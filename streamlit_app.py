@@ -25,7 +25,7 @@ st.title("📈 Financial Goal Simulator")
 
 # === Inputs ===
 target_type = st.selectbox("Target Type", ["monthly", "cumulative"])
-target_value = st.number_input("Target ₹ Value", value=10000, step=1000)
+target_value = st.number_input("Target ₹ Value", value=1000, step=1000)
 target_month = st.slider("Target Month", min_value=1, max_value=12, value=3)
 annual_return_pct = st.slider("Expected Annual Return (%)", min_value=1.0, max_value=200.0, value=effective_annual_growth)
 
