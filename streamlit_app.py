@@ -5,7 +5,7 @@ import numpy as np
 st.sidebar.header("🔧 User Inputs")
 
 one_year_forecast = st.sidebar.number_input(
-    "1-Year Forecast Growth (%)", min_value=0.0, value=12, step=0.1)
+    "1-Year Forecast Growth (%)", min_value=0.0, value=30, step=0.1)
 
 total_returns = st.sidebar.number_input(
     "Current Total Returns (%)", min_value=0.0, value=-5.74, step=0.1)
@@ -25,7 +25,7 @@ st.title("📈 Financial Goal Simulator")
 
 # === Inputs ===
 target_type = st.selectbox("Target Type", ["cumulative", "monthly"])
-target_value = st.number_input("Target ₹ Value", value=221445, step=1000)
+target_value = st.number_input("Target ₹ Value", value=10000, step=1000)
 target_month = st.slider("Target Month", min_value=1, max_value=12, value=12)
 annual_return_pct = st.slider("Expected Annual Return (%)", min_value=1.0, max_value=200.0, value=effective_annual_growth)
 
