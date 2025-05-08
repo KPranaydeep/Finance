@@ -14,7 +14,7 @@ bonds = st.sidebar.number_input(
     "Current Bonds Value (₹)", min_value=0, value=1121, step=100)
 
 tickertape = st.sidebar.number_input(
-    "Current Investments (e.g. Stocks, Mutual funds) (₹)", min_value=100000, value=0, step=1000)
+    "Current Investments (e.g. Stocks, Mutual funds) (₹)", min_value=0, value=10000, step=1000)
 
 effective_annual_growth = one_year_forecast + total_returns
 current_savings = bonds + tickertape
