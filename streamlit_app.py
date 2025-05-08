@@ -11,12 +11,12 @@ total_returns = st.sidebar.number_input(
     "Current Total Returns (%)", min_value=0.0, value=-5.74, step=0.1)
 
 bonds = st.sidebar.number_input(
-    "Current Bonds Value (₹)", min_value=0, value=0, step=100)
+    "Current Bonds Value (₹)", min_value=0, value=1121, step=100)
 
 tickertape = st.sidebar.number_input(
-    "Current Investments (e.g. Stocks, Mutual funds) (₹)", min_value=0, value=0, step=1000)
+    "Current Investments (e.g. Stocks, Mutual funds) (₹)", min_value=100000, value=0, step=1000)
 
-effective_annual_growth = one_year_forecast - total_returns
+effective_annual_growth = one_year_forecast + total_returns
 current_savings = bonds + tickertape
 
 
@@ -26,7 +26,7 @@ st.title("📈 Financial Goal Simulator")
 # === Inputs ===
 target_type = st.selectbox("Target Type", ["cumulative", "monthly"])
 target_value = st.number_input("Target ₹ Value", value=221445, step=1000)
-target_month = st.slider("Target Month", min_value=1, max_value=12, value=1)
+target_month = st.slider("Target Month", min_value=1, max_value=12, value=12)
 annual_return_pct = st.slider("Expected Annual Return (%)", min_value=1.0, max_value=200.0, value=effective_annual_growth)
 
 months = 12
