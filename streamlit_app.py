@@ -8,7 +8,7 @@ one_year_forecast = st.sidebar.number_input(
     "1-Year Forecast Growth (%)", min_value=0.0, value=30, step=0.1)
 
 total_returns = st.sidebar.number_input(
-    "Current Total Returns (%)", min_value=0.0, value=-5.74, step=0.1)
+    "Current Total Returns (%)", min_value=-30.0, value=-5.74, step=0.1)
 
 bonds = st.sidebar.number_input(
     "Current Bonds Value (₹)", min_value=0, value=1121, step=100)
