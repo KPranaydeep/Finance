@@ -5,16 +5,16 @@ import numpy as np
 st.sidebar.header("🔧 User Inputs")
 
 one_year_forecast = st.sidebar.number_input(
-    "1-Year Forecast Growth (%)", min_value=0.0, value=113.73, step=0.1)
+    "1-Year Forecast Growth (%)", min_value=0.0, value=12, step=0.1)
 
 total_returns = st.sidebar.number_input(
-    "Current Total Returns (%)", min_value=0.0, value=5.74, step=0.1)
+    "Current Total Returns (%)", min_value=0.0, value=-5.74, step=0.1)
 
 bonds = st.sidebar.number_input(
-    "Current Bonds Value (₹)", min_value=0, value=1121, step=100)
+    "Current Bonds Value (₹)", min_value=0, value=0, step=100)
 
 tickertape = st.sidebar.number_input(
-    "Current Investments (e.g. Stocks) (₹)", min_value=0, value=1707206, step=1000)
+    "Current Investments (e.g. Stocks, Mutual funds) (₹)", min_value=0, value=0, step=1000)
 
 effective_annual_growth = one_year_forecast - total_returns
 current_savings = bonds + tickertape
