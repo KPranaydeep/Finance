@@ -57,7 +57,7 @@ st.subheader("🎯 Define Your Goal")
 
 target_type = st.selectbox(
     "Target Type",
-    ["cumulative", "monthly"],
+    ["monthly","cumulative"],
     help="Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum."
 )
 
