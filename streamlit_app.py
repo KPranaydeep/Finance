@@ -60,28 +60,22 @@ target_type = st.selectbox(
     ["cumulative", "monthly"],
     help="Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum."
 )
-st.markdown("""
-Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum.
-""")
+
 target_value = st.number_input(
     "🎯 Target ₹ Value",
     value=10000.0,
     step=1000.0,
     help="How much money you want to receive in total (cumulative) or per month (monthly)."
 )
-st.markdown("""
-How much money you want to receive in total (cumulative) or per month (monthly).
-""")
+
 target_month = st.slider(
     "📅 Time Horizon (Months)",
     min_value=1,
     max_value=12,
     value=1,
-    help="Over how many months do you want to reach your financial goal?"
+    help="Choose a time horizon between 1 and 12 months for your financial goal."
 )
-st.markdown("""
-Over how many months(1 to 12) do you want to reach your financial goal?
-""")
+
 annual_return_pct = st.slider(
     "📊 Expected Annual Return (%)",
     min_value=1.0,
