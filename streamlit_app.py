@@ -12,7 +12,7 @@ These will be used to simulate how much corpus you need to meet your financial g
 one_year_forecast = st.sidebar.number_input(
     "📈 1-Year Forecast Growth (%)",
     min_value=0.0,
-    value=30.0,
+    value=12.0,
     step=0.1,
     help="Expected growth in your investments over the next 1 year."
 )
@@ -20,7 +20,7 @@ one_year_forecast = st.sidebar.number_input(
 total_returns = st.sidebar.number_input(
     "📉 Current Total Returns (%)",
     min_value=-30.0,
-    value=-5.74,
+    value=-0.0,
     step=0.1,
     help="Recent actual return on your investments. Can be negative."
 )
@@ -28,7 +28,7 @@ total_returns = st.sidebar.number_input(
 bonds = st.sidebar.number_input(
     "💰 Current Bonds Value (₹)",
     min_value=0.0,
-    value=1121.0,
+    value=0.0,
     step=100.0,
     help="Total value of your fixed-income instruments like bonds."
 )
@@ -36,7 +36,7 @@ bonds = st.sidebar.number_input(
 tickertape = st.sidebar.number_input(
     "📊 Current Investments (e.g. Stocks, MFs) (₹)",
     min_value=0.0,
-    value=10000.0,
+    value=0.0,
     step=1000.0,
     help="Market value of your equity/mutual fund holdings."
 )
