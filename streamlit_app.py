@@ -72,7 +72,7 @@ target_month = st.slider(
     "📅 Time Horizon (Months)",
     min_value=1,
     max_value=12,
-    value=3,
+    value=1,
     help="Over how many months do you want to reach your financial goal?"
 )
 
