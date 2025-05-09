@@ -132,13 +132,22 @@ for i in range(months):
     cumulative.append(sum(profits))
 
 # Display in table format
+import pandas as pd
+
+# === Format values using Indian number system and round to integers ===
+def format_inr(x):
+    return f"{int(round(x)):,}".replace(",", "_").replace("_", ",")
+
 table_data = {
     "Month": list(range(1, months + 1)),
-    "Profit (₹)": profits,
-    "Cumulative (₹)": cumulative
+    "Profit (₹)": [format_inr(p) for p in profits],
+    "Cumulative (₹)": [format_inr(c) for c in cumulative],
 }
 
-st.dataframe(table_data)
+df = pd.DataFrame(table_data)
+
+# === Display the table without vertical scroll ===
+st.dataframe(df, use_container_width=True, height=400)
 
 # === Footer Note ===
 st.markdown("""
