@@ -20,7 +20,7 @@ one_year_forecast = st.sidebar.number_input(
 total_returns = st.sidebar.number_input(
     "📉 Current Total Returns (%)",
     min_value=-30.0,
-    value=-0.0,
+    value=0.0,
     step=0.1,
     help="Recent actual return on your investments. Can be negative."
 )
@@ -72,7 +72,7 @@ target_month = st.slider(
     "📅 Time Horizon (Months)",
     min_value=1,
     max_value=12,
-    value=12,
+    value=3,
     help="Over how many months do you want to reach your financial goal?"
 )
 
