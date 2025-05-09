@@ -1,38 +1,96 @@
 import streamlit as st
 import numpy as np
 
-# === Constants ===
-st.sidebar.header("🔧 User Inputs")
+# === Sidebar: User Inputs ===
+st.sidebar.header("🔧 Your Financial Details")
+
+st.sidebar.markdown("""
+Enter your current investment details and growth expectations below.
+These will be used to simulate how much corpus you need to meet your financial goal.
+""")
 
 one_year_forecast = st.sidebar.number_input(
-    "1-Year Forecast Growth (%)", min_value=0.0, value=12.0, step=0.1)
+    "📈 1-Year Forecast Growth (%)",
+    min_value=0.0,
+    value=30.0,
+    step=0.1,
+    help="Expected growth in your investments over the next 1 year."
+)
 
 total_returns = st.sidebar.number_input(
-    "Current Total Returns (%)", min_value=-30.0, value=0.0, step=0.1)
+    "📉 Current Total Returns (%)",
+    min_value=-30.0,
+    value=-5.74,
+    step=0.1,
+    help="Recent actual return on your investments. Can be negative."
+)
 
 bonds = st.sidebar.number_input(
-    "Current Bonds Value (₹)", min_value=0.0, value=0.0, step=100.0)
+    "💰 Current Bonds Value (₹)",
+    min_value=0.0,
+    value=1121.0,
+    step=100.0,
+    help="Total value of your fixed-income instruments like bonds."
+)
 
 tickertape = st.sidebar.number_input(
-    "Current Investments (e.g. Stocks, Mutual funds) (₹)", min_value=0.0, value=1000.0, step=1000.0)
+    "📊 Current Investments (e.g. Stocks, MFs) (₹)",
+    min_value=0.0,
+    value=10000.0,
+    step=1000.0,
+    help="Market value of your equity/mutual fund holdings."
+)
 
+# Calculate effective growth rate and savings
 effective_annual_growth = one_year_forecast + total_returns
 current_savings = bonds + tickertape
 
-
 # === Title ===
 st.title("📈 Financial Goal Simulator")
+st.markdown("""
+Welcome to the **Financial Goal Simulator**!  
+This app helps you understand how much money you need to invest today to reach your monthly or cumulative financial target in the coming months.
+""")
 
-# === Inputs ===
-target_type = st.selectbox("Target Type", ["monthly", "cumulative"])
-target_value = st.number_input("Target ₹ Value", value=1000, step=1000)
-target_month = st.slider("Target Month", min_value=1, max_value=12, value=3)
-annual_return_pct = st.slider("Expected Annual Return (%)", min_value=1.0, max_value=200.0, value=effective_annual_growth)
+# === Section: Goal Inputs ===
+st.subheader("🎯 Define Your Goal")
 
+target_type = st.selectbox(
+    "Target Type",
+    ["cumulative", "monthly"],
+    help="Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum."
+)
+
+target_value = st.number_input(
+    "🎯 Target ₹ Value",
+    value=10000.0,
+    step=1000.0,
+    help="How much money you want to receive in total (cumulative) or per month (monthly)."
+)
+
+target_month = st.slider(
+    "📅 Time Horizon (Months)",
+    min_value=1,
+    max_value=12,
+    value=12,
+    help="Over how many months do you want to reach your financial goal?"
+)
+
+annual_return_pct = st.slider(
+    "📊 Expected Annual Return (%)",
+    min_value=1.0,
+    max_value=200.0,
+    value=effective_annual_growth,
+    help="How much annual return you expect from your investments."
+)
+
+# Monthly return rate
 months = 12
 r = (1 + (annual_return_pct / 100)) ** (1 / months) - 1
 
-# === Calculate Required Corpus ===
+# === Section: Corpus Calculation ===
+st.subheader("📉 Required Corpus Calculation")
+
 if target_type == "monthly":
     required_corpus = target_value / ((1 + r) ** (target_month - 1) * r)
 else:
@@ -45,7 +103,7 @@ else:
             capital += monthly_profit
         return sum(profits)
 
-    low, high = 1, 1e9
+    low, high = 1.0, 1e9
     while high - low > 0.01:
         mid = (low + high) / 2
         if simulate_cumulative(mid) < target_value:
@@ -54,11 +112,15 @@ else:
             high = mid
     required_corpus = mid
 
-# === Output ===
-st.markdown(f"### 📌 Total Required Corpus: ₹{required_corpus/1e5:.2f} lakhs")
-st.markdown(f"### 📌 Additional Corpus Needed: ₹{(required_corpus - current_savings)/1e5:.2f} lakhs")
+# === Output Summary ===
+st.markdown("### ✅ Results Summary")
 
-# === Monthly Simulation ===
+st.success(f"📌 **Total Required Corpus**: ₹{required_corpus/1e5:.2f} lakhs")
+st.warning(f"📌 **Additional Corpus Needed**: ₹{(required_corpus - current_savings)/1e5:.2f} lakhs")
+
+# === Simulation Table ===
+st.subheader("📊 Monthly Profit Simulation")
+
 capital = required_corpus
 profits = []
 cumulative = []
@@ -69,9 +131,18 @@ for i in range(months):
     capital += monthly_profit
     cumulative.append(sum(profits))
 
-# === Table ===
-st.subheader("📊 Monthly Profit Table")
-table_data = {"Month": list(range(1, months+1)),
-              "Profit (₹)": profits,
-              "Cumulative (₹)": cumulative}
+# Display in table format
+table_data = {
+    "Month": list(range(1, months + 1)),
+    "Profit (₹)": profits,
+    "Cumulative (₹)": cumulative
+}
+
 st.dataframe(table_data)
+
+# === Footer Note ===
+st.markdown("""
+---
+📌 *Disclaimer: This is a simplified financial planning tool.  
+Please consult a professional financial advisor before making investment decisions.*
+""")
