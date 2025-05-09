@@ -60,14 +60,18 @@ target_type = st.selectbox(
     ["cumulative", "monthly"],
     help="Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum."
 )
-
+st.markdown("""
+Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum.
+""")
 target_value = st.number_input(
     "🎯 Target ₹ Value",
     value=10000.0,
     step=1000.0,
     help="How much money you want to receive in total (cumulative) or per month (monthly)."
 )
-
+st.markdown("""
+How much money you want to receive in total (cumulative) or per month (monthly).
+""")
 target_month = st.slider(
     "📅 Time Horizon (Months)",
     min_value=1,
@@ -75,7 +79,9 @@ target_month = st.slider(
     value=1,
     help="Over how many months do you want to reach your financial goal?"
 )
-
+st.markdown("""
+Over how many months(1 to 12) do you want to reach your financial goal?
+""")
 annual_return_pct = st.slider(
     "📊 Expected Annual Return (%)",
     min_value=1.0,
@@ -83,6 +89,12 @@ annual_return_pct = st.slider(
     value=effective_annual_growth,
     help="How much annual return you expect from your investments."
 )
+st.markdown("""
+💡 **Tip:** This is the annual percentage return you expect from your investments.
+
+If you're unsure about the **1-Year Forecast Growth (%)** and **Current Total Returns (%)**, you can manually adjust this value.  
+You can also modify it to simulate different growth scenarios based on your own expectations or predictions.
+""")
 
 # Monthly return rate
 months = 12
