@@ -86,8 +86,7 @@ target_month = st.slider(
 st.markdown("""
 💡 **Tip:** This is the annual percentage return you expect from your investments.
 
-If you're unsure about the **1-Year Forecast Growth (%)** and **Current Total Returns (%)**, you can manually adjust this value.  
-You can also modify it to simulate different growth scenarios based on your own expectations or predictions.
+If you're unsure about the **1-Year Forecast Growth (%)** and **Current Total Returns (%)**, you can manually adjust this value. You can also modify it to simulate different growth scenarios based on your own expectations or predictions.
 """)
 
 annual_return_pct = st.slider(
