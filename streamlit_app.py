@@ -75,18 +75,6 @@ st.markdown(
     "- Select the number of months over which you want to achieve your financial goal.\n"
     "- Range: 1 to 12 months."
 )
-target_type = st.selectbox(
-    "Target Type",
-    ["monthly","cumulative"],
-    help="Choose 'monthly' if you need a fixed income every month, or 'cumulative' if you aim to accumulate a total sum."
-)
-
-target_value = st.number_input(
-    "🎯 Target ₹ Value",
-    value=10000.0,
-    step=1000.0,
-    help="How much money you want to receive in total (cumulative) or per month (monthly)."
-)
 
 target_month = st.slider(
     "📅 Time Horizon (Months)",
