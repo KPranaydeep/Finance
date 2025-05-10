@@ -54,7 +54,27 @@ This app helps you understand how much money you need to invest today to reach y
 
 # === Section: Goal Inputs ===
 st.subheader("🎯 Define Your Goal")
+st.markdown("### ℹ️ Target Type")
+st.markdown(
+    "- **Monthly**: Choose this if you want to receive a fixed income every month.\n"
+    "- **Cumulative**: Choose this if you want to accumulate a total target amount over time."
+)
 
+target_type = st.selectbox("Target Type", ["monthly", "cumulative"])
+
+st.markdown("### 🎯 Target ₹ Value")
+st.markdown(
+    "- **Monthly Mode**: Enter how much you want to receive every month.\n"
+    "- **Cumulative Mode**: Enter the total amount you aim to accumulate over your chosen period."
+)
+
+target_value = st.number_input("Target ₹ Value", value=10000.0, step=1000.0)
+
+st.markdown("### 📅 Time Horizon (in Months)")
+st.markdown(
+    "- Select the number of months over which you want to achieve your financial goal.\n"
+    "- Range: 1 to 12 months."
+)
 target_type = st.selectbox(
     "Target Type",
     ["monthly","cumulative"],
