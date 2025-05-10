@@ -83,6 +83,12 @@ target_month = st.slider(
     value=1,
     help="Choose a time horizon between 1 and 12 months for your financial goal."
 )
+st.markdown("""
+💡 **Tip:** This is the annual percentage return you expect from your investments.
+
+If you're unsure about the **1-Year Forecast Growth (%)** and **Current Total Returns (%)**, you can manually adjust this value.  
+You can also modify it to simulate different growth scenarios based on your own expectations or predictions.
+""")
 
 annual_return_pct = st.slider(
     "📊 Expected Annual Return (%)",
@@ -91,12 +97,6 @@ annual_return_pct = st.slider(
     value=effective_annual_growth,
     help="How much annual return you expect from your investments."
 )
-st.markdown("""
-💡 **Tip:** This is the annual percentage return you expect from your investments.
-
-If you're unsure about the **1-Year Forecast Growth (%)** and **Current Total Returns (%)**, you can manually adjust this value.  
-You can also modify it to simulate different growth scenarios based on your own expectations or predictions.
-""")
 
 # Monthly return rate
 months = 12
