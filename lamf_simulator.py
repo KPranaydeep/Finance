@@ -20,14 +20,14 @@ It compares:
 
 """)
 
-# --- Sidebar Inputs ---
-st.sidebar.header("🔧 Simulation Inputs")
+# --- Main Page Inputs (Instead of Sidebar) ---
+st.markdown("### 🔧 Simulation Inputs")
 
-loan_amount = st.sidebar.slider("Loan Amount (₹)", min_value=25000, max_value=1000000, step=10000, value=100000)
-interest_rate = st.sidebar.slider("Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5)
-processing_fee = st.sidebar.number_input("Processing Fee (₹)", min_value=0, max_value=10000, step=10, value=1179)
-expected_annual_return = st.sidebar.slider("Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0)
-tenure_months = st.sidebar.slider("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=12)
+loan_amount = st.slider("Loan Amount (₹)", min_value=25000, max_value=1000000, step=10000, value=100000)
+interest_rate = st.slider("Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5)
+processing_fee = st.number_input("Processing Fee (₹)", min_value=0, max_value=10000, step=10, value=1179)
+expected_annual_return = st.slider("Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0)
+tenure_months = st.slider("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=12)
 
 # --- Financial Calculations ---
 monthly_interest_rate = interest_rate / 12 / 100
@@ -64,7 +64,7 @@ st.dataframe(df_results, use_container_width=True)
 st.markdown("### 📈 Visual Comparison")
 
 plt.style.use("seaborn-v0_8-muted")
-fig, ax = plt.subplots(figsize=(4.5, 8))
+fig, ax = plt.subplots(figsize=(8, 5))
 
 labels = ["Investment Value", "Total Outflow", "Net P&L"]
 values = [investment_value, total_outflow, net_profit_loss]
