@@ -20,13 +20,32 @@ It compares:
 
 """)
 
-# --- Main Page Inputs (Instead of Sidebar) ---
+# --- Main Page Inputs with Markdown Descriptions ---
 st.markdown("### 🔧 Simulation Inputs")
 
+# Loan Amount
+st.markdown("#### 🏦 **Loan Amount (₹)**")
+st.markdown("Specify the loan amount you want to borrow against your mutual funds.")
 loan_amount = st.slider("Loan Amount (₹)", min_value=25000, max_value=1000000, step=10000, value=100000)
+
+# Interest Rate
+st.markdown("#### 💸 **Loan Interest Rate (Annual %)**")
+st.markdown("Select the annual interest rate charged on the loan.")
 interest_rate = st.slider("Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5)
+
+# Processing Fee
+st.markdown("#### 💰 **Processing Fee (₹)**")
+st.markdown("Enter the one-time processing fee that is charged for the loan.")
 processing_fee = st.number_input("Processing Fee (₹)", min_value=0, max_value=10000, step=10, value=1179)
+
+# Expected Annual Return
+st.markdown("#### 📈 **Expected Market Return (Annual %)**")
+st.markdown("Select the annual return rate you expect from investing in the market.")
 expected_annual_return = st.slider("Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0)
+
+# Loan Tenure
+st.markdown("#### ⏳ **Loan Tenure (Months)**")
+st.markdown("Select the number of months for the loan repayment period.")
 tenure_months = st.slider("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=12)
 
 # --- Financial Calculations ---
@@ -64,7 +83,7 @@ st.dataframe(df_results, use_container_width=True)
 st.markdown("### 📈 Visual Comparison")
 
 plt.style.use("seaborn-v0_8-muted")
-fig, ax = plt.subplots(figsize=(8, 5))
+fig, ax = plt.subplots(figsize=(4.5, 8))
 
 labels = ["Investment Value", "Total Outflow", "Net P&L"]
 values = [investment_value, total_outflow, net_profit_loss]
