@@ -62,7 +62,7 @@ decision_text = "✅ YES, Take LAMF" if net_profit_loss > 0 else "❌ NO, Not Wo
 def format_currency(value):
     if isinstance(value, (int, float)):
         if abs(value) >= 1_00_000:
-            return f"₹{value/1_00_000:.2f}L"
+            return f"₹{value/1_00_000:.2f}Lakhs"
         else:
             return f"₹{value:,.2f}"
     return value
