@@ -83,7 +83,7 @@ st.dataframe(df_results, use_container_width=True)
 st.markdown("### 📈 Visual Comparison")
 
 plt.style.use("seaborn-v0_8-muted")
-fig, ax = plt.subplots(figsize=(4.0, 6.25))
+fig, ax = plt.subplots(figsize=(4.25, 6.25))
 
 labels = ["Investment Value", "Total Outflow", "Net P&L"]
 values = [investment_value, total_outflow, net_profit_loss]
