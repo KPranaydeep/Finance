@@ -97,20 +97,23 @@ st.markdown("### 📈 Visual Comparison")
 plt.style.use("seaborn-v0_8-muted")
 fig, ax = plt.subplots(figsize=(4.5, 6.25))
 
+# Scale values to lakhs
 labels = ["Investment Value", "Total Outflow", "Net P&L"]
 values = [investment_value, total_outflow, net_profit_loss]
+values_in_lakhs = [v / 1_00_000 for v in values]
 colors = ['green', 'red', 'green' if net_profit_loss > 0 else 'red']
 
-bars = ax.bar(labels, values, color=colors)
+bars = ax.bar(labels, values_in_lakhs, color=colors)
 
-# Annotate bars with ₹ values
-for bar in bars:
+# Annotate bars with ₹ values in lakhs
+for i, bar in enumerate(bars):
     yval = bar.get_height()
-    ax.text(bar.get_x() + bar.get_width()/2, yval + loan_amount * 0.01,
-            f"₹{abs(yval):,.0f}", ha='center', va='bottom', fontsize=11, fontweight='bold')
+    ax.text(bar.get_x() + bar.get_width()/2, yval + 0.05,
+            f"₹{abs(values[i]) / 1_00_000:.2f}L",
+            ha='center', va='bottom', fontsize=11, fontweight='bold')
 
 ax.set_title("Investment vs Outflow vs Net Profit/Loss", fontsize=14, fontweight='bold')
-ax.set_ylabel("₹ Amount")
+ax.set_ylabel("₹ (in Lakhs)")
 ax.grid(True, linestyle='--', alpha=0.6, axis='y')
 plt.tight_layout()
 
