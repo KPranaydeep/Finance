@@ -58,25 +58,37 @@ investment_value = loan_amount * ((1 + monthly_return_rate) ** tenure_months)
 net_profit_loss = investment_value - total_outflow
 decision_text = "✅ YES, Take LAMF" if net_profit_loss > 0 else "❌ NO, Not Worth It"
 
+# --- Custom Formatting Function ---
+def format_currency(value):
+    if isinstance(value, (int, float)):
+        if abs(value) >= 1_00_000:
+            return f"₹{value/1_00_000:.2f}L"
+        else:
+            return f"₹{value:,.2f}"
+    return value
+
 # --- Results Table ---
 st.markdown("### 📊 Simulation Results")
 
 results = {
-    "Loan Amount": f"₹{loan_amount:,.2f}",
+    "Loan Amount": loan_amount,
     "Interest Rate (Annual)": f"{interest_rate:.2f}%",
     "Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
     "Expected Return (Annual)": f"{expected_annual_return:.2f}%",
     "Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
     "Loan Tenure (Months)": tenure_months,
-    "Processing Fee": f"₹{processing_fee:,.2f}",
-    "Total Interest Paid": f"₹{total_interest_paid:,.2f}",
-    "Total Outflow (Principal + Interest + Fee)": f"₹{total_outflow:,.2f}",
-    "Investment Value at Maturity": f"₹{investment_value:,.2f}",
-    "Net Profit / Loss": f"₹{net_profit_loss:,.2f}",
+    "Processing Fee": processing_fee,
+    "Total Interest Paid": total_interest_paid,
+    "Total Outflow (Principal + Interest + Fee)": total_outflow,
+    "Investment Value at Maturity": investment_value,
+    "Net Profit / Loss": net_profit_loss,
     "Decision": decision_text
 }
 
-df_results = pd.DataFrame.from_dict(results, orient='index', columns=['Value'])
+# Apply currency formatting
+formatted_results = {k: format_currency(v) for k, v in results.items()}
+
+df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
 st.dataframe(df_results, use_container_width=True)
 
 # --- Bar Chart: Visual Comparison ---
