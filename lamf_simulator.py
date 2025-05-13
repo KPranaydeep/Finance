@@ -106,10 +106,20 @@ st.pyplot(fig)
 
 # --- Final Emotional Verdict ---
 st.markdown("### 🧠 Final Verdict")
+
+def format_currency(value):
+    if abs(value) >= 1_00_000:
+        return f"{value/1_00_000:.2f}Lakhs"
+    else:
+        return f"₹{value:,.0f}"
+
+formatted_profit = format_currency(net_profit_loss)
+
 if net_profit_loss > 0:
-    st.success(f"✅ Gain of ₹{net_profit_loss:,.0f} — **Worth considering LAMF!**")
+    st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
 else:
-    st.error(f"⚠️ Loss of ₹{abs(net_profit_loss):,.0f} — **Better avoid LAMF under these terms.**")
+    st.error(f"⚠️ Loss of {format_currency(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
+
 
 # --- Educational Guide ---
 st.markdown("---")
