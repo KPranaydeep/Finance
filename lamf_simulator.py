@@ -26,12 +26,12 @@ st.markdown("### 🔧 Simulation Inputs")
 # Loan Amount
 st.markdown("#### 🏦 **Loan Amount (₹)**")
 st.markdown("Specify the loan amount you want to borrow against your mutual funds.")
-loan_amount = st.slider("Loan Amount (₹)", min_value=25000, max_value=1000000, step=10000, value=100000)
+loan_amount = st.number_input("Loan Amount (₹)", min_value=25000, max_value=1000000, step=5000, value=100000)
 
 # Interest Rate
 st.markdown("#### 💸 **Loan Interest Rate (Annual %)**")
 st.markdown("Select the annual interest rate charged on the loan.")
-interest_rate = st.slider("Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5)
+interest_rate = st.number_input("Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5)
 
 # Processing Fee
 st.markdown("#### 💰 **Processing Fee (₹)**")
@@ -41,12 +41,12 @@ processing_fee = st.number_input("Processing Fee (₹)", min_value=0, max_value=
 # Expected Annual Return
 st.markdown("#### 📈 **Expected Market Return (Annual %)**")
 st.markdown("Select the annual return rate you expect from investing in the market.")
-expected_annual_return = st.slider("Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0)
+expected_annual_return = st.number_input("Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0)
 
 # Loan Tenure
 st.markdown("#### ⏳ **Loan Tenure (Months)**")
 st.markdown("Select the number of months for the loan repayment period.")
-tenure_months = st.slider("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=12)
+tenure_months = st.number_input("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=12)
 
 # --- Financial Calculations ---
 monthly_interest_rate = interest_rate / 12 / 100
