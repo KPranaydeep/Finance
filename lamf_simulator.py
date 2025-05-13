@@ -1,12 +1,10 @@
-# lamf_simulator.py
-
 import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 # --- Streamlit Page Setup ---
-st.set_page_config(page_title="LAMF Simulator", layout="centered")
+st.set_page_config(page_title="LAMF Simulator", layout="wide")
 st.title("📌 Loan Against Mutual Fund (LAMF) Simulator")
 
 # --- Introductory Markdown ---
