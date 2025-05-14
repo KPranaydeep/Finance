@@ -144,6 +144,8 @@ loan_range = np.concatenate([
     np.arange(400000, 1000001, 100000)
 ])
 
+net_pnl_list = []  # Add this line before the for-loop
+
 for loan in loan_range:
     total_interest = loan * monthly_interest_rate * (tenure_months - 1)
     total_cost = loan + total_interest + processing_fee
