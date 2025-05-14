@@ -156,7 +156,7 @@ def format_rupee(x, _):
         return f"₹{x/100000:.2f}lakhs"
 
 # Prepare horizontal bar plot
-fig3, ax3 = plt.subplots(figsize=(10, 6))
+fig3, ax3 = plt.subplots(figsize=(8, 12))
 bars = ax3.barh(loan_range.astype(str), net_pnl_list,
                 color=['green' if val >= 0 else 'red' for val in net_pnl_list])
 
