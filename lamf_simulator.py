@@ -134,6 +134,41 @@ if net_profit_loss > 0:
 else:
     st.error(f"⚠️ Loss of {format_currency(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
 
+# --- Sensitivity Plot: Net P&L vs Loan Amount ---
+st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
+
+# Generate a range of loan amounts
+loan_range = np.arange(25000, 1000000 + 1, 25000)
+net_pnl_list = []
+
+for loan in loan_range:
+    total_interest = loan * monthly_interest_rate * (tenure_months - 1)
+    total_cost = loan + total_interest + processing_fee
+    investment = loan * ((1 + monthly_return_rate) ** tenure_months)
+    net_pnl = investment - total_cost
+    net_pnl_list.append(net_pnl)
+
+# Plotting
+fig2, ax2 = plt.subplots(figsize=(8, 5))
+ax2.plot(loan_range, net_pnl_list, color='blue', marker='o', linestyle='--')
+ax2.axhline(0, color='red', linestyle='--', linewidth=1.2)
+ax2.set_title("Net Profit/Loss vs Loan Amount", fontsize=14, fontweight='bold')
+ax2.set_xlabel("Loan Amount (₹)", fontsize=12)
+ax2.set_ylabel("Net Profit / Loss (₹)", fontsize=12)
+ax2.grid(True, linestyle='--', alpha=0.6)
+ax2.ticklabel_format(style='plain')  # Avoid scientific notation
+
+# Adjust y-axis dynamically
+min_y = min(net_pnl_list)
+max_y = max(net_pnl_list)
+padding = (max_y - min_y) * 0.1
+ax2.set_ylim(min_y - padding, max_y + padding)
+
+# Annotate decision point
+ax2.scatter(loan_amount, net_profit_loss, color='orange', s=100, label='Your Input')
+ax2.legend()
+
+st.pyplot(fig2)
 
 # --- Educational Guide ---
 st.markdown("---")
