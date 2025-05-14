@@ -160,7 +160,7 @@ bars = ax3.bar(loan_range.astype(str), net_pnl_list,
 # Annotate bars (labels just outside and close)
 for bar, value in zip(bars, net_pnl_list):
     ax3.text(bar.get_x() + bar.get_width() / 2,
-             value + (500 if value >= 0 else -800),  # Adjusted offset
+             value + (10 if value >= 0 else -10),  # Adjusted offset
              format_rupee(value, None),
              ha='center', va='bottom' if value >= 0 else 'top',
              fontsize=9, fontweight='bold')
