@@ -183,6 +183,26 @@ ax3.grid(True, linestyle='--', alpha=0.5, axis='y')
 plt.xticks(rotation=45)
 plt.tight_layout()
 
+# Add annotation box with user inputs
+input_summary = (
+    f"User Inputs:\n"
+    f"Loan: ₹{loan_amount:,.0f}\n"
+    f"Interest: {interest_rate:.1f}% p.a.\n"
+    f"Tenure: {tenure_months} months\n"
+    f"Return: {expected_annual_return:.1f}% p.a.\n"
+    f"Fee: ₹{processing_fee}"
+)
+
+# Add a text box inside the plot (top-left corner)
+ax3.text(
+    0.01, 0.99, input_summary,
+    transform=ax3.transAxes,
+    fontsize=9,
+    verticalalignment='top',
+    horizontalalignment='left',
+    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5', alpha=0.8)
+)
+
 st.pyplot(fig3)
 
 # --- Educational Guide ---
