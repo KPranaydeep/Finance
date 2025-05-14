@@ -108,7 +108,7 @@ bars = ax.bar(labels, values_in_lakhs, color=colors)
 # Annotate bars with ₹ values in lakhs
 for i, bar in enumerate(bars):
     yval = bar.get_height()
-    ax.text(bar.get_x() + bar.get_width()/2, yval - 0.01,
+    ax.text(bar.get_x() + bar.get_width()/2, yval + 0.001,
             f"₹{abs(values[i]) / 1_00_000:.2f}L",
             ha='center', va='bottom', fontsize=11, fontweight='bold')
 
