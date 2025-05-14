@@ -168,8 +168,8 @@ for bar, value in zip(bars, net_pnl_list):
              va='center', ha='left' if value >= 0 else 'right',
              fontsize=9, fontweight='bold')
 
-# Highlight user input
-user_index = np.where(loan_range == loan_amount)[0][0]
+# Safely highlight user input (closest match)
+user_index = np.argmin(np.abs(loan_range - loan_amount))
 bars[user_index].set_edgecolor("orange")
 bars[user_index].set_linewidth(3)
 
