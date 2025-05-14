@@ -137,10 +137,12 @@ else:
 # --- Sensitivity Plot: Net P&L vs Loan Amount (Vertical Bar) ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 
-# Generate range of loan amounts (step increased to ₹50,000)
-loan_range = np.arange(25000, 1000000 + 1, 50000)
-net_pnl_list = []
-
+# Define custom step ranges
+loan_range = np.concatenate([
+    np.arange(25000, 100001, 25000),       # ₹25k to ₹1L in ₹25k steps
+    np.arange(150000, 350001, 50000),      # ₹1.5L to ₹3.5L in ₹50k steps
+    np.arange(400000, 1000001, 100000)     # ₹4L to ₹10L in ₹1L steps
+])
 for loan in loan_range:
     total_interest = loan * monthly_interest_rate * (tenure_months - 1)
     total_cost = loan + total_interest + processing_fee
@@ -163,7 +165,7 @@ for bar, value in zip(bars, net_pnl_list):
              value + (10 if value >= 0 else -10),  # Adjusted offset
              format_rupee(value, None),
              ha='center', va='bottom' if value >= 0 else 'top',
-             fontsize=9, fontweight='bold')
+             fontsize=8, fontweight='bold')
 
 # Highlight user's loan amount
 user_index = np.argmin(np.abs(loan_range - loan_amount))
