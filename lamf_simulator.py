@@ -134,10 +134,10 @@ if net_profit_loss > 0:
 else:
     st.error(f"⚠️ Loss of {format_currency(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
 
-# --- Sensitivity Plot: Net P&L vs Loan Amount ---
+# --- Sensitivity Plot: Net P&L vs Loan Amount (Horizontal Bar) ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 
-# Generate a range of loan amounts
+# Generate range of loan amounts
 loan_range = np.arange(25000, 1000000 + 1, 25000)
 net_pnl_list = []
 
@@ -148,27 +148,39 @@ for loan in loan_range:
     net_pnl = investment - total_cost
     net_pnl_list.append(net_pnl)
 
-# Plotting
-fig2, ax2 = plt.subplots(figsize=(8, 5))
-ax2.plot(loan_range, net_pnl_list, color='blue', marker='o', linestyle='--')
-ax2.axhline(0, color='red', linestyle='--', linewidth=1.2)
-ax2.set_title("Net Profit/Loss vs Loan Amount", fontsize=14, fontweight='bold')
-ax2.set_xlabel("Loan Amount (₹)", fontsize=12)
-ax2.set_ylabel("Net Profit / Loss (₹)", fontsize=12)
-ax2.grid(True, linestyle='--', alpha=0.6)
-ax2.ticklabel_format(style='plain')  # Avoid scientific notation
+# Format function for axis ticks
+def format_rupee(x, _):
+    if abs(x) < 100000:
+        return f"₹{x/1000:.1f}k"
+    else:
+        return f"₹{x/100000:.2f}lakhs"
 
-# Adjust y-axis dynamically
-min_y = min(net_pnl_list)
-max_y = max(net_pnl_list)
-padding = (max_y - min_y) * 0.1
-ax2.set_ylim(min_y - padding, max_y + padding)
+# Prepare horizontal bar plot
+fig3, ax3 = plt.subplots(figsize=(10, 6))
+bars = ax3.barh(loan_range.astype(str), net_pnl_list,
+                color=['green' if val >= 0 else 'red' for val in net_pnl_list])
 
-# Annotate decision point
-ax2.scatter(loan_amount, net_profit_loss, color='orange', s=100, label='Your Input')
-ax2.legend()
+# Annotate bars
+for bar, value in zip(bars, net_pnl_list):
+    ax3.text(bar.get_width() + (5000 if value >= 0 else -15000),
+             bar.get_y() + bar.get_height() / 2,
+             f"{format_rupee(value, None)}",
+             va='center', ha='left' if value >= 0 else 'right',
+             fontsize=9, fontweight='bold')
 
-st.pyplot(fig2)
+# Highlight user input
+user_index = np.where(loan_range == loan_amount)[0][0]
+bars[user_index].set_edgecolor("orange")
+bars[user_index].set_linewidth(3)
+
+ax3.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
+ax3.set_xlabel("Net P&L", fontsize=12)
+ax3.set_ylabel("Loan Amount (₹)", fontsize=12)
+ax3.xaxis.set_major_formatter(plt.FuncFormatter(format_rupee))
+ax3.grid(True, linestyle='--', alpha=0.5, axis='x')
+plt.tight_layout()
+
+st.pyplot(fig3)
 
 # --- Educational Guide ---
 st.markdown("---")
