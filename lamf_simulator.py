@@ -195,7 +195,7 @@ input_summary = (
 
 # Add a text box inside the plot (top-left corner)
 ax3.text(
-    0.01, 0.9, input_summary,
+    0.03, 0.96, input_summary,
     transform=ax3.transAxes,
     fontsize=9,
     verticalalignment='top',
