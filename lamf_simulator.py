@@ -195,12 +195,12 @@ input_summary = (
 
 # Add a text box inside the plot (top-left corner)
 ax3.text(
-    0.01, 0.99, input_summary,
+    0.01, 0.9, input_summary,
     transform=ax3.transAxes,
     fontsize=9,
     verticalalignment='top',
     horizontalalignment='left',
-    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=-0.5', alpha=0.8)
+    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5', alpha=0.8)
 )
 
 st.pyplot(fig3)
