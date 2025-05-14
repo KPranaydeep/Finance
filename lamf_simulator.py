@@ -9,8 +9,7 @@ st.title("📌 Loan Against Mutual Fund (LAMF) Simulator")
 
 # --- Introductory Markdown ---
 st.markdown("""
-This tool simulates the financial outcome of taking a **Loan Against Mutual Funds (LAMF)**  
-and investing that borrowed amount in the market.
+This tool simulates the financial outcome of taking a **Loan Against Mutual Funds (LAMF)** and investing that borrowed amount in the market.
 
 It compares:
 - 🟥 **Total Loan Outflow** (principal + interest + processing fee)  
