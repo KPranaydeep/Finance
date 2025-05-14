@@ -185,7 +185,7 @@ plt.tight_layout()
 
 # Add annotation box with user inputs
 input_summary = (
-    f"User Inputs:\n"
+    f"Input Variables:\n"
     f"Loan: ₹{loan_amount:,.0f}\n"
     f"Interest: {interest_rate:.1f}% p.a.\n"
     f"Tenure: {tenure_months} months\n"
@@ -200,7 +200,7 @@ ax3.text(
     fontsize=9,
     verticalalignment='top',
     horizontalalignment='left',
-    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5', alpha=0.8)
+    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=-0.5', alpha=0.8)
 )
 
 st.pyplot(fig3)
