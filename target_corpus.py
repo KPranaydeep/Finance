@@ -166,59 +166,56 @@ df = pd.DataFrame(table_data)
 # === Display the table without vertical scroll ===
 st.dataframe(df, use_container_width=True, height=400)
 
-# === Week 1 Profit vs Current Savings Comparison ===
-st.subheader("📊 Week 1 Profit vs. Your Current Savings")
+# === Week 1 and Month 1 Profit vs Current Savings Comparison ===
+st.subheader("📊 Week 1 and Month 1 Profit vs. Your Current Savings")
 
-# Slider input for hypothetical corpus amount (stepping ₹25,000)
-test_corpus = st.slider(
-    "🧮 Simulate Week 1 Profit From This Corpus (₹)",
+# Slider input for hypothetical corpus (₹25k steps)
+test_corpus_combined = st.slider(
+    "🧮 Simulate Profit From This Corpus (₹)",
     min_value=0.0,
-    max_value=required_corpus,
-    value=current_savings,
+    max_value=float(required_corpus),
+    value=float(current_savings),
     step=25000.0,
-    help="Adjust to see how much profit you'd earn in Week 1 from different corpus sizes."
+    help="Adjust to see profit in Week 1 and Month 1 from different corpus sizes."
 )
 
-# Calculate week 1 profit for the selected corpus
-week1_profit_simulated = test_corpus * weekly_r
+# Compute profits
+week1_profit_simulated = test_corpus_combined * weekly_r
 week1_profit_required = required_corpus * weekly_r
 
-st.markdown(f"""
-- 💼 **Simulated Corpus**: ₹{test_corpus:,.0f}  
-- 📈 **Week 1 Profit from Simulated Corpus**: ₹{week1_profit_simulated:,.0f}  
-- 🎯 **Week 1 Profit Needed (from Required Corpus)**: ₹{week1_profit_required:,.0f}  
-""")
+month1_profit_simulated = test_corpus_combined * r
+month1_profit_required = required_corpus * r
 
-if week1_profit_simulated >= week1_profit_required:
-    st.success("✅ Your simulated corpus can generate the required Week 1 profit.")
-else:
-    shortfall = week1_profit_required - week1_profit_simulated
-    st.error(f"⚠️ You need ₹{shortfall:,.0f} more in corpus to match the required Week 1 profit.")
+# === Two Column Display ===
+col1, col2 = st.columns(2)
 
-# === Weekly Profit Simulation ===
-st.subheader("📊 Weekly Profit Simulation")
+with col1:
+    st.markdown("### 🗓️ **Week 1**")
+    st.metric(
+        label="Simulated Week 1 Profit",
+        value=f"₹{week1_profit_simulated:,.0f}",
+        delta=f"{week1_profit_simulated - week1_profit_required:,.0f}",
+        delta_color="normal" if week1_profit_simulated >= week1_profit_required else "inverse"
+    )
+    st.caption(f"Target: ₹{week1_profit_required:,.0f}")
+    if week1_profit_simulated >= week1_profit_required:
+        st.success("✅ Sufficient for Week 1 profit goal")
+    else:
+        st.error("⚠️ Below Week 1 profit target")
 
-capital_weekly = required_corpus
-weekly_profits = []
-weekly_cumulative = []
-
-for i in range(weeks):
-    weekly_profit = capital_weekly * weekly_r
-    weekly_profits.append(weekly_profit)
-    capital_weekly += weekly_profit
-    weekly_cumulative.append(sum(weekly_profits))
-
-# Prepare weekly profit table
-weekly_table_data = {
-    "Week": list(range(1, weeks + 1)),
-    "Profit (₹)": [format_inr(p) for p in weekly_profits],
-    "Cumulative (₹)": [format_inr(c) for c in weekly_cumulative],
-}
-
-weekly_df = pd.DataFrame(weekly_table_data)
-
-# Display the weekly profit table
-st.dataframe(weekly_df, use_container_width=True, height=400)
+with col2:
+    st.markdown("### 📅 **Month 1**")
+    st.metric(
+        label="Simulated Month 1 Profit",
+        value=f"₹{month1_profit_simulated:,.0f}",
+        delta=f"{month1_profit_simulated - month1_profit_required:,.0f}",
+        delta_color="normal" if month1_profit_simulated >= month1_profit_required else "inverse"
+    )
+    st.caption(f"Target: ₹{month1_profit_required:,.0f}")
+    if month1_profit_simulated >= month1_profit_required:
+        st.success("✅ Sufficient for Month 1 profit goal")
+    else:
+        st.error("⚠️ Below Month 1 profit target")
 
 # === Footer Note ===
 st.markdown("""
