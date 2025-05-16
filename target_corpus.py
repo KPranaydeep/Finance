@@ -167,7 +167,7 @@ df = pd.DataFrame(table_data)
 st.dataframe(df, use_container_width=True, height=400)
 
 # === Week 1 and Month 1 Profit vs Current Savings Comparison ===
-st.subheader("📊 Week 1 and Month 1 Profit vs. Your Current Savings")
+st.subheader("📊 One Week and One Month Profit vs. Your Current Savings")
 
 # Slider input for hypothetical corpus (₹25k steps)
 test_corpus_combined = st.slider(
@@ -176,7 +176,7 @@ test_corpus_combined = st.slider(
     max_value=float(required_corpus),
     value=float(current_savings),
     step=25000.0,
-    help="Adjust to see profit in Week 1 and Month 1 from different corpus sizes."
+    help="Adjust to see profit in One Week and One Month from different corpus sizes."
 )
 
 # Compute profits
@@ -190,32 +190,32 @@ month1_profit_required = required_corpus * r
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 🗓️ **Week 1**")
+    st.markdown("### 🗓️ **1st Week**")
     st.metric(
-        label="Simulated Week 1 Profit",
+        label="1st Week Simulated Profit",
         value=f"₹{week1_profit_simulated:,.0f}",
         delta=f"{week1_profit_simulated - week1_profit_required:,.0f}",
         delta_color="normal" if week1_profit_simulated >= week1_profit_required else "inverse"
     )
     st.caption(f"Target: ₹{week1_profit_required:,.0f}")
     if week1_profit_simulated >= week1_profit_required:
-        st.success("✅ Sufficient for Week 1 profit goal")
+        st.success("✅ Sufficient for 1st Week profit goal")
     else:
-        st.error("⚠️ Below Week 1 profit target")
+        st.error("⚠️ Below 1st Week profit target")
 
 with col2:
     st.markdown("### 📅 **Month 1**")
     st.metric(
-        label="Simulated Month 1 Profit",
+        label="1st Month Simulated Profit",
         value=f"₹{month1_profit_simulated:,.0f}",
         delta=f"{month1_profit_simulated - month1_profit_required:,.0f}",
         delta_color="normal" if month1_profit_simulated >= month1_profit_required else "inverse"
     )
     st.caption(f"Target: ₹{month1_profit_required:,.0f}")
     if month1_profit_simulated >= month1_profit_required:
-        st.success("✅ Sufficient for Month 1 profit goal")
+        st.success("✅ Sufficient for 1st Month profit goal")
     else:
-        st.error("⚠️ Below Month 1 profit target")
+        st.error("⚠️ Below 1st Month profit target")
 
 # === Footer Note ===
 st.markdown("""
