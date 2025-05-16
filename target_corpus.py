@@ -9,22 +9,6 @@ Enter your current investment details and growth expectations below.
 These will be used to simulate how much corpus you need to meet your financial goal.
 """)
 
-one_year_forecast = st.sidebar.number_input(
-    "📈 1-Year Forecast Growth (%)",
-    min_value=0.0,
-    value=12.0,
-    step=0.1,
-    help="Expected growth in your investments over the next 1 year."
-)
-
-total_returns = st.sidebar.number_input(
-    "📉 Current Total Returns (%)",
-    min_value=-30.0,
-    value=0.0,
-    step=0.1,
-    help="Recent actual return on your investments. Can be negative."
-)
-
 bonds = st.sidebar.number_input(
     "💰 Current Bonds Value (₹)",
     min_value=0.0,
@@ -33,17 +17,61 @@ bonds = st.sidebar.number_input(
     help="Total value of your fixed-income instruments like bonds."
 )
 
-tickertape = st.sidebar.number_input(
-    "📊 Current Investments (e.g. Stocks, MFs) (₹)",
+one_year_forecast_bonds = st.sidebar.number_input(
+    "📈 1-Year Forecast Growth (%)",
+    min_value=0.0,
+    value=12.0,
+    step=0.1,
+    help="Expected growth in your bonds over the next 1 year."
+)
+
+stocks = st.sidebar.number_input(
+    "📊 Current Investments (Stocks) (₹)",
     min_value=0.0,
     value=0.0,
     step=1000.0,
-    help="Market value of your equity/mutual fund holdings."
+    help="Market value of your stock holdings."
 )
 
-# Calculate effective growth rate and savings
-effective_annual_growth = one_year_forecast + total_returns
-current_savings = bonds + tickertape
+one_year_forecast_stocks = st.sidebar.number_input(
+    "📈 1-Year Forecast Growth (%)",
+    min_value=0.0,
+    value=12.0,
+    step=0.1,
+    help="Expected growth in your stocks over the next 1 year."
+)
+
+mf = st.sidebar.number_input(
+    "📊 Current Investments (MFs) (₹)",
+    min_value=0.0,
+    value=0.0,
+    step=1000.0,
+    help="Market value of your mutual fund holdings."
+)
+
+one_year_forecast_mf = st.sidebar.number_input(
+    "📈 1-Year Forecast Growth (%)",
+    min_value=0.0,
+    value=12.0,
+    step=0.1,
+    help="Expected growth in your mutual funds over the next 1 year."
+)
+
+# Total investment across all categories
+total_investment = bonds + stocks + mf
+
+# Handle the case when total investment is zero to avoid division by zero
+if total_investment == 0:
+    effective_annual_growth = 0.0
+else:
+    effective_annual_growth = (
+        (bonds * one_year_forecast_bonds) +
+        (stocks * one_year_forecast_stocks) +
+        (mf * one_year_forecast_mf)
+    ) / total_investment
+
+# Total current savings
+current_savings = total_investment
 
 # === Title ===
 st.title("📈 Financial Goal Simulator")
