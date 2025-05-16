@@ -34,7 +34,7 @@ stocks = st.sidebar.number_input(
 )
 
 one_year_forecast_stocks = st.sidebar.number_input(
-    "📈 1-Year Forecast Growth (%)",
+    "📈 1-Year Forecast Growth (%) for Stocks",
     min_value=0.0,
     value=100.0,
     step=0.1,
@@ -50,7 +50,7 @@ mf = st.sidebar.number_input(
 )
 
 one_year_forecast_mf = st.sidebar.number_input(
-    "📈 1-Year Forecast Growth (%)",
+    "📈 1-Year Forecast Growth (%) for Mutual Funds",
     min_value=0.0,
     value=12.0,
     step=0.1,
