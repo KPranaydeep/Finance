@@ -12,7 +12,7 @@ These will be used to simulate how much corpus you need to meet your financial g
 bonds = st.sidebar.number_input(
     "💰 Current Bonds Value (₹)",
     min_value=0.0,
-    value=0.0,
+    value=2000.0,
     step=100.0,
     help="Total value of your fixed-income instruments like bonds."
 )
@@ -20,7 +20,7 @@ bonds = st.sidebar.number_input(
 one_year_forecast_bonds = st.sidebar.number_input(
     "📈 1-Year Forecast Growth (%)",
     min_value=0.0,
-    value=12.0,
+    value=11.0,
     step=0.1,
     help="Expected growth in your bonds over the next 1 year."
 )
@@ -28,7 +28,7 @@ one_year_forecast_bonds = st.sidebar.number_input(
 stocks = st.sidebar.number_input(
     "📊 Current Investments (Stocks) (₹)",
     min_value=0.0,
-    value=0.0,
+    value=374113.0,
     step=1000.0,
     help="Market value of your stock holdings."
 )
@@ -36,7 +36,7 @@ stocks = st.sidebar.number_input(
 one_year_forecast_stocks = st.sidebar.number_input(
     "📈 1-Year Forecast Growth (%)",
     min_value=0.0,
-    value=12.0,
+    value=100.0,
     step=0.1,
     help="Expected growth in your stocks over the next 1 year."
 )
