@@ -166,6 +166,35 @@ df = pd.DataFrame(table_data)
 # === Display the table without vertical scroll ===
 st.dataframe(df, use_container_width=True, height=400)
 
+# === Week 1 Profit vs Current Savings Comparison ===
+st.subheader("📊 Week 1 Profit vs. Your Current Savings")
+
+# Slider input for hypothetical corpus amount (stepping ₹25,000)
+test_corpus = st.slider(
+    "🧮 Simulate Week 1 Profit From This Corpus (₹)",
+    min_value=0.0,
+    max_value=required_corpus,
+    value=current_savings,
+    step=25000.0,
+    help="Adjust to see how much profit you'd earn in Week 1 from different corpus sizes."
+)
+
+# Calculate week 1 profit for the selected corpus
+week1_profit_simulated = test_corpus * weekly_r
+week1_profit_required = required_corpus * weekly_r
+
+st.markdown(f"""
+- 💼 **Simulated Corpus**: ₹{test_corpus:,.0f}  
+- 📈 **Week 1 Profit from Simulated Corpus**: ₹{week1_profit_simulated:,.0f}  
+- 🎯 **Week 1 Profit Needed (from Required Corpus)**: ₹{week1_profit_required:,.0f}  
+""")
+
+if week1_profit_simulated >= week1_profit_required:
+    st.success("✅ Your simulated corpus can generate the required Week 1 profit.")
+else:
+    shortfall = week1_profit_required - week1_profit_simulated
+    st.error(f"⚠️ You need ₹{shortfall:,.0f} more in corpus to match the required Week 1 profit.")
+
 # === Weekly Profit Simulation ===
 st.subheader("📊 Weekly Profit Simulation")
 
