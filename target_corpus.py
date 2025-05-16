@@ -18,7 +18,7 @@ bonds = st.sidebar.number_input(
 )
 
 one_year_forecast_bonds = st.sidebar.number_input(
-    "📈 1-Year Forecast Growth (%)",
+    "📈 YTM (%)",
     min_value=0.0,
     value=11.0,
     step=0.1,
