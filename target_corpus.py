@@ -101,6 +101,10 @@ annual_return_pct = st.slider(
 months = 12
 r = (1 + (annual_return_pct / 100)) ** (1 / months) - 1
 
+# Weekly return rate
+weeks = 52
+weekly_r = (1 + (annual_return_pct / 100)) ** (1 / weeks) - 1
+
 # === Section: Corpus Calculation ===
 st.subheader("📉 Required Corpus Calculation")
 
@@ -161,6 +165,31 @@ df = pd.DataFrame(table_data)
 
 # === Display the table without vertical scroll ===
 st.dataframe(df, use_container_width=True, height=400)
+
+# === Weekly Profit Simulation ===
+st.subheader("📊 Weekly Profit Simulation")
+
+capital_weekly = required_corpus
+weekly_profits = []
+weekly_cumulative = []
+
+for i in range(weeks):
+    weekly_profit = capital_weekly * weekly_r
+    weekly_profits.append(weekly_profit)
+    capital_weekly += weekly_profit
+    weekly_cumulative.append(sum(weekly_profits))
+
+# Prepare weekly profit table
+weekly_table_data = {
+    "Week": list(range(1, weeks + 1)),
+    "Profit (₹)": [format_inr(p) for p in weekly_profits],
+    "Cumulative (₹)": [format_inr(c) for c in weekly_cumulative],
+}
+
+weekly_df = pd.DataFrame(weekly_table_data)
+
+# Display the weekly profit table
+st.dataframe(weekly_df, use_container_width=True, height=400)
 
 # === Footer Note ===
 st.markdown("""
