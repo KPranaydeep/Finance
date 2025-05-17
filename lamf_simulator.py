@@ -28,47 +28,53 @@ It compares:
 # --- Inputs ---
 st.markdown("### 🔧 Simulation Inputs")
 
-loan_amount = st.number_input(
-    "🏦 Loan Amount (₹)", min_value=25000, max_value=2000000, step=5000, value=100000,
-    help="Specify the loan amount you want to borrow against your mutual funds."
-)
+col1, col2 = st.columns(2)
 
-interest_rate = st.number_input(
-    "💸 Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5,
-    help="Select the annual interest rate charged on the loan."
-)
+with col1:
+    loan_amount = st.number_input(
+        "🏦 Loan Amount (₹)", min_value=25000, max_value=2000000, step=5000, value=100000,
+        help="Specify the loan amount you want to borrow against your mutual funds."
+    )
+    processing_fee = st.number_input(
+        "💰 Processing Fee (₹)", min_value=0, max_value=10000, step=10, value=1179,
+        help="Enter the one-time processing fee charged for the loan."
+    )
+    tenure_months = st.number_input(
+        "⏳ Investment Holding Period (Months)", min_value=2, max_value=36, step=1, value=35,
+        help="Number of months you plan to hold the loan to generate returns."
+    )
 
-processing_fee = st.number_input(
-    "💰 Processing Fee (₹)", min_value=0, max_value=10000, step=10, value=1179,
-    help="Enter the one-time processing fee that is charged for the loan."
-)
-
-expected_annual_return = st.number_input(
-    "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0,
-    help="Select the annual return rate you expect from investing in the market."
-)
-
-tenure_months = st.number_input(
-    "⏳ Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=35,
-    help="Select the number of months for the loan repayment period."
-)
+with col2:
+    interest_rate = st.number_input(
+        "💸 Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5,
+        help="Select the annual interest rate charged on the loan."
+    )
+    expected_annual_return = st.number_input(
+        "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0,
+        help="Annual return rate you expect from investing the loaned amount."
+    )
 
 # --- Inputs for Foreclosure Estimator ---
 st.markdown("### 📅 Inputs for Foreclosure Estimation")
 
-loan_start_date = st.date_input(
-    "Loan Start Date",
-    value=dt.date(2025, 3, 27),
-    help="Enter the date when the loan started."
-)
+col3, col4 = st.columns(2)
 
-loan_tenure_months = st.number_input(
-    "Loan Tenure (Months)",
-    min_value=1,
-    max_value=36,
-    value=36,
-    help="Enter the loan tenure in months."
-)
+with col3:
+    loan_start_date = st.date_input(
+        "📅 Loan Start Date",
+        value=dt.date(2025, 3, 27),
+        help="Enter the date when the loan started."
+    )
+
+with col4:
+    loan_tenure_months = st.number_input(
+        "🏁 Loan Tenure (Months)",
+        min_value=1,
+        max_value=36,
+        value=36,
+        help="Total loan duration agreed with lender (used for foreclosure calculation)."
+    )
+
 # --- Financial Calculations ---
 monthly_interest_rate = interest_rate / 12 / 100
 monthly_return_rate = (1 + expected_annual_return / 100) ** (1 / 12) - 1
