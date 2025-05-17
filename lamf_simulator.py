@@ -207,32 +207,23 @@ st.dataframe(df_results, use_container_width=True)
 # --- Final Emotional Verdict ---
 st.markdown("### 🧠 Final Verdict")
 
-def format_currency_simple(value):
-    abs_val = abs(value)
-    if abs_val >= 100000:
-        return f"{value/100000:.2f} Lakhs"
-    else:
-        return f"₹{value:,.0f}"
-
-formatted_profit = format_currency_simple(net_profit_loss)
+formatted_profit = format_currency(net_profit_loss)
 
 if net_profit_loss > 0:
     st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
 else:
-    st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
+    st.error(f"⚠️ Loss of {format_currency(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
     
 summary_text = f"""
 Let's break this down:
 
 You plan to borrow ₹{loan_amount:,.0f} starting from {formatted_start_date}, with a loan tenure of {loan_tenure_months} months.  
-At an annual interest rate of {interest_rate:.2f}%, your monthly interest rate is about {monthly_interest_rate * 100:.3f}%.  
+At an annual interest rate of {interest_rate:.2f}%. Over the loan period, you will pay a total interest of approximately {format_currency(total_interest_paid):,.2f}, plus a processing fee of ₹{format_currency(processing_fee):,.0f}.  
+This means your total outflow (principal + interest + fees) will be around {format_currency(total_outflow):,.2f}.  
 
-Over the loan period, you will pay a total interest of approximately ₹{total_interest_paid:,.2f}, plus a processing fee of ₹{processing_fee:,.0f}.  
-This means your total outflow (principal + interest + fees) will be around ₹{total_outflow:,.2f}.  
+Assuming you reinvest the loan amount, expecting an annual return of {expected_annual_return:.2f}%, your investment could grow to {format_currency(investment_value):,.2f} by the end of the tenure.  
 
-Assuming you reinvest the loan amount, expecting an annual return of {expected_annual_return:.2f}%, your investment could grow to ₹{investment_value:,.2f} by the end of the tenure.  
-
-This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of ₹{abs(net_profit_loss):,.2f}.  
+This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of {format_currency(abs(net_profit_loss)):,.2f}.  
 
 {decision_text}
 
