@@ -336,6 +336,8 @@ bars[user_index].set_linewidth(2)
 ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
 ax.set_ylabel("Net P&L", fontsize=12)
 ax.set_xlabel("Loan Amount", fontsize=12)
+y_max = max(net_pnl_list) * 1.1
+ax.set_ylim(0, y_max)
 
 # Custom ticks and formatting
 ax.set_xticks(indices)
