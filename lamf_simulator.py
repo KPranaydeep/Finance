@@ -118,6 +118,55 @@ def get_foreclosure_date(start_date, tenure_months):
         check_date -= dt.timedelta(days=1)
 
     return None
+
+# --- Helper functions for foreclosure date ---
+
+def is_blackout(date):
+    """Returns True if date is in blackout period: 27th to 3rd (inclusive)"""
+    return (date.day >= 27 or date.day <= 3)
+
+def is_valid_foreclosure_day(date, indian_holidays):
+    """Returns True if date is a working day, not a holiday, and not in blackout period."""
+    return (
+        date.weekday() < 5 and  # Monday to Friday
+        date not in indian_holidays and
+        not is_blackout(date)
+    )
+
+def count_working_days(start_date, end_date, holidays_set):
+    """Count working days (Mon-Fri excluding holidays) between two dates inclusive."""
+    current = start_date
+    count = 0
+    while current <= end_date:
+        if current.weekday() < 5 and current not in holidays_set:
+            count += 1
+        current += dt.timedelta(days=1)
+    return count
+
+def get_foreclosure_date(start_date, tenure_months):
+    """
+    Find the latest valid foreclosure date such that:
+    - Date is a valid foreclosure day (Mon-Fri, no holiday, no blackout)
+    - There are at least 5 working days (Mon-Fri excluding holidays) between foreclosure date and loan end date
+    - Foreclosure date is at least 7 days after start_date
+    """
+    end_date = start_date + pd.DateOffset(months=tenure_months)
+    earliest_check_date = start_date + dt.timedelta(days=7)
+
+    all_years = list(set([start_date.year, end_date.year]))
+    indian_holidays = holidays.India(years=all_years)
+
+    check_date = end_date.date()
+    while check_date >= earliest_check_date:
+        if is_valid_foreclosure_day(check_date, indian_holidays):
+            # Count working days from check_date to end_date (inclusive), ignoring blackout days here
+            working_days = count_working_days(check_date, end_date.date(), indian_holidays)
+            if working_days >= 5:
+                return check_date
+        check_date -= dt.timedelta(days=1)
+
+    return None
+
 foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
@@ -295,54 +344,6 @@ This tool helps you estimate the earliest valid foreclosure date for a mutual fu
 - Indian public holidays
 - Monthly blackout period (27th to 3rd)
 """)
-
-# --- Helper functions for foreclosure date ---
-
-def is_blackout(date):
-    """Returns True if date is in blackout period: 27th to 3rd (inclusive)"""
-    return (date.day >= 27 or date.day <= 3)
-
-def is_valid_foreclosure_day(date, indian_holidays):
-    """Returns True if date is a working day, not a holiday, and not in blackout period."""
-    return (
-        date.weekday() < 5 and  # Monday to Friday
-        date not in indian_holidays and
-        not is_blackout(date)
-    )
-
-def count_working_days(start_date, end_date, holidays_set):
-    """Count working days (Mon-Fri excluding holidays) between two dates inclusive."""
-    current = start_date
-    count = 0
-    while current <= end_date:
-        if current.weekday() < 5 and current not in holidays_set:
-            count += 1
-        current += dt.timedelta(days=1)
-    return count
-
-def get_foreclosure_date(start_date, tenure_months):
-    """
-    Find the latest valid foreclosure date such that:
-    - Date is a valid foreclosure day (Mon-Fri, no holiday, no blackout)
-    - There are at least 5 working days (Mon-Fri excluding holidays) between foreclosure date and loan end date
-    - Foreclosure date is at least 7 days after start_date
-    """
-    end_date = start_date + pd.DateOffset(months=tenure_months)
-    earliest_check_date = start_date + dt.timedelta(days=7)
-
-    all_years = list(set([start_date.year, end_date.year]))
-    indian_holidays = holidays.India(years=all_years)
-
-    check_date = end_date.date()
-    while check_date >= earliest_check_date:
-        if is_valid_foreclosure_day(check_date, indian_holidays):
-            # Count working days from check_date to end_date (inclusive), ignoring blackout days here
-            working_days = count_working_days(check_date, end_date.date(), indian_holidays)
-            if working_days >= 5:
-                return check_date
-        check_date -= dt.timedelta(days=1)
-
-    return None
 
 # Directly calculate and display the foreclosure date without a button
 foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
