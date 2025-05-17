@@ -95,31 +95,35 @@ def get_foreclosure_date(start_date, tenure_months):
 
 col_amounts, col_rates = st.columns(2)
 
+from datetime import datetime, date
+
 with col_amounts:
+    # Loan and fee inputs
     loan_amount = st.number_input(
-        "🏦 Loan Amount (₹)", min_value=25000, max_value=2000000, step=5000, value=100000,
+        "🏦 Loan Amount (₹)", min_value=25_000, max_value=20_00_000, step=5_000, value=1_00_000,
         help="Specify the loan amount you want to borrow against your mutual funds."
     )
     processing_fee = st.number_input(
-        "💰 Processing Fee (₹)", min_value=0, max_value=10000, step=10, value=1179,
+        "💰 Processing Fee (₹)", min_value=0, max_value=10_000, step=10, value=1179,
         help="Enter the one-time processing fee charged for the loan."
     )
 
+    # Compute foreclosure date
     foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
-    from datetime import datetime, date
-    
-    # Normalize both to date
+
+    # Ensure 'today' and 'foreclosure_date' are date objects
+    today = datetime.today().date()
     if isinstance(foreclosure_date, datetime):
         foreclosure_date = foreclosure_date.date()
-    if isinstance(today, datetime):
-        today = today.date()
-    
+
+    # Determine default tenure
     if foreclosure_date:
         delta_days = (foreclosure_date - today).days
         default_tenure_months = max(2, delta_days // 30)
     else:
-        default_tenure_months = 12  # fallback default
+        default_tenure_months = 12
 
+    # Tenure input
     tenure_months = st.number_input(
         "⏳ Investment Holding Period (Months)",
         min_value=2,
