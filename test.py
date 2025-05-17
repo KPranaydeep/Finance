@@ -279,12 +279,11 @@ def get_foreclosure_date(start_date, tenure_months):
 
     check_date = today
     while check_date < end_date.date():
-        if is_valid_foreclosure
-_day(check_date, indian_holidays):
+        if is_valid_foreclosure_day(check_date, indian_holidays):
 # Only consider dates at least 7 days after today for realistic processing
 if (check_date - today).days >= 7:
-return check_date
-check_date += dt.timedelta(days=1)
+    return check_date
+    check_date += dt.timedelta(days=1)
 return None
 
 --- Inputs for Foreclosure Estimator ---
