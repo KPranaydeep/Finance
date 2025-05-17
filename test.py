@@ -271,18 +271,16 @@ def is_valid_foreclosure_day(date, indian_holidays):
 def get_foreclosure_date(start_date, tenure_months):
     """Find the earliest valid foreclosure date based on start date and tenure."""
     end_date = start_date + pd.DateOffset(months=tenure_months)
-    today = dt.date.today()
+    # Start checking at least 7 days after loan start date
+    check_date = start_date + dt.timedelta(days=7)
 
-    # Get Indian holidays for all relevant years
-    all_years = list(set([today.year, end_date.year, start_date.year]))
+    # Collect years for holidays covering whole range
+    all_years = list(set([start_date.year, end_date.year]))
     indian_holidays = holidays.India(years=all_years)
 
-    check_date = today
-    while check_date < end_date.date():
+    while check_date <= end_date.date():
         if is_valid_foreclosure_day(check_date, indian_holidays):
-            # Only consider dates at least 7 days after today for realistic processing
-            if (check_date - today).days >= 7:
-                return check_date
+            return check_date
         check_date += dt.timedelta(days=1)
     return None
 
