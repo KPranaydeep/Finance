@@ -225,7 +225,7 @@ Assuming you reinvest the loan amount, expecting an annual return of {expected_a
 
 This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of {format_currency(abs(net_profit_loss))}.  
 
-{decision_text}
+So, is it financially sound to proceed? {decision_text}
 
 Remember, these are projections based on current assumptions. Real markets fluctuate, but this gives you a realistic outlook to help you make an informed decision.
 
