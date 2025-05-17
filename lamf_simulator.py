@@ -178,21 +178,25 @@ def format_currency(value):
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
 
+# Format dates correctly
+formatted_start_date = loan_start_date.strftime("%d-%b-%Y")
+formatted_foreclosure_date = foreclosure_date.strftime("%d-%b-%Y") if foreclosure_date else "N/A"
+
 results = {
-    "Loan Start Date": loan_start_date.strftime("%Y-%m-%d"),
-    "Foreclosure Date": foreclosure_date.strftime("%Y-%m-%d") if foreclosure_date else "N/A",
-    "Loan Amount": loan_amount,
-    "Interest Rate (Annual)": f"{interest_rate:.2f}%",
-    "Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
-    "Expected Return (Annual)": f"{expected_annual_return:.2f}%",
-    "Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
-    "Loan Tenure (Months)": f"{tenure_months} Months",
-    "Processing Fee": processing_fee,
-    "Total Interest Paid": total_interest_paid,
-    "Total Outflow (Principal + Interest + Fee)": total_outflow,
-    "Investment Value at Maturity": investment_value,
-    "Net Profit / Loss": net_profit_loss,
-    "Decision": decision_text
+    "📅 Loan Start Date": formatted_start_date,
+    "🔓 Foreclosure Date": formatted_foreclosure_date,
+    "💵 Loan Amount (₹)": f"{loan_amount:,}",
+    "💸 Processing Fee (₹)": f"{processing_fee:,}",
+    "📈 Interest Rate (Annual)": f"{interest_rate:.2f}%",
+    "📆 Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
+    "📊 Expected Return (Annual)": f"{expected_annual_return:.2f}%",
+    "📅 Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
+    "⏳ Loan Tenure Left": f"{tenure_months} months",
+    "💰 Total Interest Paid (₹)": f"{total_interest_paid:,.2f}",
+    "📤 Total Outflow (₹)": f"{total_outflow:,.2f}",
+    "📈 Investment Value at Maturity (₹)": f"{investment_value:,.2f}",
+    "📉 Net Profit / Loss (₹)": f"{net_profit_loss:,.2f}",
+    "✅ Decision": decision_text
 }
 
 # Format currency fields except for percentages, months, and decision text
