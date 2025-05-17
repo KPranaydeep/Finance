@@ -45,6 +45,29 @@ with col_loan_tenure:
         value=36,
         help="Total loan duration agreed with lender (used for foreclosure calculation)."
     )
+# --- Helper functions for foreclosure date ---
+
+def is_blackout(date):
+    """Returns True if date is in blackout period: 27th to 3rd (inclusive)"""
+    return date.day >= 27 or date.day <= 3
+
+def is_valid_foreclosure_day(date, indian_holidays):
+    """Returns True if date is a working day, not a holiday, and not in blackout period."""
+    return (
+        date.weekday() < 5 and  # Monday to Friday
+        date not in indian_holidays and
+        not is_blackout(date)
+    )
+
+def count_working_days(start_date, end_date, holidays_set):
+    """Count working days (Mon-Fri excluding holidays) between two dates inclusive."""
+    current = start_date
+    count = 0
+    while current <= end_date:
+        if current.weekday() < 5 and current not in holidays_set:
+            count += 1
+        current += dt.timedelta(days=1)
+    return count
 
 # --- Foreclosure Logic ---
 def get_foreclosure_date(start_date, tenure_months):
@@ -107,30 +130,6 @@ with col_rates:
         "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0,
         help="Annual return rate you expect from investing the loaned amount."
     )
-
-# --- Helper functions for foreclosure date ---
-
-def is_blackout(date):
-    """Returns True if date is in blackout period: 27th to 3rd (inclusive)"""
-    return date.day >= 27 or date.day <= 3
-
-def is_valid_foreclosure_day(date, indian_holidays):
-    """Returns True if date is a working day, not a holiday, and not in blackout period."""
-    return (
-        date.weekday() < 5 and  # Monday to Friday
-        date not in indian_holidays and
-        not is_blackout(date)
-    )
-
-def count_working_days(start_date, end_date, holidays_set):
-    """Count working days (Mon-Fri excluding holidays) between two dates inclusive."""
-    current = start_date
-    count = 0
-    while current <= end_date:
-        if current.weekday() < 5 and current not in holidays_set:
-            count += 1
-        current += dt.timedelta(days=1)
-    return count
 
 # --- Foreclosure Date Output ---
 if foreclosure_date:
