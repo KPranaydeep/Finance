@@ -145,7 +145,7 @@ with col_rates:
 
 # --- Foreclosure Date Output ---
 if foreclosure_date:
-    st.success(f"📅 Earliest valid foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
+    st.success(f"📅 The foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
 else:
     st.error("Could not find a valid foreclosure date within the loan tenure period.")
 
@@ -163,6 +163,23 @@ investment_value = loan_amount * ((1 + monthly_return_rate) ** tenure_months)
 net_profit_loss = investment_value - total_outflow
 decision_text = "✅ YES, Take LAMF" if net_profit_loss > 0 else "❌ NO, Not Worth It"
 
+# --- Final Emotional Verdict ---
+st.markdown("### 🧠 Final Verdict")
+
+def format_currency_simple(value):
+    abs_val = abs(value)
+    if abs_val >= 1_00_000:
+        return f"{value/1_00_000:.2f} Lakhs"
+    else:
+        return f"₹{value:,.0f}"
+
+formatted_profit = format_currency_simple(net_profit_loss)
+
+if net_profit_loss > 0:
+    st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
+else:
+    st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
+    
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
 
@@ -234,23 +251,6 @@ ax.set_ylabel("₹ (in Lakhs)")
 ax.grid(True, linestyle='--', alpha=0.6, axis='y')
 plt.tight_layout()
 st.pyplot(fig)
-
-# --- Final Emotional Verdict ---
-st.markdown("### 🧠 Final Verdict")
-
-def format_currency_simple(value):
-    abs_val = abs(value)
-    if abs_val >= 1_00_000:
-        return f"{value/1_00_000:.2f} Lakhs"
-    else:
-        return f"₹{value:,.0f}"
-
-formatted_profit = format_currency_simple(net_profit_loss)
-
-if net_profit_loss > 0:
-    st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
-else:
-    st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
 
 # --- Sensitivity Plot: Net P&L vs Loan Amount ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
