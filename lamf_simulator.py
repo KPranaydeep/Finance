@@ -51,7 +51,7 @@ tenure_months = st.number_input("Loan Tenure (Months)", min_value=2, max_value=3
 monthly_interest_rate = interest_rate / 12 / 100
 monthly_return_rate = (1 + expected_annual_return / 100) ** (1 / 12) - 1
 
-total_interest_paid = loan_amount * monthly_interest_rate * (tenure_months - 1)
+total_interest_paid = loan_amount * monthly_interest_rate * (tenure_months)
 total_outflow = loan_amount + total_interest_paid + processing_fee
 investment_value = loan_amount * ((1 + monthly_return_rate) ** tenure_months)
 net_profit_loss = investment_value - total_outflow
@@ -75,7 +75,7 @@ results = {
     "Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
     "Expected Return (Annual)": f"{expected_annual_return:.2f}%",
     "Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
-    "Loan Tenure (Months)": tenure_months,
+    "Loan Tenure (Months)": f"{tenure_months} Months",  # <-- updated here
     "Processing Fee": processing_fee,
     "Total Interest Paid": total_interest_paid,
     "Total Outflow (Principal + Interest + Fee)": total_outflow,
@@ -84,8 +84,13 @@ results = {
     "Decision": decision_text
 }
 
-# Apply currency formatting
-formatted_results = {k: format_currency(v) for k, v in results.items()}
+# Apply currency formatting where appropriate
+formatted_results = {
+    k: format_currency(v) if k not in ["Loan Tenure (Months)", "Decision",
+                                       "Interest Rate (Annual)", "Monthly Interest Rate",
+                                       "Expected Return (Annual)", "Monthly Return Rate"] else v
+    for k, v in results.items()
+}
 
 df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
 st.dataframe(df_results, use_container_width=True)
