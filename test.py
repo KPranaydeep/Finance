@@ -279,7 +279,12 @@ def count_working_days(start_date, end_date, holidays_set):
     return count
 
 def get_foreclosure_date(start_date, tenure_months):
-    """Find latest valid foreclosure date ensuring 5 working days to end_date ignoring blackout days."""
+    """
+    Find the latest valid foreclosure date such that:
+    - Date is a valid foreclosure day (Mon-Fri, no holiday, no blackout)
+    - There are at least 5 working days (Mon-Fri excluding holidays) between foreclosure date and loan end date
+    - Foreclosure date is at least 7 days after start_date
+    """
     end_date = start_date + pd.DateOffset(months=tenure_months)
     earliest_check_date = start_date + dt.timedelta(days=7)
 
@@ -289,7 +294,7 @@ def get_foreclosure_date(start_date, tenure_months):
     check_date = end_date.date()
     while check_date >= earliest_check_date:
         if is_valid_foreclosure_day(check_date, indian_holidays):
-            # Count working days from check_date to end_date (inclusive), ignoring blackout
+            # Count working days from check_date to end_date (inclusive), ignoring blackout days here
             working_days = count_working_days(check_date, end_date.date(), indian_holidays)
             if working_days >= 5:
                 return check_date
@@ -307,11 +312,11 @@ loan_start_date = st.date_input(
 )
 
 loan_tenure_months = st.number_input(
-"Loan Tenure (Months)",
-min_value=1,
-max_value=36,
-value=tenure_months,
-help="Enter the loan tenure in months."
+    "Loan Tenure (Months)",
+    min_value=1,
+    max_value=36,
+    value=12,
+    help="Enter the loan tenure in months."
 )
 
 if st.button("Estimate Foreclosure Date"):
@@ -323,8 +328,7 @@ if st.button("Estimate Foreclosure Date"):
 
 st.markdown("---")
 st.markdown("""
-
-About Blackout Period:
+**About Blackout Period:**  
 The blackout period is from the 27th of a month to the 3rd of the next month, inclusive.
 
 During this time, loan foreclosure or redemptions are generally restricted.
