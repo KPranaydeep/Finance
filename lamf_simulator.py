@@ -98,6 +98,8 @@ def format_currency(value):
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
 
+foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
+
 results = {
     "Loan Start Date": loan_start_date.strftime("%Y-%m-%d"),
     "Foreclosure Date": foreclosure_date.strftime("%Y-%m-%d") if foreclosure_date else "N/A",
