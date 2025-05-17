@@ -209,8 +209,8 @@ st.markdown("### 🧠 Final Verdict")
 
 def format_currency_simple(value):
     abs_val = abs(value)
-    if abs_val >= 1_00_000:
-        return f"{value/1_00_000:.2f} Lakhs"
+    if abs_val >= 100000:
+        return f"{value/100000:.2f} Lakhs"
     else:
         return f"₹{value:,.0f}"
 
@@ -221,12 +221,35 @@ if net_profit_loss > 0:
 else:
     st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
     
+summary_text = f"""
+Let's break this down:
+
+You plan to borrow ₹{loan_amount:,.0f} starting from {formatted_start_date}, with a loan tenure of {tenure_months} months.  
+At an annual interest rate of {interest_rate:.2f}%, your monthly interest rate is about {monthly_interest_rate * 100:.3f}%.  
+
+Over the loan period, you will pay a total interest of approximately ₹{total_interest_paid:,.2f}, plus a processing fee of ₹{processing_fee:,.0f}.  
+This means your total outflow (principal + interest + fees) will be around ₹{total_outflow:,.2f}.  
+
+Assuming you reinvest the loan amount, expecting an annual return of {expected_annual_return:.2f}%, your investment could grow to ₹{investment_value:,.2f} by the end of the tenure.  
+
+This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of ₹{abs(net_profit_loss):,.2f}.  
+
+{decision_text}
+
+Remember, these are projections based on current assumptions. Real markets fluctuate, but this gives you a realistic outlook to help you make an informed decision.
+
+{f"Foreclosure is scheduled for {formatted_foreclosure_date}." if foreclosure_date else ""}
+"""
+
+st.markdown("### 📋 Summary of Your Loan & Investment Simulation")
+st.markdown(summary_text)
+
 # --- Foreclosure Date Output ---
 if foreclosure_date:
     st.success(f"📅 The foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
 else:
     st.error("Could not find a valid foreclosure date within the loan tenure period.")
-    
+
 # --- Bar Chart: Visual Comparison ---
 st.markdown("### 📈 Visual Comparison")
 
