@@ -163,6 +163,12 @@ investment_value = loan_amount * ((1 + monthly_return_rate) ** tenure_months)
 net_profit_loss = investment_value - total_outflow
 decision_text = "✅ YES, Take LAMF" if net_profit_loss > 0 else "❌ NO, Not Worth It"
 
+# --- Display Results Table ---
+st.markdown("### 📊 Simulation Results")
+
+# Format dates correctly
+formatted_start_date = loan_start_date.strftime("%d-%b-%Y")
+formatted_foreclosure_date = foreclosure_date.strftime("%d-%b-%Y") if foreclosure_date else "N/A"
 # --- Formatting Function ---
 def format_currency(value):
     if isinstance(value, (int, float)):
@@ -174,14 +180,7 @@ def format_currency(value):
         else:
             return f"₹{value:,.2f}"
     return value
-
-# --- Display Results Table ---
-st.markdown("### 📊 Simulation Results")
-
-# Format dates correctly
-formatted_start_date = loan_start_date.strftime("%d-%b-%Y")
-formatted_foreclosure_date = foreclosure_date.strftime("%d-%b-%Y") if foreclosure_date else "N/A"
-
+    
 results = {
     "📅 Loan Start Date": formatted_start_date,
     "🔓 Foreclosure Date": formatted_foreclosure_date,
