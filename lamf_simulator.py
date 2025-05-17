@@ -6,8 +6,8 @@ import datetime as dt
 import holidays
 
 # --- Streamlit Page Setup ---
-st.set_page_config(page_title="LAMF Simulator & Foreclosure Estimator", layout="wide")
-st.title("📌 Loan Against Mutual Fund (LAMF) Simulator & Foreclosure Date Estimator")
+st.set_page_config(page_title="LAMF Simulator", layout="centered",initial_sidebar_state="auto")
+st.title("📌 Loan Against Mutual Fund (LAMF) Simulator")
 
 # -------------------------
 # LAMF Simulator Section
@@ -168,6 +168,10 @@ def get_foreclosure_date(start_date, tenure_months):
     return None
 
 foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
+if foreclosure_date:
+    st.success(f"📅 Earliest valid foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
+else:
+    st.error("Could not find a valid foreclosure date within the loan tenure period.")
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
 
@@ -329,35 +333,4 @@ st.markdown("""
 ---
 
 > 📌 **Note:** This tool assumes reinvestment in high-return mutual funds or equity markets with no withdrawal during tenure.
-""")
-
-# -------------------------
-# Foreclosure Date Estimator Section
-# -------------------------
-
-st.markdown("---")
-st.markdown("## 📆 Mutual Fund Loan Foreclosure Estimator (India)")
-
-st.markdown("""
-This tool helps you estimate the earliest valid foreclosure date for a mutual fund loan, accounting for:
-- Working days (Mon–Fri)
-- Indian public holidays
-- Monthly blackout period (27th to 3rd)
-""")
-
-# Directly calculate and display the foreclosure date without a button
-foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
-if foreclosure_date:
-    st.success(f"📅 Earliest valid foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
-else:
-    st.error("Could not find a valid foreclosure date within the loan tenure period.")
-
-st.markdown("---")
-st.markdown("""
-**About Blackout Period:**  
-The blackout period is from the 27th of a month to the 3rd of the next month, inclusive.
-
-During this time, loan foreclosure or redemptions are generally restricted.
-
-This calculator accounts for all public holidays and weekends in India, and only returns the earliest valid foreclosure date outside blackout.
 """)
