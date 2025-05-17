@@ -286,7 +286,7 @@ def get_foreclosure_date(start_date, tenure_months):
         check_date += dt.timedelta(days=1)
     return None
 
---- Inputs for Foreclosure Estimator ---
+# --- Inputs for Foreclosure Estimator ---
 st.markdown("### 📅 Inputs for Foreclosure Estimation")
 
 loan_start_date = st.date_input(
