@@ -218,12 +218,12 @@ summary_text = f"""
 Let's break this down:
 
 You plan to borrow ₹{loan_amount:,.0f} starting from {formatted_start_date}, with a loan tenure of {loan_tenure_months} months.  
-At an annual interest rate of {interest_rate:.2f}%. Over the loan period, you will pay a total interest of approximately {format_currency(total_interest_paid)}, plus a processing fee of {format_currency(processing_fee)}.
-This means your total outflow (principal + interest + fees) will be around {format_currency(total_outflow):,.2f}.  
+At an annual interest rate of {interest_rate:.2f}%. Over the loan period, you will pay a total interest of approximately {format_currency(total_interest_paid)}, plus a processing fee of {format_currency(processing_fee)}.  
+This means your total outflow (principal + interest + fees) will be around {format_currency(total_outflow)}.  
 
-Assuming you reinvest the loan amount, expecting an annual return of {expected_annual_return:.2f}%, your investment could grow to {format_currency(investment_value):,.2f} by the end of the tenure.  
+Assuming you reinvest the loan amount, expecting an annual return of {expected_annual_return:.2f}%, your investment could grow to {format_currency(investment_value)} by the end of the tenure.  
 
-This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of {format_currency(abs(net_profit_loss)):,.2f}.  
+This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of {format_currency(abs(net_profit_loss))}.  
 
 {decision_text}
 
