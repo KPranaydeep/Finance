@@ -25,7 +25,7 @@ st.markdown("### 🔧 Simulation Inputs")
 # Loan Amount
 st.markdown("#### 🏦 **Loan Amount (₹)**")
 st.markdown("Specify the loan amount you want to borrow against your mutual funds.")
-loan_amount = st.number_input("Loan Amount (₹)", min_value=25000, max_value=1000000, step=5000, value=100000)
+loan_amount = st.number_input("Loan Amount (₹)", min_value=25000, max_value=2000000, step=5000, value=100000)
 
 # Interest Rate
 st.markdown("#### 💸 **Loan Interest Rate (Annual %)**")
