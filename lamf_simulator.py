@@ -118,11 +118,9 @@ def get_foreclosure_date(start_date, tenure_months):
         check_date -= dt.timedelta(days=1)
 
     return None
-    
+foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
-
-foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
 
 results = {
     "Loan Start Date": loan_start_date.strftime("%Y-%m-%d"),
