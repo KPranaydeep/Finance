@@ -266,8 +266,23 @@ ax.grid(True, linestyle='--', alpha=0.6, axis='y')
 plt.tight_layout()
 st.pyplot(fig)
 
+import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
 # --- Sensitivity Plot: Net P&L vs Loan Amount ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
+
+# --- Input Variables (You can replace these with Streamlit inputs) ---
+loan_amount = 500000  # Highlighted loan
+interest_rate = 10.0  # Annual interest rate in %
+expected_annual_return = 12.0  # Annual return in %
+tenure_months = 12
+processing_fee = 1000
+
+monthly_interest_rate = interest_rate / 12 / 100
+monthly_return_rate = expected_annual_return / 12 / 100
 
 loan_range = np.concatenate([
     np.arange(25000, 100001, 25000),
@@ -312,10 +327,14 @@ bars[user_index].set_linewidth(2)
 
 ax3.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
 ax3.set_ylabel("Net P&L", fontsize=12)
-ax3.set_xlabel("Loan Amount (₹)", fontsize=12)
-ax3.yaxis.set_major_formatter(plt.FuncFormatter(format_rupee))
+ax3.set_xlabel("Loan Amount", fontsize=12)
+
+# Apply custom rupee format to both axes
+ax3.yaxis.set_major_formatter(FuncFormatter(format_rupee))
+ax3.set_xticks(range(len(loan_range)))
+ax3.set_xticklabels([format_rupee(x, None) for x in loan_range], rotation=45)
+
 ax3.grid(True, linestyle='--', alpha=0.5, axis='y')
-plt.xticks(rotation=45)
 plt.tight_layout()
 
 input_summary = (
