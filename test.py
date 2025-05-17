@@ -304,11 +304,11 @@ help="Enter the loan tenure in months."
 )
 
 if st.button("Estimate Foreclosure Date"):
-  foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
-if foreclosure_date:
-  st.success(f"📅 Earliest valid foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
-else:
-  st.error("Could not find a valid foreclosure date within the loan tenure period.")
+    foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
+    if foreclosure_date:
+        st.success(f"📅 Earliest valid foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
+    else:
+        st.error("Could not find a valid foreclosure date within the loan tenure period.")
 
 st.markdown("---")
 st.markdown("""
