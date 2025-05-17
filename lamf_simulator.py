@@ -106,8 +106,16 @@ with col_amounts:
     )
 
     foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
+    from datetime import datetime, date
+    
+    # Normalize both to date
+    if isinstance(foreclosure_date, datetime):
+        foreclosure_date = foreclosure_date.date()
+    if isinstance(today, datetime):
+        today = today.date()
+    
     if foreclosure_date:
-        delta_days = (foreclosure_date - loan_start_date).days
+        delta_days = (foreclosure_date - today).days
         default_tenure_months = max(2, delta_days // 30)
     else:
         default_tenure_months = 12  # fallback default
