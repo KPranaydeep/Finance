@@ -107,7 +107,7 @@ with col_amounts:
 
     foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
     if foreclosure_date:
-        delta_days = (foreclosure_date - loan_start_date.date()).days
+        delta_days = (foreclosure_date - loan_start_date).days
         default_tenure_months = max(2, delta_days // 30)
     else:
         default_tenure_months = 12  # fallback default
