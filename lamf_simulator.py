@@ -169,6 +169,25 @@ st.markdown("### 📊 Simulation Results")
 # Format dates correctly
 formatted_start_date = loan_start_date.strftime("%d-%b-%Y")
 formatted_foreclosure_date = foreclosure_date.strftime("%d-%b-%Y") if foreclosure_date else "N/A"
+
+# --- Results Dictionary with Labels ---
+results = {
+    "📅 Loan Start Date": formatted_start_date,
+    "🔓 Foreclosure Date": formatted_foreclosure_date,
+    "💵 Loan Amount (₹)": loan_amount,
+    "💸 Processing Fee (₹)": processing_fee,
+    "📈 Interest Rate (Annual)": f"{interest_rate:.2f}%",
+    "📆 Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
+    "📊 Expected Return (Annual)": f"{expected_annual_return:.2f}%",
+    "📅 Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
+    "⏳ Loan Tenure Left": f"{tenure_months} months",
+    "💰 Total Interest Paid (₹)": total_interest_paid,
+    "📤 Total Outflow (₹)": total_outflow,
+    "📈 Investment Value at Maturity (₹)": investment_value,
+    "📉 Net Profit / Loss (₹)": net_profit_loss,
+    "✅ Decision": decision_text
+}
+
 # --- Formatting Function ---
 def format_currency(value):
     if isinstance(value, (int, float)):
@@ -180,33 +199,16 @@ def format_currency(value):
         else:
             return f"₹{value:,.2f}"
     return value
-# Format currency fields except for percentages, months, and decision text
+
+# Format currency fields selectively
 formatted_results = {
-    k: format_currency(v) if k not in [
-        "Loan Tenure (Months)", "Decision",
-        "Interest Rate (Annual)", "Monthly Interest Rate",
-        "Expected Return (Annual)", "Monthly Return Rate"
-    ] else v for k, v in results.items()
+    k: format_currency(v) if not isinstance(v, str) or "₹" in k else v
+    for k, v in results.items()
 }
 
+# --- Create and Display DataFrame ---
 df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
 st.dataframe(df_results, use_container_width=True)
-results = {
-    "📅 Loan Start Date": formatted_start_date,
-    "🔓 Foreclosure Date": formatted_foreclosure_date,
-    "💵 Loan Amount (₹)": f"{loan_amount:,}",
-    "💸 Processing Fee (₹)": f"{processing_fee:,}",
-    "📈 Interest Rate (Annual)": f"{interest_rate:.2f}%",
-    "📆 Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
-    "📊 Expected Return (Annual)": f"{expected_annual_return:.2f}%",
-    "📅 Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
-    "⏳ Loan Tenure Left": f"{tenure_months} months",
-    "💰 Total Interest Paid (₹)": f"{total_interest_paid:,.2f}",
-    "📤 Total Outflow (₹)": f"{total_outflow:,.2f}",
-    "📈 Investment Value at Maturity (₹)": f"{investment_value:,.2f}",
-    "📉 Net Profit / Loss (₹)": f"{net_profit_loss:,.2f}",
-    "✅ Decision": decision_text
-}
 
 # --- Bar Chart: Visual Comparison ---
 st.markdown("### 📈 Visual Comparison")
