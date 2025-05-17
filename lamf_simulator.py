@@ -304,7 +304,7 @@ def format_rupee(x, _):
     if abs_x < 100000:
         return f"₹{x/1000:.1f}k"
     else:
-        return f"₹{x/100000:.2f}L"
+        return f"₹{x/100000:.1f}L"
 
 fig3, ax3 = plt.subplots(figsize=(10, 6))
 bars = ax3.bar(
