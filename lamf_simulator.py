@@ -272,7 +272,8 @@ st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 loan_range = np.concatenate([
     np.arange(25000, 100001, 25000),
     np.arange(150000, 350001, 50000),
-    np.arange(400000, 2000001, 100000)
+    np.arange(400000, 1000001, 100000)
+    np.arange(1000000, 2000001, 250000)
 ])
 
 net_pnl_list = []
