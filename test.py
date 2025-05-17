@@ -268,19 +268,31 @@ def is_valid_foreclosure_day(date, indian_holidays):
         not is_blackout(date)
     )
 
+def count_working_days(start_date, end_date, holidays_set):
+    """Count working days (Mon-Fri excluding holidays) between two dates inclusive."""
+    current = start_date
+    count = 0
+    while current <= end_date:
+        if current.weekday() < 5 and current not in holidays_set:
+            count += 1
+        current += dt.timedelta(days=1)
+    return count
+
 def get_foreclosure_date(start_date, tenure_months):
-    """Find the latest valid foreclosure date within tenure by scanning backward."""
+    """Find latest valid foreclosure date ensuring 5 working days to end_date ignoring blackout days."""
     end_date = start_date + pd.DateOffset(months=tenure_months)
     earliest_check_date = start_date + dt.timedelta(days=7)
 
-    # Collect years for holidays covering whole range
     all_years = list(set([start_date.year, end_date.year]))
     indian_holidays = holidays.India(years=all_years)
 
     check_date = end_date.date()
     while check_date >= earliest_check_date:
         if is_valid_foreclosure_day(check_date, indian_holidays):
-            return check_date
+            # Count working days from check_date to end_date (inclusive), ignoring blackout
+            working_days = count_working_days(check_date, end_date.date(), indian_holidays)
+            if working_days >= 5:
+                return check_date
         check_date -= dt.timedelta(days=1)
 
     return None
