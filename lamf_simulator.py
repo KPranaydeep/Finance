@@ -271,6 +271,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
+import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
 # --- Sensitivity Plot: Net P&L vs Loan Amount ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 
@@ -302,41 +307,51 @@ for loan in loan_range:
 def format_rupee(x, _):
     abs_x = abs(x)
     if abs_x < 100000:
-        return f"₹{x/1000:.1f}k"
+        return f"₹{x/1000:.1f}k".rstrip('0').rstrip('.')
     else:
-        return f"₹{x/100000:.1f}L"
+        return f"₹{x/100000:.1f}L".rstrip('0').rstrip('.')
 
-fig3, ax3 = plt.subplots(figsize=(10, 6))
+# --- Plotting ---
+fig3, ax3 = plt.subplots(figsize=(12, 6))
 bars = ax3.bar(
-    loan_range.astype(str), net_pnl_list,
+    loan_range,
+    net_pnl_list,
+    width=20000,
     color=['green' if val >= 0 else 'red' for val in net_pnl_list]
 )
 
+# Annotate bars
 for bar, value in zip(bars, net_pnl_list):
     ax3.text(
         bar.get_x() + bar.get_width() / 2,
-        value + (25 if value >= 0 else -25),
+        value + (2500 if value >= 0 else -2500),
         format_rupee(value, None),
         ha='center', va='bottom' if value >= 0 else 'top',
         fontsize=8, fontweight='bold'
     )
 
+# Highlight user's loan amount
 user_index = np.argmin(np.abs(loan_range - loan_amount))
 bars[user_index].set_edgecolor("orange")
 bars[user_index].set_linewidth(2)
 
+# Titles and labels
 ax3.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
 ax3.set_ylabel("Net P&L", fontsize=12)
 ax3.set_xlabel("Loan Amount", fontsize=12)
 
-# Apply custom rupee format to both axes
+# Y-axis rupee format
 ax3.yaxis.set_major_formatter(FuncFormatter(format_rupee))
-ax3.set_xticks(range(len(loan_range)))
-ax3.set_xticklabels([format_rupee(x, None) for x in loan_range], rotation=45)
 
+# X-axis custom ticks and labels
+ax3.set_xticks(loan_range)
+ax3.set_xticklabels([format_rupee(x, None) for x in loan_range], rotation=45, ha='right')
+
+# Grid and layout
 ax3.grid(True, linestyle='--', alpha=0.5, axis='y')
 plt.tight_layout()
 
+# Add input summary box
 input_summary = (
     f"Input Variables:\n"
     f"Loan: ₹{loan_amount:,.0f}\n"
@@ -355,8 +370,8 @@ ax3.text(
     bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5', alpha=0.8)
 )
 
+# Show plot in Streamlit
 st.pyplot(fig3)
-
 # --- Educational Guide ---
 st.markdown("---")
 st.markdown("""
