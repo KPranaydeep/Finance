@@ -45,7 +45,7 @@ expected_annual_return = st.number_input("Expected Market Return (Annual %)", mi
 # Loan Tenure
 st.markdown("#### ⏳ **Loan Tenure (Months)**")
 st.markdown("Select the number of months for the loan repayment period.")
-tenure_months = st.number_input("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=12)
+tenure_months = st.number_input("Loan Tenure (Months)", min_value=2, max_value=36, step=1, value=36)
 
 # --- Financial Calculations ---
 monthly_interest_rate = interest_rate / 12 / 100
