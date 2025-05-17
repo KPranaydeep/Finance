@@ -143,12 +143,6 @@ with col_rates:
         help="Annual return rate you expect from investing the loaned amount."
     )
 
-# --- Foreclosure Date Output ---
-if foreclosure_date:
-    st.success(f"📅 The foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
-else:
-    st.error("Could not find a valid foreclosure date within the loan tenure period.")
-
 # --- Financial Calculations ---
 monthly_interest_rate = interest_rate / 12 / 100
 monthly_return_rate = (1 + expected_annual_return / 100) ** (1 / 12) - 1
@@ -226,7 +220,13 @@ if net_profit_loss > 0:
     st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
 else:
     st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
-
+    
+# --- Foreclosure Date Output ---
+if foreclosure_date:
+    st.success(f"📅 The foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
+else:
+    st.error("Could not find a valid foreclosure date within the loan tenure period.")
+    
 # --- Bar Chart: Visual Comparison ---
 st.markdown("### 📈 Visual Comparison")
 
