@@ -224,7 +224,7 @@ else:
 summary_text = f"""
 Let's break this down:
 
-You plan to borrow ₹{loan_amount:,.0f} starting from {formatted_start_date}, with a loan tenure of {tenure_months} months.  
+You plan to borrow ₹{loan_amount:,.0f} starting from {formatted_start_date}, with a loan tenure of {loan_tenure_months} months.  
 At an annual interest rate of {interest_rate:.2f}%, your monthly interest rate is about {monthly_interest_rate * 100:.3f}%.  
 
 Over the loan period, you will pay a total interest of approximately ₹{total_interest_paid:,.2f}, plus a processing fee of ₹{processing_fee:,.0f}.  
