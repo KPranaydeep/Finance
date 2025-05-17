@@ -180,7 +180,17 @@ def format_currency(value):
         else:
             return f"₹{value:,.2f}"
     return value
-    
+# Format currency fields except for percentages, months, and decision text
+formatted_results = {
+    k: format_currency(v) if k not in [
+        "Loan Tenure (Months)", "Decision",
+        "Interest Rate (Annual)", "Monthly Interest Rate",
+        "Expected Return (Annual)", "Monthly Return Rate"
+    ] else v for k, v in results.items()
+}
+
+df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
+st.dataframe(df_results, use_container_width=True)
 results = {
     "📅 Loan Start Date": formatted_start_date,
     "🔓 Foreclosure Date": formatted_foreclosure_date,
@@ -197,18 +207,6 @@ results = {
     "📉 Net Profit / Loss (₹)": f"{net_profit_loss:,.2f}",
     "✅ Decision": decision_text
 }
-
-# Format currency fields except for percentages, months, and decision text
-formatted_results = {
-    k: format_currency(v) if k not in [
-        "Loan Tenure (Months)", "Decision",
-        "Interest Rate (Annual)", "Monthly Interest Rate",
-        "Expected Return (Annual)", "Monthly Return Rate"
-    ] else v for k, v in results.items()
-}
-
-df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
-st.dataframe(df_results, use_container_width=True)
 
 # --- Bar Chart: Visual Comparison ---
 st.markdown("### 📈 Visual Comparison")
