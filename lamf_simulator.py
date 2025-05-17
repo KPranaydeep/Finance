@@ -119,7 +119,7 @@ def get_foreclosure_date(start_date, tenure_months):
         if is_valid_foreclosure_day(check_date, indian_holidays):
             # Count working days from check_date to end_date (inclusive), ignoring blackout days here
             working_days = count_working_days(check_date, end_date.date(), indian_holidays)
-            if working_days >= 5:
+            if working_days >= 7:
                 return check_date
         check_date -= dt.timedelta(days=1)
 
