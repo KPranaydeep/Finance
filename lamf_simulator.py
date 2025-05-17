@@ -271,18 +271,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-
 # --- Sensitivity Plot: Net P&L vs Loan Amount ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 
-# --- Input Variables (You can replace these with Streamlit inputs) ---
-loan_amount = 500000  # Highlighted loan
-interest_rate = 10.0  # Annual interest rate in %
-expected_annual_return = 12.0  # Annual return in %
+# --- Input Variables ---
+loan_amount = 500000
+interest_rate = 10.0
+expected_annual_return = 12.0
 tenure_months = 12
 processing_fee = 1000
 
@@ -311,18 +306,20 @@ def format_rupee(x, _):
     else:
         return f"₹{x/100000:.1f}L".rstrip('0').rstrip('.')
 
-# --- Plotting ---
-fig3, ax3 = plt.subplots(figsize=(12, 6))
-bars = ax3.bar(
-    loan_range,
+# Plot using indices for equidistant bars
+indices = np.arange(len(loan_range))
+
+fig, ax = plt.subplots(figsize=(12, 6))
+bars = ax.bar(
+    indices,
     net_pnl_list,
-    width=20000,
+    width=0.6,
     color=['green' if val >= 0 else 'red' for val in net_pnl_list]
 )
 
-# Annotate bars
-for bar, value in zip(bars, net_pnl_list):
-    ax3.text(
+# Annotate each bar
+for i, (bar, value) in enumerate(zip(bars, net_pnl_list)):
+    ax.text(
         bar.get_x() + bar.get_width() / 2,
         value + (2500 if value >= 0 else -2500),
         format_rupee(value, None),
@@ -330,28 +327,22 @@ for bar, value in zip(bars, net_pnl_list):
         fontsize=8, fontweight='bold'
     )
 
-# Highlight user's loan amount
+# Highlight user's loan
 user_index = np.argmin(np.abs(loan_range - loan_amount))
 bars[user_index].set_edgecolor("orange")
 bars[user_index].set_linewidth(2)
 
-# Titles and labels
-ax3.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
-ax3.set_ylabel("Net P&L", fontsize=12)
-ax3.set_xlabel("Loan Amount", fontsize=12)
+# Axis labels and title
+ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
+ax.set_ylabel("Net P&L", fontsize=12)
+ax.set_xlabel("Loan Amount", fontsize=12)
 
-# Y-axis rupee format
-ax3.yaxis.set_major_formatter(FuncFormatter(format_rupee))
+# Custom ticks and formatting
+ax.set_xticks(indices)
+ax.set_xticklabels([format_rupee(x, None) for x in loan_range], rotation=45, ha='right')
+ax.yaxis.set_major_formatter(FuncFormatter(format_rupee))
 
-# X-axis custom ticks and labels
-ax3.set_xticks(loan_range)
-ax3.set_xticklabels([format_rupee(x, None) for x in loan_range], rotation=45, ha='right')
-
-# Grid and layout
-ax3.grid(True, linestyle='--', alpha=0.5, axis='y')
-plt.tight_layout()
-
-# Add input summary box
+# Input summary
 input_summary = (
     f"Input Variables:\n"
     f"Loan: ₹{loan_amount:,.0f}\n"
@@ -361,17 +352,19 @@ input_summary = (
     f"Fee: ₹{processing_fee}"
 )
 
-ax3.text(
+ax.text(
     0.01, 0.98, input_summary,
-    transform=ax3.transAxes,
+    transform=ax.transAxes,
     fontsize=9,
     verticalalignment='top',
     horizontalalignment='left',
     bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5', alpha=0.8)
 )
 
-# Show plot in Streamlit
-st.pyplot(fig3)
+ax.grid(True, linestyle='--', alpha=0.5, axis='y')
+plt.tight_layout()
+
+st.pyplot(fig)
 # --- Educational Guide ---
 st.markdown("---")
 st.markdown("""
