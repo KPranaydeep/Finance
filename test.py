@@ -290,9 +290,9 @@ def get_foreclosure_date(start_date, tenure_months):
 st.markdown("### 📅 Inputs for Foreclosure Estimation")
 
 loan_start_date = st.date_input(
-"Loan Start Date",
-value=dt.date.today() - pd.DateOffset(months=1),
-help="Enter the date when the loan started."
+    "Loan Start Date",
+    value=dt.date(2025, 3, 27),
+    help="Enter the date when the loan started."
 )
 
 loan_tenure_months = st.number_input(
