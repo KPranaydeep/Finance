@@ -162,23 +162,6 @@ investment_value = loan_amount * ((1 + monthly_return_rate) ** tenure_months)
 
 net_profit_loss = investment_value - total_outflow
 decision_text = "✅ YES, Take LAMF" if net_profit_loss > 0 else "❌ NO, Not Worth It"
-
-# --- Final Emotional Verdict ---
-st.markdown("### 🧠 Final Verdict")
-
-def format_currency_simple(value):
-    abs_val = abs(value)
-    if abs_val >= 1_00_000:
-        return f"{value/1_00_000:.2f} Lakhs"
-    else:
-        return f"₹{value:,.0f}"
-
-formatted_profit = format_currency_simple(net_profit_loss)
-
-if net_profit_loss > 0:
-    st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
-else:
-    st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
     
 # --- Display Results Table ---
 st.markdown("### 📊 Simulation Results")
@@ -226,6 +209,23 @@ formatted_results = {
 # --- Create and Display DataFrame ---
 df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
 st.dataframe(df_results, use_container_width=True)
+
+# --- Final Emotional Verdict ---
+st.markdown("### 🧠 Final Verdict")
+
+def format_currency_simple(value):
+    abs_val = abs(value)
+    if abs_val >= 1_00_000:
+        return f"{value/1_00_000:.2f} Lakhs"
+    else:
+        return f"₹{value:,.0f}"
+
+formatted_profit = format_currency_simple(net_profit_loss)
+
+if net_profit_loss > 0:
+    st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
+else:
+    st.error(f"⚠️ Loss of {format_currency_simple(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
 
 # --- Bar Chart: Visual Comparison ---
 st.markdown("### 📈 Visual Comparison")
