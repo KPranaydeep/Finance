@@ -338,5 +338,5 @@ st.markdown("""
 
 ---
 
-> 📌 **Note:** This tool assumes reinvestment in high-return mutual funds or equity markets with no withdrawal during tenure.
+> 📌 **Note:** This tool assumes reinvestment in funds or equity markets you trust—ones that you believe have a track record of consistent, strong returns, not solely based on past performance. Remember, investing always carries risk, so please invest thoughtfully and within your comfort zone.
 """)
