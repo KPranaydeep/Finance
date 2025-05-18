@@ -329,7 +329,7 @@ user_index = np.argmin(np.abs(loan_range - loan_amount))
 highlight_bar = bars[user_index]
 highlight_bar.set_linewidth(3)
 
-highlight_bar.set_hatch('-')
+highlight_bar.set_hatch('xx')
 highlight_bar.set_width(0.6)            
 highlight_bar.set_facecolor("#89F336")   
 highlight_bar.set_edgecolor("#DA2C43")   
