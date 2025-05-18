@@ -292,6 +292,9 @@ loan_range = np.concatenate([
     np.arange(1250000, 2000001, 250000)
 ])
 
+loan_range = np.unique(np.append(loan_range, loan_amount))
+loan_range.sort()
+
 net_pnl_list = []
 for loan in loan_range:
     total_interest = loan * monthly_interest_rate * tenure_months
