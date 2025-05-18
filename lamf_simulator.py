@@ -142,7 +142,7 @@ with col_rates:
         help="Select the annual interest rate charged on the loan."
     )
     expected_annual_return = st.number_input(
-        "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=12.0,
+        "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=100.0,
         help="Annual return rate you expect from investing the loaned amount."
     )
 
