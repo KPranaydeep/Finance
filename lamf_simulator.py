@@ -314,7 +314,7 @@ bars = ax.bar(
 for i, (bar, value) in enumerate(zip(bars, net_pnl_list)):
     ax.text(
         bar.get_x() + bar.get_width() / 2,
-        value + (2750 if value >= 0 else -2750),
+        value + (3000 if value >= 0 else -3000),
         format_rupee(value, None),
         ha='center', va='bottom' if value >= 0 else 'top',
         fontsize=8, fontweight='bold'
