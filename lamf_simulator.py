@@ -327,7 +327,7 @@ for i, (bar, value) in enumerate(zip(bars, net_pnl_list)):
 # Highlight user's loan
 user_index = np.argmin(np.abs(loan_range - loan_amount))
 bars[user_index].set_edgecolor("red")
-bars[user_index].set_linewidth(2)
+bars[user_index].set_linewidth(9)
 
 # Axis labels and title
 ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
