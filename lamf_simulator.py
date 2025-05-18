@@ -390,6 +390,38 @@ href = f'<a href="data:image/png;base64,{b64}" download="net_pnl_vs_loan.png">�
 # Show download link
 st.markdown(href, unsafe_allow_html=True)
 
+from scipy.optimize import fsolve
+
+st.markdown("### 🔥 FIRE Target Simulation")
+fire_target = st.number_input(
+    "🎯 Enter Desired Net P&L (FIRE Goal in ₹)",
+    min_value=-1_00_00_000, max_value=5_00_00_000,
+    step=10_000, value=1_00_000,
+    help="This is your desired gain from taking a loan and investing it. We will estimate the required loan amount to achieve this."
+)
+
+# Define the net P&L function to zero-in on
+def net_pnl_solver(loan_guess):
+    loan = loan_guess
+    total_interest = loan * monthly_interest_rate * tenure_months
+    total_cost = loan + total_interest + processing_fee
+    investment = loan * ((1 + monthly_return_rate) ** tenure_months)
+    return investment - total_cost - fire_target
+
+# Use fsolve to find the loan amount that gives the desired net P&L
+initial_guess = 1_00_000
+try:
+    fire_loan_amount = float(fsolve(net_pnl_solver, initial_guess)[0])
+    fire_loan_amount = round(fire_loan_amount, -2)  # round to nearest ₹100
+except Exception:
+    fire_loan_amount = None
+
+if fire_loan_amount > 0:
+    st.success(f"💡 To achieve a Net P&L of ₹{fire_target:,.0f}, you need to borrow approximately **₹{fire_loan_amount:,.0f}**.")
+    st.caption("Note: This assumes fixed processing fee and your current input rates.")
+else:
+    st.error("Unable to compute a valid loan amount for this FIRE target with current parameters.")
+
 # --- Educational Guide ---
 st.markdown("---")
 st.markdown("""
