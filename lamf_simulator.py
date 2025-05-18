@@ -285,9 +285,6 @@ st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 
 # --- Input Variables ---
 
-monthly_interest_rate = interest_rate / 12 / 100
-monthly_return_rate = expected_annual_return / 12 / 100
-
 loan_range = np.concatenate([
     np.arange(25000, 100001, 25000),
     np.arange(150000, 350001, 50000),
