@@ -294,12 +294,14 @@ for loan in loan_range:
     net_pnl = investment - total_cost
     net_pnl_list.append(net_pnl)
 
-def format_rupee(x, _):
+def format_rupee(x, _=None):
     abs_x = abs(x)
-    if abs_x < 100000:
-        return f"₹{x/1000:.1f}k".rstrip('0').rstrip('.')
+    if abs_x >= 10000000:
+        return f"₹{x / 10000000:.1f}Cr".rstrip('0').rstrip('.')
+    elif abs_x >= 100000:
+        return f"₹{x / 100000:.1f}L".rstrip('0').rstrip('.')
     else:
-        return f"₹{x/100000:.1f}L".rstrip('0').rstrip('.')
+        return f"₹{x / 1000:.1f}k".rstrip('0').rstrip('.')
 
 # Plot using indices for equidistant bars
 indices = np.arange(len(loan_range))
