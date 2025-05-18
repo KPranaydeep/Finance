@@ -329,11 +329,11 @@ user_index = np.argmin(np.abs(loan_range - loan_amount))
 highlight_bar = bars[user_index]
 highlight_bar.set_linewidth(3)
 
-highlight_bar.set_edgecolor("red")
 highlight_bar.set_hatch('//')            # Pattern
 highlight_bar.set_width(0.6)             # Slightly wider bar
 highlight_bar.set_linestyle('dashed')    # Dashed edge
 highlight_bar.set_facecolor("#FFDAB9")    # Light peach – gentle but distinct fill
+highlight_bar.set_edgecolor("red")
 
 # Axis labels and title
 ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
