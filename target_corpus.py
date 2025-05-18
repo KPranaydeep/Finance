@@ -58,7 +58,7 @@ with col3:
     mf = st.number_input(
         "Current Mutual Funds Value (₹)",
         min_value=0.0,
-        value=0.0,
+        value=1625000.0,
         step=1000.0,
         help="Market value of your mutual fund holdings."
     )
