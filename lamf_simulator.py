@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import datetime as dt
 import holidays
 
@@ -245,7 +246,7 @@ else:
 st.markdown("### 📈 Visual Comparison")
 
 plt.style.use("seaborn-v0_8-muted")
-fig, ax = plt.subplots(figsize=(4.5, 5.0))
+fig, ax = plt.subplots(figsize=(4.5, 5.0),dpi=600)
 
 labels = ["Investment Value", "Total Outflow", "Net P&L"]
 values = [investment_value, total_outflow, net_profit_loss]
@@ -265,11 +266,6 @@ ax.set_ylabel("₹ (in Lakhs)")
 ax.grid(True, linestyle='--', alpha=0.6, axis='y')
 plt.tight_layout()
 st.pyplot(fig)
-
-import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
 
 # --- Sensitivity Plot: Net P&L vs Loan Amount ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
@@ -306,7 +302,7 @@ def format_rupee(x, _=None):
 # Plot using indices for equidistant bars
 indices = np.arange(len(loan_range))
 
-fig, ax = plt.subplots(figsize=(12, 6),dpi=300)
+fig, ax = plt.subplots(figsize=(12, 6),dpi=600)
 bars = ax.bar(
     indices,
     net_pnl_list,
