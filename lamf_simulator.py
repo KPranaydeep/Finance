@@ -289,7 +289,7 @@ loan_range = np.concatenate([
     np.arange(25000, 100001, 25000),
     np.arange(150000, 350001, 50000),
     np.arange(400000, 1000001, 100000),
-    np.arange(1250000, 2500001, 250000)
+    np.arange(1250000, 3000001, 250000)
 ])
 
 loan_range = np.unique(np.append(loan_range, loan_amount))
