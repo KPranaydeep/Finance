@@ -329,10 +329,10 @@ user_index = np.argmin(np.abs(loan_range - loan_amount))
 highlight_bar = bars[user_index]
 highlight_bar.set_linewidth(3)
 
-highlight_bar.set_hatch('x')
-highlight_bar.set_width(0.6)             # Slightly wider bar 
-highlight_bar.set_facecolor("#E6F0FF")    # Soft blue tint
-highlight_bar.set_edgecolor("#1E90FF")    # DodgerBlue
+highlight_bar.set_hatch('₹₹')
+highlight_bar.set_width(0.6)            
+highlight_bar.set_facecolor("#89F336")   
+highlight_bar.set_edgecolor("#DA2C43")   
 
 # Axis labels and title
 ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
