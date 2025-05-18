@@ -306,7 +306,7 @@ def format_rupee(x, _=None):
 # Plot using indices for equidistant bars
 indices = np.arange(len(loan_range))
 
-fig, ax = plt.subplots(figsize=(12, 6))
+fig, ax = plt.subplots(figsize=(12, 6),dpi=300)
 bars = ax.bar(
     indices,
     net_pnl_list,
