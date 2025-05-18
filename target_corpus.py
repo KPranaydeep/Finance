@@ -1,73 +1,74 @@
 import streamlit as st
 import numpy as np
 
+# === Page Config ===
+st.set_page_config(
+    page_title="📈 Financial Goal Simulator",
+    layout="wide",
+    initial_sidebar_state="auto"
+)
+
 # === Title ===
-st.set_page_config(page_title="📈 Financial Goal Simulator", layout="centered",initial_sidebar_state="auto")
-st.markdown("""
-Welcome to the **Financial Goal Simulator**!  
-This app helps you understand how much money you need to invest today to reach your monthly or cumulative financial target in the coming months.
-""")
+st.title("📈 Financial Goal Simulator")
+st.markdown("Welcome to the **Financial Goal Simulator**! This app helps you understand how much money you need to invest today to reach your monthly or cumulative financial target in the coming months.")
 
+st.markdown("---")
 st.header("🔧 Your Financial Details")
+st.markdown("Enter your current investment values and their expected 1-year growth rate:")
 
-st.markdown("""
-Enter your current investment details and growth expectations below.
-These will be used to simulate how much corpus you need to meet your financial goal.
-""")
-
-# Create 3 columns for a cleaner layout
+# === Layout ===
 col1, col2, col3 = st.columns(3)
 
 with col1:
+    st.subheader("💰 Bonds")
     bonds = st.number_input(
-        "💰 Current Bonds Value (₹)",
+        "Current Bonds Value (₹)",
         min_value=0.0,
         value=2000.0,
         step=100.0,
         help="Total value of your fixed-income instruments like bonds."
     )
-
-    stocks = st.number_input(
-        "📊 Current Investments (Stocks) (₹)",
-        min_value=0.0,
-        value=374113.0,
-        step=1000.0,
-        help="Market value of your stock holdings."
-    )
-
-    mf = st.number_input(
-        "📊 Current Investments (MFs) (₹)",
-        min_value=0.0,
-        value=0.0,
-        step=1000.0,
-        help="Market value of your mutual fund holdings."
-    )
-
-with col2:
     one_year_forecast_bonds = st.number_input(
-        "📈 YTM (%)",
+        "Expected YTM (%)",
         min_value=0.0,
         value=11.0,
         step=0.1,
         help="Expected growth in your bonds over the next 1 year."
     )
 
+with col2:
+    st.subheader("📊 Stocks")
+    stocks = st.number_input(
+        "Current Stocks Value (₹)",
+        min_value=0.0,
+        value=374113.0,
+        step=1000.0,
+        help="Market value of your stock holdings."
+    )
     one_year_forecast_stocks = st.number_input(
-        "📈 1-Year Forecast Growth (%) for Stocks",
+        "Expected Growth (%)",
         min_value=0.0,
         value=100.0,
         step=0.1,
         help="Expected growth in your stocks over the next 1 year."
     )
 
+with col3:
+    st.subheader("📈 Mutual Funds")
+    mf = st.number_input(
+        "Current Mutual Funds Value (₹)",
+        min_value=0.0,
+        value=0.0,
+        step=1000.0,
+        help="Market value of your mutual fund holdings."
+    )
     one_year_forecast_mf = st.number_input(
-        "📈 1-Year Forecast Growth (%) for Mutual Funds",
+        "Expected Growth (%)",
         min_value=0.0,
         value=12.0,
         step=0.1,
         help="Expected growth in your mutual funds over the next 1 year."
     )
-
 
 # Total investment across all categories
 total_investment = bonds + stocks + mf
