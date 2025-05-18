@@ -4,7 +4,7 @@ import numpy as np
 # === Page Config ===
 st.set_page_config(
     page_title="📈 Financial Goal Simulator",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="auto"
 )
 
