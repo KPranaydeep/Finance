@@ -20,7 +20,7 @@ st.markdown("Enter your current investment values and their expected 1-year grow
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.subheader("💰 Bonds")
+    st.subheader("💰 Bond")
     bonds = st.number_input(
         "Current Bonds Value (₹)",
         min_value=0.0,
@@ -37,7 +37,7 @@ with col1:
     )
 
 with col2:
-    st.subheader("📊 Stocks")
+    st.subheader("📊 Stock")
     stocks = st.number_input(
         "Current Stocks Value (₹)",
         min_value=0.0,
@@ -54,7 +54,7 @@ with col2:
     )
 
 with col3:
-    st.subheader("📈 Mutual Funds")
+    st.subheader("📈 Mutual Fund")
     mf = st.number_input(
         "Current Mutual Funds Value (₹)",
         min_value=0.0,
