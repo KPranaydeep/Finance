@@ -325,9 +325,9 @@ user_index = np.argmin(np.abs(loan_range - loan_amount))
 highlight_bar = bars[user_index]
 
 highlight_bar.set_width(0.6)            
-highlight_bar.set_edgecolor("#D4AF37")  # Gold
+highlight_bar.set_edgecolor((1.0, 0.843, 0.0, 1.0))  # RGBA glitter gold
 highlight_bar.set_linewidth(3)
-highlight_bar.set_hatch("***")           # Simulates a glittery pattern
+highlight_bar.set_hatch(".*")           # Simulates a glittery pattern
 
 # Axis labels and title
 ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
