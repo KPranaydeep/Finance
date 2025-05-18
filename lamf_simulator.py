@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import datetime as dt
 import holidays
+import io
+import base64
 
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="LAMF Simulator", layout="centered",initial_sidebar_state="auto")
@@ -266,6 +268,17 @@ ax.set_ylabel("₹ (in Lakhs)")
 ax.grid(True, linestyle='--', alpha=0.6, axis='y')
 plt.tight_layout()
 st.pyplot(fig)
+# Save the figure to a BytesIO buffer
+buf = io.BytesIO()
+fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+buf.seek(0)
+
+# Encode buffer to base64
+b64 = base64.b64encode(buf.read()).decode()
+href = f'<a href="data:image/png;base64,{b64}" download="visual_comparison.png">📥 Download Chart as PNG</a>'
+
+# Show the download link
+st.markdown(href, unsafe_allow_html=True)
 
 # --- Sensitivity Plot: Net P&L vs Loan Amount ---
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
@@ -364,6 +377,18 @@ ax.grid(True, linestyle='--', alpha=0.5, axis='y')
 plt.tight_layout()
 
 st.pyplot(fig)
+# Save figure to buffer
+buf = io.BytesIO()
+fig.savefig(buf, format="png", dpi=1000, bbox_inches="tight")
+buf.seek(0)
+
+# Encode to base64
+b64 = base64.b64encode(buf.read()).decode()
+href = f'<a href="data:image/png;base64,{b64}" download="net_pnl_vs_loan.png">📥 Download Plot as PNG</a>'
+
+# Show download link
+st.markdown(href, unsafe_allow_html=True)
+
 # --- Educational Guide ---
 st.markdown("---")
 st.markdown("""
