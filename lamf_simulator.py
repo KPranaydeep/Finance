@@ -417,10 +417,16 @@ except Exception:
     fire_loan_amount = None
 
 if fire_loan_amount > 0:
-    st.success(f"💡 To achieve a Net P&L of ₹{fire_target:,.0f}, you need to borrow approximately **₹{fire_loan_amount:,.0f}**.")
+    st.success(
+        f"💡 To achieve a Net P&L of {format_currency(fire_target)}, "
+        f"you need to borrow approximately **{format_currency(fire_loan_amount)}**."
+    )
     st.caption("Note: This assumes fixed processing fee and your current input rates.")
 else:
-    st.error("Unable to compute a valid loan amount for this FIRE target with current parameters.")
+    st.error(
+        f"❌ Unable to compute a valid loan amount for a target Net P&L of {format_currency(fire_target)} "
+        f"with the current parameters."
+    )
 
 # --- Educational Guide ---
 st.markdown("---")
