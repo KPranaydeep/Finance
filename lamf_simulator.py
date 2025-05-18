@@ -100,7 +100,7 @@ from datetime import datetime, date
 with col_amounts:
     # Loan and fee inputs
     loan_amount = st.number_input(
-        "🏦 Loan Amount (₹)", min_value=25_000, max_value=20_00_000, step=5_000, value=1_00_000,
+        "🏦 Loan Amount (₹)", min_value=25_000, max_value=20_00_000, step=5_000, value=3_00_000,
         help="Specify the loan amount you want to borrow against your mutual funds."
     )
     processing_fee = st.number_input(
