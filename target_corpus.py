@@ -1,6 +1,13 @@
 import streamlit as st
 import numpy as np
 
+# === Title ===
+st.set_page_config(page_title="📈 Financial Goal Simulator", layout="centered",initial_sidebar_state="auto")
+st.markdown("""
+Welcome to the **Financial Goal Simulator**!  
+This app helps you understand how much money you need to invest today to reach your monthly or cumulative financial target in the coming months.
+""")
+
 st.header("🔧 Your Financial Details")
 
 st.markdown("""
@@ -77,13 +84,6 @@ else:
 
 # Total current savings
 current_savings = total_investment
-
-# === Title ===
-st.title("📈 Financial Goal Simulator")
-st.markdown("""
-Welcome to the **Financial Goal Simulator**!  
-This app helps you understand how much money you need to invest today to reach your monthly or cumulative financial target in the coming months.
-""")
 
 # === Section: Goal Inputs ===
 st.subheader("🎯 Define Your Goal")
