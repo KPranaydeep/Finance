@@ -275,11 +275,6 @@ from matplotlib.ticker import FuncFormatter
 st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
 
 # --- Input Variables ---
-loan_amount = 500000
-interest_rate = 10.0
-expected_annual_return = 12.0
-tenure_months = 12
-processing_fee = 1000
 
 monthly_interest_rate = interest_rate / 12 / 100
 monthly_return_rate = expected_annual_return / 12 / 100
