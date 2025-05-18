@@ -1,61 +1,66 @@
 import streamlit as st
 import numpy as np
 
-# === Sidebar: User Inputs ===
-st.sidebar.header("🔧 Your Financial Details")
+st.header("🔧 Your Financial Details")
 
-st.sidebar.markdown("""
+st.markdown("""
 Enter your current investment details and growth expectations below.
 These will be used to simulate how much corpus you need to meet your financial goal.
 """)
 
-bonds = st.sidebar.number_input(
-    "💰 Current Bonds Value (₹)",
-    min_value=0.0,
-    value=2000.0,
-    step=100.0,
-    help="Total value of your fixed-income instruments like bonds."
-)
+# Create 3 columns for a cleaner layout
+col1, col2, col3 = st.columns(3)
 
-one_year_forecast_bonds = st.sidebar.number_input(
-    "📈 YTM (%)",
-    min_value=0.0,
-    value=11.0,
-    step=0.1,
-    help="Expected growth in your bonds over the next 1 year."
-)
+with col1:
+    bonds = st.number_input(
+        "💰 Current Bonds Value (₹)",
+        min_value=0.0,
+        value=2000.0,
+        step=100.0,
+        help="Total value of your fixed-income instruments like bonds."
+    )
 
-stocks = st.sidebar.number_input(
-    "📊 Current Investments (Stocks) (₹)",
-    min_value=0.0,
-    value=374113.0,
-    step=1000.0,
-    help="Market value of your stock holdings."
-)
+    stocks = st.number_input(
+        "📊 Current Investments (Stocks) (₹)",
+        min_value=0.0,
+        value=374113.0,
+        step=1000.0,
+        help="Market value of your stock holdings."
+    )
 
-one_year_forecast_stocks = st.sidebar.number_input(
-    "📈 1-Year Forecast Growth (%) for Stocks",
-    min_value=0.0,
-    value=100.0,
-    step=0.1,
-    help="Expected growth in your stocks over the next 1 year."
-)
+    mf = st.number_input(
+        "📊 Current Investments (MFs) (₹)",
+        min_value=0.0,
+        value=0.0,
+        step=1000.0,
+        help="Market value of your mutual fund holdings."
+    )
 
-mf = st.sidebar.number_input(
-    "📊 Current Investments (MFs) (₹)",
-    min_value=0.0,
-    value=0.0,
-    step=1000.0,
-    help="Market value of your mutual fund holdings."
-)
+with col2:
+    one_year_forecast_bonds = st.number_input(
+        "📈 YTM (%)",
+        min_value=0.0,
+        value=11.0,
+        step=0.1,
+        help="Expected growth in your bonds over the next 1 year."
+    )
 
-one_year_forecast_mf = st.sidebar.number_input(
-    "📈 1-Year Forecast Growth (%) for Mutual Funds",
-    min_value=0.0,
-    value=12.0,
-    step=0.1,
-    help="Expected growth in your mutual funds over the next 1 year."
-)
+    one_year_forecast_stocks = st.number_input(
+        "📈 1-Year Forecast Growth (%) for Stocks",
+        min_value=0.0,
+        value=100.0,
+        step=0.1,
+        help="Expected growth in your stocks over the next 1 year."
+    )
+
+    one_year_forecast_mf = st.number_input(
+        "📈 1-Year Forecast Growth (%) for Mutual Funds",
+        min_value=0.0,
+        value=12.0,
+        step=0.1,
+        help="Expected growth in your mutual funds over the next 1 year."
+    )
+
 
 # Total investment across all categories
 total_investment = bonds + stocks + mf
