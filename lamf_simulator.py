@@ -396,7 +396,7 @@ st.markdown("### 🔥 FIRE Target Simulation")
 fire_target = st.number_input(
     "🎯 Enter Desired Net P&L (FIRE Goal in ₹)",
     min_value=-1_00_00_000, max_value=5_00_00_000,
-    step=10_000, value=1_00_000,
+    step=50_000, value=1_90_00_000, # ₹1,87,78,023
     help="This is your desired gain from taking a loan and investing it. We will estimate the required loan amount to achieve this."
 )
 
