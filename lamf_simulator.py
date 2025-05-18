@@ -331,7 +331,7 @@ highlight_bar.set_linewidth(3)
 
 highlight_bar.set_hatch('xx')
 highlight_bar.set_width(0.6)             # Slightly wider bar
-highlight_bar.set_linestyle('dashed')    # Dashed edge
+highlight_bar.set_linestyle('dotted')    
 highlight_bar.set_facecolor("#E6F0FF")    # Soft blue tint
 highlight_bar.set_edgecolor("#1E90FF")    # DodgerBlue
 
