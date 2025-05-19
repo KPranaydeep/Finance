@@ -22,11 +22,21 @@ st.markdown("Choose whether you want to **calculate required investment** or **c
 
 # Formatter for Indian currency style with suffixes
 def indian_number_format(number):
-    x = str(int(round(number)))  # Round and convert to int string
-    pattern = re.compile(r"(\d+)(\d{3})(?!\d)")
-    while pattern.match(x):
-        x = pattern.sub(r"\1,\2", x)
-    return x
+    num_str = str(int(round(number)))  # Round and convert to int string
+    if len(num_str) <= 3:
+        return num_str
+    else:
+        # Extract last 3 digits
+        last_three = num_str[-3:]
+        # Extract remaining digits before last 3
+        rest = num_str[:-3]
+        # Add commas every 2 digits from the right
+        rest_with_commas = ''
+        while len(rest) > 2:
+            rest_with_commas = ',' + rest[-2:] + rest_with_commas
+            rest = rest[:-2]
+        rest_with_commas = rest + rest_with_commas
+        return rest_with_commas + ',' + last_three
 
 mode = st.radio("Select Mode", ["Calculate Required Investment", "Calculate Investment Duration"], horizontal=True)
 
