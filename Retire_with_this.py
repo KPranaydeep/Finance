@@ -16,10 +16,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# st.title("💰 Investment Required Calculator")
+st.title("💰 Investment Required Calculator")
 st.markdown("Calculate how much you need to invest today to support inflation-adjusted withdrawals over time.")
 
 # Formatter for currency
+
 def format_currency(value):
     if value >= 1e7:
         return f"₹{value / 1e7:.2f} Cr"
@@ -78,16 +79,17 @@ if st.button("Calculate Investment Required"):
         "Investment": investment_series
     })
 
-    # Create animated graph (in years)
+    # Create animated graph with dual y-axes
     fig = go.Figure(
         data=[
-            go.Scatter(x=[], y=[], mode='lines', name='Investment Balance'),
-            go.Scatter(x=[], y=[], mode='lines', name='Monthly Withdrawal')
+            go.Scatter(x=[], y=[], mode='lines', name='Investment Balance', yaxis="y1"),
+            go.Scatter(x=[], y=[], mode='lines', name='Monthly Withdrawal', yaxis="y2")
         ],
         layout=go.Layout(
             title="Investment & Withdrawal Over Time",
             xaxis=dict(title="Year"),
-            yaxis=dict(title="Amount (₹)", range=[0, max(balance_series) * 1.1]),
+            yaxis=dict(title="Investment Balance (₹ Cr)", side="left", overlaying=None),
+            yaxis2=dict(title="Withdrawal (₹ Lakh)", side="right", overlaying="y"),
             updatemenus=[dict(type="buttons", showactive=False,
                               buttons=[dict(label="Play",
                                             method="animate",
@@ -97,8 +99,8 @@ if st.button("Calculate Investment Required"):
         ),
         frames=[go.Frame(
             data=[
-                go.Scatter(x=years[:k], y=balance_series[:k], mode='lines', name='Investment Balance'),
-                go.Scatter(x=years[:k], y=withdrawal_series[:k], mode='lines', name='Monthly Withdrawal')
+                go.Scatter(x=years[:k], y=np.array(balance_series[:k]) / 1e7, mode='lines', name='Investment Balance', yaxis="y1"),
+                go.Scatter(x=years[:k], y=np.array(withdrawal_series[:k]) / 1e5, mode='lines', name='Monthly Withdrawal', yaxis="y2")
             ]
         ) for k in range(1, total_months, int(total_months / 100))]
     )
