@@ -118,21 +118,35 @@ with col_amounts:
     today = datetime.today().date()
     if isinstance(foreclosure_date, datetime):
         foreclosure_date = foreclosure_date.date()
-
-    # Determine default tenure
+    
+    # Determine default tenure based on foreclosure
     if foreclosure_date:
         delta_days = (foreclosure_date - today).days
         default_tenure_months = max(2, delta_days // 30)
     else:
         default_tenure_months = 12
-
-    # Tenure input
+    
+    # Calculate Dasara-based months
+    dasara_date = date(2025, 10, 12)
+    dasara_months = (dasara_date - today).days // 30
+    dasara_months = min(max(dasara_months, 2), 36)  # Clamp between 2 and 36
+    
+    # Initialize session state
+    if "tenure_months" not in st.session_state:
+        st.session_state.tenure_months = default_tenure_months
+    
+    # Button to set tenure to Dasara months
+    if st.button(f"🎯 Set Tenure to Dasara ({dasara_months} months left)"):
+        st.session_state.tenure_months = dasara_months
+    
+    # Tenure input field
     tenure_months = st.number_input(
         "⏳ Investment Holding Period (Months)",
         min_value=2,
         max_value=36,
         step=1,
-        value=default_tenure_months,
+        value=st.session_state.tenure_months,
+        key="tenure_months",
         help="Number of months you plan to hold the loan to generate returns."
     )
 
