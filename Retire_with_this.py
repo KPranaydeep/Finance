@@ -3,7 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 import re
 
-st.set_page_config(page_title="Title", layout="centered")
+st.set_page_config(page_title="Retirement Corpus Calculator", layout="centered")
 
 # Custom CSS styling
 st.markdown("""
@@ -17,7 +17,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Retirement Corpus Calculator")
+st.title("T")
 st.markdown("Choose whether you want to **calculate required investment** or **check how long your current investment will last**.")
 
 # Formatter for Indian currency style with suffixes
