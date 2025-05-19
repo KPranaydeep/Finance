@@ -108,7 +108,7 @@ else:
     format="%.2f"
     )
     current_investment = current_investment * 100000
-    st.write(f"Current Investment in Rupees: ₹{current_investment_in_rupees:,.0f}")
+    st.write(f"Current Investment in Rupees: ₹{current_investment:,.0f}")
 
     if st.button("Calculate Duration"):
         balance = current_investment
