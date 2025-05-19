@@ -91,7 +91,7 @@ if st.button("Calculate Investment Required"):
             updatemenus=[dict(type="buttons", showactive=False,
                               buttons=[dict(label="Play",
                                             method="animate",
-                                            args=[None, {"frame": {"duration": 40, "redraw": True},
+                                            args=[None, {"frame": {"duration": duration_years, "redraw": True},
                                                          "fromcurrent": True,
                                                          "transition": {"duration": 0}}])])]
         ),
