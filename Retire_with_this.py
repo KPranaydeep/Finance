@@ -16,7 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Retirement Corpus Calculator")
+st.title("Title")
 st.markdown("Choose whether you want to **calculate required investment** or **check how long your current investment will last**.")
 
 # Formatter for Indian currency style
