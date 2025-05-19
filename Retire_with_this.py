@@ -60,7 +60,7 @@ if mode == "Calculate Required Investment":
 
         total_investment = pv_annuity + pv_final
 
-        st.success(f"You need to invest ₹{indian_number_format(total_investment)} today.")
+        st.success(f"You need to invest ₹{total_investment/10000000:.2f} Crores today.")
 
         # Plotting
         months = np.arange(1, total_months + 1)
