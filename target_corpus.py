@@ -111,16 +111,19 @@ st.markdown(
 )
 
 # Calculate months until Dasara (October 2, 2025) from today
-today = dt.date.today()
-dasara_date = dt.date(2025, 10, 2)
-dasara_months = (dasara_date - today).days // 30  # Integer division for months
+today = date.today()
+dasara_date = date(2025, 10, 2)
+dasara_months = (dasara_date - today).days // 30  # Approximate months
+
+# Ensure initial slider value is in range [1, 12]
+initial_value = dasara_months if 1 <= dasara_months <= 12 else 6
 
 # Time horizon slider
 target_month = st.slider(
     "📅 Time Horizon (Months)",
     min_value=1,
     max_value=12,
-    value=dasara_months if 1 <= dasara_months <= 12 else 6,  # fallback to 6 months if out of bounds
+    value=initial_value,
     help="Choose a time horizon between 1 and 12 months for your financial goal."
 )
 
