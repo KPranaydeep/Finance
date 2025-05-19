@@ -138,6 +138,8 @@ with col4:
         "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=100.0,
         help="Annual return rate you expect from investing the loaned amount."
     )
+# After user inputs section ends
+tenure_months = st.session_state.get("tenure_months", default_tenure_months)
 
 # --- Financial Calculations ---
 monthly_interest_rate = interest_rate / 12 / 100
