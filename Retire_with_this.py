@@ -51,16 +51,30 @@ if mode == "Calculate Required Investment":
 
     if st.button("Calculate Investment Required"):
         total_months = int(duration_years * 12)
-
-        # Present Value of growing annuity
+    
+        # Present Value of growing annuity (SWP)
         pv_annuity = monthly_withdrawal * (1 - ((1 + monthly_g) / (1 + monthly_r)) ** total_months) / (monthly_r - monthly_g)
-
+    
         # Present Value of final balance goal
         pv_final = final_balance / ((1 + annual_r / 100) ** duration_years)
-
+    
+        # Total investment required today
         total_investment = pv_annuity + pv_final
-
-        st.success(f"You need to invest ₹{total_investment/10000000:.2f} Crores today.")
+    
+        # Future Value of the investment (for verification)
+        future_value = total_investment * ((1 + annual_r / 100) ** duration_years)
+    
+        # Future Value of SWP withdrawals
+        fv_annuity = monthly_withdrawal * (((1 + monthly_r) ** total_months - (1 + monthly_g) ** total_months) / (monthly_r - monthly_g))
+    
+        # Remaining balance after all withdrawals
+        remaining_balance = future_value - fv_annuity
+    
+        st.success(f"""
+        You need to invest ₹{total_investment / 10000000:.2f} Crores today.
+    
+        🧾 **Estimated Remaining Balance after Withdrawals**: ₹{remaining_balance / 10000000:.2f} Crores
+        """)
 
         # Plotting
         months = np.arange(1, total_months + 1)
