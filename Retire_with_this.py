@@ -80,6 +80,8 @@ if st.button("Calculate Investment Required"):
     })
 
     # Create animated graph with dual y-axes
+    step = max(1, int(total_months / 100))
+
     fig = go.Figure(
         data=[
             go.Scatter(x=[], y=[], mode='lines', name='Investment Balance', yaxis="y1"),
@@ -102,7 +104,7 @@ if st.button("Calculate Investment Required"):
                 go.Scatter(x=years[:k], y=np.array(balance_series[:k]) / 1e7, mode='lines', name='Investment Balance', yaxis="y1"),
                 go.Scatter(x=years[:k], y=np.array(withdrawal_series[:k]) / 1e5, mode='lines', name='Monthly Withdrawal', yaxis="y2")
             ]
-        ) for k in range(1, total_months, int(total_months / 100))]
+        ) for k in range(1, total_months, step)]
     )
 
     st.plotly_chart(fig, use_container_width=True)
