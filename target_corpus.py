@@ -110,18 +110,19 @@ st.markdown(
     "- Range: 1 to 12 months."
 )
 
+# Calculate months until Dasara (October 2, 2025) from today
+today = dt.date.today()
+dasara_date = dt.date(2025, 10, 2)
+dasara_months = (dasara_date - today).days // 30  # Integer division for months
+
+# Time horizon slider
 target_month = st.slider(
     "📅 Time Horizon (Months)",
     min_value=1,
     max_value=12,
-    value=1,
+    value=dasara_months if 1 <= dasara_months <= 12 else 6,  # fallback to 6 months if out of bounds
     help="Choose a time horizon between 1 and 12 months for your financial goal."
 )
-st.markdown("""
-💡 **Tip:** This is the annual percentage return you expect from your investments.
-
-If you're unsure about the **1-Year Forecast Growth (%)** and **Current Total Returns (%)**, you can manually adjust this value. You can also modify it to simulate different growth scenarios based on your own expectations or predictions.
-""")
 
 annual_return_pct = st.slider(
     "📊 Expected Annual Return (%)",
