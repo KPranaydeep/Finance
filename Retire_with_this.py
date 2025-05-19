@@ -16,7 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("💰 Investment Required Calculator")
+# st.title("💰 Investment Required Calculator")
 st.markdown("Calculate how much you need to invest today to support inflation-adjusted withdrawals over time.")
 
 # Formatter for currency
