@@ -90,7 +90,7 @@ if mode == "Calculate Required Investment":
             balance = balance * (1 + monthly_r) - w
 
         step = max(1, int(total_months / 100))
-
+        
         fig = go.Figure(
             data=[
                 go.Scatter(x=[], y=[], mode='lines', name='Investment Balance', yaxis="y1"),
@@ -104,7 +104,7 @@ if mode == "Calculate Required Investment":
                 updatemenus=[dict(type="buttons", showactive=False,
                                   buttons=[dict(label="Play",
                                                 method="animate",
-                                                args=[None, {"frame": {"duration": 50, "redraw": True},
+                                                args=[None, {"frame": {"duration": duration_years, "redraw": True},
                                                              "fromcurrent": True,
                                                              "transition": {"duration": 0}}])])])
             ),
