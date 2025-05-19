@@ -238,7 +238,7 @@ with col1:
         st.error("⚠️ Below 1st Week profit target")
 
 with col2:
-    st.markdown("### 📅 **Month 1**")
+    st.markdown("### 📅 **1st Month**")
     st.metric(
         label="1st Month Simulated Profit",
         value=f"₹{month1_profit_simulated:,.0f}",
