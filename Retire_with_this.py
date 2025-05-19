@@ -47,19 +47,41 @@ g = inflation_rate / 100
 monthly_r = (1 + r) ** (1/12) - 1
 monthly_g = (1 + g) ** (1/12) - 1
 
+import streamlit as st
+import numpy as np
+import plotly.graph_objects as go
+import re
+
+def indian_number_format(number):
+    x = str(int(round(number)))  # Round and convert to int string
+    pattern = re.compile(r"(\d+)(\d{3})(?!\d)")
+    while pattern.match(x):
+        x = pattern.sub(r"\1,\2", x)
+    return x
+
+mode = st.selectbox("Select Mode", ["Calculate Required Investment", "Other Modes..."])
+
 if mode == "Calculate Required Investment":
+    # Input parameters
     duration_years = st.number_input("Investment Duration (Years)", value=100, step=1)
     final_balance = st.number_input("Final Balance Desired (₹)", value=0, step=100000)
+    monthly_withdrawal = st.number_input("Monthly Withdrawal (₹)", value=0, step=1000)
+    monthly_r = st.number_input("Monthly Rate of Return (decimal)", value=0.005)  # e.g. 0.5% monthly
+    monthly_g = st.number_input("Monthly Growth in Withdrawal (decimal)", value=0.002)  # e.g. 0.2% monthly growth
+    r = (1 + monthly_r) ** 12 - 1  # Approximate yearly rate from monthly
 
     if st.button("Calculate Investment Required"):
         total_months = int(duration_years * 12)
 
+        # Present Value of annuity (withdrawals growing at monthly_g and discounted by monthly_r)
         pv_annuity = monthly_withdrawal * (1 - ((1 + monthly_g) / (1 + monthly_r)) ** total_months) / (monthly_r - monthly_g)
+        # Present Value of final balance
         pv_final = final_balance / ((1 + r) ** duration_years)
         total_investment = pv_annuity + pv_final
 
-        st.success(f"You need to invest {format_currency(total_investment)} today.")
+        st.success(f"You need to invest ₹{indian_number_format(total_investment)} today.")
 
+        # Prepare time series for plotting
         months = np.arange(1, total_months + 1)
         years = months / 12
         withdrawal_series = monthly_withdrawal * ((1 + monthly_g) ** months)
@@ -88,7 +110,7 @@ if mode == "Calculate Required Investment":
                                                 method="animate",
                                                 args=[None, {"frame": {"duration": duration_years, "redraw": True},
                                                              "fromcurrent": True,
-                                                             "transition": {"duration": 0}}])])]
+                                                             "transition": {"duration": 0}}])])])
             ),
             frames=[go.Frame(
                 data=[
@@ -100,14 +122,7 @@ if mode == "Calculate Required Investment":
 
         st.plotly_chart(fig, use_container_width=True)
 
-    def indian_number_format(number):
-        x = str(int(round(number)))  # Round and convert to int string
-        pattern = re.compile(r"(\d+)(\d{3})(?!\d)")
-        while pattern.match(x):
-            x = pattern.sub(r"\1,\2", x)
-        return x
-    
-    # Your main code block (inside some if/else or function)
+    # Current Investment input & duration calculation
     current_investment_lakhs = st.number_input(
         "Current Investment (₹ in Lakhs)", 
         min_value=0.0, 
@@ -118,10 +133,10 @@ if mode == "Calculate Required Investment":
     
     current_investment_rupees = current_investment_lakhs * 100000
     formatted_investment = indian_number_format(current_investment_rupees)
-    
     st.write(f"Current Investment in Rupees: ₹{formatted_investment}")
+
     if st.button("Calculate Duration"):
-        balance = current_investment
+        balance = current_investment_rupees
         months = 0
         while balance > 0:
             withdrawal = monthly_withdrawal * ((1 + monthly_g) ** months)
@@ -132,5 +147,4 @@ if mode == "Calculate Required Investment":
 
         years = months // 12
         rem_months = months % 12
-
         st.success(f"Your investment will last for {years} years and {rem_months} months.")
