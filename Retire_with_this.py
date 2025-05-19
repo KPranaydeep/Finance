@@ -19,6 +19,15 @@ st.markdown("""
 st.title("💰 Investment Required Calculator")
 st.markdown("Calculate how much you need to invest today to support inflation-adjusted withdrawals over time.")
 
+# Formatter for currency
+def format_currency(value):
+    if value >= 1e7:
+        return f"₹{value / 1e7:.2f} Cr"
+    elif value >= 1e5:
+        return f"₹{value / 1e5:.2f} Lakh"
+    else:
+        return f"₹{value:,.2f}"
+
 # Inputs
 col1, col2 = st.columns(2)
 
@@ -47,41 +56,51 @@ if st.button("Calculate Investment Required"):
 
     total_investment = pv_annuity + pv_final
 
-    st.success(f"You need to invest ₹{total_investment:,.2f} today.")
+    st.success(f"You need to invest {format_currency(total_investment)} today.")
 
     # Create data for graph
     months = np.arange(1, total_months + 1)
+    years = months / 12
     withdrawal_series = monthly_withdrawal * ((1 + monthly_g) ** months)
     balance_series = []
+    investment_series = []
     balance = total_investment
 
     for w in withdrawal_series:
+        investment_series.append(balance)
         balance = balance * (1 + monthly_r) - w
         balance_series.append(balance)
 
     df = pd.DataFrame({
-        "Month": months,
+        "Year": years,
         "Balance": balance_series,
-        "Withdrawal": withdrawal_series
+        "Withdrawal": withdrawal_series,
+        "Investment": investment_series
     })
 
-    # Create animated graph
+    # Create animated graph (in years)
     fig = go.Figure(
-        data=[go.Scatter(x=[], y=[], mode='lines', name='Investment Balance')],
+        data=[
+            go.Scatter(x=[], y=[], mode='lines', name='Investment Balance'),
+            go.Scatter(x=[], y=[], mode='lines', name='Monthly Withdrawal')
+        ],
         layout=go.Layout(
-            title="Investment Balance Over Time",
-            xaxis=dict(title="Month"),
-            yaxis=dict(title="Balance (₹)", range=[0, max(balance_series)*1.1]),
+            title="Investment & Withdrawal Over Time",
+            xaxis=dict(title="Year"),
+            yaxis=dict(title="Amount (₹)", range=[0, max(balance_series) * 1.1]),
             updatemenus=[dict(type="buttons", showactive=False,
                               buttons=[dict(label="Play",
                                             method="animate",
-                                            args=[None, {"frame": {"duration": 20, "redraw": True},
+                                            args=[None, {"frame": {"duration": 40, "redraw": True},
                                                          "fromcurrent": True,
                                                          "transition": {"duration": 0}}])])]
         ),
         frames=[go.Frame(
-            data=[go.Scatter(x=months[:k], y=balance_series[:k], mode='lines', name='Investment Balance')]
-        ) for k in range(1, total_months, int(total_months/100))]
+            data=[
+                go.Scatter(x=years[:k], y=balance_series[:k], mode='lines', name='Investment Balance'),
+                go.Scatter(x=years[:k], y=withdrawal_series[:k], mode='lines', name='Monthly Withdrawal')
+            ]
+        ) for k in range(1, total_months, int(total_months / 100))]
     )
 
     st.plotly_chart(fig, use_container_width=True)
