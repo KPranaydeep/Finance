@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import re
 
 st.set_page_config(page_title="Retirement Corpus Calculator", layout="centered")
 
@@ -99,17 +100,26 @@ if mode == "Calculate Required Investment":
 
         st.plotly_chart(fig, use_container_width=True)
 
-else:
-    current_investment = st.number_input(
-    "Current Investment (₹ in Lakhs)", 
-    min_value=0.0, 
-    value=20.0, 
-    step=1.0, 
-    format="%.2f"
+    def indian_number_format(number):
+        x = str(int(round(number)))  # Round and convert to int string
+        pattern = re.compile(r"(\d+)(\d{3})(?!\d)")
+        while pattern.match(x):
+            x = pattern.sub(r"\1,\2", x)
+        return x
+    
+    # Your main code block (inside some if/else or function)
+    current_investment_lakhs = st.number_input(
+        "Current Investment (₹ in Lakhs)", 
+        min_value=0.0, 
+        value=20.0, 
+        step=1.0, 
+        format="%.2f"
     )
-    current_investment = current_investment * 100000
-    st.write(f"Current Investment in Rupees: ₹{current_investment:,.0f}")
-
+    
+    current_investment_rupees = current_investment_lakhs * 100000
+    formatted_investment = indian_number_format(current_investment_rupees)
+    
+    st.write(f"Current Investment in Rupees: ₹{formatted_investment}")
     if st.button("Calculate Duration"):
         balance = current_investment
         months = 0
