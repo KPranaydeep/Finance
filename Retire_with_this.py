@@ -99,7 +99,15 @@ if mode == "Calculate Required Investment":
         st.plotly_chart(fig, use_container_width=True)
 
 else:
-    current_investment = st.number_input("Current Investment (₹)", value=1000000, step=100000)
+    current_investment = st.number_input(
+    "Current Investment (₹ in Lakhs)", 
+    min_value=0.0, 
+    value=20.0, 
+    step=1.0, 
+    format="%.2f"
+    )
+    current_investment = current_investment * 100000
+    st.write(f"Current Investment in Rupees: ₹{current_investment_in_rupees:,.0f}")
 
     if st.button("Calculate Duration"):
         balance = current_investment
