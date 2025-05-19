@@ -5,17 +5,13 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import datetime as dt
 import holidays
-import io
-import base64
+from datetime import datetime, date
 
 # --- Streamlit Page Setup ---
-st.set_page_config(page_title="LAMF Simulator", layout="centered",initial_sidebar_state="auto")
+st.set_page_config(page_title="LAMF Simulator", layout="centered", initial_sidebar_state="auto")
 st.title("📌 Loan Against Mutual Fund (LAMF) Simulator")
 
-# -------------------------
-# LAMF Simulator Section
-# -------------------------
-
+# --- Intro ---
 st.markdown("""
 ## LAMF Simulator: Financial Outcome of Taking Loan Against Mutual Funds
 
@@ -28,19 +24,18 @@ It compares:
 ---
 """)
 
-# --- Inputs ---
+# --- Input Header ---
 st.markdown("### 🔧 Simulation Inputs")
 
-col_loan_start, col_loan_tenure = st.columns(2)
-
-with col_loan_start:
+# --- Loan Date and Tenure ---
+col1, col2 = st.columns(2)
+with col1:
     loan_start_date = st.date_input(
         "📅 Loan Start Date",
         value=dt.date(2025, 3, 27),
         help="Enter the date when the loan started."
     )
-
-with col_loan_tenure:
+with col2:
     loan_tenure_months = st.number_input(
         "🏁 Loan Tenure (Months)",
         min_value=1,
@@ -48,22 +43,19 @@ with col_loan_tenure:
         value=36,
         help="Total loan duration agreed with lender (used for foreclosure calculation)."
     )
-# --- Helper functions for foreclosure date ---
 
+# --- Foreclosure Logic ---
 def is_blackout(date):
-    """Returns True if date is in blackout period: 27th to 3rd (inclusive)"""
     return date.day >= 27 or date.day <= 3
 
 def is_valid_foreclosure_day(date, indian_holidays):
-    """Returns True if date is a working day, not a holiday, and not in blackout period."""
     return (
-        date.weekday() < 5 and  # Monday to Friday
+        date.weekday() < 5 and
         date not in indian_holidays and
         not is_blackout(date)
     )
 
 def count_working_days(start_date, end_date, holidays_set):
-    """Count working days (Mon-Fri excluding holidays) between two dates inclusive."""
     current = start_date
     count = 0
     while current <= end_date:
@@ -72,20 +64,11 @@ def count_working_days(start_date, end_date, holidays_set):
         current += dt.timedelta(days=1)
     return count
 
-# --- Foreclosure Logic ---
 def get_foreclosure_date(start_date, tenure_months):
-    """
-    Find the latest valid foreclosure date such that:
-    - Date is a valid foreclosure day (Mon-Fri, no holiday, no blackout)
-    - There are at least 5 working days (Mon-Fri excluding holidays) between foreclosure date and loan end date
-    - Foreclosure date is at least 7 days after start_date
-    """
     end_date = start_date + pd.DateOffset(months=tenure_months)
     earliest_check_date = start_date + dt.timedelta(days=7)
-
     all_years = list(set([start_date.year, end_date.year]))
     indian_holidays = holidays.India(years=all_years)
-
     check_date = end_date.date()
     while check_date >= earliest_check_date:
         if is_valid_foreclosure_day(check_date, indian_holidays):
@@ -93,15 +76,32 @@ def get_foreclosure_date(start_date, tenure_months):
             if working_days >= 7:
                 return check_date
         check_date -= dt.timedelta(days=1)
-
     return None
 
-col_amounts, col_rates = st.columns(2)
+# --- Calculate Foreclosure Date ---
+foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
+today = datetime.today().date()
+if isinstance(foreclosure_date, datetime):
+    foreclosure_date = foreclosure_date.date()
 
-from datetime import datetime, date
+# --- Default Tenure ---
+if foreclosure_date:
+    delta_days = (foreclosure_date - today).days
+    default_tenure_months = max(2, delta_days // 30)
+else:
+    default_tenure_months = 12
 
-with col_amounts:
-    # Loan and fee inputs
+# --- Dasara Date Logic ---
+dasara_date = date(2025, 10, 12)
+dasara_months = (dasara_date - today).days // 30
+dasara_months = min(max(dasara_months, 2), 36)
+
+if "tenure_months" not in st.session_state:
+    st.session_state.tenure_months = default_tenure_months
+
+# --- Loan Details: Amount, Fee, Dasara Button ---
+fee_col, button_col = st.columns([2, 3])
+with fee_col:
     loan_amount = st.number_input(
         "🏦 Loan Amount (₹)", min_value=25_000, max_value=40_00_000, step=5_000, value=3_00_000,
         help="Specify the loan amount you want to borrow against your mutual funds."
@@ -110,51 +110,30 @@ with col_amounts:
         "💰 Processing Fee (₹)", min_value=0, max_value=10_000, step=10, value=1179,
         help="Enter the one-time processing fee charged for the loan."
     )
-
-    # Compute foreclosure date
-    foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
-
-    # Ensure 'today' and 'foreclosure_date' are date objects
-    today = datetime.today().date()
-    if isinstance(foreclosure_date, datetime):
-        foreclosure_date = foreclosure_date.date()
-    
-    # Determine default tenure based on foreclosure
-    if foreclosure_date:
-        delta_days = (foreclosure_date - today).days
-        default_tenure_months = max(2, delta_days // 30)
-    else:
-        default_tenure_months = 12
-    
-    # Calculate Dasara-based months
-    dasara_date = date(2025, 10, 12)
-    dasara_months = (dasara_date - today).days // 30
-    dasara_months = min(max(dasara_months, 2), 36)  # Clamp between 2 and 36
-    
-    # Initialize session state
-    if "tenure_months" not in st.session_state:
-        st.session_state.tenure_months = default_tenure_months
-    
-    # Button to set tenure to Dasara months
+with button_col:
+    st.markdown("### ")  # Vertical space
     if st.button(f"🎯 Set Tenure to Dasara ({dasara_months} months left)"):
         st.session_state.tenure_months = dasara_months
-    
-    # Tenure input field
-    tenure_months = st.number_input(
-        "⏳ Investment Holding Period (Months)",
-        min_value=2,
-        max_value=36,
-        step=1,
-        value=st.session_state.tenure_months,
-        key="tenure_months",
-        help="Number of months you plan to hold the loan to generate returns."
-    )
 
-with col_rates:
+# --- Investment Tenure ---
+st.number_input(
+    "⏳ Investment Holding Period (Months)",
+    min_value=2,
+    max_value=36,
+    step=1,
+    value=st.session_state.tenure_months,
+    key="tenure_months",
+    help="Number of months you plan to hold the loan to generate returns."
+)
+
+# --- Interest and Return Rates ---
+col3, col4 = st.columns(2)
+with col3:
     interest_rate = st.number_input(
         "💸 Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5,
         help="Select the annual interest rate charged on the loan."
     )
+with col4:
     expected_annual_return = st.number_input(
         "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=100.0,
         help="Annual return rate you expect from investing the loaned amount."
