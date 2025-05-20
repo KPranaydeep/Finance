@@ -9,7 +9,7 @@ st.markdown("Use the buttons below to launch a tool in a new tab.")
 # Define the local URLs assuming you're running each app on a different port
 apps = {
     "💰 LAMF Simulator": "https://lamfsimulatorpy-dupueqmb2r5eo52ad4tkvf.streamlit.app/",
-    "🧓 Retire With This": "https://finance-retire.streamlit.app/",
+    "🧓 Smart SWP Planner: Inflation-Proof": "https://finance-retire.streamlit.app/",
     "🎯 Target Corpus Planner": "https://finance-knqvcpyxszgty2sbj2gsqt.streamlit.app/",
 }
 
