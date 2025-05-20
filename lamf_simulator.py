@@ -6,6 +6,7 @@ from matplotlib.ticker import FuncFormatter
 import datetime as dt
 import holidays
 from datetime import datetime, date
+import io
 
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="LAMF Simulator", layout="centered", initial_sidebar_state="auto")
