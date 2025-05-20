@@ -67,13 +67,9 @@ if mode == "Calculate Required Investment":
         # Future Value of SWP withdrawals
         fv_annuity = monthly_withdrawal * (((1 + monthly_r) ** total_months - (1 + monthly_g) ** total_months) / (monthly_r - monthly_g))
     
-        # Remaining balance after all withdrawals
-        remaining_balance = future_value - fv_annuity
-    
         st.success(f"""
         You need to invest ₹{total_investment / 10000000:.2f} Crores today.
     
-        🧾 **Estimated Remaining Balance after Withdrawals**: ₹{remaining_balance / 10000000:.2f} Crores
         """)
 
         # Plotting
