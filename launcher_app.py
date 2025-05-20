@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="📊 Personal Finance Tools", layout="wide")
+st.set_page_config(page_title="📊 Personal Finance Tools", layout="centered")
 
 st.title("📊 Personal Finance Toolkit")
 st.markdown("Use the buttons below to launch a tool in a new tab.")
