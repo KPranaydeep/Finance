@@ -19,7 +19,7 @@ for name, url in apps.items():
         f"""
         <a href="{url}" target="_blank">
             <button style="
-                background-color:#4CAF50;
+                background-color:#222831;
                 border:none;
                 color:white;
                 padding:10px 24px;
