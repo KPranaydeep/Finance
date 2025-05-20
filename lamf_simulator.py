@@ -105,7 +105,7 @@ if "tenure_months" not in st.session_state:
 fee_col, button_col = st.columns([2, 3])
 with fee_col:
     loan_amount = st.number_input(
-        "🏦 Loan Amount (₹)", min_value=25_000, max_value=40_00_000, step=5_000, value=3_17_982, # 317982
+        "🏦 Loan Amount (₹)", min_value=25_000, max_value=40_00_000, step=5_000, value=4_00_000,
         help="Specify the loan amount you want to borrow against your mutual funds."
     )
     processing_fee = st.number_input(
