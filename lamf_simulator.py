@@ -120,7 +120,7 @@ with button_col:
 # --- Investment Tenure ---
 st.number_input(
     "⏳ Investment Holding Period (Months)",
-    min_value=2,
+    min_value=1,
     max_value=36,
     step=1,
     value=st.session_state.tenure_months,
