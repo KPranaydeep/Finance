@@ -42,8 +42,8 @@ with col2:
     stocks = st.number_input(
         "Current Stocks Value (₹)",
         min_value=0.0,
-        value=374113.0,
-        step=1000.0,
+        value=100000.0,
+        step=10000.0,
         help="Market value of your stock holdings."
     )
     one_year_forecast_stocks = st.number_input(
@@ -60,7 +60,7 @@ with col3:
         "Current Mutual Funds Value (₹)",
         min_value=0.0,
         value=1625000.0,
-        step=1000.0,
+        step=25000.0,
         help="Market value of your mutual fund holdings."
     )
     one_year_forecast_mf = st.number_input(
