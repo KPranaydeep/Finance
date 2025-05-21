@@ -103,7 +103,7 @@ st.markdown(
     "- **Cumulative Mode**: Enter the total amount you aim to accumulate over your chosen period."
 )
 
-target_value = st.number_input("Target ₹ Value", value=22245.0, step=1000.0)
+target_value = st.number_input("Target ₹ Value", value=40000.0, step=1000.0)
 
 st.markdown("### 📅 Time Horizon (in Months)")
 st.markdown(
