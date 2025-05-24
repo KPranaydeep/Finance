@@ -25,7 +25,7 @@ with col1:
     bonds = st.number_input(
         "Current Bonds Value (₹)",
         min_value=0.0,
-        value=2000.0,
+        value=0.0,
         step=100.0,
         help="Total value of your fixed-income instruments like bonds."
     )
@@ -42,7 +42,7 @@ with col2:
     stocks = st.number_input(
         "Current Stocks Value (₹)",
         min_value=0.0,
-        value=100000.0,
+        value=400000.0,
         step=10000.0,
         help="Market value of your stock holdings."
     )
@@ -59,7 +59,7 @@ with col3:
     mf = st.number_input(
         "Current Mutual Funds Value (₹)",
         min_value=0.0,
-        value=1625000.0,
+        value=0.0,
         step=25000.0,
         help="Market value of your mutual fund holdings."
     )
