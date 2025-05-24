@@ -44,7 +44,7 @@ with col2:
     stocks = st.number_input(
         "Current Stocks Value (₹)",
         min_value=0.0,
-        value=400000.0,
+        value=63200.0,
         step=10000.0,
         help="Market value of your stock holdings."
     )
