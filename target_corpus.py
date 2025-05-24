@@ -256,6 +256,84 @@ with col2:
     else:
         st.error("⚠️ Below 1st Month profit target")
 
+import math
+
+st.subheader("📥 12-Month Daily P&L Target Tracking Report (100% CAGR Goal)")
+
+# === Constants ===
+trading_days_per_year = 250
+target_cagr = 100.0
+charges_rate = 0.15  # 15% of profit as trading charges
+
+# === Solve for Required Daily Gross Return (x), Netting to 100% CAGR ===
+target_final = 2  # Doubling the corpus in 1 year
+
+# Let (1 + 0.85x)^250 = 2 => x = ?
+required_daily_return = (target_final ** (1 / trading_days_per_year) - 1) / 0.85
+effective_daily_net_return = 0.85 * required_daily_return
+
+# === Inputs & Setup ===
+initial_corpus = stocks  # Only stock corpus considered
+monthly_topup = 1_00_000
+months = 12
+daily_r = effective_daily_net_return
+
+# === Build Report ===
+report_rows = []
+capital = initial_corpus
+start_date = date.today()
+
+for month in range(1, months + 1):
+    days_in_month = 21  # Approx trading days per month
+    gross_profit = capital * ((1 + daily_r) ** days_in_month - 1)
+    net_profit = gross_profit * (1 - charges_rate)
+    capital += gross_profit + monthly_topup
+
+    target_profit = initial_corpus * ((1 + required_daily_return * 0.85) ** (days_in_month * month) - 1)
+    status = "✅ On Track" if net_profit >= target_profit / month else "❌ Behind"
+
+    report_rows.append({
+        "Month": f"{start_date.strftime('%b %Y')}",
+        "Starting Corpus (₹)": int(round(capital - gross_profit - monthly_topup)),
+        "Gross Profit (₹)": int(round(gross_profit)),
+        "Net Profit After Charges (₹)": int(round(net_profit)),
+        "Top-up (₹)": monthly_topup,
+        "Target Net Profit (₹)": int(round(target_profit / month)),
+        "Status": status
+    })
+    
+    # advance to next month
+    start_date = date(start_date.year + (start_date.month // 12), (start_date.month % 12) + 1, 1)
+
+# === Display Assumptions ===
+st.markdown("### 📌 Assumptions & Constants")
+st.markdown(f"""
+- 🎯 **CAGR Target**: 100% per year  
+- 🏦 **Corpus Considered**: ₹{initial_corpus:,.0f} (from stocks)  
+- 📆 **Trading Days/Year**: {trading_days_per_year}  
+- 📈 **Required Daily Gross Return**: `{required_daily_return:.5f}`  
+- 💸 **Charges on Daily Profit**: {charges_rate*100:.0f}%  
+- 📊 **Effective Daily Net Return**: `{daily_r:.5f}`  
+- 💼 **Monthly Top-up**: ₹{monthly_topup:,.0f}  
+- 📅 **Duration**: 12 Months
+""")
+
+# === Report Table ===
+report_df = pd.DataFrame(report_rows)
+st.dataframe(report_df, use_container_width=True)
+
+# === Download Button ===
+csv_buffer = StringIO()
+report_df.to_csv(csv_buffer, index=False)
+csv_data = csv_buffer.getvalue()
+
+st.download_button(
+    label="📤 Download Daily P&L Target Report (CSV)",
+    data=csv_data,
+    file_name="daily_pnl_target_100_cagr.csv",
+    mime="text/csv"
+)
+
 # === Footer Note ===
 st.markdown("""
 ---
