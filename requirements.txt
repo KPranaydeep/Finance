@@ -6,3 +6,4 @@ holidays
 scipy
 plotly
 yfinance
+openpyxl
