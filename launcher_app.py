@@ -11,6 +11,7 @@ apps = {
     "💰 Loan Against Mutual Funds Simulator": "https://lamfsimulatorpy-dupueqmb2r5eo52ad4tkvf.streamlit.app/",
     "🧓 Smart SWP Planner: Inflation-Proof": "https://finance-retire.streamlit.app/",
     "🎯 Target Corpus Planner": "https://finance-knqvcpyxszgty2sbj2gsqt.streamlit.app/",
+    "📈 Stock Holdings Analysis & Sell Plan": "https://sellplan.streamlit.app/"
 }
 
 # Button-styled links
