@@ -75,17 +75,17 @@ if holdings_file:
     st.dataframe(df[['SYMBOL', 'Quantity', 'AvgBuyPrice', 'LTP', 'Unrealized_PnL']])
 
 # Calculate default target profit as (0.069957 / 20) * SUMPRODUCT(Quantity * AvgBuyPrice)
-scaling_factor = 0.069957 / 20
-sumproduct = (df['Quantity'] * df['AvgBuyPrice']).sum()
-default_profit = int(scaling_factor * sumproduct)
+    scaling_factor = 0.069957 / 20
+    sumproduct = (df['Quantity'] * df['AvgBuyPrice']).sum()
+    default_profit = int(scaling_factor * sumproduct)
 
-# Target profit input (default is computed)
-target_profit = st.number_input(
-    "Enter target profit to book (₹)",
-    min_value=1,
-    value=default_profit,
-    step=100
-)
+    # Target profit input (default is computed)
+    target_profit = st.number_input(
+        "Enter target profit to book (₹)",
+        min_value=1,
+        value=default_profit,
+        step=100
+    )
 
     def get_sell_plan(df, target_profit):
         df_profitable = df[df['Unrealized_PnL'] > 0].sort_values(by='Unrealized_PnL', ascending=False).reset_index(drop=True)
