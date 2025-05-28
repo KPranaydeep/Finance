@@ -8,9 +8,12 @@ DATA_FILE = 'performance_data.csv'
 
 # Load existing data or create new DataFrame
 if os.path.exists(DATA_FILE):
-    df = pd.read_csv(DATA_FILE, parse_dates=['Date'])
+    df = pd.read_csv(DATA_FILE)
 else:
     df = pd.DataFrame(columns=['Date', 'Buy', 'Sell', 'Charges'])
+
+# Ensure Date is datetime
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 
 # --- Input Section ---
 st.title("Stock Performance Tracker")
