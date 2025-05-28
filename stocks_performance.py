@@ -44,24 +44,36 @@ df['Charges %'] = df['Charges'] / df['Buy'] * 100
 df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
 df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
 
-# --- Plots ---
+import matplotlib.dates as mdates
+
+# --- Refined Plots ---
 if not df.empty:
     st.subheader("Charges % of Buy Value Over Time")
-    fig1, ax1 = plt.subplots()
-    ax1.plot(df['Date'], df['Charges %'], marker='o')
-    ax1.set_ylabel("Charges (%)")
-    ax1.set_xlabel("Date")
+
+    fig1, ax1 = plt.subplots(figsize=(10, 4), dpi=150)
+    ax1.plot(df['Date'], df['Charges %'], marker='o', linestyle='-', color='darkblue', linewidth=2, markersize=6)
+    ax1.set_ylabel("Charges (% of Buy Value)", fontsize=12)
+    ax1.set_xlabel("Date", fontsize=12)
+    ax1.set_title("Charges % Over Time", fontsize=14, weight='bold')
+    ax1.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+    fig1.autofmt_xdate()
     st.pyplot(fig1)
 
     st.subheader("Annualized Return Over Time")
-    fig2, ax2 = plt.subplots()
-    ax2.plot(df['Date'], df['Annualized Return'] * 100, marker='o')
-    ax2.set_ylabel("Annualized Return (%)")
-    ax2.set_xlabel("Date")
+
+    fig2, ax2 = plt.subplots(figsize=(10, 4), dpi=150)
+    ax2.plot(df['Date'], df['Annualized Return'] * 100, marker='s', linestyle='-', color='darkgreen', linewidth=2, markersize=6)
+    ax2.set_ylabel("Annualized Return (%)", fontsize=12)
+    ax2.set_xlabel("Date", fontsize=12)
+    ax2.set_title("Annualized Return vs Time", fontsize=14, weight='bold')
+    ax2.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+    fig2.autofmt_xdate()
     st.pyplot(fig2)
 
+    # --- Display formatted Data Table ---
     df_display = df.copy()
-
     df_display['Buy'] = df_display['Buy'].map('₹{:,.2f}'.format)
     df_display['Sell'] = df_display['Sell'].map('₹{:,.2f}'.format)
     df_display['Charges'] = df_display['Charges'].map('₹{:,.2f}'.format)
@@ -69,6 +81,6 @@ if not df.empty:
     df_display['ROI'] = (df['ROI'] * 100).round(2).astype(str) + '%'
     df_display['Charges %'] = df['Charges %'].round(2).astype(str) + '%'
     df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
-    
-    st.dataframe(df_display)
 
+    st.subheader("Formatted Performance Table")
+    st.dataframe(df_display)
