@@ -14,8 +14,11 @@ if DATA_FILE.exists():
 else:
     df = pd.DataFrame(columns=['Date', 'Buy', 'Sell', 'Charges'])
 
-# Ensure Date is datetime
+# Ensure Date is datetime and drop invalid
 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+df = df.dropna(subset=['Date'])
+
+st.write("Rows after removing invalid dates:", len(df))
 
 st.success(f"Entry added! Saved to: {DATA_FILE}")
 
