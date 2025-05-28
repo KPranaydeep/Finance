@@ -60,4 +60,15 @@ if not df.empty:
     ax2.set_xlabel("Date")
     st.pyplot(fig2)
 
-    st.dataframe(df)
+    df_display = df.copy()
+
+    df_display['Buy'] = df_display['Buy'].map('₹{:,.2f}'.format)
+    df_display['Sell'] = df_display['Sell'].map('₹{:,.2f}'.format)
+    df_display['Charges'] = df_display['Charges'].map('₹{:,.2f}'.format)
+    df_display['Net Profit'] = df_display['Net Profit'].map('₹{:,.2f}'.format)
+    df_display['ROI'] = (df['ROI'] * 100).round(2).astype(str) + '%'
+    df_display['Charges %'] = df['Charges %'].round(2).astype(str) + '%'
+    df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
+    
+    st.dataframe(df_display)
+
