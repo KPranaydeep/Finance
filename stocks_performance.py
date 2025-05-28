@@ -2,18 +2,22 @@ import streamlit as st
 import pandas as pd
 import datetime
 import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 
-DATA_FILE = 'performance_data.csv'
+APP_DIR = Path(__file__).parent
+DATA_FILE = APP_DIR / 'performance_data.csv'
 
 # Load existing data or create new DataFrame
-if os.path.exists(DATA_FILE):
+if DATA_FILE.exists():
     df = pd.read_csv(DATA_FILE)
 else:
     df = pd.DataFrame(columns=['Date', 'Buy', 'Sell', 'Charges'])
 
 # Ensure Date is datetime
 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
+st.success(f"Entry added! Saved to: {DATA_FILE}")
 
 # --- Input Section ---
 st.title("Stock Performance Tracker")
