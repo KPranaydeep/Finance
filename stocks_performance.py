@@ -4,7 +4,7 @@ import datetime
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt
-
+st.set_page_config(page_title="Stock Performance Tracker", layout="centered")
 APP_DIR = Path(__file__).parent
 DATA_FILE = APP_DIR / 'performance_data.csv'
 
