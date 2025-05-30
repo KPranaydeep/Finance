@@ -8,11 +8,12 @@ st.markdown("Quick access to all your personal finance tools. Click on a button 
 
 # App list with names and URLs
 apps = {
+    "🎯 Target Corpus Planner": "https://finance-knqvcpyxszgty2sbj2gsqt.streamlit.app/",
+    "📅 Stock Performance Tracker": "https://stocks-performance.streamlit.app/",
     "💰 Loan Against Mutual Funds Simulator": "https://lamfsimulatorpy-dupueqmb2r5eo52ad4tkvf.streamlit.app/",
     "🧓 Smart SWP Planner: Inflation-Proof": "https://finance-retire.streamlit.app/",
-    "🎯 Target Corpus Planner": "https://finance-knqvcpyxszgty2sbj2gsqt.streamlit.app/",
-    "📈 Stock Holdings Analysis & Sell Plan": "https://sellplan.streamlit.app/",
-    "📅 Stock Performance Tracker": "https://stocks-performance.streamlit.app/"
+    "📈 Stock Holdings Analysis & Sell Plan": "https://sellplan.streamlit.app/"
+    
 }
 
 # Button style
@@ -35,7 +36,7 @@ def render_button(name, url):
             </button>
         </a>
         """,
-        height=160,
+        height=90,
     )
 
 # Layout with 2 columns per row
