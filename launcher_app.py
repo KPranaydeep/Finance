@@ -1,39 +1,48 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="📊 Personal Finance Tools", layout="centered")
+st.set_page_config(page_title="📊 Personal Finance Tools", layout="wide")
 
 st.title("📊 Personal Finance Toolkit")
-st.markdown("Use the buttons below to launch a tool in a new tab.")
+st.markdown("Quick access to all your personal finance tools. Click on a button below to launch an app in a new tab.")
 
-# Define the local URLs assuming you're running each app on a different port
+# App list with names and URLs
 apps = {
     "💰 Loan Against Mutual Funds Simulator": "https://lamfsimulatorpy-dupueqmb2r5eo52ad4tkvf.streamlit.app/",
     "🧓 Smart SWP Planner: Inflation-Proof": "https://finance-retire.streamlit.app/",
     "🎯 Target Corpus Planner": "https://finance-knqvcpyxszgty2sbj2gsqt.streamlit.app/",
-    "📈 Stock Holdings Analysis & Sell Plan": "https://sellplan.streamlit.app/"
+    "📈 Stock Holdings Analysis & Sell Plan": "https://sellplan.streamlit.app/",
+    "📅 Stock Performance Tracker": "https://stocks-performance.streamlit.app/"
 }
 
-# Button-styled links
-for name, url in apps.items():
+# Button style
+def render_button(name, url):
     components.html(
         f"""
-        <a href="{url}" target="_blank">
+        <a href="{url}" target="_blank" style="text-decoration: none;">
             <button style="
-                background-color:#222831;
-                border:none;
-                color:white;
-                padding:10px 24px;
-                text-align:center;
-                text-decoration:none;
-                display:inline-block;
-                font-size:16px;
-                margin:10px 2px;
-                cursor:pointer;
-                border-radius:8px;">
+                background-color:#30475e;
+                color:#f5f5f5;
+                padding: 14px 28px;
+                margin: 10px;
+                border: none;
+                border-radius: 10px;
+                font-size: 16px;
+                width: 100%;
+                transition: background-color 0.3s;
+                cursor: pointer;">
                 {name}
             </button>
         </a>
         """,
-        height=70,
+        height=80,
     )
+
+# Layout with 2 columns per row
+cols = st.columns(2)
+for idx, (name, url) in enumerate(apps.items()):
+    with cols[idx % 2]:
+        render_button(name, url)
+
+st.markdown("---")
+st.info("💡 Tip: All tools open in a **new tab** so you can run multiple tools in parallel.")
