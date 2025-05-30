@@ -35,7 +35,7 @@ def render_button(name, url):
             </button>
         </a>
         """,
-        height=80,
+        height=160,
     )
 
 # Layout with 2 columns per row
