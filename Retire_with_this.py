@@ -65,16 +65,21 @@ if mode == "Calculate Required Investment":
                    f"(`{total_investment / 1e7:.2f} Cr`).")
 
         # Plotting
-        months = np.arange(0, total_months + 1)  # Start from month 0
+        months = np.arange(0, total_months + 1)
         years = months / 12
         withdrawal_series = monthly_withdrawal * ((1 + monthly_g) ** months)
-        
-        balance_series = [total_investment]  # Start with initial investment
+
+        balance_series = [total_investment]
         balance = total_investment
 
-        # Compute balance after each month
-        for w in withdrawal_series[1:]:  # Skip month 0
-            balance = balance * (1 + monthly_r) - w
+        for i in range(1, total_months + 1):
+            withdrawal = withdrawal_series[i]
+            balance = balance * (1 + monthly_r) - withdrawal
+
+            # Clamp to zero
+            if balance < 0:
+                balance = 0
+
             balance_series.append(balance)
 
         # Normalize to ₹ Lakhs
@@ -100,7 +105,7 @@ if mode == "Calculate Required Investment":
             ],
             layout=go.Layout(
                 title="Investment & Withdrawal Over Time",
-                xaxis=dict(title="Year"),
+                xaxis=dict(title="Year", range=[0, duration_years]),
                 yaxis=dict(title="₹ in Lakhs"),
                 updatemenus=[dict(
                     type="buttons",
