@@ -125,9 +125,9 @@ if holdings_file:
 
     st.subheader(f"Sell Plan to Book ₹{target_profit} Profit")
     if not plan_df.empty:
-    st.dataframe(plan_df)
-    st.write(f"### Total Estimated Profit Booked: ₹{total_booked:.2f}")
+        st.dataframe(plan_df)
+        st.write(f"### Total Estimated Profit Booked: ₹{total_booked:.2f}")
     else:
-    st.info("No profitable sell plan possible with current holdings.")
+        st.info("No profitable sell plan possible with current holdings.")
     
 
