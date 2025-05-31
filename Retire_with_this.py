@@ -19,7 +19,7 @@ st.markdown("""
 st.title("Smart SWP Planner: Inflation-Proof")
 st.markdown("Choose whether you want to **calculate required investment** or **check how long your current investment will last**.")
 
-# Formatter for Indian currency style
+# === FORMATTERS ===
 def indian_number_format(number):
     num_str = str(int(round(number)))
     if len(num_str) <= 3:
@@ -33,7 +33,13 @@ def indian_number_format(number):
     rest_with_commas = rest + rest_with_commas
     return rest_with_commas + ',' + last_three
 
-# Mode selector
+def format_inr_crores_lakhs(amount):
+    if amount >= 1e7:
+        return f"₹{indian_number_format(round(amount))} (`{amount / 1e7:.2f} Cr`)"
+    else:
+        return f"₹{indian_number_format(round(amount))} (`{amount / 1e5:.2f} Lakhs`)"
+
+# === MODE SELECTOR ===
 mode = st.radio("Select Mode", ["Calculate Required Investment", "Calculate Investment Duration"], horizontal=True)
 
 # === MODE 1: CALCULATE REQUIRED INVESTMENT ===
@@ -52,17 +58,14 @@ if mode == "Calculate Required Investment":
     if st.button("Calculate Investment Required"):
         total_months = int(duration_years * 12)
 
-        # === BACKWARD CALCULATION to meet exact final balance ===
+        # === BACKWARD CALCULATION ===
         withdrawal_schedule_rev = monthly_withdrawal * ((1 + monthly_g) ** np.arange(total_months))[::-1]
-
         balance = final_balance
         for w in withdrawal_schedule_rev:
             balance = (balance + w) / (1 + monthly_r)
-
         total_investment = balance
 
-        st.success(f"You need to invest ₹{indian_number_format(round(total_investment))} today "
-                   f"(`{total_investment / 1e7:.2f} Cr`).")
+        st.success(f"💰 You need to invest {format_inr_crores_lakhs(total_investment)} today.")
 
         # === FORWARD SIMULATION ===
         months = np.arange(0, total_months + 1)
@@ -75,10 +78,21 @@ if mode == "Calculate Required Investment":
             balance_series.append(balance)
             withdrawal = withdrawal_series[i]
             balance = balance * (1 + monthly_r) - withdrawal
-            balance = max(balance, 0)  # Clamp to avoid negative drift
+            balance = max(balance, 0)
 
-        # Force final value to match exactly
-        balance_series[-1] = final_balance
+        balance_series[-1] = final_balance  # ensure final match
+
+        # === MAX STATS ===
+        max_balance = max(balance_series)
+        max_balance_index = balance_series.index(max_balance)
+        max_withdrawal = max(withdrawal_series)
+        max_withdrawal_index = np.argmax(withdrawal_series)
+
+        max_balance_year = max_balance_index // 12
+        max_withdrawal_year = max_withdrawal_index // 12
+
+        st.info(f"📈 **Peak Investment Balance**: {format_inr_crores_lakhs(max_balance)} at Year {max_balance_year}")
+        st.info(f"📤 **Peak Monthly Withdrawal**: {format_inr_crores_lakhs(max_withdrawal)} at Year {max_withdrawal_year}")
 
         # Normalize to ₹ Lakhs
         withdrawal_series_lakhs = withdrawal_series / 1e5
@@ -161,4 +175,4 @@ elif mode == "Calculate Investment Duration":
         else:
             years = months // 12
             rem_months = months % 12
-            st.success(f"Your investment will last for {years} years and {rem_months} months.")
+            st.success(f"🕒 Your investment will last for {years} years and {rem_months} months.")
