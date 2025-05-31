@@ -153,7 +153,7 @@ if mode == "Calculate Required Investment":
 elif mode == "Calculate Investment Duration":
     monthly_withdrawal = st.number_input("Initial Monthly Withdrawal (₹)", value=63200, step=1000)
     inflation_rate = st.number_input("Annual Inflation Rate (%)", value=6.0, step=0.1)
-    return_rate = st.number_input("Expected Annual Return (%)", value=3.0, step=0.1)
+    return_rate = st.number_input("Expected Annual Return (%)", value=11.75, step=0.1)
 
     current_investment_lakhs = st.number_input(
         "Current Investment (₹ in Lakhs)", min_value=0.0, value=20.0, step=1.0, format="%.2f"
