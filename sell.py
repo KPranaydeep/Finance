@@ -109,10 +109,12 @@ if holdings_file:
 
             if sell_qty > 0:
                 realized_profit = sell_qty * profit_per_share
+                sell_value = round(sell_qty * sell_price, 2)
                 plan.append({
                     'Stock': row['SYMBOL'],
                     'Sell Quantity': sell_qty,
                     'Sell Price (₹)': sell_price,
+                    'Sell Value (₹)': sell_value,
                     'Realized Profit (₹)': round(realized_profit, 2)
                 })
                 total_profit += realized_profit
@@ -120,10 +122,11 @@ if holdings_file:
         return pd.DataFrame(plan), total_profit
 
     plan_df, total_booked = get_sell_plan(df, target_profit)
-
+    plan_df = pd.DataFrame(plan).sort_values(by="Sell Value (₹)", ascending=False).reset_index(drop=True)
     st.subheader(f"Sell Plan to Book ₹{target_profit} Profit")
     if not plan_df.empty:
         st.dataframe(plan_df)
         st.write(f"### Total Estimated Profit Booked: ₹{total_booked:.2f}")
     else:
         st.info("No profitable sell plan possible with current holdings.")
+        
