@@ -52,35 +52,34 @@ if mode == "Calculate Required Investment":
     if st.button("Calculate Investment Required"):
         total_months = int(duration_years * 12)
 
-        # Present Value of growing annuity (SWP)
-        pv_annuity = monthly_withdrawal * (1 - ((1 + monthly_g) / (1 + monthly_r)) ** total_months) / (monthly_r - monthly_g)
+        # === BACKWARD CALCULATION ===
+        # Generate reversed withdrawal schedule
+        withdrawal_schedule_rev = monthly_withdrawal * ((1 + monthly_g) ** np.arange(total_months))[::-1]
 
-        # Present Value of final balance goal
-        pv_final = final_balance / ((1 + annual_r / 100) ** duration_years)
+        balance = final_balance
+        backward_balances = [balance]
+        for w in withdrawal_schedule_rev:
+            balance = (balance + w) / (1 + monthly_r)
+            backward_balances.append(balance)
 
-        # Total investment required today
-        total_investment = pv_annuity + pv_final
+        total_investment = backward_balances[-1]
 
         st.success(f"You need to invest ₹{indian_number_format(round(total_investment))} today "
                    f"(`{total_investment / 1e7:.2f} Cr`).")
 
-        # Plotting
+        # === FORWARD SIMULATION FOR PLOTTING ===
         months = np.arange(0, total_months + 1)
         years = months / 12
         withdrawal_series = monthly_withdrawal * ((1 + monthly_g) ** months)
 
         balance_series = [total_investment]
         balance = total_investment
-
-        for i in range(1, total_months + 1):
-            withdrawal = withdrawal_series[i]
-            balance = balance * (1 + monthly_r) - withdrawal
-
-            # Clamp to zero
-            if balance < 0:
-                balance = 0
-
+        for w in withdrawal_series[1:]:
+            balance = balance * (1 + monthly_r) - w
             balance_series.append(balance)
+
+        # Force final balance to match exactly
+        balance_series[-1] = final_balance
 
         # Normalize to ₹ Lakhs
         withdrawal_series_lakhs = withdrawal_series / 1e5
@@ -130,7 +129,7 @@ if mode == "Calculate Required Investment":
 elif mode == "Calculate Investment Duration":
     monthly_withdrawal = st.number_input("Initial Monthly Withdrawal (₹)", value=63200, step=1000)
     inflation_rate = st.number_input("Annual Inflation Rate (%)", value=6.0, step=0.1)
-    return_rate = st.number_input("Expected Annual Return (%)", value=3.0, step=0.1)
+    return_rate = st.number_input("Expected Annual Return (%)", value=11.75, step=0.1)
 
     current_investment_lakhs = st.number_input(
         "Current Investment (₹ in Lakhs)",
