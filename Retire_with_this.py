@@ -51,26 +51,18 @@ if mode == "Calculate Required Investment":
 
     if st.button("Calculate Investment Required"):
         total_months = int(duration_years * 12)
-    
+
         # Present Value of growing annuity (SWP)
         pv_annuity = monthly_withdrawal * (1 - ((1 + monthly_g) / (1 + monthly_r)) ** total_months) / (monthly_r - monthly_g)
-    
+
         # Present Value of final balance goal
         pv_final = final_balance / ((1 + annual_r / 100) ** duration_years)
-    
+
         # Total investment required today
         total_investment = pv_annuity + pv_final
-    
-        # Future Value of the investment (for verification)
-        future_value = total_investment * ((1 + annual_r / 100) ** duration_years)
-    
-        # Future Value of SWP withdrawals
-        fv_annuity = monthly_withdrawal * (((1 + monthly_r) ** total_months - (1 + monthly_g) ** total_months) / (monthly_r - monthly_g))
-    
-        st.success(f"""
-        You need to invest ₹{total_investment / 10000000:.2f} Crores today.
-    
-        """)
+
+        st.success(f"You need to invest ₹{indian_number_format(round(total_investment))} today "
+                   f"(`{total_investment / 1e7:.2f} Cr`).")
 
         # Plotting
         months = np.arange(1, total_months + 1)
@@ -83,12 +75,17 @@ if mode == "Calculate Required Investment":
             balance_series.append(balance)
             balance = balance * (1 + monthly_r) - w
 
+        # Normalize all to ₹ Lakhs
+        withdrawal_series_lakhs = withdrawal_series / 1e5
+        balance_series_lakhs = np.array(balance_series) / 1e5
+
+        # Plot animation
         step = max(1, int(total_months / 100))
         frames = [
             go.Frame(
                 data=[
-                    go.Scatter(x=years[:k], y=np.array(balance_series[:k]) / 1e7, mode='lines', name='Investment Balance', yaxis="y1"),
-                    go.Scatter(x=years[:k], y=np.array(withdrawal_series[:k]) / 1e5, mode='lines', name='Monthly Withdrawal', yaxis="y2")
+                    go.Scatter(x=years[:k], y=balance_series_lakhs[:k], mode='lines', name='Investment Balance (₹ Lakhs)'),
+                    go.Scatter(x=years[:k], y=withdrawal_series_lakhs[:k], mode='lines', name='Monthly Withdrawal (₹ Lakhs)')
                 ]
             )
             for k in range(1, total_months, step)
@@ -96,23 +93,24 @@ if mode == "Calculate Required Investment":
 
         fig = go.Figure(
             data=[
-                go.Scatter(x=[], y=[], mode='lines', name='Investment Balance', yaxis="y1"),
-                go.Scatter(x=[], y=[], mode='lines', name='Monthly Withdrawal', yaxis="y2")
+                go.Scatter(x=[], y=[], mode='lines', name='Investment Balance (₹ Lakhs)'),
+                go.Scatter(x=[], y=[], mode='lines', name='Monthly Withdrawal (₹ Lakhs)')
             ],
             layout=go.Layout(
                 title="Investment & Withdrawal Over Time",
                 xaxis=dict(title="Year"),
-                yaxis=dict(title="Investment Balance (₹ Cr)", side="left"),
-                yaxis2=dict(title="Withdrawal (₹ Lakh)", side="right", overlaying="y"),
+                yaxis=dict(title="₹ in Lakhs"),
                 updatemenus=[dict(
                     type="buttons",
                     showactive=False,
                     buttons=[dict(
                         label="Play",
                         method="animate",
-                        args=[None, {"frame": {"duration": 100, "redraw": True},
-                                     "fromcurrent": True,
-                                     "transition": {"duration": 0}}]
+                        args=[None, {
+                            "frame": {"duration": 100, "redraw": True},
+                            "fromcurrent": True,
+                            "transition": {"duration": 0}
+                        }]
                     )]
                 )]
             ),
@@ -153,6 +151,9 @@ elif mode == "Calculate Investment Duration":
                 break
             months += 1
 
-        years = months // 12
-        rem_months = months % 12
-        st.success(f"Your investment will last for {years} years and {rem_months} months.")
+        if months == 0:
+            st.warning("⚠️ Your investment cannot support even the first month of withdrawal.")
+        else:
+            years = months // 12
+            rem_months = months % 12
+            st.success(f"Your investment will last for {years} years and {rem_months} months.")
