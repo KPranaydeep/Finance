@@ -65,21 +65,23 @@ if mode == "Calculate Required Investment":
                    f"(`{total_investment / 1e7:.2f} Cr`).")
 
         # Plotting
-        months = np.arange(1, total_months + 1)
+        months = np.arange(0, total_months + 1)  # Start from month 0
         years = months / 12
         withdrawal_series = monthly_withdrawal * ((1 + monthly_g) ** months)
-        balance_series = []
+        
+        balance_series = [total_investment]  # Start with initial investment
         balance = total_investment
 
-        for w in withdrawal_series:
-            balance_series.append(balance)
+        # Compute balance after each month
+        for w in withdrawal_series[1:]:  # Skip month 0
             balance = balance * (1 + monthly_r) - w
+            balance_series.append(balance)
 
-        # Normalize all to ₹ Lakhs
+        # Normalize to ₹ Lakhs
         withdrawal_series_lakhs = withdrawal_series / 1e5
         balance_series_lakhs = np.array(balance_series) / 1e5
 
-        # Plot animation
+        # Create animation frames
         step = max(1, int(total_months / 100))
         frames = [
             go.Frame(
@@ -88,13 +90,13 @@ if mode == "Calculate Required Investment":
                     go.Scatter(x=years[:k], y=withdrawal_series_lakhs[:k], mode='lines', name='Monthly Withdrawal (₹ Lakhs)')
                 ]
             )
-            for k in range(1, total_months, step)
+            for k in range(2, total_months + 1, step)
         ]
 
         fig = go.Figure(
             data=[
-                go.Scatter(x=[], y=[], mode='lines', name='Investment Balance (₹ Lakhs)'),
-                go.Scatter(x=[], y=[], mode='lines', name='Monthly Withdrawal (₹ Lakhs)')
+                go.Scatter(x=years, y=balance_series_lakhs, mode='lines', name='Investment Balance (₹ Lakhs)'),
+                go.Scatter(x=years, y=withdrawal_series_lakhs, mode='lines', name='Monthly Withdrawal (₹ Lakhs)')
             ],
             layout=go.Layout(
                 title="Investment & Withdrawal Over Time",
