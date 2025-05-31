@@ -122,12 +122,12 @@ if holdings_file:
         return pd.DataFrame(plan), total_profit
     plan_df, total_booked = get_sell_plan(df, target_profit)
     plan_df = plan_df.sort_values(by="Sell Value (₹)", ascending=False).reset_index(drop=True)
-
+    total_sell_value = plan_df["Sell Value (₹)"].sum()
     st.subheader(f"Sell Plan to Book ₹{target_profit} Profit")
+    
     if not plan_df.empty:
         st.dataframe(plan_df)
         st.write(f"### Total Estimated Profit Booked: ₹{total_booked:.2f}")
+        st.write(f"### Total Estimated Sell Value: ₹{total_sell_value:.2f}")
     else:
         st.info("No profitable sell plan possible with current holdings.")
-    
-
