@@ -38,11 +38,11 @@ mode = st.radio("Select Mode", ["Calculate Required Investment", "Calculate Inve
 
 # === MODE 1: CALCULATE REQUIRED INVESTMENT ===
 if mode == "Calculate Required Investment":
-    duration_years = st.number_input("Investment Duration (Years)", value=100, step=1)
+    duration_years = st.number_input("Investment Duration (Years)", value=99, step=1)
     final_balance = st.number_input("Final Balance Desired (₹)", value=0, step=100000)
     monthly_withdrawal = st.number_input("Monthly Withdrawal (₹)", value=63200, step=1000)
 
-    annual_r = st.number_input("Expected Annual Return (%)", value=6.1, step=0.1, format="%.2f")
+    annual_r = st.number_input("Expected Annual Return (%)", value=11.75, step=0.1, format="%.2f")
     annual_g = st.number_input("Annual Increase in Withdrawal (%)", value=6.0, step=0.1, format="%.2f")
 
     # Convert to monthly rates
