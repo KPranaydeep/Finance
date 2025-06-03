@@ -190,12 +190,24 @@ if uploaded_holdings:
         st.subheader("🔄 Fetching Live Prices from NSE")
         ltp_list = []
         for symbol in merged_df['Symbol']:
+            ltp = None
             try:
                 ticker = yf.Ticker(f"{symbol}.NS")
-                ltp = ticker.history(period='1d')['Close'].iloc[-1]
-                ltp_list.append(ltp)
+                ltp_data = ticker.history(period='1d')
+                if not ltp_data.empty:
+                    ltp = ltp_data['Close'].iloc[-1]
             except:
-                ltp_list.append(None)
+                pass
+            if ltp is None:
+                try:
+                    ticker = yf.Ticker(f"{symbol}.BO")
+                    ltp_data = ticker.history(period='1d')
+                    if not ltp_data.empty:
+                        ltp = ltp_data['Close'].iloc[-1]
+                except:
+                    pass
+            ltp_list.append(ltp)
+
         merged_df['Live LTP'] = ltp_list
 
         merged_df['Invested Amount'] = merged_df['Quantity'] * merged_df['Average Price']
@@ -203,18 +215,23 @@ if uploaded_holdings:
         merged_df['Profit/Loss'] = merged_df['Current Value'] - merged_df['Invested Amount']
         merged_df['Profit/Loss (%)'] = (merged_df['Profit/Loss'] / merged_df['Invested Amount']) * 100
 
-        st.subheader("📈 Updated Holdings with Live LTP")
-        st.dataframe(merged_df[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Invested Amount', 'Current Value', 'Profit/Loss', 'Profit/Loss (%)']])
+        total_invested = merged_df['Invested Amount'].sum()
+        default_target = round(total_invested * 0.06, 2)
+        target_rupees = st.number_input("🎯 Enter target booking profit (₹)", value=default_target, min_value=0.0, step=100.0)
 
-        target_profit = st.number_input("🎯 Enter your target profit percentage (%)", min_value=0.0, step=0.1)
-        sell_candidates = merged_df[merged_df['Profit/Loss (%)'] >= target_profit]
+        merged_df = merged_df.sort_values('Profit/Loss', ascending=False).copy()
+        merged_df['Cumulative P&L'] = merged_df['Profit/Loss'].cumsum()
+        sell_plan = merged_df[merged_df['Cumulative P&L'] <= target_rupees]
+        if not sell_plan.empty:
+            final_row = merged_df[merged_df['Cumulative P&L'] >= target_rupees].head(1)
+            sell_plan = pd.concat([sell_plan, final_row])
 
-        st.subheader("📤 Suggested Sell Plan")
-        if not sell_candidates.empty:
-            st.success(f"The following holdings have met or exceeded your target profit of {target_profit}%:")
-            st.dataframe(sell_candidates[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Profit/Loss (%)']])
+        st.subheader("📤 Suggested Sell Plan to Book Target Profit")
+        if not sell_plan.empty:
+            st.success(f"To book ₹{target_rupees}, sell these holdings:")
+            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Profit/Loss', 'Cumulative P&L']])
         else:
-            st.info("No holdings have met your target profit yet.")
+            st.info("No holdings available to meet the target profit.")
 
     except Exception as e:
         st.error(f"❌ Could not process file: {e}")
