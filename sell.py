@@ -140,7 +140,7 @@ if uploaded_mmi_file:
     highest_mmi_date = future_df['Predicted_MMI'].idxmax()
     ci_upper_high = highest_mmi_value + 1.96 * resid_std
     ci_lower_high = highest_mmi_value - 1.96 * resid_std
-f"{dt:%d, %b, %Y}" dates in this format
+
     st.write(f"### Forecast Summary for next 120 days")
     st.write(f"Lowest predicted MMI: {lowest_mmi_value:.2f} on {lowest_mmi_date.date.strftime('%d, %b, %Y')}")
     st.write(f"95% CI for lowest MMI: [{ci_lower:.2f}, {ci_upper:.2f}]")
