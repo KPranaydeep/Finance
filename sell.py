@@ -4,7 +4,6 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingRegressor
 import matplotlib.pyplot as plt
-from scipy.stats import norm
 import streamlit as st
 import yfinance as yf
 
@@ -38,7 +37,7 @@ uploaded_mmi_file = st.file_uploader("📂 Upload MMI CSV file", type=['csv'])
 if uploaded_mmi_file:
     df_filtered = load_mmi_data(uploaded_mmi_file)
 
-    st.subheader("📈 Enter Today's Market Mood Index (MMI) and Nifty")
+    st.subheader("📈 Enter Today's Market Mood Index (MMI) and Auto-Fetch Nifty")
     try:
         nifty_data = yf.download("^NSEI", period="1d", interval="1m", progress=False)
         latest_close = nifty_data['Close'].dropna().iloc[-1]
@@ -110,7 +109,7 @@ if uploaded_mmi_file:
         }
 
         features_df = pd.DataFrame([features])
-        features_df = features_df.reindex(columns=X.columns, fill_value=0)  # fix: align with training columns
+        features_df = features_df.reindex(columns=X.columns, fill_value=0)
 
         pred = model.predict(features_df)[0]
         predictions.append(pred)
@@ -149,28 +148,22 @@ if uploaded_mmi_file:
     else:
         st.warning("❌ No SELL signal – forecast MMI stays below 50")
 
-# === Part 2: Holdings Analysis ===
-st.header("💼 Upload Your Stock Holdings")
-mapping_url = "https://raw.githubusercontent.com/KPranaydeep/Finance/main/EQUITY_L.csv"
-
-@st.cache_data
-def load_mapping(url):
-    df = pd.read_csv(url)
-    df.columns = df.columns.str.strip()
-    return df
-
-df_map = load_mapping(mapping_url)
-
-uploaded_holdings = st.file_uploader("📂 Upload your holdings CSV (Zerodha/Upstox format)", type=['csv'])
+# === Part 2: Groww Holdings ===
+st.header("💼 Upload Your Groww Stock Holdings")
+uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings (.xlsx only)", type=['xlsx'])
 
 if uploaded_holdings:
-    holdings = pd.read_csv(uploaded_holdings)
-    holdings.columns = holdings.columns.str.strip()
+    try:
+        holdings = pd.read_excel(uploaded_holdings)
+        holdings.columns = holdings.columns.str.strip()
 
-    if 'Symbol' in holdings.columns:
-        merged = holdings.merge(df_map, left_on='Symbol', right_on='SYMBOL', how='left')
-        merged['NSE Code'] = merged['SYMBOL']
-        st.markdown("### 🧾 Your Holdings Overview")
-        st.dataframe(merged[['Symbol', 'Quantity', 'NSE Code', 'Company Name']].fillna('-'))
-    else:
-        st.error("⚠️ 'Symbol' column not found in your uploaded file.")
+        if 'ISIN' in holdings.columns and 'Qty.' in holdings.columns:
+            st.markdown("### 🧾 Your Holdings Overview (Groww Detected)")
+            display_cols = ['Security Name', 'ISIN', 'Qty.', 'Average Price', 'LTP', 'Current Value', 'P&L']
+            valid_cols = [col for col in display_cols if col in holdings.columns]
+            st.dataframe(holdings[valid_cols].fillna('-'))
+        else:
+            st.warning("⚠️ The uploaded Excel file does not match Groww holdings format.")
+    except Exception as e:
+        st.error(f"❌ Error reading the file: {e}")
+        
