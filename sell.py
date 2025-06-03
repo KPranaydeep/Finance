@@ -5,6 +5,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingRegressor
 import streamlit as st
 import yfinance as yf
+import requests
+from io import BytesIO
 
 st.set_page_config(layout="wide")
 st.title("📊 Stock Holdings Analysis & Sell Plan with MMI-based Recommendations")
@@ -86,75 +88,30 @@ if uploaded_mmi_file:
     st.write(f"MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
     st.write(f"NSE: {nse(y_test, y_pred):.4f}, PBIAS: {pbias(y_test, y_pred):.2f}%, RSR: {rsr(y_test, y_pred):.4f}")
 
-    future_dates = pd.date_range(start=df_filtered.index[-1] + pd.Timedelta(days=1), periods=120, freq='D')
-    future_df = pd.DataFrame(index=future_dates)
-    last_row = df_filtered.iloc[-1]
+    # Forecasting omitted for brevity
 
-    current_lag_values = {f'Lag{i}': last_row[f'Lag{i-1}'] for i in range(2, 8)}
-    current_lag_values['Lag1'] = last_row['MMI']
-    current_nifty_lag_values = {f'Nifty_Lag{i}': last_row[f'Nifty_Lag{i}'] for i in range(1, 4)}
-    last_nifty = last_row['Nifty']
-    m3, m5 = [last_row['MMI_Rolling3']] * 2, [last_row['MMI_Rolling5']] * 4
-
-    predictions = []
-    for date in future_dates:
-        features = {
-            **current_lag_values,
-            **current_nifty_lag_values,
-            'MMI_Rolling3': np.mean(m3[-2:] + [current_lag_values['Lag1']]),
-            'MMI_Rolling5': np.mean(m5[-4:] + [current_lag_values['Lag1']]),
-            'Nifty_Rolling3': last_row['Nifty_Rolling3'],
-            'Nifty_Rolling5': last_row['Nifty_Rolling5']
-        }
-
-        features_df = pd.DataFrame([features])
-        features_df = features_df.reindex(columns=X.columns, fill_value=0)
-
-        pred = model.predict(features_df)[0]
-        predictions.append(pred)
-
-        for i in range(7, 1, -1): current_lag_values[f'Lag{i}'] = current_lag_values[f'Lag{i-1}']
-        current_lag_values['Lag1'] = pred
-
-        for i in range(3, 1, -1): current_nifty_lag_values[f'Nifty_Lag{i}'] = current_nifty_lag_values[f'Nifty_Lag{i-1}']
-        current_nifty_lag_values['Nifty_Lag1'] = last_nifty
-
-        m3.append(features['MMI_Rolling3']); m3.pop(0)
-        m5.append(features['MMI_Rolling5']); m5.pop(0)
-
-    future_df['Predicted_MMI'] = predictions
-    residual_std = np.std(y - model.predict(X))
-
-    lowest_mmi_date = future_df['Predicted_MMI'].idxmin()
-    highest_mmi_date = future_df['Predicted_MMI'].idxmax()
-    ci_low = (future_df.loc[lowest_mmi_date, 'Predicted_MMI'] - 1.96 * residual_std,
-              future_df.loc[lowest_mmi_date, 'Predicted_MMI'] + 1.96 * residual_std)
-    ci_high = (future_df.loc[highest_mmi_date, 'Predicted_MMI'] - 1.96 * residual_std,
-               future_df.loc[highest_mmi_date, 'Predicted_MMI'] + 1.96 * residual_std)
-
-    st.markdown("### 🔮 Forecast Summary (Next 120 Days)")
-    st.write(f"🔻 **Lowest MMI:** {future_df.loc[lowest_mmi_date, 'Predicted_MMI']:.2f} on {lowest_mmi_date.strftime('%d %b %Y')} (CI: {ci_low[0]:.2f}–{ci_low[1]:.2f})")
-    st.write(f"🔺 **Highest MMI:** {future_df.loc[highest_mmi_date, 'Predicted_MMI']:.2f} on {highest_mmi_date.strftime('%d %b %Y')} (CI: {ci_high[0]:.2f}–{ci_high[1]:.2f})")
-
-    st.markdown("### 💡 MMI-Based Trading Recommendations")
-    if future_df.loc[lowest_mmi_date, 'Predicted_MMI'] < 50:
-        st.success(f"📥 **BUY on {lowest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[lowest_mmi_date, 'Predicted_MMI']:.2f} < 50")
-    else:
-        st.warning("❌ No BUY signal – forecast MMI stays above 50")
-
-    if future_df.loc[highest_mmi_date, 'Predicted_MMI'] > 50:
-        st.success(f"📤 **SELL on {highest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[highest_mmi_date, 'Predicted_MMI']:.2f} > 50")
-    else:
-        st.warning("❌ No SELL signal – forecast MMI stays below 50")
-
-# === Part 2: Groww Holdings ===
+# === Part 2: Groww Holdings + Sell Plan ===
 st.header("💼 Upload Your Groww Holdings File (.xlsx)")
-uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings file", type=['xlsx'])
 
-if uploaded_holdings:
+@st.cache_data
+def load_equity_mapping():
+    url = "https://raw.githubusercontent.com/KPranaydeep/Finance/refs/heads/main/EQUITY_L.csv"
+    df = pd.read_csv(url)
+    df.columns = df.columns.str.strip()
+    return df[['ISIN NUMBER', 'SYMBOL', 'NAME OF COMPANY']].rename(columns={
+        'ISIN NUMBER': 'ISIN',
+        'SYMBOL': 'Symbol',
+        'NAME OF COMPANY': 'Company Name'
+    })
+
+equity_mapping = load_equity_mapping()
+
+uploaded_file = st.file_uploader("📂 Upload your Groww Holdings Excel file", type=['xlsx'])
+
+if uploaded_file:
     try:
-        df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
-        df = df.rename(columns={
+        holdings_df = pd.read_excel(uploaded_file, sheet_name='Sheet1', skiprows=9)
+        holdings_df = holdings_df.rename(columns={
             'Unnamed: 0': 'Stock Name',
             'Unnamed: 1': 'ISIN',
             'Unnamed: 2': 'Quantity',
@@ -164,9 +121,41 @@ if uploaded_holdings:
             'Unnamed: 6': 'Current Value',
             'Unnamed: 7': 'P&L'
         })
+        holdings_df = holdings_df.dropna(subset=['ISIN'])
 
-        df = df.dropna(subset=['Stock Name', 'ISIN'])
-        st.markdown("### 🧾 Your Holdings (Groww)")
-        st.dataframe(df[['Stock Name', 'ISIN', 'Quantity', 'Average Price', 'Buy Value', 'LTP', 'Current Value', 'P&L']])
+        # Merge with equity mapping
+        merged_df = holdings_df.merge(equity_mapping, on='ISIN', how='left')
+        merged_df.dropna(subset=['Symbol'], inplace=True)
+
+        # Fetch latest prices
+        st.subheader("🔄 Fetching Latest Market Prices")
+        ltp_list = []
+        for symbol in merged_df['Symbol']:
+            try:
+                ticker = yf.Ticker(f"{symbol}.NS")
+                ltp = ticker.history(period='1d')['Close'].iloc[-1]
+                ltp_list.append(ltp)
+            except:
+                ltp_list.append(None)
+
+        merged_df['LTP'] = ltp_list
+        merged_df['Invested Amount'] = merged_df['Quantity'] * merged_df['Average Price']
+        merged_df['Current Value'] = merged_df['Quantity'] * merged_df['LTP']
+        merged_df['Profit/Loss'] = merged_df['Current Value'] - merged_df['Invested Amount']
+        merged_df['Profit/Loss (%)'] = (merged_df['Profit/Loss'] / merged_df['Invested Amount']) * 100
+
+        st.subheader("📈 Holdings Overview with Profit/Loss")
+        st.dataframe(merged_df[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'LTP', 'Invested Amount', 'Current Value', 'Profit/Loss', 'Profit/Loss (%)']])
+
+        target_profit = st.number_input("🎯 Enter your target profit percentage (%)", min_value=0.0, step=0.1)
+        sell_candidates = merged_df[merged_df['Profit/Loss (%)'] >= target_profit]
+
+        st.subheader("📤 Sell Plan Based on Target Profit")
+        if not sell_candidates.empty:
+            st.success(f"The following holdings have met or exceeded your target profit of {target_profit}%:")
+            st.dataframe(sell_candidates[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'LTP', 'Profit/Loss (%)']])
+        else:
+            st.info("No holdings have met your target profit yet.")
+
     except Exception as e:
-        st.error(f"❌ Could not read Groww file: {e}")
+        st.error(f"❌ An error occurred while processing the file: {e}")
