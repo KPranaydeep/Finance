@@ -142,9 +142,9 @@ if uploaded_mmi_file:
     ci_lower_high = highest_mmi_value - 1.96 * resid_std
 
     st.write(f"### Forecast Summary for next 120 days")
-    st.write(f"Lowest predicted MMI: {lowest_mmi_value:.2f} on {lowest_mmi_date.date.strftime('%d, %b, %Y')}")
+    st.write(f"Lowest predicted MMI: {lowest_mmi_value:.2f} on {lowest_mmi_date.strftime('%d, %b, %Y')}")
     st.write(f"95% CI for lowest MMI: [{ci_lower:.2f}, {ci_upper:.2f}]")
-    st.write(f"Highest predicted MMI: {highest_mmi_value:.2f} on {highest_mmi_date.date.strftime('%d, %b, %Y')}")
+    st.write(f"Highest predicted MMI: {highest_mmi_value:.2f} on {highest_mmi_date.strftime('%d, %b, %Y')}")
     st.write(f"95% CI for highest MMI: [{ci_lower_high:.2f}, {ci_upper_high:.2f}]")
 
     # Recommendation logic
