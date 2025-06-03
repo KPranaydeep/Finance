@@ -216,7 +216,7 @@ if uploaded_holdings:
         merged_df['Profit/Loss (%)'] = (merged_df['Profit/Loss'] / merged_df['Invested Amount']) * 100
 
         total_invested = merged_df['Invested Amount'].sum()
-        default_target = round(total_invested * 0.06, 2)
+        default_target = round(total_invested * 0.0034, 2)
         target_rupees = st.number_input("🎯 Enter target booking profit (₹)", value=default_target, min_value=0.0, step=100.0)
 
         merged_df = merged_df.sort_values('Profit/Loss', ascending=False).copy()
