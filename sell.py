@@ -151,12 +151,12 @@ if uploaded_mmi_file:
     buy_recommendation = ""
     sell_recommendation = ""
     if lowest_mmi_value < 50:
-        buy_recommendation = f"BUY recommendation on {lowest_mmi_date.date.strftime('%d, %b, %Y')} with forecast MMI {lowest_mmi_value:.2f} (below 50 threshold)."
+        buy_recommendation = f"BUY recommendation on {lowest_mmi_date.date().strftime('%d, %b, %Y')} with forecast MMI {lowest_mmi_value:.2f} (below 50 threshold)."
     else:
         buy_recommendation = "No BUY recommendation (lowest forecast MMI not below 50)."
 
     if highest_mmi_value > 50:
-        sell_recommendation = f"SELL recommendation on {highest_mmi_date.date.strftime('%d, %b, %Y')} with forecast MMI {highest_mmi_value:.2f} (above 50 threshold)."
+        sell_recommendation = f"SELL recommendation on {highest_mmi_date.date().strftime('%d, %b, %Y')} with forecast MMI {highest_mmi_value:.2f} (above 50 threshold)."
     else:
         sell_recommendation = "No SELL recommendation (highest forecast MMI not above 50)."
 
