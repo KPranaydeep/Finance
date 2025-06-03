@@ -140,23 +140,23 @@ if uploaded_mmi_file:
     highest_mmi_date = future_df['Predicted_MMI'].idxmax()
     ci_upper_high = highest_mmi_value + 1.96 * resid_std
     ci_lower_high = highest_mmi_value - 1.96 * resid_std
-
+f"{dt:%d, %b, %Y}" dates in this format
     st.write(f"### Forecast Summary for next 120 days")
-    st.write(f"Lowest predicted MMI: {lowest_mmi_value:.2f} on {lowest_mmi_date.date()}")
+    st.write(f"Lowest predicted MMI: {lowest_mmi_value:.2f} on {lowest_mmi_date.date.strftime('%d, %b, %Y')}")
     st.write(f"95% CI for lowest MMI: [{ci_lower:.2f}, {ci_upper:.2f}]")
-    st.write(f"Highest predicted MMI: {highest_mmi_value:.2f} on {highest_mmi_date.date()}")
+    st.write(f"Highest predicted MMI: {highest_mmi_value:.2f} on {highest_mmi_date.date.strftime('%d, %b, %Y')}")
     st.write(f"95% CI for highest MMI: [{ci_lower_high:.2f}, {ci_upper_high:.2f}]")
 
     # Recommendation logic
     buy_recommendation = ""
     sell_recommendation = ""
     if lowest_mmi_value < 50:
-        buy_recommendation = f"BUY recommendation on {lowest_mmi_date.date()} with forecast MMI {lowest_mmi_value:.2f} (below 50 threshold)."
+        buy_recommendation = f"BUY recommendation on {lowest_mmi_date.date.strftime('%d, %b, %Y')} with forecast MMI {lowest_mmi_value:.2f} (below 50 threshold)."
     else:
         buy_recommendation = "No BUY recommendation (lowest forecast MMI not below 50)."
 
     if highest_mmi_value > 50:
-        sell_recommendation = f"SELL recommendation on {highest_mmi_date.date()} with forecast MMI {highest_mmi_value:.2f} (above 50 threshold)."
+        sell_recommendation = f"SELL recommendation on {highest_mmi_date.date.strftime('%d, %b, %Y')} with forecast MMI {highest_mmi_value:.2f} (above 50 threshold)."
     else:
         sell_recommendation = "No SELL recommendation (highest forecast MMI not above 50)."
 
