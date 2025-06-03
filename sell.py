@@ -41,8 +41,9 @@ if uploaded_mmi_file:
     st.subheader("📈 Enter Today's Market Mood Index (MMI) and Nifty")
     try:
         nifty_data = yf.download("^NSEI", period="1d", interval="1m", progress=False)
-        today_nifty = round(nifty_data['Close'].dropna().iloc[-1], 2)
-        st.success(f"📈 Auto-fetched Today's Nifty: {today_nifty}")
+        latest_close = nifty_data['Close'].dropna().iloc[-1]
+        today_nifty = round(float(latest_close), 2)
+        st.success(f"📈 Auto-fetched Today's Nifty LTP: **{today_nifty}**")
     except Exception as e:
         today_nifty = st.number_input("Today's Nifty (Auto-fetch failed)", min_value=0.0, step=1.0)
         st.warning("⚠️ Couldn't fetch live Nifty data. Please enter manually.")
