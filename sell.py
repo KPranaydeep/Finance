@@ -101,14 +101,10 @@ if uploaded_mmi_file:
         features = {**current_lag_values, **current_nifty_lag_values}
         m3_val = np.mean(m3[-2:] + [current_lag_values['Lag1']])
         m5_val = np.mean(m5[-4:] + [current_lag_values['Lag1']])
-        features.update({
-            'MMI_Rolling3': m3_val,
-            'MMI_Rolling5': m5_val,
-            'Nifty_Rolling3': last_row['Nifty_Rolling3'],
-            'Nifty_Rolling5': last_row['Nifty_Rolling5'],
-            'Nifty': last_nifty
-        })
-        pred = model.predict(pd.DataFrame([features]))[0]
+        features_df = pd.DataFrame([features])
+        features_df = features_df[X.columns]  # reorder and filter columns exactly as training features
+        pred = model.predict(features_df)[0]
+
         predictions.append(pred)
 
         for i in range(7, 1, -1): current_lag_values[f'Lag{i}'] = current_lag_values[f'Lag{i-1}']
