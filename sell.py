@@ -162,7 +162,6 @@ def load_equity_mapping():
     })
 
 equity_mapping = load_equity_mapping()
-
 uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings file", type=['xlsx'])
 
 if uploaded_holdings:
@@ -179,36 +178,29 @@ if uploaded_holdings:
             'Unnamed: 7': 'P&L'
         })
         df = df.dropna(subset=['Stock Name', 'ISIN'])
-
         st.markdown("### 🧾 Your Holdings (Groww)")
         st.dataframe(df[['Stock Name', 'ISIN', 'Quantity', 'Average Price', 'Buy Value', 'LTP', 'Current Value', 'P&L']])
 
-        # Enhance: Join with symbol mapping
         merged_df = df.merge(equity_mapping, on='ISIN', how='left')
         merged_df.dropna(subset=['Symbol'], inplace=True)
 
-        st.subheader("🔄 Fetching Live Prices from NSE")
+        st.subheader("🔄 Fetching Live Prices from NSE/BSE...")
         ltp_list = []
         for symbol in merged_df['Symbol']:
             ltp = None
-            try:
-                ticker = yf.Ticker(f"{symbol}.NS")
-                ltp_data = ticker.history(period='1d')
-                if not ltp_data.empty:
-                    ltp = ltp_data['Close'].iloc[-1]
-            except:
-                pass
-            if ltp is None:
+            for suffix in ['.NS', '.BO']:
                 try:
-                    ticker = yf.Ticker(f"{symbol}.BO")
+                    ticker = yf.Ticker(symbol + suffix)
                     ltp_data = ticker.history(period='1d')
                     if not ltp_data.empty:
                         ltp = ltp_data['Close'].iloc[-1]
+                        break
                 except:
-                    pass
+                    continue
             ltp_list.append(ltp)
 
         merged_df['Live LTP'] = ltp_list
+        merged_df.dropna(subset=['Live LTP'], inplace=True)
 
         merged_df['Invested Amount'] = merged_df['Quantity'] * merged_df['Average Price']
         merged_df['Current Value'] = merged_df['Quantity'] * merged_df['Live LTP']
@@ -219,19 +211,27 @@ if uploaded_holdings:
         default_target = round(total_invested * 0.0034, 2)
         target_rupees = st.number_input("🎯 Enter target booking profit (₹)", value=default_target, min_value=0.0, step=100.0)
 
-        merged_df = merged_df.sort_values('Profit/Loss', ascending=False).copy()
-        merged_df['Cumulative P&L'] = merged_df['Profit/Loss'].cumsum()
-        sell_plan = merged_df[merged_df['Cumulative P&L'] <= target_rupees]
-        if not sell_plan.empty:
-            final_row = merged_df[merged_df['Cumulative P&L'] >= target_rupees].head(1)
-            sell_plan = pd.concat([sell_plan, final_row])
+        # Sort by highest profit first
+        merged_df = merged_df.sort_values(by='Profit/Loss', ascending=False).reset_index(drop=True)
 
-        st.subheader("📤 Suggested Sell Plan to Book Target Profit")
-        if not sell_plan.empty:
+        # Iteratively accumulate to meet target
+        cumulative = 0
+        rows_to_sell = []
+        for idx, row in merged_df.iterrows():
+            if cumulative >= target_rupees:
+                break
+            cumulative += row['Profit/Loss']
+            rows_to_sell.append(row)
+
+        if cumulative >= target_rupees and rows_to_sell:
+            sell_plan = pd.DataFrame(rows_to_sell)
+            st.subheader("📤 Suggested Sell Plan to Book Target Profit")
             st.success(f"To book ₹{target_rupees}, sell these holdings:")
-            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Profit/Loss', 'Cumulative P&L']])
+            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Profit/Loss']])
         else:
-            st.info("No holdings available to meet the target profit.")
+            st.warning("📉 No sufficient profitable stocks available to book the target profit.")
+            st.info("⏳ Come back tomorrow — the market may rise and help you hit your target!")
 
     except Exception as e:
         st.error(f"❌ Could not process file: {e}")
+
