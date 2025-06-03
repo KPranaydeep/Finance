@@ -3,7 +3,6 @@ import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingRegressor
-import matplotlib.pyplot as plt
 import streamlit as st
 import yfinance as yf
 
@@ -149,21 +148,25 @@ if uploaded_mmi_file:
         st.warning("❌ No SELL signal – forecast MMI stays below 50")
 
 # === Part 2: Groww Holdings ===
-st.header("💼 Upload Your Groww Stock Holdings")
-uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings (.xlsx only)", type=['xlsx'])
+st.header("💼 Upload Your Groww Holdings File (.xlsx)")
+uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings file", type=['xlsx'])
 
 if uploaded_holdings:
     try:
-        holdings = pd.read_excel(uploaded_holdings)
-        holdings.columns = holdings.columns.str.strip()
+        df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
+        df = df.rename(columns={
+            'Unnamed: 0': 'Stock Name',
+            'Unnamed: 1': 'ISIN',
+            'Unnamed: 2': 'Quantity',
+            'Unnamed: 3': 'Average Price',
+            'Unnamed: 4': 'Buy Value',
+            'Unnamed: 5': 'LTP',
+            'Unnamed: 6': 'Current Value',
+            'Unnamed: 7': 'P&L'
+        })
 
-        if 'ISIN' in holdings.columns and 'Qty.' in holdings.columns:
-            st.markdown("### 🧾 Your Holdings Overview (Groww Detected)")
-            display_cols = ['Security Name', 'ISIN', 'Qty.', 'Average Price', 'LTP', 'Current Value', 'P&L']
-            valid_cols = [col for col in display_cols if col in holdings.columns]
-            st.dataframe(holdings[valid_cols].fillna('-'))
-        else:
-            st.warning("⚠️ The uploaded Excel file does not match Groww holdings format.")
+        df = df.dropna(subset=['Stock Name', 'ISIN'])
+        st.markdown("### 🧾 Your Holdings (Groww)")
+        st.dataframe(df[['Stock Name', 'ISIN', 'Quantity', 'Average Price', 'Buy Value', 'LTP', 'Current Value', 'P&L']])
     except Exception as e:
-        st.error(f"❌ Error reading the file: {e}")
-        
+        st.error(f"❌ Could not read Groww file: {e}")
