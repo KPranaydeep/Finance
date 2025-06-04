@@ -139,17 +139,33 @@ if uploaded_mmi_file:
 
     st.markdown("### 💡 MMI-Based Trading Recommendations")
 
-    # Buy Signal Condition
-    if (future_df.loc[lowest_mmi_date, 'Predicted_MMI'] < 50) and (today_mmi < 50):
-        st.success(f"📥 **BUY on {lowest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[lowest_mmi_date, 'Predicted_MMI']:.2f} < 50 and Today's MMI {today_mmi:.2f} < 50")
-    else:
-        st.warning("❌ No BUY signal – Either forecast or today's MMI is not below 50")
+    # Extract forecasted values
+    lowest_mmi = future_df.loc[lowest_mmi_date, 'Predicted_MMI']
+    highest_mmi = future_df.loc[highest_mmi_date, 'Predicted_MMI']
     
-    # Sell Signal Condition
-    if (future_df.loc[highest_mmi_date, 'Predicted_MMI'] > 50) and (today_mmi > 50):
-        st.success(f"📤 **SELL on {highest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[highest_mmi_date, 'Predicted_MMI']:.2f} > 50 and Today's MMI {today_mmi:.2f} > 50")
+    # BUY Signal: today's MMI < 50 AND forecasted lowest MMI < 50
+    if today_mmi < 50 and lowest_mmi < 50:
+        st.success(
+            f"📥 **BUY Signal** – Today's MMI is {today_mmi:.2f} (< 50) and "
+            f"lowest forecasted MMI is {lowest_mmi:.2f} on {lowest_mmi_date.strftime('%d %b %Y')} (< 50)"
+        )
     else:
-        st.warning("❌ No SELL signal – Either forecast or today's MMI is not above 50")
+        st.warning(
+            f"❌ No BUY Signal – Today's MMI is {today_mmi:.2f} and "
+            f"lowest forecasted MMI is {lowest_mmi:.2f} on {lowest_mmi_date.strftime('%d %b %Y')}"
+        )
+    
+    # SELL Signal: today's MMI > 50 AND forecasted highest MMI > 50
+    if today_mmi > 50 and highest_mmi > 50:
+        st.success(
+            f"📤 **SELL Signal** – Today's MMI is {today_mmi:.2f} (> 50) and "
+            f"highest forecasted MMI is {highest_mmi:.2f} on {highest_mmi_date.strftime('%d %b %Y')} (> 50)"
+        )
+    else:
+        st.warning(
+            f"❌ No SELL Signal – Today's MMI is {today_mmi:.2f} and "
+            f"highest forecasted MMI is {highest_mmi:.2f} on {highest_mmi_date.strftime('%d %b %Y')}"
+        )
 
 # === Part 2: Groww Holdings with LTP and Sell Plan ===
 st.header("💼 Upload Your Groww Holdings File (.xlsx)")
