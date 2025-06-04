@@ -139,32 +139,39 @@ if uploaded_mmi_file:
 
     st.markdown("### 💡 MMI-Based Trading Recommendations")
 
-    # Extract forecasted values
-    lowest_mmi = future_df.loc[lowest_mmi_date, 'Predicted_MMI']
-    highest_mmi = future_df.loc[highest_mmi_date, 'Predicted_MMI']
+    # Add today's MMI to the forecast dataframe
+    today_row = pd.DataFrame({
+        'Predicted_MMI': [today_mmi]
+    }, index=[pd.Timestamp.today().normalize()])  # today at 00:00
     
-    # BUY Signal: today's MMI < 50 AND forecasted lowest MMI < 50
-    if today_mmi < 50 and lowest_mmi < 50:
+    # Combine today + forecast
+    combined_df = pd.concat([today_row, future_df])
+    
+    # Find lowest and highest MMI (from today onward)
+    min_mmi_date = combined_df['Predicted_MMI'].idxmin()
+    min_mmi_value = combined_df.loc[min_mmi_date, 'Predicted_MMI']
+    
+    max_mmi_date = combined_df['Predicted_MMI'].idxmax()
+    max_mmi_value = combined_df.loc[max_mmi_date, 'Predicted_MMI']
+    
+    # === BUY Signal ===
+    if min_mmi_value < 50:
         st.success(
-            f"📥 **BUY Signal** – Today's MMI is {today_mmi:.2f} (< 50) and "
-            f"lowest forecasted MMI is {lowest_mmi:.2f} on {lowest_mmi_date.strftime('%d %b %Y')} (< 50)"
+            f"📥 **BUY on {min_mmi_date.strftime('%d %b %Y')}** – MMI {min_mmi_value:.2f} < 50"
         )
     else:
         st.warning(
-            f"❌ No BUY Signal – Today's MMI is {today_mmi:.2f} and "
-            f"lowest forecasted MMI is {lowest_mmi:.2f} on {lowest_mmi_date.strftime('%d %b %Y')}"
+            f"❌ No BUY Signal – Minimum MMI is {min_mmi_value:.2f} on {min_mmi_date.strftime('%d %b %Y')}"
         )
     
-    # SELL Signal: today's MMI > 50 AND forecasted highest MMI > 50
-    if today_mmi > 50 and highest_mmi > 50:
+    # === SELL Signal ===
+    if today_mmi > 50 and max_mmi_value > 50:
         st.success(
-            f"📤 **SELL Signal** – Today's MMI is {today_mmi:.2f} (> 50) and "
-            f"highest forecasted MMI is {highest_mmi:.2f} on {highest_mmi_date.strftime('%d %b %Y')} (> 50)"
+            f"📤 **SELL on {max_mmi_date.strftime('%d %b %Y')}** – MMI {max_mmi_value:.2f} > 50"
         )
     else:
         st.warning(
-            f"❌ No SELL Signal – Today's MMI is {today_mmi:.2f} and "
-            f"highest forecasted MMI is {highest_mmi:.2f} on {highest_mmi_date.strftime('%d %b %Y')}"
+            f"❌ No SELL Signal – Max MMI is {max_mmi_value:.2f} on {max_mmi_date.strftime('%d %b %Y')}, Today's MMI: {today_mmi:.2f}"
         )
 
 # === Part 2: Groww Holdings with LTP and Sell Plan ===
