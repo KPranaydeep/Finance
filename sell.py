@@ -138,15 +138,18 @@ if uploaded_mmi_file:
     st.write(f"🔺 **Highest MMI:** {future_df.loc[highest_mmi_date, 'Predicted_MMI']:.2f} on {highest_mmi_date.strftime('%d %b %Y')} (CI: {ci_high[0]:.2f}–{ci_high[1]:.2f})")
 
     st.markdown("### 💡 MMI-Based Trading Recommendations")
-    if future_df.loc[lowest_mmi_date, 'Predicted_MMI'] < 50:
-        st.success(f"📥 **BUY on {lowest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[lowest_mmi_date, 'Predicted_MMI']:.2f} < 50")
-    else:
-        st.warning("❌ No BUY signal – forecast MMI stays above 50")
 
-    if future_df.loc[highest_mmi_date, 'Predicted_MMI'] > 50:
-        st.success(f"📤 **SELL on {highest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[highest_mmi_date, 'Predicted_MMI']:.2f} > 50")
+    # Buy Signal Condition
+    if (future_df.loc[lowest_mmi_date, 'Predicted_MMI'] < 50) and (today_mmi < 50):
+        st.success(f"📥 **BUY on {lowest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[lowest_mmi_date, 'Predicted_MMI']:.2f} < 50 and Today's MMI {today_mmi:.2f} < 50")
     else:
-        st.warning("❌ No SELL signal – forecast MMI stays below 50")
+        st.warning("❌ No BUY signal – Either forecast or today's MMI is not below 50")
+    
+    # Sell Signal Condition
+    if (future_df.loc[highest_mmi_date, 'Predicted_MMI'] > 50) and (today_mmi > 50):
+        st.success(f"📤 **SELL on {highest_mmi_date.strftime('%d %b %Y')}** – Forecast MMI {future_df.loc[highest_mmi_date, 'Predicted_MMI']:.2f} > 50 and Today's MMI {today_mmi:.2f} > 50")
+    else:
+        st.warning("❌ No SELL signal – Either forecast or today's MMI is not above 50")
 
 # === Part 2: Groww Holdings with LTP and Sell Plan ===
 st.header("💼 Upload Your Groww Holdings File (.xlsx)")
