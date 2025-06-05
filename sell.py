@@ -179,7 +179,6 @@ import pandas as pd
 import yfinance as yf
 
 # === Page Setup ===
-st.set_page_config(page_title="💼 Groww Holdings Analyzer", layout="wide")
 st.header("💼 Upload Your Groww Holdings File (.xlsx)")
 
 # === Load ISIN to Symbol Mapping ===
