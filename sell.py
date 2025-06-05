@@ -258,7 +258,7 @@ if uploaded_holdings:
         col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl/total_invested)*100:.2f}%")
 
         # === Explain Target ===
-        st.markdown("💡 *To achieve 100% CAGR (doubling in 1 year), you need ~0.33% daily gross return. After 15% trading charges, your net return is ~0.28% per day.*")
+        st.markdown("💡 *To achieve 100% CAGR (doubling in 1 year), you need ~0.34% daily gross return. After 15% trading charges, your net return is ~0.28% per day.*")
         st.markdown("📌 *This tool helps you plan daily profit booking using that logic.*")
 
         # === Enter Daily Target Profit ===
