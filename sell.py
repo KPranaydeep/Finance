@@ -264,29 +264,43 @@ if uploaded_holdings:
         # === Enter Daily Target Profit ===
         default_target = round(total_invested * 0.0034, 2)
         target_rupees = st.number_input("🎯 Enter today's target booking profit (₹)", value=default_target, min_value=0.0, step=100.0)
-
         # === Sell Plan Logic ===
-        merged_df = merged_df.sort_values(by='Profit/Loss', ascending=False).reset_index(drop=True)
-        cumulative = 0
-        rows_to_sell = []
-
-        for idx, row in merged_df.iterrows():
-            if cumulative >= target_rupees:
+        # Sort by highest return percentage (Profit/Loss %)
+        merged_df = merged_df.sort_values(by='Profit/Loss (%)', ascending=False).reset_index(drop=True)
+        
+        # Accumulate rows until the target profit is met
+        cumulative_profit = 0
+        selected_rows = []
+        
+        for _, row in merged_df.iterrows():
+            if cumulative_profit >= target_rupees:
                 break
-            cumulative += row['Profit/Loss']
-            rows_to_sell.append(row)
-
-        if cumulative >= target_rupees and rows_to_sell:
-            sell_plan = pd.DataFrame(rows_to_sell)
-            sell_plan['Sell Limit'] = (sell_plan['Live LTP'] * 1.0034).round(2)
-
+            cumulative_profit += row['Profit/Loss']
+            selected_rows.append(row)
+        
+        # Show the sell plan if target is met
+        if cumulative_profit >= target_rupees and selected_rows:
+            sell_plan = pd.DataFrame(selected_rows).copy()
+        
+            # Add suggested sell limit (1.0034x of LTP)
+            sell_plan['Sell Limit (₹)'] = (sell_plan['Live LTP'] * 1.0034).round(2)
+        
+            # Rearrange and round columns for clean display
+            sell_plan = sell_plan[[
+                'Symbol', 'Company Name', 'Quantity', 'Average Price',
+                'Live LTP', 'Sell Limit (₹)', 'Profit/Loss', 'Profit/Loss (%)'
+            ]]
+            sell_plan[['Average Price', 'Live LTP', 'Sell Limit (₹)', 'Profit/Loss']] = sell_plan[[
+                'Average Price', 'Live LTP', 'Sell Limit (₹)', 'Profit/Loss'
+            ]].round(2)
+            sell_plan['Profit/Loss (%)'] = sell_plan['Profit/Loss (%)'].round(2)
+        
             st.subheader("📤 Suggested Sell Plan to Book Target Profit")
-            st.success(f"✅ To book ₹{target_rupees}, sell these holdings:")
-            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Sell Limit', 'Profit/Loss']])
+            st.success(f"✅ To book ₹{target_rupees:.2f}, sell the following holdings:")
+            st.dataframe(sell_plan, use_container_width=True)
+        
         else:
             st.warning("📉 No sufficient profitable stocks available to book the target profit.")
             st.info("⏳ Come back tomorrow — the market may rise and help you hit your target!")
-
-    except Exception as e:
-        st.error(f"❌ Could not process file: {e}")
-
+        
+        
