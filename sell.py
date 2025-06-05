@@ -174,9 +174,16 @@ if uploaded_mmi_file:
             f"❌ No SELL Signal – Max MMI is {max_mmi_value:.2f} on {max_mmi_date.strftime('%d %b %Y')}, Today's MMI: {today_mmi:.2f}"
         )
 
-# === Part 2: Groww Holdings with LTP and Sell Plan ===
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+
+# === Page Setup ===
+st.set_page_config(page_title="💼 Groww Holdings Analyzer", layout="wide")
 st.header("💼 Upload Your Groww Holdings File (.xlsx)")
 
+# === Load ISIN to Symbol Mapping ===
+@st.cache_data
 def load_equity_mapping():
     url = "https://raw.githubusercontent.com/KPranaydeep/Finance/refs/heads/main/EQUITY_L.csv"
     df = pd.read_csv(url)
@@ -188,10 +195,13 @@ def load_equity_mapping():
     })
 
 equity_mapping = load_equity_mapping()
+
+# === Upload Holdings File ===
 uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings file", type=['xlsx'])
 
 if uploaded_holdings:
     try:
+        # === Read and Clean Holdings File ===
         df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
         df = df.rename(columns={
             'Unnamed: 0': 'Stock Name',
@@ -204,12 +214,15 @@ if uploaded_holdings:
             'Unnamed: 7': 'P&L'
         })
         df = df.dropna(subset=['Stock Name', 'ISIN'])
-        st.markdown("### 🧾 Your Holdings (Groww)")
+
+        st.markdown("### 🧾 Your Holdings (Groww Upload)")
         st.dataframe(df[['Stock Name', 'ISIN', 'Quantity', 'Average Price', 'Buy Value', 'LTP', 'Current Value', 'P&L']])
 
+        # === Merge with Equity Mapping ===
         merged_df = df.merge(equity_mapping, on='ISIN', how='left')
         merged_df.dropna(subset=['Symbol'], inplace=True)
 
+        # === Fetch Live LTP ===
         st.subheader("🔄 Fetching Live Prices from NSE/BSE...")
         ltp_list = []
         for symbol in merged_df['Symbol']:
@@ -228,21 +241,36 @@ if uploaded_holdings:
         merged_df['Live LTP'] = ltp_list
         merged_df.dropna(subset=['Live LTP'], inplace=True)
 
+        # === Calculate Metrics ===
         merged_df['Invested Amount'] = merged_df['Quantity'] * merged_df['Average Price']
         merged_df['Current Value'] = merged_df['Quantity'] * merged_df['Live LTP']
         merged_df['Profit/Loss'] = merged_df['Current Value'] - merged_df['Invested Amount']
         merged_df['Profit/Loss (%)'] = (merged_df['Profit/Loss'] / merged_df['Invested Amount']) * 100
 
         total_invested = merged_df['Invested Amount'].sum()
+        total_current_value = merged_df['Current Value'].sum()
+        total_pl = merged_df['Profit/Loss'].sum()
+
+        # === Display Summary ===
+        st.markdown("### 📊 Portfolio Summary")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("💰 Total Invested", f"₹{total_invested:,.2f}")
+        col2.metric("📈 Total Current Value", f"₹{total_current_value:,.2f}")
+        col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl/total_invested)*100:.2f}%")
+
+        # === Explain Target ===
+        st.markdown("💡 *To achieve 100% CAGR (doubling in 1 year), you need ~0.33% daily gross return. After 15% trading charges, your net return is ~0.28% per day.*")
+        st.markdown("📌 *This tool helps you plan daily profit booking using that logic.*")
+
+        # === Enter Daily Target Profit ===
         default_target = round(total_invested * 0.0034, 2)
-        target_rupees = st.number_input("🎯 Enter target booking profit (₹)", value=default_target, min_value=0.0, step=100.0)
+        target_rupees = st.number_input("🎯 Enter today's target booking profit (₹)", value=default_target, min_value=0.0, step=100.0)
 
-        # Sort by highest profit first
+        # === Sell Plan Logic ===
         merged_df = merged_df.sort_values(by='Profit/Loss', ascending=False).reset_index(drop=True)
-
-        # Iteratively accumulate to meet target
         cumulative = 0
         rows_to_sell = []
+
         for idx, row in merged_df.iterrows():
             if cumulative >= target_rupees:
                 break
@@ -251,9 +279,11 @@ if uploaded_holdings:
 
         if cumulative >= target_rupees and rows_to_sell:
             sell_plan = pd.DataFrame(rows_to_sell)
+            sell_plan['Sell Limit'] = (sell_plan['Live LTP'] * 1.0034).round(2)
+
             st.subheader("📤 Suggested Sell Plan to Book Target Profit")
-            st.success(f"To book ₹{target_rupees}, sell these holdings:")
-            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Profit/Loss']])
+            st.success(f"✅ To book ₹{target_rupees}, sell these holdings:")
+            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Sell Price (1.0034x)', 'Profit/Loss']])
         else:
             st.warning("📉 No sufficient profitable stocks available to book the target profit.")
             st.info("⏳ Come back tomorrow — the market may rise and help you hit your target!")
