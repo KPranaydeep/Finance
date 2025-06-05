@@ -282,7 +282,7 @@ if uploaded_holdings:
 
             st.subheader("📤 Suggested Sell Plan to Book Target Profit")
             st.success(f"✅ To book ₹{target_rupees}, sell these holdings:")
-            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Sell Price (1.0034x)', 'Profit/Loss']])
+            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price', 'Live LTP', 'Sell Limit)', 'Profit/Loss']])
         else:
             st.warning("📉 No sufficient profitable stocks available to book the target profit.")
             st.info("⏳ Come back tomorrow — the market may rise and help you hit your target!")
