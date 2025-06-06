@@ -198,6 +198,9 @@ if uploaded_holdings:
     try:
         # === Read and Clean Holdings File ===
         df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
+        # Drop the first row if it contains header-like strings (double header issue)
+        if df.iloc[0].astype(str).str.contains("Stock Name", case=False).any():
+            df = df.iloc[1:]
         df = df.rename(columns={
             'Unnamed: 0': 'Stock Name',
             'Unnamed: 1': 'ISIN',
