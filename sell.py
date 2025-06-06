@@ -197,7 +197,7 @@ uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings file", typ
 if uploaded_holdings:
     try:
         # === Read and Clean Holdings File ===
-        df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
+        df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=10)
         df = df.rename(columns={
             'Unnamed: 0': 'Stock Name',
             'Unnamed: 1': 'ISIN',
