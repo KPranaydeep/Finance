@@ -12,6 +12,19 @@ from datetime import datetime, timedelta
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
 
+st.header("🧠 Market Mood Analysis")
+
+mmi_file = st.file_uploader("Upload MMI CSV file", type=["csv"], key="mmi_file")
+
+if mmi_file is not None:
+    try:
+        analyzer = MarketMoodAnalyzer(mmi_file.read())
+        analyzer.display_mood_analysis()
+    except Exception as e:
+        st.error(f"❌ Failed to process MMI file: {e}")
+else:
+    st.info("📄 Please upload the MMI CSV file to view market mood analysis.")
+
 # ==================== MARKET MOOD ANALYSIS ====================
 class MarketMoodAnalyzer:
     def __init__(self, mmi_data):
