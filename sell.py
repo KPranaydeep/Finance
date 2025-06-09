@@ -229,34 +229,58 @@ if uploaded_holdings:
         
         default_target = round(total_invested * 0.0034, 2)
         target_rupees = st.number_input("Enter today's target profit (₹)", 
-                                      value=default_target, min_value=0.0, step=100.0)
-
+                                        value=default_target, min_value=0.0, step=100.0)
+        
+        # Prepare for profit booking
+        merged_df = merged_df[merged_df['Profit/Loss'] > 0].copy()
         merged_df = merged_df.sort_values(by='Profit/Loss (%)', ascending=False)
-        cumulative_profit = 0
-        selected_rows = []
-
+        merged_df['Sell Limit (₹)'] = (merged_df['Live LTP'] * 1.0034).round(2)
+        
+        cumulative_profit = 0.0
+        sell_plan_rows = []
+        
         for _, row in merged_df.iterrows():
             if cumulative_profit >= target_rupees:
                 break
-            cumulative_profit += row['Profit/Loss']
-            selected_rows.append(row)
-
-        if cumulative_profit >= target_rupees and selected_rows:
-            sell_plan = pd.DataFrame(selected_rows).copy()
-            sell_plan['Sell Limit (₹)'] = (sell_plan['Live LTP'] * 1.0034).round(2)
-
-            st.success(f"✅ Suggested Sell Plan to Book ₹{target_rupees:.2f} Profit")
-            st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price',
-                                  'Live LTP', 'Sell Limit (₹)', 'Profit/Loss', 'Profit/Loss (%)']])
-            
+        
+            per_share_profit = row['Sell Limit (₹)'] - row['Average Price']
+            if per_share_profit <= 0:
+                continue
+        
+            max_possible_shares = row['Quantity']
+            needed_profit = target_rupees - cumulative_profit
+            shares_to_sell = min(max_possible_shares, int(needed_profit // per_share_profit))
+        
+            if shares_to_sell <= 0:
+                continue
+        
+            actual_profit = shares_to_sell * per_share_profit
+            cumulative_profit += actual_profit
+        
+            sell_plan_rows.append({
+                'Symbol': row['Symbol'],
+                'Company Name': row['Company Name'],
+                'Quantity to Sell': shares_to_sell,
+                'Average Price': row['Average Price'],
+                'Live LTP': row['Live LTP'],
+                'Sell Limit (₹)': row['Sell Limit (₹)'],
+                'Expected Profit': actual_profit,
+                'Profit/Loss (%)': row['Profit/Loss (%)']
+            })
+        
+        if sell_plan_rows:
+            sell_plan_df = pd.DataFrame(sell_plan_rows)
+            st.success(f"✅ Suggested Sell Plan to Book ₹{cumulative_profit:.2f} Profit")
+            st.dataframe(sell_plan_df)
+        
             # Add export button
-            csv = sell_plan.to_csv(index=False).encode('utf-8')
+            csv = sell_plan_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 "📥 Download Sell Plan",
                 csv,
                 "sell_plan.csv",
                 "text/csv",
-                key='download-csv'
+                key='download-sell-plan'
             )
         else:
             st.warning("📉 Not enough profitable stocks to meet target")
