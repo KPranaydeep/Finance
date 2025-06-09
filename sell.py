@@ -186,6 +186,13 @@ def analyze_holdings(uploaded_holdings):
         return None
 
 # ==================== STREAMLIT UI ====================
+st.header("📤 Upload Your Holdings")
+uploaded_holdings = st.file_uploader("Upload your stock holdings Excel file (.xlsx)", type=['xlsx'])
+
+if uploaded_holdings:
+    st.header("💼 Your Portfolio Analysis")
+    ...
+
 # Add these functions to your existing code
 def get_april_first_current_year():
     today = datetime.now()
