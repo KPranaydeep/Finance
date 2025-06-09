@@ -7,7 +7,7 @@ from io import BytesIO
 from itertools import groupby
 from scipy.stats import weibull_min
 from lifelines import KaplanMeierFitter
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
