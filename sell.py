@@ -258,71 +258,72 @@ if uploaded_holdings:
                                                min_value=0.01, 
                                                max_value=5.0, 
                                                step=0.01)
-        
-            if net_pl > 0:
-                sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct)
-                daily_return_pct = round((sell_limit_multiplier - 1) * 100, 4)
-                st.markdown(f"💡 *Dynamic sell limit calculated at {daily_return_pct}% above buy price*")
-                
-                # Default target profit
-                default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
-                target_rupees = st.number_input("Enter today's target profit (₹)", 
-                                                value=default_target, 
-                                                min_value=0.0, 
-                                                step=100.0)
-        
-                # --- Move entire sell plan logic here ---
-                # Filter profitable stocks
-                profitable_df = merged_df[merged_df['Profit/Loss'] > 0].copy()
-                profitable_df = profitable_df.sort_values(by='Profit/Loss (%)', ascending=False)
-                profitable_df['Sell Limit (₹)'] = (profitable_df['Live LTP'] * sell_limit_multiplier).round(2)
-        
-                cumulative_profit = 0.0
-                sell_plan_rows = []
-        
-                for _, row in profitable_df.iterrows():
-                    if cumulative_profit >= target_rupees:
-                        break
-        
-                    per_share_profit = row['Sell Limit (₹)'] - row['Average Price']
-                    if per_share_profit <= 0:
-                        continue
-        
-                    max_possible_shares = row['Quantity']
-                    needed_profit = target_rupees - cumulative_profit
-                    shares_to_sell = min(max_possible_shares, int(needed_profit // per_share_profit))
-        
-                    if shares_to_sell <= 0:
-                        continue
-        
-                    actual_profit = shares_to_sell * per_share_profit
-                    cumulative_profit += actual_profit
-        
-                    sell_plan_rows.append({
-                        'Symbol': row['Symbol'],
-                        'Company Name': row['Company Name'],
-                        'Quantity to Sell': shares_to_sell,
-                        'Average Price': row['Average Price'],
-                        'Current Price': row['Live LTP'],
-                        'Sell Limit (₹)': row['Sell Limit (₹)'],
-                        'Expected Profit': actual_profit,
-                        'Profit (%)': (row['Sell Limit (₹)'] - row['Average Price']) / row['Average Price'] * 100
-                    })
-        
-                if sell_plan_rows:
-                    sell_plan_df = pd.DataFrame(sell_plan_rows)
-                    st.success(f"✅ Suggested Sell Plan to Book ₹{cumulative_profit:.2f} Profit")
-                    st.dataframe(sell_plan_df)
-                    csv = sell_plan_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        "📥 Download Sell Plan",
-                        csv,
-                        "sell_plan.csv",
-                        "text/csv",
-                        key='download-sell-plan'
-                    )
-                else:
-                    st.warning("📉 Not enough profitable stocks to meet target")
-                    st.info("⏳ Check back tomorrow when market conditions may improve")
+
+        # ✅ Fix starts here — remove one indentation level from this line onward
+        if net_pl > 0:
+            sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct)
+            daily_return_pct = round((sell_limit_multiplier - 1) * 100, 4)
+            st.markdown(f"💡 *Dynamic sell limit calculated at {daily_return_pct}% above buy price*")
+            
+            # Default target profit
+            default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
+            target_rupees = st.number_input("Enter today's target profit (₹)", 
+                                            value=default_target, 
+                                            min_value=0.0, 
+                                            step=100.0)
+
+            # --- Move entire sell plan logic here ---
+            # Filter profitable stocks
+            profitable_df = merged_df[merged_df['Profit/Loss'] > 0].copy()
+            profitable_df = profitable_df.sort_values(by='Profit/Loss (%)', ascending=False)
+            profitable_df['Sell Limit (₹)'] = (profitable_df['Live LTP'] * sell_limit_multiplier).round(2)
+
+            cumulative_profit = 0.0
+            sell_plan_rows = []
+
+            for _, row in profitable_df.iterrows():
+                if cumulative_profit >= target_rupees:
+                    break
+
+                per_share_profit = row['Sell Limit (₹)'] - row['Average Price']
+                if per_share_profit <= 0:
+                    continue
+
+                max_possible_shares = row['Quantity']
+                needed_profit = target_rupees - cumulative_profit
+                shares_to_sell = min(max_possible_shares, int(needed_profit // per_share_profit))
+
+                if shares_to_sell <= 0:
+                    continue
+
+                actual_profit = shares_to_sell * per_share_profit
+                cumulative_profit += actual_profit
+
+                sell_plan_rows.append({
+                    'Symbol': row['Symbol'],
+                    'Company Name': row['Company Name'],
+                    'Quantity to Sell': shares_to_sell,
+                    'Average Price': row['Average Price'],
+                    'Current Price': row['Live LTP'],
+                    'Sell Limit (₹)': row['Sell Limit (₹)'],
+                    'Expected Profit': actual_profit,
+                    'Profit (%)': (row['Sell Limit (₹)'] - row['Average Price']) / row['Average Price'] * 100
+                })
+
+            if sell_plan_rows:
+                sell_plan_df = pd.DataFrame(sell_plan_rows)
+                st.success(f"✅ Suggested Sell Plan to Book ₹{cumulative_profit:.2f} Profit")
+                st.dataframe(sell_plan_df)
+                csv = sell_plan_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "📥 Download Sell Plan",
+                    csv,
+                    "sell_plan.csv",
+                    "text/csv",
+                    key='download-sell-plan'
+                )
             else:
-                st.error("❌ Cannot calculate sell limit with zero or negative P&L")
+                st.warning("📉 Not enough profitable stocks to meet target")
+                st.info("⏳ Check back tomorrow when market conditions may improve")
+        else:
+            st.error("❌ Cannot calculate sell limit with zero or negative P&L")
