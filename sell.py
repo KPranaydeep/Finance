@@ -189,10 +189,6 @@ def analyze_holdings(uploaded_holdings):
 st.header("📤 Upload Your Holdings")
 uploaded_holdings = st.file_uploader("Upload your stock holdings Excel file (.xlsx)", type=['xlsx'])
 
-if uploaded_holdings:
-    st.header("💼 Your Portfolio Analysis")
-    ...
-
 # Add these functions to your existing code
 def get_april_first_current_year():
     today = datetime.now()
@@ -244,21 +240,24 @@ if uploaded_holdings:
 
         # Sell plan logic - MODIFIED SECTION
         st.subheader("🎯 Profit Booking Strategy")
+
+        st.subheader("🔧 Adjust Profit Booking Parameters")
         
-        with st.expander("🔧 Adjust Profit Booking Parameters"):
-            net_pl = st.number_input("Enter net P&L (INR)", 
-                                     value=float(total_pl), 
-                                     min_value=0.0, 
-                                     step=1000.0)
-            charges = st.number_input("Enter charges (INR)", 
-                                      value=6135.0, 
-                                      min_value=0.0, 
-                                      step=100.0)
-            target_net_daily_pct = st.number_input("Target net daily return (%)", 
-                                                   value=0.28, 
-                                                   min_value=0.01, 
-                                                   max_value=5.0, 
-                                                   step=0.01)
+        net_pl = st.number_input("Enter net P&L (INR)", 
+                                 value=float(total_pl), 
+                                 min_value=0.0, 
+                                 step=1000.0)
+        
+        charges = st.number_input("Enter charges (INR)", 
+                                  value=6135.0, 
+                                  min_value=0.0, 
+                                  step=100.0)
+        
+        target_net_daily_pct = st.number_input("Target net daily return (%)", 
+                                               value=0.28, 
+                                               min_value=0.01, 
+                                               max_value=5.0, 
+                                               step=0.01)
         
             if net_pl > 0:
                 sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct)
