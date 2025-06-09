@@ -73,46 +73,52 @@ class MarketMoodAnalyzer:
     
     def display_mood_analysis(self):
         """Display market mood analysis in Streamlit"""
-        with st.expander("📈 Market Mood Analysis (Expand for Details)"):
-            # Analyze historical patterns
-            fear_res = self._analyze_mood('Fear')
-            greed_res = self._analyze_mood('Greed')
-            res = fear_res if self.current_mood == 'Fear' else greed_res
+        # Analyze historical patterns
+        fear_res = self._analyze_mood('Fear')
+        greed_res = self._analyze_mood('Greed')
+        res = fear_res if self.current_mood == 'Fear' else greed_res
+        
+        # Find confidence-based flip point
+        confidence_flip_day = self._get_confidence_flip_date(
+            res['survival_days'], 
+            res['survival_prob']
+        )
+        
+        # Create mood display container
+        mood_container = st.container()
+        with mood_container:
+            st.subheader("📈 Current Market Mood Analysis")
             
-            # Find confidence-based flip point
-            confidence_flip_day = self._get_confidence_flip_date(
-                res['survival_days'], 
-                res['survival_prob']
-            )
-            
-            # Display current status
-            st.subheader("🔍 Current Market Mood Status")
+            # Current status columns
             col1, col2, col3 = st.columns(3)
-            col1.metric("Current MMI", f"{self.current_mmi:.2f}")
-            col2.metric("Market Mood", self.current_mood)
-            col3.metric("Current Streak", f"{self.current_streak} days")
+            col1.metric("Current MMI", f"{self.current_mmi:.2f}", 
+                       "Fear" if self.current_mmi <= 50 else "Greed")
+            col2.metric("Current Streak", f"{self.current_streak} days")
             
-            # Display historical patterns
-            st.subheader("📊 Historical Mood Patterns")
-            hist_col1, hist_col2 = st.columns(2)
-            hist_col1.metric("Fear Streaks", f"{len(fear_res['runs'])}", f"Avg: {np.mean(fear_res['runs']):.1f} days")
-            hist_col2.metric("Greed Streaks", f"{len(greed_res['runs'])}", f"Avg: {np.mean(greed_res['runs']):.1f} days")
-            
-            # Display prediction
+            # Mood prediction
             if confidence_flip_day:
                 days_until_flip = confidence_flip_day - self.current_streak
                 confidence_date = self.today_date + timedelta(days=days_until_flip)
-                
-                st.subheader("⚠️ High Confidence Prediction")
-                st.warning(f"95% probability the current {self.current_mood} streak will end by:")
-                st.metric("Expected Flip Date", confidence_date.strftime('%d %b %Y'), f"in {days_until_flip} days")
-                
+                col3.metric("Expected Flip Date", 
+                           confidence_date.strftime('%d %b %Y'), 
+                           f"in {days_until_flip} days")
+            
+            # Historical patterns
+            st.markdown("**Historical Patterns**")
+            hist_col1, hist_col2 = st.columns(2)
+            hist_col1.metric("Fear Streaks", 
+                            f"{len(fear_res['runs'])}", 
+                            f"Avg: {np.mean(fear_res['runs']):.1f} days")
+            hist_col2.metric("Greed Streaks", 
+                           f"{len(greed_res['runs'])}", 
+                           f"Avg: {np.mean(greed_res['runs']):.1f} days")
+            
+            # Recommendation
+            if confidence_flip_day:
                 if self.current_mood == 'Greed':
-                    st.info("🛑 Recommended Action: Prepare for potential Fear entry opportunity")
+                    st.warning("🛑 Market in Greed Phase - Consider profit booking")
                 else:
-                    st.info("🛑 Recommended Action: Prepare for potential Greed exit opportunity")
-            else:
-                st.info("ℹ️ No high-confidence flip prediction available within observed data range")
+                    st.success("🟢 Market in Fear Phase - Look for entry opportunities")
 
 # ==================== STOCK HOLDINGS ANALYSIS ====================
 @st.cache_data
@@ -180,23 +186,29 @@ def analyze_holdings(uploaded_holdings):
         return None
 
 # ==================== STREAMLIT UI ====================
-# Sidebar for MMI data upload
-with st.sidebar:
-    st.header("📊 Market Mood Data")
-    uploaded_mmi = st.file_uploader("Upload MMI Data (CSV)", type=['csv'])
-    if uploaded_mmi:
-        mood_analyzer = MarketMoodAnalyzer(uploaded_mmi.read())
-        mood_analyzer.display_mood_analysis()
+# File upload section
+st.header("📁 Upload Your Data")
+upload_col1, upload_col2 = st.columns(2)
 
-# Main content area for holdings analysis
-st.header("💼 Upload Your Groww Holdings File (.xlsx)")
-uploaded_holdings = st.file_uploader("📂 Upload your Groww holdings file", type=['xlsx'])
+with upload_col1:
+    uploaded_mmi = st.file_uploader("Market Mood Data (CSV)", type=['csv'])
 
+with upload_col2:
+    uploaded_holdings = st.file_uploader("Groww Holdings File (XLSX)", type=['xlsx'])
+
+# Display mood analysis if MMI data uploaded
+if uploaded_mmi:
+    mood_analyzer = MarketMoodAnalyzer(uploaded_mmi.read())
+    mood_analyzer.display_mood_analysis()
+
+# Display holdings analysis if holdings data uploaded
 if uploaded_holdings:
+    st.header("💼 Your Portfolio Analysis")
     merged_df = analyze_holdings(uploaded_holdings)
+    
     if merged_df is not None:
         # Display holdings
-        st.markdown("### 🧾 Your Holdings")
+        st.subheader("🧾 Current Holdings")
         st.dataframe(merged_df[['Symbol', 'Company Name', 'Quantity', 'Average Price', 
                               'Live LTP', 'Current Value', 'Profit/Loss', 'Profit/Loss (%)']])
         
@@ -205,16 +217,18 @@ if uploaded_holdings:
         total_current_value = merged_df['Current Value'].sum()
         total_pl = merged_df['Profit/Loss'].sum()
 
-        st.markdown("### 📊 Portfolio Summary")
+        st.subheader("📊 Portfolio Summary")
         col1, col2, col3 = st.columns(3)
         col1.metric("💰 Total Invested", f"₹{total_invested:,.2f}")
         col2.metric("📈 Current Value", f"₹{total_current_value:,.2f}")
         col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl/total_invested)*100:.2f}%")
 
         # Sell plan logic
-        st.markdown("💡 *To achieve 100% CAGR (doubling in 1 year), you need ~0.34% daily gross return.*")
+        st.subheader("🎯 Profit Booking Strategy")
+        st.markdown("💡 *To achieve 100% CAGR (doubling in 1 year), target ~0.34% daily return*")
+        
         default_target = round(total_invested * 0.0034, 2)
-        target_rupees = st.number_input("🎯 Enter today's target booking profit (₹)", 
+        target_rupees = st.number_input("Enter today's target profit (₹)", 
                                       value=default_target, min_value=0.0, step=100.0)
 
         merged_df = merged_df.sort_values(by='Profit/Loss (%)', ascending=False)
@@ -231,10 +245,19 @@ if uploaded_holdings:
             sell_plan = pd.DataFrame(selected_rows).copy()
             sell_plan['Sell Limit (₹)'] = (sell_plan['Live LTP'] * 1.0034).round(2)
 
-            st.subheader("📤 Suggested Sell Plan")
-            st.success(f"✅ To book ₹{target_rupees:.2f}, sell these holdings:")
+            st.success(f"✅ Suggested Sell Plan to Book ₹{target_rupees:.2f} Profit")
             st.dataframe(sell_plan[['Symbol', 'Company Name', 'Quantity', 'Average Price',
                                   'Live LTP', 'Sell Limit (₹)', 'Profit/Loss', 'Profit/Loss (%)']])
+            
+            # Add export button
+            csv = sell_plan.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Sell Plan",
+                csv,
+                "sell_plan.csv",
+                "text/csv",
+                key='download-csv'
+            )
         else:
-            st.warning("📉 Not enough profitable stocks to meet target.")
-            st.info("⏳ Check back tomorrow when market conditions may improve.")
+            st.warning("📉 Not enough profitable stocks to meet target")
+            st.info("⏳ Check back tomorrow when market conditions may improve")
