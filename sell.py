@@ -12,17 +12,10 @@ from datetime import datetime, timedelta
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Use the Streamlit secret
+MONGO_URI = st.secrets["MONGO_URI"]
 
-# Get URI from environment
-MONGO_URI = os.getenv("MONGO_URI")
-
-# Check if URI was loaded
-if not MONGO_URI:
-    raise ValueError("MONGO_URI not found in environment variables")
-
-# MongoDB connection
+# Setup client
 client = MongoClient(MONGO_URI)
 db = client['finance_db']
 collection = db['sell_plan_params']
