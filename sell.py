@@ -246,7 +246,8 @@ if uploaded_holdings:
         net_pl = st.number_input("Enter net P&L (INR)", 
                                  value=float(total_pl), 
                                  min_value=0.0, 
-                                 step=1000.0)
+                                 step=1000.0,
+                                max_value=100000)
         
         charges = st.number_input("Enter charges (INR)", 
                                   value=6135.0, 
