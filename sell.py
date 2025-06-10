@@ -3,11 +3,35 @@ import numpy as np
 import streamlit as st
 import yfinance as yf
 import requests
+import os
 from io import BytesIO
 from itertools import groupby
 from scipy.stats import weibull_min
 from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
+from pymongo import MongoClient
+
+# MongoDB Connection
+client = MongoClient("mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance")
+db = client['finance_db']
+collection = db['sell_plan_params']
+
+def save_input_params(user_id, net_pl, charges, target_pct):
+    record = {
+        'user_id': user_id,
+        'timestamp': datetime.utcnow(),
+        'net_pl': net_pl,
+        'charges': charges,
+        'target_pct': target_pct
+    }
+    collection.insert_one(record)
+
+def get_latest_input_params(user_id):
+    latest = collection.find_one(
+        {'user_id': user_id},
+        sort=[('timestamp', -1)]
+    )
+    return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
@@ -237,28 +261,36 @@ if uploaded_holdings:
         col1.metric("💰 Total Invested", f"₹{total_invested:,.2f}")
         col2.metric("📈 Current Value", f"₹{total_current_value:,.2f}")
         col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl/total_invested)*100:.2f}%")
-
         # Sell plan logic - MODIFIED SECTION
+        # Set a default user ID (could later be tied to login/email)
+        USER_ID = "default_user"
+        
+        # Fetch latest saved values from MongoDB
+        latest_params = get_latest_input_params(USER_ID)
+        
         st.subheader("🎯 Profit Booking Strategy")
-
         st.subheader("🔧 Adjust Profit Booking Parameters")
         
+        # Load previous values as defaults
         net_pl = st.number_input("Enter net P&L (INR)", 
-                                 value=float(total_pl), 
+                                 value=float(latest_params.get('net_pl', 0.0)), 
                                  min_value=0.0, 
                                  step=1000.0,
-                                max_value=100000)
+                                 max_value=100000)
         
         charges = st.number_input("Enter charges (INR)", 
-                                  value=6135.0, 
+                                  value=float(latest_params.get('charges', 0.0)), 
                                   min_value=0.0, 
                                   step=100.0)
         
         target_net_daily_pct = st.number_input("Target net daily return (%)", 
-                                               value=0.28, 
+                                               value=float(latest_params.get('target_pct', 0.28)), 
                                                min_value=0.01, 
                                                max_value=5.0, 
                                                step=0.01)
+        
+        # Save values when form submitted or app rerun
+        save_input_params(USER_ID, net_pl, charges, target_net_daily_pct)
 
         # ✅ Fix starts here — remove one indentation level from this line onward
         if net_pl > 0:
