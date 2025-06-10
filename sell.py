@@ -276,7 +276,7 @@ if uploaded_holdings:
                                  value=float(latest_params.get('net_pl', 0.0)), 
                                  min_value=0.0, 
                                  step=1000.0,
-                                 max_value=100000)
+                                 max_value=100000.0)
         
         charges = st.number_input("Enter charges (INR)", 
                                   value=float(latest_params.get('charges', 0.0)), 
