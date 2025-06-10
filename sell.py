@@ -9,14 +9,22 @@ from itertools import groupby
 from scipy.stats import weibull_min
 from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
-from pymongo import MongoClient
-from dotenv import load_dotenv
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
 
-# Use the Streamlit secret
-MONGO_URI = st.secrets["MONGO_URI"]
+# Replace <db_password> with your actual MongoDB password
+uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
 
-# Setup client
-client = MongoClient(MONGO_URI)
+# Create a new client and connect to the server using Server API v1
+client = MongoClient(uri, server_api=ServerApi('1'))
+
+# Send a ping to confirm a successful connection
+try:
+    client.admin.command('ping')
+    print("✅ Pinged your deployment. You successfully connected to MongoDB!")
+except Exception as e:
+    print("❌ Error connecting to MongoDB:", e)
+
 db = client['finance_db']
 collection = db['sell_plan_params']
 
