@@ -10,19 +10,19 @@ from scipy.stats import weibull_min
 from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
 from pymongo import MongoClient
-from datetime import datetime
-import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# MongoDB Connection using secure URI from environment variable
+# Get URI from environment
 MONGO_URI = os.getenv("MONGO_URI")
 
+# Check if URI was loaded
 if not MONGO_URI:
-    raise ValueError("Missing MONGO_URI in environment variables.")
+    raise ValueError("MONGO_URI not found in environment variables")
 
+# MongoDB connection
 client = MongoClient(MONGO_URI)
 db = client['finance_db']
 collection = db['sell_plan_params']
@@ -42,11 +42,7 @@ def get_latest_input_params(user_id):
         {'user_id': user_id},
         sort=[('timestamp', -1)]
     )
-    return latest if latest else {
-        'net_pl': 0.0,
-        'charges': 0.0,
-        'target_pct': 0.28
-    }
+    return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
