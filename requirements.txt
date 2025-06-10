@@ -10,3 +10,4 @@ openpyxl
 scikit-learn
 lifelines
 pymongo[srv]
+python-dotenv
