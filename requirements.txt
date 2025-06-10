@@ -9,3 +9,4 @@ yfinance
 openpyxl
 scikit-learn
 lifelines
+pymongo[srv]
