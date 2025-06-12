@@ -393,6 +393,26 @@ if uploaded_holdings:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
 # ========== MMI SECTION (Place this AFTER the class definition) ==========
+# ========== Load Analyzer from MongoDB or Uploaded File ==========
+try:
+    if uploaded_bytes:
+        st.info("📄 Using uploaded MMI CSV file")
+        analyzer = MarketMoodAnalyzer(uploaded_bytes)
+    else:
+        df_from_db = read_mmi_from_mongodb()
+        if not df_from_db.empty:
+            st.info("☁️ Using MMI data from MongoDB")
+            analyzer = MarketMoodAnalyzer(df_from_db)
+        else:
+            st.warning("⚠️ No valid MMI data found in MongoDB. Please upload or add today’s MMI.")
+            analyzer = None
+except Exception as e:
+    analyzer = None
+    st.error(f"❌ Error loading MMI data: {str(e)}")
+
+# ========== Display Mood Analysis ==========
+if analyzer:
+    analyzer.display_mood_analysis()
 st.subheader("📂 Upload full MMI dataset (optional)")
 uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
 
@@ -449,24 +469,3 @@ with st.form("add_today_mmi"):
             st.success(f"✅ Added today's MMI ({today_mmi}) and Nifty ({nifty_today:.2f}) to MongoDB")
         except Exception as e:
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
-
-# ========== Load Analyzer from MongoDB or Uploaded File ==========
-try:
-    if uploaded_bytes:
-        st.info("📄 Using uploaded MMI CSV file")
-        analyzer = MarketMoodAnalyzer(uploaded_bytes)
-    else:
-        df_from_db = read_mmi_from_mongodb()
-        if not df_from_db.empty:
-            st.info("☁️ Using MMI data from MongoDB")
-            analyzer = MarketMoodAnalyzer(df_from_db)
-        else:
-            st.warning("⚠️ No valid MMI data found in MongoDB. Please upload or add today’s MMI.")
-            analyzer = None
-except Exception as e:
-    analyzer = None
-    st.error(f"❌ Error loading MMI data: {str(e)}")
-
-# ========== Display Mood Analysis ==========
-if analyzer:
-    analyzer.display_mood_analysis()
