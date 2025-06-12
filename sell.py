@@ -393,11 +393,12 @@ if uploaded_holdings:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
 # ========== MMI SECTION (Place this AFTER the class definition) ==========
+
 uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
 
 uploaded_bytes = None
 if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
-    uploaded_bytes = uploaded_mmi_csv.read()  # ✅ Read once
+    uploaded_bytes = uploaded_mmi_csv.read()  # ✅ Read only once
     try:
         mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
         mmi_df.columns = ['Date', 'MMI', 'Nifty']
@@ -421,11 +422,11 @@ with st.form("add_today_mmi"):
 
     if submitted:
         try:
-            # Fetch Nifty 50 index automatically using yfinance
+            # Fetch Nifty 50 index using yfinance
             nifty_ticker = yf.Ticker("^NSEI")
             nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
-            
-            # Save to DB
+
+            # Save to MongoDB
             mmi_collection.insert_one({
                 "Date": datetime.combine(today, datetime.min.time()),
                 "MMI": today_mmi,
@@ -439,18 +440,17 @@ with st.form("add_today_mmi"):
 # =================== Load Analyzer from MongoDB or Uploaded File ===================
 
 try:
-    if 'uploaded_bytes' in locals() and uploaded_bytes is not None:
-        # If file was just uploaded in the same session, use it
+    if uploaded_bytes:
         st.info("📄 Using uploaded MMI CSV file from this session")
-        analyzer = MarketMoodAnalyzer(BytesIO(uploaded_bytes))
+        analyzer = MarketMoodAnalyzer(uploaded_bytes)
     else:
-        # Always fallback to MongoDB on reload
+        # Fallback to MongoDB
         df_from_db = read_mmi_from_mongodb()
         if not df_from_db.empty:
             st.info("☁️ Using MMI data from MongoDB")
             analyzer = MarketMoodAnalyzer(df_from_db)
         else:
-            st.warning("⚠️ No data in MongoDB. Please upload a CSV first.")
+            st.warning("⚠️ No data available. Please upload a CSV or add today's MMI.")
             analyzer = None
 except Exception as e:
     analyzer = None
