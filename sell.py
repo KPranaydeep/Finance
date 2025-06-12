@@ -188,54 +188,69 @@ def load_equity_mapping():
     })
 
 def analyze_holdings(uploaded_holdings):
-    """Analyze stock holdings and generate sell plan"""
+    """Analyze stock holdings from Groww (XLSX) or Kite (CSV)"""
     try:
-        # Read and clean holdings file
-        df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
-        if df.iloc[0].astype(str).str.contains("Stock Name", case=False).any():
-            df = df.iloc[1:]
-        df = df.rename(columns={
-            'Unnamed: 0': 'Stock Name',
-            'Unnamed: 1': 'ISIN',
-            'Unnamed: 2': 'Quantity',
-            'Unnamed: 3': 'Average Price',
-            'Unnamed: 4': 'Buy Value',
-            'Unnamed: 5': 'LTP',
-            'Unnamed: 6': 'Current Value',
-            'Unnamed: 7': 'P&L'
-        })
-        df = df.dropna(subset=['Stock Name', 'ISIN'])
+        file_type = uploaded_holdings.name.split(".")[-1]
 
-        # Merge with equity mapping
-        equity_mapping = load_equity_mapping()
-        merged_df = df.merge(equity_mapping, on='ISIN', how='left')
-        merged_df.dropna(subset=['Symbol'], inplace=True)
+        if file_type.lower() == "csv":
+            df = pd.read_csv(uploaded_holdings)
+            if "Instrument" in df.columns and "Qty." in df.columns:
+                # Kite format
+                df = df.rename(columns={
+                    'Instrument': 'Symbol',
+                    'Qty.': 'Quantity',
+                    'Avg. cost': 'Average Price',
+                    'LTP': 'Live LTP',
+                    'Invested': 'Invested Amount',
+                    'Cur. val': 'Current Value',
+                    'P&L': 'Profit/Loss'
+                })
+                df['Company Name'] = df['Symbol']  # Placeholder
+            else:
+                raise ValueError("Unrecognized CSV format. Only Kite statement supported.")
 
-        # Fetch live prices
-        ltp_list = []
-        for symbol in merged_df['Symbol']:
-            ltp = None
-            for suffix in ['.NS', '.BO']:
-                try:
-                    ticker = yf.Ticker(symbol + suffix)
-                    ltp_data = ticker.history(period='1d')
-                    if not ltp_data.empty:
-                        ltp = ltp_data['Close'].iloc[-1]
-                        break
-                except:
-                    continue
-            ltp_list.append(ltp)
+        elif file_type.lower() == "xlsx":
+            df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
+            if df.iloc[0].astype(str).str.contains("Stock Name", case=False).any():
+                df = df.iloc[1:]
+            df = df.rename(columns={
+                'Unnamed: 0': 'Stock Name',
+                'Unnamed: 1': 'ISIN',
+                'Unnamed: 2': 'Quantity',
+                'Unnamed: 3': 'Average Price',
+                'Unnamed: 4': 'Buy Value',
+                'Unnamed: 5': 'LTP',
+                'Unnamed: 6': 'Current Value',
+                'Unnamed: 7': 'P&L'
+            })
+            df = df.dropna(subset=['Stock Name', 'ISIN'])
 
-        merged_df['Live LTP'] = ltp_list
-        merged_df.dropna(subset=['Live LTP'], inplace=True)
+            # Merge with equity mapping
+            equity_mapping = load_equity_mapping()
+            df = df.merge(equity_mapping, on='ISIN', how='left')
+            df.dropna(subset=['Symbol'], inplace=True)
+            df['Company Name'] = df['Company Name'].fillna(df['Stock Name'])
+            df['Live LTP'] = df['LTP']
 
-        # Calculate metrics
-        merged_df['Invested Amount'] = merged_df['Quantity'] * merged_df['Average Price']
-        merged_df['Current Value'] = merged_df['Quantity'] * merged_df['Live LTP']
-        merged_df['Profit/Loss'] = merged_df['Current Value'] - merged_df['Invested Amount']
-        merged_df['Profit/Loss (%)'] = (merged_df['Profit/Loss'] / merged_df['Invested Amount']) * 100
+        else:
+            raise ValueError("Unsupported file type. Please upload CSV (Kite) or XLSX (Groww)")
 
-        return merged_df
+        # Ensure numeric types
+        df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce')
+        df['Average Price'] = pd.to_numeric(df['Average Price'], errors='coerce')
+        df['Live LTP'] = pd.to_numeric(df['Live LTP'], errors='coerce')
+
+        # Clean and calculate derived fields
+        df = df.dropna(subset=['Symbol', 'Quantity', 'Average Price', 'Live LTP'])
+        df['Invested Amount'] = df['Quantity'] * df['Average Price']
+        df['Current Value'] = df['Quantity'] * df['Live LTP']
+        df['Profit/Loss'] = df['Current Value'] - df['Invested Amount']
+        df['Profit/Loss (%)'] = (df['Profit/Loss'] / df['Invested Amount']) * 100
+
+        return df[['Symbol', 'Company Name', 'Quantity', 'Average Price', 
+                   'Live LTP', 'Invested Amount', 'Current Value', 
+                   'Profit/Loss', 'Profit/Loss (%)']]
+
     except Exception as e:
         st.error(f"❌ Could not process file: {e}")
         return None
