@@ -440,21 +440,25 @@ with st.form("add_today_mmi"):
 # =================== Load Analyzer from MongoDB or Uploaded File ===================
 
 try:
+    # Use uploaded session file if available
     if uploaded_bytes:
         st.info("📄 Using uploaded MMI CSV file from this session")
         analyzer = MarketMoodAnalyzer(uploaded_bytes)
     else:
         # Fallback to MongoDB
         df_from_db = read_mmi_from_mongodb()
-        if not df_from_db.empty:
+
+        if isinstance(df_from_db, pd.DataFrame) and not df_from_db.empty:
             st.info("☁️ Using MMI data from MongoDB")
             analyzer = MarketMoodAnalyzer(df_from_db)
         else:
-            st.warning("⚠️ No data available. Please upload a CSV or add today's MMI.")
+            st.warning("⚠️ No valid MMI data found in MongoDB. Please upload or enter data.")
             analyzer = None
 except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
+
+st.write("📅 Last Date in MongoDB:", df_from_db['Date'].max())
 
 # =================== Display Mood Analysis ===================
 
