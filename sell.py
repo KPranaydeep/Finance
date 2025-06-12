@@ -51,6 +51,15 @@ st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
 
 # ==================== MARKET MOOD ANALYSIS ====================
 class MarketMoodAnalyzer:
+    def _prepare_mmi_data(self, mmi_data):
+        df = pd.read_csv(BytesIO(mmi_data))
+        df.columns = ['Date', 'MMI', 'Nifty']
+        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
+        df.sort_values('Date', inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')
+        return df
+
     def __init__(self, mmi_data):
         self.df = self._prepare_mmi_data(mmi_data)
         self.run_lengths = self._identify_mood_streaks()
@@ -58,15 +67,6 @@ class MarketMoodAnalyzer:
         self.current_mmi = self.df['MMI'].iloc[-1]
         self.current_mood = 'Fear' if self.current_mmi <= 50 else 'Greed'
         self.current_streak = self._get_current_streak_length()
-
-    def _prepare_mmi_data(self, mmi_data):
-        df = pd.read_csv(BytesIO(mmi_data))
-        df.columns = ['Date', 'MMI', 'Nifty']
-        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
-        df.sort_values('Date', inplace=True)
-        df.reset_index(drop=True, inplace=True)
-        df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')  # ← this line is critical
-        return df
 
     def read_mmi_from_mongodb(self):
         cursor = mmi_collection.find()
