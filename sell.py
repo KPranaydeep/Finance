@@ -58,14 +58,23 @@ class MarketMoodAnalyzer:
         self.current_mmi = self.df['MMI'].iloc[-1]
         self.current_mood = 'Fear' if self.current_mmi <= 50 else 'Greed'
         self.current_streak = self._get_current_streak_length()
-        
-    def read_mmi_from_mongodb():
+
+    def _prepare_mmi_data(self, mmi_data):
+        df = pd.read_csv(BytesIO(mmi_data))
+        df.columns = ['Date', 'MMI', 'Nifty']
+        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
+        df.sort_values('Date', inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')  # ← this line is critical
+        return df
+
+    def read_mmi_from_mongodb(self):
         cursor = mmi_collection.find()
         df = pd.DataFrame(list(cursor))
         if '_id' in df.columns:
             df = df.drop(columns=['_id'])
         return df
-    
+
     def _identify_mood_streaks(self):
         """Identify consecutive runs of Fear/Greed moods"""
         mood_series = self.df['Mood'].values
