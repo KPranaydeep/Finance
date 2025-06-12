@@ -433,9 +433,9 @@ with st.form("add_today_mmi"):
 
 try:
     if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
+        uploaded_bytes = uploaded_mmi_csv.read()  # ✅ read once
         st.info("📄 Using uploaded MMI CSV file")
-        file_bytes = uploaded_mmi_csv.read()
-        analyzer = MarketMoodAnalyzer(file_bytes)
+        analyzer = MarketMoodAnalyzer(uploaded_bytes)
     else:
         st.info("☁️ No file uploaded — loading MMI data from MongoDB")
         df_from_db = read_mmi_from_mongodb()
