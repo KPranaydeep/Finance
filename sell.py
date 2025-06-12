@@ -348,13 +348,6 @@ if uploaded_holdings:
                                             min_value=0.0, 
                                             step=100.0)
                                     
-            # Default target profit
-            default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
-            target_rupees = st.number_input("Enter today's target profit (₹)", 
-                                            value=default_target, 
-                                            min_value=0.0, 
-                                            step=100.0)
-
             # --- Move entire sell plan logic here ---
             # Filter profitable stocks
             profitable_df = merged_df[merged_df['Profit/Loss'] > 0].copy()
