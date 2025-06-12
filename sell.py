@@ -447,3 +447,8 @@ try:
 except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
+
+# =================== Display Mood Analysis ===================
+
+if analyzer:
+    analyzer.display_mood_analysis()
