@@ -406,6 +406,44 @@ if uploaded_holdings:
 
 # ========== MMI SECTION (Place this AFTER the class definition) ==========
 # ========== Load Analyzer from MongoDB or Uploaded File ==========
+# ========== Define helper to read MMI from MongoDB ==========
+def read_mmi_from_mongodb():
+    try:
+        records = list(mmi_collection.find({}, {'_id': 0}))
+        if records:
+            df = pd.DataFrame(records)
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.sort_values('Date', inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            return df
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"❌ Failed to read from MongoDB: {e}")
+        return pd.DataFrame()
+
+# ========== Upload full MMI dataset ==========
+st.subheader("📂 Upload full MMI dataset (optional)")
+uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
+
+uploaded_bytes = None
+if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
+    uploaded_bytes = uploaded_mmi_csv.read()
+    try:
+        mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
+        mmi_df.columns = ['Date', 'MMI', 'Nifty']
+        mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
+
+        # Store to MongoDB
+        mmi_collection.delete_many({})
+        mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
+
+        st.success("✅ MMI data uploaded and saved to MongoDB")
+    except Exception as e:
+        st.error(f"❌ Error processing MMI CSV: {e}")
+        uploaded_bytes = None  # reset on failure
+
+# ========== MMI SECTION (Load Analyzer from MongoDB or Uploaded File) ==========
 try:
     if uploaded_bytes:
         st.info("📄 Using uploaded MMI CSV file")
@@ -425,40 +463,6 @@ except Exception as e:
 # ========== Display Mood Analysis ==========
 if analyzer:
     analyzer.display_mood_analysis()
-st.subheader("📂 Upload full MMI dataset (optional)")
-uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
-
-def read_mmi_from_mongodb():
-    try:
-        records = list(mmi_collection.find({}, {'_id': 0}))
-        if records:
-            df = pd.DataFrame(records)
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.sort_values('Date', inplace=True)
-            df.reset_index(drop=True, inplace=True)
-            return df
-        else:
-            return pd.DataFrame()  # Return empty DataFrame if no data
-    except Exception as e:
-        st.error(f"❌ Failed to read from MongoDB: {e}")
-        return pd.DataFrame()
-
-uploaded_bytes = None
-if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
-    uploaded_bytes = uploaded_mmi_csv.read()
-    try:
-        mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
-        mmi_df.columns = ['Date', 'MMI', 'Nifty']
-        mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
-
-        # Store to MongoDB
-        mmi_collection.delete_many({})
-        mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
-
-        st.success("✅ MMI data uploaded and saved to MongoDB")
-    except Exception as e:
-        st.error(f"❌ Error processing MMI CSV: {e}")
-        uploaded_bytes = None  # reset on failure
 
 # ========== Add Today’s MMI Entry ==========
 st.subheader("📝 Add Today's MMI")
