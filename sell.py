@@ -328,7 +328,26 @@ if uploaded_holdings:
             sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct)
             daily_return_pct = round((sell_limit_multiplier - 1) * 100, 4)
             st.markdown(f"💡 *Dynamic sell limit calculated at {daily_return_pct}% above buy price*")
+
+            # Choose rotation strategy
+            rotation_option = st.radio(
+                "Select rotation strategy for calculating target profit:",
+                ["Daily", "Monthly"],
+                index=1,
+                horizontal=True
+            )
             
+            # Calculate target based on selected rotation
+            if rotation_option == "Daily":
+                default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
+            else:  # Monthly Rotation
+                default_target = round(total_invested * (sell_limit_multiplier - 1) * 21, 2)
+            
+            target_rupees = st.number_input("Enter target profit (₹)", 
+                                            value=default_target, 
+                                            min_value=0.0, 
+                                            step=100.0)
+                                    
             # Default target profit
             default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
             target_rupees = st.number_input("Enter today's target profit (₹)", 
