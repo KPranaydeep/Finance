@@ -50,14 +50,18 @@ st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
 
 # ==================== MARKET MOOD ANALYSIS ====================
+from streamlit.runtime.uploaded_file_manager import UploadedFile
+
 class MarketMoodAnalyzer:
     def __init__(self, mmi_data):
         if isinstance(mmi_data, bytes):
             self.df = self._prepare_mmi_data_from_bytes(mmi_data)
         elif isinstance(mmi_data, pd.DataFrame):
             self.df = self._prepare_mmi_data_from_df(mmi_data)
+        elif hasattr(mmi_data, "read"):  # Catch Streamlit UploadedFile
+            self.df = self._prepare_mmi_data_from_bytes(mmi_data.read())
         else:
-            raise ValueError("Unsupported input type for MMI data.")
+            raise ValueError(f"Unsupported input type for MMI data: {type(mmi_data)}")
         
         self.run_lengths = self._identify_mood_streaks()
         self.today_date = self.df['Date'].iloc[-1]
