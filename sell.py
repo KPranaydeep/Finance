@@ -432,14 +432,18 @@ with st.form("add_today_mmi"):
         except Exception as e:
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
 
+# =================== Load Analyzer from MongoDB or Uploaded File ===================
+
 try:
-    if uploaded_bytes is not None:
-        st.info("📄 Using uploaded MMI CSV file")
-        analyzer = MarketMoodAnalyzer(uploaded_bytes)
+    if 'uploaded_bytes' in locals() and uploaded_bytes is not None:
+        # If file was just uploaded in the same session, use it
+        st.info("📄 Using uploaded MMI CSV file from this session")
+        analyzer = MarketMoodAnalyzer(BytesIO(uploaded_bytes))
     else:
-        st.info("☁️ No file uploaded — loading MMI data from MongoDB")
+        # Always fallback to MongoDB on reload
         df_from_db = read_mmi_from_mongodb()
         if not df_from_db.empty:
+            st.info("☁️ Using MMI data from MongoDB")
             analyzer = MarketMoodAnalyzer(df_from_db)
         else:
             st.warning("⚠️ No data in MongoDB. Please upload a CSV first.")
