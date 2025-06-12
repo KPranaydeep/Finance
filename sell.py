@@ -416,7 +416,7 @@ with st.form("add_today_mmi"):
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
 
 # If file not uploaded, use MongoDB data
-if mmi_file is not None:
+if uploaded_mmi_csv is not None:
     try:
         analyzer = MarketMoodAnalyzer(mmi_file.read())
         analyzer.display_mood_analysis()
