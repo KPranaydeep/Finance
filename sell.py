@@ -51,28 +51,35 @@ st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
 
 # ==================== MARKET MOOD ANALYSIS ====================
 class MarketMoodAnalyzer:
-    def _prepare_mmi_data(self, mmi_data):
-        df = pd.read_csv(BytesIO(mmi_data))
-        df.columns = ['Date', 'MMI', 'Nifty']
-        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
-        df.sort_values('Date', inplace=True)
-        df.reset_index(drop=True, inplace=True)
-        df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')
-        return df
-
     def __init__(self, mmi_data):
-        self.df = self._prepare_mmi_data(mmi_data)
+        if isinstance(mmi_data, bytes):
+            self.df = self._prepare_mmi_data_from_bytes(mmi_data)
+        elif isinstance(mmi_data, pd.DataFrame):
+            self.df = self._prepare_mmi_data_from_df(mmi_data)
+        else:
+            raise ValueError("Unsupported input type for MMI data.")
+        
         self.run_lengths = self._identify_mood_streaks()
         self.today_date = self.df['Date'].iloc[-1]
         self.current_mmi = self.df['MMI'].iloc[-1]
         self.current_mood = 'Fear' if self.current_mmi <= 50 else 'Greed'
         self.current_streak = self._get_current_streak_length()
 
-    def read_mmi_from_mongodb(self):
-        cursor = mmi_collection.find()
-        df = pd.DataFrame(list(cursor))
-        if '_id' in df.columns:
-            df = df.drop(columns=['_id'])
+    def _prepare_mmi_data_from_bytes(self, mmi_bytes):
+        if not mmi_bytes:
+            raise ValueError("Empty file provided.")
+        df = pd.read_csv(BytesIO(mmi_bytes))
+        return self._process_dataframe(df)
+
+    def _prepare_mmi_data_from_df(self, df):
+        return self._process_dataframe(df)
+
+    def _process_dataframe(self, df):
+        df.columns = ['Date', 'MMI', 'Nifty']
+        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
+        df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')
+        df.sort_values('Date', inplace=True)
+        df.reset_index(drop=True, inplace=True)
         return df
 
     def _identify_mood_streaks(self):
@@ -424,25 +431,22 @@ with st.form("add_today_mmi"):
         except Exception as e:
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
 
-# If file not uploaded, use MongoDB data
-mmi_file = uploaded_mmi_csv
-if mmi_file is not None:
-    analyzer = MarketMoodAnalyzer(mmi_file.read())
-    try:
-        analyzer = MarketMoodAnalyzer(mmi_file.read())
-        analyzer.display_mood_analysis()
-    except Exception as e:
-        st.error(f"❌ Failed to process MMI file: {e}")
-else:
-    try:
-        mmi_df = read_mmi_from_mongodb()
-        if not mmi_df.empty:
-            # Convert to CSV bytes for analyzer
-            mmi_csv_bytes = BytesIO()
-            mmi_df.to_csv(mmi_csv_bytes, index=False)
-            analyzer = MarketMoodAnalyzer(mmi_csv_bytes.getvalue())
-            analyzer.display_mood_analysis()
+try:
+    if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
+        st.info("📄 Using uploaded MMI CSV file")
+        file_bytes = uploaded_mmi_csv.read()
+        analyzer = MarketMoodAnalyzer(file_bytes)
+    else:
+        st.info("☁️ No file uploaded — loading MMI data from MongoDB")
+        df_from_db = read_mmi_from_mongodb()
+        if not df_from_db.empty:
+            analyzer = MarketMoodAnalyzer(df_from_db)
         else:
-            st.warning("ℹ️ No MMI data available in MongoDB.")
-    except Exception as e:
-        st.error(f"❌ Error loading MMI from MongoDB: {e}")
+            st.warning("⚠️ No data in MongoDB. Please upload a CSV first.")
+            analyzer = None
+except Exception as e:
+    analyzer = None
+    st.error(f"❌ Error loading MMI data: {str(e)}")
+
+if analyzer:
+    analyzer.display_mood_analysis()
