@@ -396,6 +396,21 @@ if uploaded_holdings:
 st.subheader("📂 Upload full MMI dataset (optional)")
 uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
 
+def read_mmi_from_mongodb():
+    try:
+        records = list(mmi_collection.find({}, {'_id': 0}))
+        if records:
+            df = pd.DataFrame(records)
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.sort_values('Date', inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            return df
+        else:
+            return pd.DataFrame()  # Return empty DataFrame if no data
+    except Exception as e:
+        st.error(f"❌ Failed to read from MongoDB: {e}")
+        return pd.DataFrame()
+
 uploaded_bytes = None
 if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
     uploaded_bytes = uploaded_mmi_csv.read()
