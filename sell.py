@@ -257,7 +257,11 @@ def analyze_holdings(uploaded_holdings):
 
 # ==================== STREAMLIT UI ====================
 st.header("📤 Upload Your Holdings")
-uploaded_holdings = st.file_uploader("Upload your stock holdings Excel file (.xlsx)", type=['xlsx'])
+
+uploaded_holdings = st.file_uploader(
+    "Upload your stock holdings file (.xlsx for Groww or .csv for Kite)",
+    type=['xlsx', 'csv']
+)
 
 # Add these functions to your existing code
 def get_april_first_current_year():
