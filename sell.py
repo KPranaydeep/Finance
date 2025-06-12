@@ -58,11 +58,11 @@ class MarketMoodAnalyzer:
             self.df = self._prepare_mmi_data_from_bytes(mmi_data)
         elif isinstance(mmi_data, pd.DataFrame):
             self.df = self._prepare_mmi_data_from_df(mmi_data)
-        elif hasattr(mmi_data, "read"):  # Catch Streamlit UploadedFile
+        elif hasattr(mmi_data, "read"):  # Handles Streamlit UploadedFile
             self.df = self._prepare_mmi_data_from_bytes(mmi_data.read())
         else:
             raise ValueError(f"Unsupported input type for MMI data: {type(mmi_data)}")
-        
+
         self.run_lengths = self._identify_mood_streaks()
         self.today_date = self.df['Date'].iloc[-1]
         self.current_mmi = self.df['MMI'].iloc[-1]
