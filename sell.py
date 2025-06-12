@@ -435,4 +435,3 @@ else:
             st.warning("ℹ️ No MMI data available in MongoDB.")
     except Exception as e:
         st.error(f"❌ Error loading MMI from MongoDB: {e}")
-
