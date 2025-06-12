@@ -458,8 +458,6 @@ except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
 
-st.write("📅 Last Date in MongoDB:", df_from_db['Date'].max())
-
 # =================== Display Mood Analysis ===================
 
 if analyzer:
