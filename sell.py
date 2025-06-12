@@ -389,16 +389,17 @@ if uploaded_holdings:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
 # ========== MMI SECTION (Place this AFTER the class definition) ==========
-st.subheader("🗃️ Upload & Save MMI CSV to MongoDB")
 uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
 
-if uploaded_mmi_csv is not None:
+uploaded_bytes = None
+if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
+    uploaded_bytes = uploaded_mmi_csv.read()  # ✅ Read once
     try:
-        mmi_df = pd.read_csv(uploaded_mmi_csv)
+        mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
         mmi_df.columns = ['Date', 'MMI', 'Nifty']
         mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
-        
-        # Drop existing data (optional) and insert new
+
+        # Store to MongoDB
         mmi_collection.delete_many({})
         mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
 
@@ -432,8 +433,7 @@ with st.form("add_today_mmi"):
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
 
 try:
-    if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
-        uploaded_bytes = uploaded_mmi_csv.read()  # ✅ read once
+    if uploaded_bytes is not None:
         st.info("📄 Using uploaded MMI CSV file")
         analyzer = MarketMoodAnalyzer(uploaded_bytes)
     else:
@@ -447,6 +447,3 @@ try:
 except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
-
-if analyzer:
-    analyzer.display_mood_analysis()
