@@ -332,7 +332,7 @@ if uploaded_holdings:
             # Choose rotation strategy
             rotation_option = st.radio(
                 "Select rotation strategy for calculating target profit:",
-                ["Daily", "Monthly"],
+                ["Daily", "Weekly"],
                 index=1,
                 horizontal=True
             )
@@ -341,7 +341,7 @@ if uploaded_holdings:
             if rotation_option == "Daily":
                 default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
             else:  # Monthly Rotation
-                default_target = round(total_invested * (sell_limit_multiplier - 1) * 21, 2)
+                default_target = round(total_invested * (sell_limit_multiplier - 1) * 4.84615385, 2)
             
             target_rupees = st.number_input("Enter target profit (₹)", 
                                             value=default_target, 
