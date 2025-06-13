@@ -66,13 +66,15 @@ if not df.empty:
     df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
     df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
 
-    # Prepare cleaned data for plotting
+    # ✅ Sort by Date and remove duplicates (keep last entry if duplicate dates exist)
     df_plot = df.sort_values('Date').groupby('Date', as_index=False).last()
+
+    import matplotlib.dates as mdates
 
     # --- Plot 1: Charges % over Time ---
     st.subheader("📉 Charges % Over Time")
     fig1, ax1 = plt.subplots(figsize=(10, 4), dpi=150)
-    ax1.plot(df['Date'], df['Charges %'], marker='o', linestyle='-', color='crimson')
+    ax1.plot(df_plot['Date'].values, df_plot['Charges %'].values, marker='o', linestyle='-', color='crimson')
     ax1.set_ylabel("Charges (% of Buy)", fontsize=12)
     ax1.set_xlabel("Date", fontsize=12)
     ax1.set_title("Charges % Over Time", fontsize=14, weight='bold')
@@ -84,7 +86,7 @@ if not df.empty:
     # --- Plot 2: Annualized Return over Time ---
     st.subheader("📈 Annualized Return Over Time")
     fig2, ax2 = plt.subplots(figsize=(10, 4), dpi=150)
-    ax2.plot(df['Date'], df['Annualized Return'] * 100, marker='s', linestyle='-', color='darkgreen')
+    ax2.plot(df_plot['Date'].values, df_plot['Annualized Return'].values * 100, marker='s', linestyle='-', color='darkgreen')
     ax2.set_ylabel("Annualized Return (%)", fontsize=12)
     ax2.set_xlabel("Date", fontsize=12)
     ax2.set_title("Annualized Return vs Time", fontsize=14, weight='bold')
@@ -96,7 +98,7 @@ if not df.empty:
     # --- Plot 3: ROI over Time ---
     st.subheader("📊 ROI Over Time")
     fig3, ax3 = plt.subplots(figsize=(10, 4), dpi=150)
-    ax3.plot(df['Date'], df['ROI'] * 100, marker='^', linestyle='-', color='navy')
+    ax3.plot(df_plot['Date'].values, df_plot['ROI'].values * 100, marker='^', linestyle='-', color='navy')
     ax3.set_ylabel("ROI (%)", fontsize=12)
     ax3.set_xlabel("Date", fontsize=12)
     ax3.set_title("ROI vs Time", fontsize=14, weight='bold')
