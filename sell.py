@@ -11,33 +11,6 @@ from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
-import time
-
-def fetch_live_mmi_from_tickertape():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-
-    try:
-        driver.get("https://www.tickertape.in/market-mood-index")
-        time.sleep(5)  # Allow time for JS to render
-
-        mmi_text = driver.find_element(By.CSS_SELECTOR, "span.number.jsx-230719208").text
-        return float(mmi_text)
-    except Exception as e:
-        st.error(f"⚠️ Failed to scrape MMI from Tickertape: {e}")
-        return None
-    finally:
-        driver.quit()
 
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
