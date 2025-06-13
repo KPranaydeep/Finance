@@ -103,7 +103,8 @@ if not df.empty:
     st.pyplot(fig3)
 
     # --- Display Table ---
-    df_display = df.copy()
+    # Keep only the latest entry per date (in case of multiple entries per date)
+    df_display = df.sort_values('Date').groupby('Date', as_index=False).last()
     df_display['Buy'] = df_display['Buy'].map('₹{:,.2f}'.format)
     df_display['Sell'] = df_display['Sell'].map('₹{:,.2f}'.format)
     df_display['Charges'] = df_display['Charges'].map('₹{:,.2f}'.format)
