@@ -1,35 +1,116 @@
+# stocks_performance.py
+
+import streamlit as st
 import pandas as pd
+import datetime
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
-# MongoDB connection
+# --- Streamlit page setup ---
+st.set_page_config(page_title="📈 Stock Performance Tracker", layout="centered")
+st.title("📊 Stock Performance Tracker")
+
+# --- MongoDB Setup ---
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
 client = MongoClient(uri, server_api=ServerApi('1'))
 
-# Connect to DB & collection
+try:
+    client.admin.command('ping')
+    st.sidebar.success("✅ Connected to MongoDB")
+except Exception as e:
+    st.sidebar.error("❌ MongoDB Connection Failed")
+    st.stop()
+
 db = client['finance_db']
 collection = db['stock_performance']
 
-# Read your CSV data
-csv_data = """
-Date,Buy,Sell,Charges
-2025-05-28,697382.44,739054.06,5594.4
-2025-05-29,697382.44,739054.06,5611.04
-2025-06-05,745414.69,787800.92,6042.56
-2025-06-07,751492.93,794472.95,6135.66
-2025-06-09,783039.63,828429.75,6394.62
-2025-06-10,813541.67,863852.47,6629.08
-2025-06-12,844662.99,899626.61,6857.65
-"""
+# --- Load Data from MongoDB ---
+data = list(collection.find({}, {"_id": 0}))
+df = pd.DataFrame(data)
 
-from io import StringIO
-df = pd.read_csv(StringIO(csv_data))
-df['Date'] = pd.to_datetime(df['Date'])
+if df.empty:
+    df = pd.DataFrame(columns=['Date', 'Buy', 'Sell', 'Charges'])
 
-# Convert each row to a dict and insert into MongoDB
-records = df.to_dict(orient='records')
-# Optional: remove any existing records first (CAUTION!)
-# collection.delete_many({})
-collection.insert_many(records)
+# --- Ensure Correct Data Types ---
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+df['Buy'] = pd.to_numeric(df['Buy'], errors='coerce')
+df['Sell'] = pd.to_numeric(df['Sell'], errors='coerce')
+df['Charges'] = pd.to_numeric(df['Charges'], errors='coerce')
+df = df.dropna(subset=['Date'])
 
-print(f"✅ Imported {len(records)} records to MongoDB.")
+# --- Input Section ---
+default_date = datetime.date.today() - datetime.timedelta(days=1)
+input_date = st.date_input("📅 Date", value=default_date)
+buy_value = st.number_input("💰 Buy Value", min_value=0.0, format="%.2f")
+sell_value = st.number_input("💸 Sell Value", min_value=0.0, format="%.2f")
+charges = st.number_input("⚙️ Charges", min_value=0.0, format="%.2f")
+
+if st.button("➕ Add Entry"):
+    new_entry = {
+        'Date': input_date.strftime("%Y-%m-%d"),
+        'Buy': float(buy_value),
+        'Sell': float(sell_value),
+        'Charges': float(charges)
+    }
+    collection.insert_one(new_entry)
+    st.success("✅ Entry added to MongoDB!")
+    st.experimental_rerun()
+
+# --- Calculations ---
+if not df.empty:
+    df['Net Profit'] = df['Sell'] - df['Buy'] - df['Charges']
+    df['ROI'] = df['Net Profit'] / df['Buy']
+    df['Charges %'] = df['Charges'] / df['Buy'] * 100
+    df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
+    df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
+
+    # --- Plot 1: Charges % over Time ---
+    st.subheader("📉 Charges % Over Time")
+    fig1, ax1 = plt.subplots(figsize=(10, 4), dpi=150)
+    ax1.plot(df['Date'], df['Charges %'], marker='o', linestyle='-', color='crimson')
+    ax1.set_ylabel("Charges (% of Buy)", fontsize=12)
+    ax1.set_xlabel("Date", fontsize=12)
+    ax1.set_title("Charges % Over Time", fontsize=14, weight='bold')
+    ax1.grid(True, linestyle='--', alpha=0.6)
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+    fig1.autofmt_xdate()
+    st.pyplot(fig1)
+
+    # --- Plot 2: Annualized Return over Time ---
+    st.subheader("📈 Annualized Return Over Time")
+    fig2, ax2 = plt.subplots(figsize=(10, 4), dpi=150)
+    ax2.plot(df['Date'], df['Annualized Return'] * 100, marker='s', linestyle='-', color='darkgreen')
+    ax2.set_ylabel("Annualized Return (%)", fontsize=12)
+    ax2.set_xlabel("Date", fontsize=12)
+    ax2.set_title("Annualized Return vs Time", fontsize=14, weight='bold')
+    ax2.grid(True, linestyle='--', alpha=0.6)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+    fig2.autofmt_xdate()
+    st.pyplot(fig2)
+
+    # --- Plot 3: ROI over Time ---
+    st.subheader("📊 ROI Over Time")
+    fig3, ax3 = plt.subplots(figsize=(10, 4), dpi=150)
+    ax3.plot(df['Date'], df['ROI'] * 100, marker='^', linestyle='-', color='navy')
+    ax3.set_ylabel("ROI (%)", fontsize=12)
+    ax3.set_xlabel("Date", fontsize=12)
+    ax3.set_title("ROI vs Time", fontsize=14, weight='bold')
+    ax3.grid(True, linestyle='--', alpha=0.6)
+    ax3.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+    fig3.autofmt_xdate()
+    st.pyplot(fig3)
+
+    # --- Display Table ---
+    df_display = df.copy()
+    df_display['Buy'] = df_display['Buy'].map('₹{:,.2f}'.format)
+    df_display['Sell'] = df_display['Sell'].map('₹{:,.2f}'.format)
+    df_display['Charges'] = df_display['Charges'].map('₹{:,.2f}'.format)
+    df_display['Net Profit'] = df_display['Net Profit'].map('₹{:,.2f}'.format)
+    df_display['ROI'] = (df['ROI'] * 100).round(2).astype(str) + '%'
+    df_display['Charges %'] = df['Charges %'].round(2).astype(str) + '%'
+    df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
+
+    st.subheader("📋 Formatted Performance Table")
+    st.dataframe(df_display)
