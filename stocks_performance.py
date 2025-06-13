@@ -28,3 +28,14 @@ if df.empty:
 # Parse date properly
 df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 df = df.dropna(subset=['Date'])
+
+if st.button("Add Entry"):
+    new_entry = {
+        'Date': input_date.strftime("%Y-%m-%d"),
+        'Buy': float(buy_value),
+        'Sell': float(sell_value),
+        'Charges': float(charges)
+    }
+    collection.insert_one(new_entry)
+    st.success("✅ Entry added to MongoDB!")
+    st.experimental_rerun()  # Refresh to show new data
