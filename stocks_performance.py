@@ -117,5 +117,5 @@ if not df.empty:
     df_display['Charges %'] = df['Charges %'].round(2).astype(str) + '%'
     df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
 
-    st.subheader("📋 Formatted Performance Table")
+    with st.expander("📋 Show Formatted Performance Table"):
     st.dataframe(df_display)
