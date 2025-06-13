@@ -16,9 +16,9 @@ client = MongoClient(uri, server_api=ServerApi('1'))
 
 try:
     client.admin.command('ping')
-    st.sidebar.success("✅ Connected to MongoDB")
+    st.success("✅ Connected to MongoDB")
 except Exception as e:
-    st.sidebar.error("❌ MongoDB Connection Failed")
+    st.error("❌ MongoDB Connection Failed")
     st.stop()
 
 db = client['finance_db']
