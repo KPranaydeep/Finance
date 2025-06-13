@@ -485,6 +485,7 @@ if analyzer:
 
 # ========== Add Today’s MMI Entry ==========
 st.subheader("📝 Add Today's MMI")
+
 with st.form("add_today_mmi"):
     today_mmi = st.number_input("Enter Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
     today = datetime.today().date()
@@ -492,9 +493,11 @@ with st.form("add_today_mmi"):
 
     if submitted:
         try:
+            # Fetch today's Nifty value
             nifty_ticker = yf.Ticker("^NSEI")
             nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
 
+            # Insert into MongoDB
             mmi_collection.insert_one({
                 "Date": datetime.combine(today, datetime.min.time()),
                 "MMI": today_mmi,
@@ -502,5 +505,16 @@ with st.form("add_today_mmi"):
             })
 
             st.success(f"✅ Added today's MMI ({today_mmi}) and Nifty ({nifty_today:.2f}) to MongoDB")
+
+            # Refresh analyzer with updated data
+            df_from_db = read_mmi_from_mongodb()
+            if not df_from_db.empty:
+                analyzer = MarketMoodAnalyzer(df_from_db)
+                st.success("🔄 Analysis updated with latest data")
+            else:
+                analyzer = None
+                st.warning("⚠️ MongoDB returned no data. Please check your upload.")
+
         except Exception as e:
+            analyzer = None
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
