@@ -479,10 +479,6 @@ except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
 
-# ========== Display Mood Analysis ==========
-if analyzer:
-    analyzer.display_mood_analysis()
-
 # ========== Add Today’s MMI Entry ==========
 st.subheader("📝 Add Today's MMI")
 
@@ -518,3 +514,7 @@ with st.form("add_today_mmi"):
         except Exception as e:
             analyzer = None
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
+
+# ========== Display Mood Analysis ==========
+if analyzer:
+    analyzer.display_mood_analysis()
