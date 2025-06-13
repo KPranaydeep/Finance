@@ -118,4 +118,4 @@ if not df.empty:
     df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
 
     with st.expander("📋 Show Formatted Performance Table"):
-    st.dataframe(df_display)
+        st.dataframe(df_display)
