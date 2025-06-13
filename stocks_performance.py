@@ -38,23 +38,24 @@ df['Sell'] = pd.to_numeric(df['Sell'], errors='coerce')
 df['Charges'] = pd.to_numeric(df['Charges'], errors='coerce')
 df = df.dropna(subset=['Date'])
 
-# --- Input Section ---
-default_date = datetime.date.today() - datetime.timedelta(days=1)
-input_date = st.date_input("📅 Date", value=default_date)
-buy_value = st.number_input("💰 Buy Value", min_value=0.0, format="%.2f")
-sell_value = st.number_input("💸 Sell Value", min_value=0.0, format="%.2f")
-charges = st.number_input("⚙️ Charges", min_value=0.0, format="%.2f")
-
-if st.button("➕ Add Entry"):
-    new_entry = {
-        'Date': input_date.strftime("%Y-%m-%d"),
-        'Buy': float(buy_value),
-        'Sell': float(sell_value),
-        'Charges': float(charges)
-    }
-    collection.insert_one(new_entry)
-    st.success("✅ Entry added to MongoDB!")
-    st.experimental_rerun()
+# --- Collapsible Input Section ---
+with st.expander("➕ Add New Entry"):
+    default_date = datetime.date.today() - datetime.timedelta(days=1)
+    input_date = st.date_input("📅 Date", value=default_date)
+    buy_value = st.number_input("💰 Buy Value", min_value=0.0, format="%.2f")
+    sell_value = st.number_input("💸 Sell Value", min_value=0.0, format="%.2f")
+    charges = st.number_input("⚙️ Charges", min_value=0.0, format="%.2f")
+    
+    if st.button("✅ Add Entry"):
+        new_row = pd.DataFrame([{
+            'Date': input_date,
+            'Buy': buy_value,
+            'Sell': sell_value,
+            'Charges': charges
+        }])
+        df = pd.concat([df, new_row], ignore_index=True)
+        df.to_csv(DATA_FILE, index=False)
+        st.success("✅ Entry added!")
 
 # --- Calculations ---
 if not df.empty:
