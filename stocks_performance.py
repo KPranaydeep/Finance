@@ -66,6 +66,9 @@ if not df.empty:
     df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
     df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
 
+    # Prepare cleaned data for plotting
+    df_plot = df.sort_values('Date').groupby('Date', as_index=False).last()
+
     # --- Plot 1: Charges % over Time ---
     st.subheader("📉 Charges % Over Time")
     fig1, ax1 = plt.subplots(figsize=(10, 4), dpi=150)
