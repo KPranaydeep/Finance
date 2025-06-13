@@ -32,4 +32,4 @@ records = df.to_dict(orient='records')
 # collection.delete_many({})
 collection.insert_many(records)
 
-print(f"✅ Imported {len(records)} records to MongoDB."
+print(f"✅ Imported {len(records)} records to MongoDB.")
