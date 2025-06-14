@@ -29,6 +29,25 @@ db = client['finance_db']
 collection = db['sell_plan_params']
 mmi_collection = db['mmi_data']
 
+def is_market_closed():
+    try:
+        nifty = yf.Ticker("^NSEI")
+        df = nifty.history(period="1d", interval="5m")
+        if len(df) < 2:
+            return True  # Not enough data to say it's open
+        last_close = df['Close'].iloc[-1]
+        prev_close = df['Close'].iloc[-2]
+        return abs(last_close - prev_close) < 0.5  # Minimal movement → likely closed
+    except:
+        return False  # Fail-safe: assume market open if error
+
+def get_next_trading_day(from_date):
+    # Skip Saturday/Sunday
+    next_day = from_date + timedelta(days=1)
+    while next_day.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        next_day += timedelta(days=1)
+    return next_day
+
 def save_input_params(user_id, net_pl, charges, target_pct):
     record = {
         'user_id': user_id,
@@ -149,12 +168,21 @@ class MarketMoodAnalyzer:
             col1.metric("Current MMI", f"{self.current_mmi:.2f}", 
                        "Fear" if self.current_mmi <= 50 else "Greed")
             col2.metric("Current Streak", f"{self.current_streak} days")
-            
+
             # Mood prediction
             if confidence_flip_day:
                 days_until_flip = confidence_flip_day - self.current_streak
                 confidence_date = self.today_date + timedelta(days=days_until_flip)
-                flip_status = "today" if days_until_flip == 0 else f"in {days_until_flip} days"
+                
+                # Check if market is closed, then adjust
+                if is_market_closed() and days_until_flip <= 0:
+                    confidence_date = get_next_trading_day(self.today_date)
+                    flip_status = f"on {confidence_date.strftime('%A')}"
+                else:
+                    flip_status = (
+                        "today" if days_until_flip == 0 else f"in {days_until_flip} days"
+                    )
+            
                 col3.metric("Expected Flip Date", 
                             confidence_date.strftime('%d %b %Y'), 
                             flip_status)
