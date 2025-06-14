@@ -276,6 +276,103 @@ def analyze_holdings(uploaded_holdings):
         return None
 
 # ==================== STREAMLIT UI ====================
+
+# ========== MMI SECTION (Place this AFTER the class definition) ==========
+# ========== Load Analyzer from MongoDB or Uploaded File ==========
+# ========== Define helper to read MMI from MongoDB ==========
+def read_mmi_from_mongodb():
+    try:
+        records = list(mmi_collection.find({}, {'_id': 0}))
+        if records:
+            df = pd.DataFrame(records)
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.sort_values('Date', inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            return df
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"❌ Failed to read from MongoDB: {e}")
+        return pd.DataFrame()
+
+# ========== Upload full MMI dataset ==========
+st.subheader("📂 Upload full MMI dataset (optional)")
+uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
+
+uploaded_bytes = None
+if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
+    uploaded_bytes = uploaded_mmi_csv.read()
+    try:
+        mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
+        mmi_df.columns = ['Date', 'MMI', 'Nifty']
+        mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
+
+        # Store to MongoDB
+        mmi_collection.delete_many({})
+        mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
+
+        st.success("✅ MMI data uploaded and saved to MongoDB")
+    except Exception as e:
+        st.error(f"❌ Error processing MMI CSV: {e}")
+        uploaded_bytes = None  # reset on failure
+
+# ========== MMI SECTION (Load Analyzer from MongoDB or Uploaded File) ==========
+try:
+    if uploaded_bytes:
+        st.info("📄 Using uploaded MMI CSV file")
+        analyzer = MarketMoodAnalyzer(uploaded_bytes)
+    else:
+        df_from_db = read_mmi_from_mongodb()
+        if not df_from_db.empty:
+            st.info("☁️ Using MMI data from MongoDB")
+            analyzer = MarketMoodAnalyzer(df_from_db)
+        else:
+            st.warning("⚠️ No valid MMI data found in MongoDB. Please upload or add today’s MMI.")
+            analyzer = None
+except Exception as e:
+    analyzer = None
+    st.error(f"❌ Error loading MMI data: {str(e)}")
+
+# ========== Add Today’s MMI Entry ==========
+st.subheader("📝 Add Today's MMI")
+
+with st.form("add_today_mmi"):
+    today_mmi = st.number_input("Enter Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
+    today = datetime.today().date()
+    submitted = st.form_submit_button("Add to MongoDB")
+
+    if submitted:
+        try:
+            # Fetch today's Nifty value
+            nifty_ticker = yf.Ticker("^NSEI")
+            nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
+
+            # Insert into MongoDB
+            mmi_collection.insert_one({
+                "Date": datetime.combine(today, datetime.min.time()),
+                "MMI": today_mmi,
+                "Nifty": nifty_today
+            })
+
+            st.success(f"✅ Added today's MMI ({today_mmi}) and Nifty ({nifty_today:.2f}) to MongoDB")
+
+            # Refresh analyzer with updated data
+            df_from_db = read_mmi_from_mongodb()
+            if not df_from_db.empty:
+                analyzer = MarketMoodAnalyzer(df_from_db)
+                st.success("🔄 Analysis updated with latest data")
+            else:
+                analyzer = None
+                st.warning("⚠️ MongoDB returned no data. Please check your upload.")
+
+        except Exception as e:
+            analyzer = None
+            st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
+
+# ========== Display Mood Analysis ==========
+if analyzer:
+    analyzer.display_mood_analysis()
+
 st.header("📤 Upload Your Holdings")
 
 uploaded_holdings = st.file_uploader(
@@ -442,99 +539,3 @@ if uploaded_holdings:
                 st.info("⏳ Check back tomorrow when market conditions may improve")
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
-
-# ========== MMI SECTION (Place this AFTER the class definition) ==========
-# ========== Load Analyzer from MongoDB or Uploaded File ==========
-# ========== Define helper to read MMI from MongoDB ==========
-def read_mmi_from_mongodb():
-    try:
-        records = list(mmi_collection.find({}, {'_id': 0}))
-        if records:
-            df = pd.DataFrame(records)
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.sort_values('Date', inplace=True)
-            df.reset_index(drop=True, inplace=True)
-            return df
-        else:
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"❌ Failed to read from MongoDB: {e}")
-        return pd.DataFrame()
-
-# ========== Upload full MMI dataset ==========
-st.subheader("📂 Upload full MMI dataset (optional)")
-uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
-
-uploaded_bytes = None
-if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
-    uploaded_bytes = uploaded_mmi_csv.read()
-    try:
-        mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
-        mmi_df.columns = ['Date', 'MMI', 'Nifty']
-        mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
-
-        # Store to MongoDB
-        mmi_collection.delete_many({})
-        mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
-
-        st.success("✅ MMI data uploaded and saved to MongoDB")
-    except Exception as e:
-        st.error(f"❌ Error processing MMI CSV: {e}")
-        uploaded_bytes = None  # reset on failure
-
-# ========== MMI SECTION (Load Analyzer from MongoDB or Uploaded File) ==========
-try:
-    if uploaded_bytes:
-        st.info("📄 Using uploaded MMI CSV file")
-        analyzer = MarketMoodAnalyzer(uploaded_bytes)
-    else:
-        df_from_db = read_mmi_from_mongodb()
-        if not df_from_db.empty:
-            st.info("☁️ Using MMI data from MongoDB")
-            analyzer = MarketMoodAnalyzer(df_from_db)
-        else:
-            st.warning("⚠️ No valid MMI data found in MongoDB. Please upload or add today’s MMI.")
-            analyzer = None
-except Exception as e:
-    analyzer = None
-    st.error(f"❌ Error loading MMI data: {str(e)}")
-
-# ========== Add Today’s MMI Entry ==========
-st.subheader("📝 Add Today's MMI")
-
-with st.form("add_today_mmi"):
-    today_mmi = st.number_input("Enter Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
-    today = datetime.today().date()
-    submitted = st.form_submit_button("Add to MongoDB")
-
-    if submitted:
-        try:
-            # Fetch today's Nifty value
-            nifty_ticker = yf.Ticker("^NSEI")
-            nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
-
-            # Insert into MongoDB
-            mmi_collection.insert_one({
-                "Date": datetime.combine(today, datetime.min.time()),
-                "MMI": today_mmi,
-                "Nifty": nifty_today
-            })
-
-            st.success(f"✅ Added today's MMI ({today_mmi}) and Nifty ({nifty_today:.2f}) to MongoDB")
-
-            # Refresh analyzer with updated data
-            df_from_db = read_mmi_from_mongodb()
-            if not df_from_db.empty:
-                analyzer = MarketMoodAnalyzer(df_from_db)
-                st.success("🔄 Analysis updated with latest data")
-            else:
-                analyzer = None
-                st.warning("⚠️ MongoDB returned no data. Please check your upload.")
-
-        except Exception as e:
-            analyzer = None
-            st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
-
-# ========== Display Mood Analysis ==========
-if analyzer:
-    analyzer.display_mood_analysis()
