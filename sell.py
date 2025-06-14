@@ -208,28 +208,26 @@ def load_equity_mapping():
     })
 
 def analyze_holdings(uploaded_holdings):
-    """Analyze stock holdings from Groww (XLSX) or Kite (CSV)"""
+    """Analyze stock holdings from Groww or Kite XLSX files"""
     try:
-        file_type = uploaded_holdings.name.split(".")[-1]
+        xls = pd.ExcelFile(uploaded_holdings)
+        sheet_names = xls.sheet_names
 
-        if file_type.lower() == "csv":
-            df = pd.read_csv(uploaded_holdings)
-            if "Instrument" in df.columns and "Qty." in df.columns:
-                # Kite format
-                df = df.rename(columns={
-                    'Instrument': 'Symbol',
-                    'Qty.': 'Quantity',
-                    'Avg. cost': 'Average Price',
-                    'LTP': 'Live LTP',
-                    'Invested': 'Invested Amount',
-                    'Cur. val': 'Current Value',
-                    'P&L': 'Profit/Loss'
-                })
-                df['Company Name'] = df['Symbol']  # Placeholder
-            else:
-                raise ValueError("Unrecognized CSV format. Only Kite statement supported.")
+        if "Equity" in sheet_names:
+            # Kite XLSX format (your uploaded file)
+            df = pd.read_excel(uploaded_holdings, sheet_name="Equity", skiprows=22)
+            df = df.dropna(subset=["Symbol"])
+            df = df.rename(columns={
+                "Quantity Available": "Quantity",
+                "Average Price": "Average Price",
+                "Unrealized P&L": "P&L",
+                "Unrealized P&L Pct.": "P&L (%)",
+                "Previous Closing Price": "Live LTP"
+            })
+            df["Company Name"] = df["Symbol"]
 
-        elif file_type.lower() == "xlsx":
+        else:
+            # Assume Groww XLSX format
             df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
             if df.iloc[0].astype(str).str.contains("Stock Name", case=False).any():
                 df = df.iloc[1:]
@@ -252,9 +250,6 @@ def analyze_holdings(uploaded_holdings):
             df['Company Name'] = df['Company Name'].fillna(df['Stock Name'])
             df['Live LTP'] = df['LTP']
 
-        else:
-            raise ValueError("Unsupported file type. Please upload CSV (Kite) or XLSX (Groww)")
-
         # Ensure numeric types
         df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce')
         df['Average Price'] = pd.to_numeric(df['Average Price'], errors='coerce')
@@ -272,7 +267,7 @@ def analyze_holdings(uploaded_holdings):
                    'Profit/Loss', 'Profit/Loss (%)']]
 
     except Exception as e:
-        st.error(f"❌ Could not process file: {e}")
+        st.error(f"❌ Could not process XLSX file: {e}")
         return None
 
 # ==================== STREAMLIT UI ====================
