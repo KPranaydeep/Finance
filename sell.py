@@ -175,13 +175,15 @@ class MarketMoodAnalyzer:
                 confidence_date = self.today_date + timedelta(days=days_until_flip)
                 
                 # Check if market is closed, then adjust
-                if is_market_closed() and days_until_flip <= 0:
-                    confidence_date = get_next_trading_day(self.today_date)
-                    flip_status = f"on {confidence_date.strftime('%A')}"
+                if days_until_flip <= 0:
+                    if is_market_closed():
+                        # Market is closed and flip is due → push to next trading day
+                        confidence_date = get_next_trading_day(self.today_date)
+                        flip_status = f"on {confidence_date.strftime('%A')}"
+                    else:
+                        flip_status = "today"
                 else:
-                    flip_status = (
-                        "today" if days_until_flip == 0 else f"in {days_until_flip} days"
-                    )
+                    flip_status = f"in {days_until_flip} days"
             
                 col3.metric("Expected Flip Date", 
                             confidence_date.strftime('%d %b %Y'), 
