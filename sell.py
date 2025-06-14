@@ -165,15 +165,9 @@ class MarketMoodAnalyzer:
                 confidence_date = raw_confidence_date
                 days_left = (confidence_date - self.today_date).days
     
-                # Flip display logic
-                if days_left < 0:
-                    if is_market_closed():
-                        confidence_date = get_next_trading_day(self.today_date)
-                        flip_status = f"on {confidence_date.strftime('%A')}"
-                    else:
-                        flip_status = "today"
-                elif days_left == 0:
-                    if is_market_closed():
+                # ✅ Final flip display logic
+                if days_left <= 0:
+                    if is_market_closed() or raw_confidence_date < self.today_date:
                         confidence_date = get_next_trading_day(self.today_date)
                         flip_status = f"on {confidence_date.strftime('%A')}"
                     else:
@@ -199,6 +193,7 @@ class MarketMoodAnalyzer:
                     st.warning("🛑 Market in Greed Phase - Consider profit booking")
                 else:
                     st.success("🟢 Market in Fear Phase - Look for entry opportunities")
+
 
 # ==================== STOCK HOLDINGS ANALYSIS ====================
 @st.cache_data
