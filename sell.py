@@ -154,9 +154,10 @@ class MarketMoodAnalyzer:
             if confidence_flip_day:
                 days_until_flip = confidence_flip_day - self.current_streak
                 confidence_date = self.today_date + timedelta(days=days_until_flip)
+                flip_status = "today" if days_until_flip == 0 else f"in {days_until_flip} days"
                 col3.metric("Expected Flip Date", 
-                           confidence_date.strftime('%d %b %Y'), 
-                           f"in {days_until_flip} days")
+                            confidence_date.strftime('%d %b %Y'), 
+                            flip_status)
             
             # Historical patterns
             st.markdown("**Historical Patterns**")
