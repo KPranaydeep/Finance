@@ -82,8 +82,11 @@ class MarketMoodAnalyzer:
         else:
             raise ValueError(f"Unsupported input type for MMI data: {type(mmi_data)}")
 
+        self.df = self.df.sort_values('Date').reset_index(drop=True)
         self.run_lengths = self._identify_mood_streaks()
-        self.today_date = self.df['Date'].iloc[-1]
+        
+        self.mmi_last_date = self.df['Date'].iloc[-1].date()  # Last date in MMI data
+        self.today_date = datetime.today().date()             # Actual today
         self.current_mmi = self.df['MMI'].iloc[-1]
         self.current_mood = 'Fear' if self.current_mmi <= 50 else 'Greed'
         self.current_streak = self._get_current_streak_length()
@@ -101,21 +104,17 @@ class MarketMoodAnalyzer:
         df.columns = ['Date', 'MMI', 'Nifty']
         df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
         df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')
-        df.sort_values('Date', inplace=True)
-        df.reset_index(drop=True, inplace=True)
         return df
 
     def _identify_mood_streaks(self):
-        """Identify consecutive runs of Fear/Greed moods"""
         mood_series = self.df['Mood'].values
         streaks = [(mood, sum(1 for _ in group)) for mood, group in groupby(mood_series)]
         run_lengths = {'Fear': [], 'Greed': []}
         for mood, length in streaks:
             run_lengths[mood].append(length)
         return run_lengths
-    
+
     def _get_current_streak_length(self):
-        """Calculate length of current mood streak"""
         current_streak = 1
         for i in range(len(self.df) - 2, -1, -1):
             if self.df['Mood'].iloc[i] == self.current_mood:
@@ -123,83 +122,71 @@ class MarketMoodAnalyzer:
             else:
                 break
         return current_streak
-    
+
     @staticmethod
     def _empirical_survival_hazard(data):
-        """Calculate empirical survival function"""
         kmf = KaplanMeierFitter()
         kmf.fit(data, event_observed=np.ones_like(data))
         surv = kmf.survival_function_.reset_index()
         return surv['timeline'].values, surv['KM_estimate'].values
-    
+
     def _analyze_mood(self, mood):
-        """Analyze historical patterns for a specific mood"""
         data = np.array(self.run_lengths[mood])
         days, S = self._empirical_survival_hazard(data)
         return {'runs': data, 'survival_days': days, 'survival_prob': S}
-    
+
     def _get_confidence_flip_date(self, survival_days, survival_prob, confidence=0.05):
-        """Get flip date at specified confidence level"""
         for d, s in zip(survival_days, survival_prob):
             if s <= confidence:
                 return d
         return None
-    
+
     def display_mood_analysis(self):
-        """Display market mood analysis in Streamlit"""
-        # Analyze historical patterns
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
         res = fear_res if self.current_mood == 'Fear' else greed_res
-        
-        # Find confidence-based flip point
+
         confidence_flip_day = self._get_confidence_flip_date(
-            res['survival_days'], 
-            res['survival_prob']
+            res['survival_days'], res['survival_prob']
         )
-        
-        # Create mood display container
+
         mood_container = st.container()
         with mood_container:
             st.subheader("📈 Current Market Mood Analysis")
-            
-            # Current status columns
+
             col1, col2, col3 = st.columns(3)
             col1.metric("Current MMI", f"{self.current_mmi:.2f}", 
-                       "Fear" if self.current_mmi <= 50 else "Greed")
+                        "Fear" if self.current_mmi <= 50 else "Greed")
             col2.metric("Current Streak", f"{self.current_streak} days")
 
-            # Mood prediction
-            if confidence_flip_day:
+            if confidence_flip_day is not None:
                 days_until_flip = confidence_flip_day - self.current_streak
-                confidence_date = self.today_date + timedelta(days=days_until_flip)
-                
-                # Check if market is closed, then adjust
-                if days_until_flip <= 0:
-                    if is_market_closed():
-                        # Market is closed and flip is due → push to next trading day
-                        confidence_date = get_next_trading_day(self.today_date)
-                        flip_status = f"on {confidence_date.strftime('%A')}"
-                    else:
-                        flip_status = "today"
+                raw_confidence_date = self.mmi_last_date + timedelta(days=days_until_flip)
+
+                if raw_confidence_date <= self.today_date and is_market_closed():
+                    confidence_date = get_next_trading_day(self.today_date)
+                    flip_status = f"on {confidence_date.strftime('%A')}"
+                elif raw_confidence_date == self.today_date:
+                    confidence_date = raw_confidence_date
+                    flip_status = "today"
                 else:
-                    flip_status = f"in {days_until_flip} days"
-            
+                    confidence_date = raw_confidence_date
+                    days_left = (confidence_date - self.today_date).days
+                    flip_status = f"in {days_left} days"
+
                 col3.metric("Expected Flip Date", 
                             confidence_date.strftime('%d %b %Y'), 
                             flip_status)
-            
-            # Historical patterns
+
             st.markdown("**Historical Patterns**")
             hist_col1, hist_col2 = st.columns(2)
             hist_col1.metric("Fear Streaks", 
                             f"{len(fear_res['runs'])}", 
                             f"Avg: {np.mean(fear_res['runs']):.1f} days")
             hist_col2.metric("Greed Streaks", 
-                           f"{len(greed_res['runs'])}", 
-                           f"Avg: {np.mean(greed_res['runs']):.1f} days")
-            
-            # Recommendation
+                            f"{len(greed_res['runs'])}", 
+                            f"Avg: {np.mean(greed_res['runs']):.1f} days")
+
             if confidence_flip_day:
                 if self.current_mood == 'Greed':
                     st.warning("🛑 Market in Greed Phase - Consider profit booking")
