@@ -297,7 +297,12 @@ def read_mmi_from_mongodb():
 
 # ========== Upload full MMI dataset ==========
 st.subheader("📂 Upload full MMI dataset (optional)")
-uploaded_mmi_csv = st.file_uploader("Upload full MMI dataset (CSV format)", type=["csv"], key="upload_mmi_db")
+with st.expander("📂 Upload Full MMI Dataset (CSV Format)"):
+    uploaded_mmi_csv = st.file_uploader(
+        "Upload full MMI dataset (CSV format)",
+        type=["csv"],
+        key="upload_mmi_db"
+    )
 
 uploaded_bytes = None
 if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
@@ -375,10 +380,11 @@ if analyzer:
 
 st.header("📤 Upload Your Holdings")
 
-uploaded_holdings = st.file_uploader(
-    "Upload your stock holdings file (.xlsx for Groww or .csv for Kite)",
-    type=['xlsx', 'csv']
-)
+with st.expander("📤 Upload Your Stock Holdings File"):
+    uploaded_holdings = st.file_uploader(
+        "Upload your stock holdings file (.xlsx for Groww or .csv for Kite)",
+        type=['xlsx', 'csv']
+    )
 
 # Add these functions to your existing code
 def get_april_first_current_year():
