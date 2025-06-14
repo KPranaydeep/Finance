@@ -172,7 +172,15 @@ class MarketMoodAnalyzer:
                 else:
                     confidence_date = raw_confidence_date
                     days_left = (confidence_date - self.today_date).days
-                    flip_status = f"in {days_left} days"
+                    if days_left < 0:
+                        if is_market_closed():
+                            confidence_date = get_next_trading_day(self.today_date)
+                            flip_status = f"on {confidence_date.strftime('%A')}"
+                        else:
+                            flip_status = "today"
+                    else:
+                        flip_status = f"in {days_left} days"
+
 
                 col3.metric("Expected Flip Date", 
                             confidence_date.strftime('%d %b %Y'), 
