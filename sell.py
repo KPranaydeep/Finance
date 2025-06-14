@@ -377,8 +377,8 @@ st.header("📤 Upload Your Holdings")
 
 with st.expander("📤 Upload Your Stock Holdings File"):
     uploaded_holdings = st.file_uploader(
-        "Upload your stock holdings file (.xlsx for Groww or .csv for Kite)",
-        type=['xlsx', 'csv']
+        "Upload your stock holdings file (.xlsx format only — Groww or Kite)",
+        type=['xlsx']
     )
 
 # Add these functions to your existing code
