@@ -145,56 +145,55 @@ class MarketMoodAnalyzer:
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
         res = fear_res if self.current_mood == 'Fear' else greed_res
-
+    
         confidence_flip_day = self._get_confidence_flip_date(
             res['survival_days'], res['survival_prob']
         )
-
+    
         mood_container = st.container()
         with mood_container:
             st.subheader("📈 Current Market Mood Analysis")
-
+    
             col1, col2, col3 = st.columns(3)
             col1.metric("Current MMI", f"{self.current_mmi:.2f}", 
                         "Fear" if self.current_mmi <= 50 else "Greed")
             col2.metric("Current Streak", f"{self.current_streak} days")
-
+    
             if confidence_flip_day is not None:
                 days_until_flip = confidence_flip_day - self.current_streak
                 raw_confidence_date = self.mmi_last_date + timedelta(days=days_until_flip)
-
-                if raw_confidence_date <= self.today_date and is_market_closed():
-                    confidence_date = get_next_trading_day(self.today_date)
-                    flip_status = f"on {confidence_date.strftime('%A')}"
-                elif raw_confidence_date == self.today_date:
-                    confidence_date = raw_confidence_date
-                    flip_status = "today"
-                else:
-                    confidence_date = raw_confidence_date
-                    days_left = (confidence_date - self.today_date).days
-                    if days_left < 0:
-                        if is_market_closed():
-                            confidence_date = get_next_trading_day(self.today_date)
-                            flip_status = f"on {confidence_date.strftime('%A')}"
-                        else:
-                            flip_status = "today"
+                confidence_date = raw_confidence_date
+                days_left = (confidence_date - self.today_date).days
+    
+                # Flip display logic
+                if days_left < 0:
+                    if is_market_closed():
+                        confidence_date = get_next_trading_day(self.today_date)
+                        flip_status = f"on {confidence_date.strftime('%A')}"
                     else:
-                        flip_status = f"in {days_left} days"
-
-
+                        flip_status = "today"
+                elif days_left == 0:
+                    if is_market_closed():
+                        confidence_date = get_next_trading_day(self.today_date)
+                        flip_status = f"on {confidence_date.strftime('%A')}"
+                    else:
+                        flip_status = "today"
+                else:
+                    flip_status = f"in {days_left} days"
+    
                 col3.metric("Expected Flip Date", 
                             confidence_date.strftime('%d %b %Y'), 
                             flip_status)
-
+    
             st.markdown("**Historical Patterns**")
             hist_col1, hist_col2 = st.columns(2)
             hist_col1.metric("Fear Streaks", 
-                            f"{len(fear_res['runs'])}", 
-                            f"Avg: {np.mean(fear_res['runs']):.1f} days")
+                             f"{len(fear_res['runs'])}", 
+                             f"Avg: {np.mean(fear_res['runs']):.1f} days")
             hist_col2.metric("Greed Streaks", 
-                            f"{len(greed_res['runs'])}", 
-                            f"Avg: {np.mean(greed_res['runs']):.1f} days")
-
+                             f"{len(greed_res['runs'])}", 
+                             f"Avg: {np.mean(greed_res['runs']):.1f} days")
+    
             if confidence_flip_day:
                 if self.current_mood == 'Greed':
                     st.warning("🛑 Market in Greed Phase - Consider profit booking")
