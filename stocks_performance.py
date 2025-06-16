@@ -54,7 +54,13 @@ with st.expander("➕ Add New Entry"):
             'Charges': charges
         }])
         df = pd.concat([df, new_row], ignore_index=True)
-        df.to_csv(DATA_FILE, index=False)
+        collection.insert_one({
+            'Date': input_date.strftime('%Y-%m-%d'),
+            'Buy': buy_value,
+            'Sell': sell_value,
+            'Charges': charges
+        })
+        st.experimental_rerun()
         st.success("✅ Entry added!")
 
 # --- Calculations ---
