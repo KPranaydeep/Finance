@@ -469,7 +469,7 @@ if uploaded_holdings:
             rotation_option = st.radio(
                 "Select rotation strategy for calculating target profit:",
                 ["Daily", "Weekly", "Monthly"],
-                index=1,
+                index=2,
                 horizontal=True
             )
             
@@ -481,23 +481,21 @@ if uploaded_holdings:
             else:  # Monthly Rotation
                 default_target = round(total_invested * (sell_limit_multiplier - 1) * 21, 2)
 
-                st.title("📆 Monthly Rotation Checklist – 21 Market Days Strategy (Jun–Dec 2025)")
+                st.title("Monthly Rotation Checklist – 21 Market Days Strategy (Jun–Dec 2025)")
                 
                 st.markdown("Each rotation happens after ~21 market days from the previous one. Check off when done!")
                 
-                st.checkbox("✅ June 17, 2025 (Tue) – Initial Daily Rotation Done")
+                st.checkbox("July 18, 2025 (Fri) – 1st Monthly Rotation")
                 
-                st.checkbox("🟩 July 18, 2025 (Fri) – 1st Monthly Rotation")
+                st.checkbox("August 22, 2025 (Fri) – 2nd Monthly Rotation (Adjusted for Aug 15 Holiday)")
                 
-                st.checkbox("🟩 August 22, 2025 (Fri) – 2nd Monthly Rotation (Adjusted for Aug 15 Holiday)")
+                st.checkbox("September 19, 2025 (Fri) – 3rd Monthly Rotation")
                 
-                st.checkbox("🟩 September 19, 2025 (Fri) – 3rd Monthly Rotation")
+                st.checkbox("October 17, 2025 (Fri) – 4th Monthly Rotation (Oct 18 is Saturday)")
                 
-                st.checkbox("🟩 October 17, 2025 (Fri) – 4th Monthly Rotation (Oct 18 is Saturday)")
+                st.checkbox("November 21, 2025 (Fri) – 5th Monthly Rotation (Post-Diwali Holiday Window)")
                 
-                st.checkbox("🟩 November 21, 2025 (Fri) – 5th Monthly Rotation (Post-Diwali Holiday Window)")
-                
-                st.checkbox("🟩 December 19, 2025 (Fri) – 6th Monthly Rotation")
+                st.checkbox("December 19, 2025 (Fri) – 6th Monthly Rotation")
             
             target_rupees = st.number_input("Enter target profit (₹)", 
                                             value=default_target, 
