@@ -443,8 +443,7 @@ if uploaded_holdings:
         net_pl = st.number_input("Enter net P&L (INR)", 
                                  value=float(latest_params.get('net_pl', 0.0)), 
                                  min_value=0.0, 
-                                 step=1000.0,
-                                 max_value=100000.0)
+                                 step=1000.0)
         
         charges = st.number_input("Enter charges (INR)", 
                                   value=float(latest_params.get('charges', 0.0)), 
@@ -469,7 +468,7 @@ if uploaded_holdings:
             # Choose rotation strategy
             rotation_option = st.radio(
                 "Select rotation strategy for calculating target profit:",
-                ["Daily", "Weekly"],
+                ["Daily", "Weekly", "Monthly"],
                 index=1,
                 horizontal=True
             )
@@ -477,8 +476,10 @@ if uploaded_holdings:
             # Calculate target based on selected rotation
             if rotation_option == "Daily":
                 default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
-            else:  # Monthly Rotation
+            elif rotation_option == "Weekly":
                 default_target = round(total_invested * (sell_limit_multiplier - 1) * 4.84615385, 2)
+            else:  # Monthly Rotation
+                default_target = round(total_invested * (sell_limit_multiplier - 1) * 21, 2)
             
             target_rupees = st.number_input("Enter target profit (₹)", 
                                             value=default_target, 
