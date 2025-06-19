@@ -10,6 +10,25 @@ from pymongo.server_api import ServerApi
 st.set_page_config(page_title="📈 Stock Performance Tracker", layout="centered")
 st.title("📊 Stock Performance Tracker")
 
+st.markdown("## 🎯 June 2025 Targets")
+
+st.markdown("""
+### ✅ **Target Summary (By 30 June 2025)**
+
+| Scenario     | **Target ROI (%)** | **Target Annualized Return (%)** |
+|--------------|--------------------|----------------------------------|
+| 🟢 Conservative | `6.3`              | `28 – 30`                         |
+| 🟡 Realistic    | `6.8`              | `31.5 – 33.5`                     |
+| 🔴 Stretch      | `7.5`              | `35 – 37`                         |
+""")
+
+st.markdown("""
+### 📌 Notes:
+- **ROI** = Cumulative Net Profit / Buy Value × 100
+- **Annualized Return** = Adjusted for time decay: faster ROI earlier in the month increases annualized return.
+- With ~13 days left in June, **ROI growth will now be the main lever** for boosting annualized return.
+""")
+
 # --- MongoDB Setup ---
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
 client = MongoClient(uri, server_api=ServerApi('1'))
