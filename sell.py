@@ -538,7 +538,7 @@ if analyzer:
             submit_alloc = st.form_submit_button("Generate Allocation Plan")
 
         if submit_alloc:
-            alloc_df = analyzer.generate_allocation_plan(amt, days)
+            alloc_df = analyzer.generate_allocation_plan(amt)
             st.dataframe(alloc_df)
             save_allocation_plan("default_user", alloc_df, amt, days, {
                 'mmi': analyzer.current_mmi,
