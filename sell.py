@@ -137,6 +137,19 @@ class MarketMoodAnalyzer:
             forecast.append((forecast_date, mmi))
     
         return pd.DataFrame(forecast, columns=['Date', 'Forecasted_MMI'])
+    def _get_forecast_horizon(self, confidence=0.05):
+        streak_data = self.run_lengths[self.current_mood]
+        if len(streak_data) < 2:
+            return 5  # default small fallback
+    
+        shape, loc, scale = weibull_min.fit(streak_data, floc=0)
+        current = self.current_streak
+        x = current
+        while weibull_min.sf(x, shape, loc, scale) > confidence:
+            x += 1
+            if x > 10 * max(streak_data):
+                break
+        return max(1, x - current)
 
     def _get_current_streak_length(self):
         current_streak = 1
