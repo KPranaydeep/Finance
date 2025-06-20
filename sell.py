@@ -140,6 +140,43 @@ class MarketMoodAnalyzer:
             if s <= confidence:
                 return d
         return None
+    def generate_allocation_plan(self, investable_amount, total_days):
+    """
+    Generate MMI-based staggered allocation plan across market days
+    as a pandas DataFrame. Allocation is based on MMI gap to 50 and streak length.
+    """
+        mmi_today = self.current_mmi
+        streak_days = self.current_streak
+        mmi_step = (50 - mmi_today) / (total_days - 1)
+    
+        date = self.today_date + timedelta(days=1)
+        mmi = mmi_today
+        day_count = 0
+        allocation_rows = []
+    
+        while day_count < total_days:
+            if date.weekday() < 5:  # Only weekdays (Mon-Fri) are market days
+                gap = max(0, 50 - mmi)
+                weight = gap * (1 / streak_days) * (1 / total_days)
+                allocation = weight * investable_amount
+                percent = int(round((allocation / investable_amount) * 100))
+    
+                if percent > 0:  # Avoid showing 0% allocations
+                    allocation_rows.append({
+                        "Day": day_count + 1,
+                        "Date": date.strftime('%a, %d %b %Y'),
+                        "Est. MMI": round(mmi, 2),
+                        "MMI Gap": round(gap, 2),
+                        "Weight": round(weight, 6),
+                        "Allocation (%)": f"{percent}%",
+                        "Allocation (₹)": f"₹{allocation:.2f}"
+                    })
+    
+                mmi += mmi_step
+                day_count += 1
+            date += timedelta(days=1)
+    
+        return pd.DataFrame(allocation_rows)
 
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
