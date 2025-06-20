@@ -113,6 +113,30 @@ class MarketMoodAnalyzer:
         for mood, length in streaks:
             run_lengths[mood].append(length)
         return run_lengths
+    def _generate_survival_based_forecast(self, forecast_days=30, confidence=0.05):
+        remaining_days = self._get_forecast_horizon(confidence)
+        forecast = []
+        current_mmi = self.current_mmi
+        mood = self.current_mood
+        flip_triggered = False
+    
+        for day in range(1, forecast_days + 1):
+            forecast_date = self.today_date + timedelta(days=day)
+    
+            if day <= remaining_days:
+                mmi = current_mmi + np.random.uniform(-2, 2)
+            else:
+                if not flip_triggered:
+                    flip_triggered = True
+                    mmi = 49.0 if mood == 'Greed' else 51.0
+                    mood = 'Fear' if mood == 'Greed' else 'Greed'
+                else:
+                    mmi += np.random.uniform(-3, 3)
+    
+            current_mmi = mmi
+            forecast.append((forecast_date, mmi))
+    
+        return pd.DataFrame(forecast, columns=['Date', 'Forecasted_MMI'])
 
     def _get_current_streak_length(self):
         current_streak = 1
