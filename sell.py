@@ -97,6 +97,23 @@ class MarketMoodAnalyzer:
         df = pd.read_csv(BytesIO(mmi_bytes))
         return self._process_dataframe(df)
 
+    def _count_trading_days(self, start_date, calendar_days):
+        """Counts trading days (Mon–Fri) starting from given date for next X calendar days"""
+        end_date = start_date + timedelta(days=calendar_days)
+        trading_days = pd.date_range(start=start_date + timedelta(days=1), end=end_date, freq='B')
+        return len(trading_days)
+
+    def _get_days_until_confidence_flip(self, confidence=0.05):
+        """Returns number of calendar days until the current mood is expected to flip"""
+        mood = self.current_mood
+        res = self._analyze_mood(mood)
+        confidence_flip_day = self._get_confidence_flip_date(res['survival_days'], res['survival_prob'], confidence)
+    
+        if confidence_flip_day is not None:
+            return max(1, confidence_flip_day - self.current_streak)
+        else:
+            return None
+
     def _prepare_mmi_data_from_df(self, df):
         return self._process_dataframe(df)
 
@@ -177,11 +194,23 @@ class MarketMoodAnalyzer:
             if s <= confidence:
                 return d
         return None
-    def generate_allocation_plan(self, investable_amount, total_days):
-        """Generate a plan where total allocation adds up exactly to 100%"""
+
+    def generate_allocation_plan(self, investable_amount):
+        """Generate MMI-aware staggered allocation plan using expected mood flip"""
+        days_until_flip = self._get_days_until_confidence_flip()
+    
+        if days_until_flip is None:
+            st.warning("⚠️ Could not forecast flip — defaulting to 15 market days.")
+            total_days = 15
+        else:
+            total_days = self._count_trading_days(self.today_date, days_until_flip)
+            if total_days < 5:
+                total_days = 5  # fallback minimum
+    
+        # Same as before from here
         mmi_today = self.current_mmi
         streak_days = self.current_streak
-        mmi_step = (50 - mmi_today) / (total_days - 1)
+        mmi_step = (50 - mmi_today) / max(1, (total_days - 1))
     
         date = self.today_date + timedelta(days=1)
         mmi = mmi_today
@@ -191,7 +220,6 @@ class MarketMoodAnalyzer:
         total_weight = 0
         temp_rows = []
     
-        # 1st pass: calculate weights and accumulate
         while day_count < total_days:
             if date.weekday() < 5:
                 gap = max(0, 50 - mmi)
@@ -202,7 +230,6 @@ class MarketMoodAnalyzer:
                 day_count += 1
             date += timedelta(days=1)
     
-        # 2nd pass: normalize weights to get allocation
         allocation_total = 0
         for i, (day_num, date, mmi, gap, weight) in enumerate(temp_rows):
             weight_norm = weight / total_weight
@@ -219,13 +246,13 @@ class MarketMoodAnalyzer:
                 "Allocation (₹)": f"₹{allocation:.2f}"
             })
     
-        # Correction if needed to match exact investable amount
         total_alloc = sum(float(row['Allocation (₹)'].replace('₹', '')) for row in allocation_rows)
         diff = investable_amount - total_alloc
         if abs(diff) > 0.01:
             allocation_rows[-1]['Allocation (₹)'] = f"₹{(float(allocation_rows[-1]['Allocation (₹)'].replace('₹', '')) + diff):.2f}"
     
         return pd.DataFrame(allocation_rows)
+
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
