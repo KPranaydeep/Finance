@@ -141,10 +141,6 @@ class MarketMoodAnalyzer:
                 return d
         return None
     def generate_allocation_plan(self, investable_amount, total_days):
-    """
-    Generate MMI-based staggered allocation plan across market days
-    as a pandas DataFrame. Allocation is based on MMI gap to 50 and streak length.
-    """
         mmi_today = self.current_mmi
         streak_days = self.current_streak
         mmi_step = (50 - mmi_today) / (total_days - 1)
@@ -230,7 +226,6 @@ class MarketMoodAnalyzer:
                     st.warning("🛑 Market in Greed Phase - Consider profit booking")
                 else:
                     st.success("🟢 Market in Fear Phase - Look for entry opportunities")
-
 
 # ==================== STOCK HOLDINGS ANALYSIS ====================
 @st.cache_data
