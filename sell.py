@@ -445,8 +445,7 @@ def read_mmi_from_mongodb():
         return pd.DataFrame()
 
 # ========== Upload full MMI dataset ==========
-st.subheader("📂 Upload full MMI dataset (optional)")
-with st.expander("📂 Upload Full MMI Dataset (CSV Format)"):
+with st.sidebar.expander("📂 Upload MMI Dataset"):
     uploaded_mmi_csv = st.file_uploader(
         "Upload full MMI dataset (CSV format)",
         type=["csv"],
