@@ -372,6 +372,10 @@ with st.form("add_today_mmi"):
 # ========== Display Mood Analysis ==========
 if analyzer:
     analyzer.display_mood_analysis()
+    if analyzer.current_mood == "Fear":
+        st.success("🟢 MMI indicates *Fear* – market may offer entry opportunities")
+        from buy import show_buy_plan
+        show_buy_plan(analyzer)
 
 st.header("📤 Upload Your Holdings")
 
