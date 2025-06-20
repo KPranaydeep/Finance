@@ -178,7 +178,7 @@ class MarketMoodAnalyzer:
                 return d
         return None
     def generate_allocation_plan(self, investable_amount, total_days):
-        """Generate MMI-based staggered allocation plan across market days"""
+        """Generate a plan where total allocation adds up exactly to 100%"""
         mmi_today = self.current_mmi
         streak_days = self.current_streak
         mmi_step = (50 - mmi_today) / (total_days - 1)
@@ -188,30 +188,44 @@ class MarketMoodAnalyzer:
         day_count = 0
         allocation_rows = []
     
+        total_weight = 0
+        temp_rows = []
+    
+        # 1st pass: calculate weights and accumulate
         while day_count < total_days:
-            if date.weekday() < 5:  # Only weekdays (Mon-Fri)
+            if date.weekday() < 5:
                 gap = max(0, 50 - mmi)
-                weight = gap * (1 / streak_days) * (1 / total_days)
-                allocation = weight * investable_amount
-                percent = int(round((allocation / investable_amount) * 100))
-    
-                if percent > 0:  # Skip near-zero allocations
-                    allocation_rows.append({
-                        "Day": day_count + 1,
-                        "Date": date.strftime('%a, %d %b %Y'),
-                        "Est. MMI": round(mmi, 2),
-                        "MMI Gap": round(gap, 2),
-                        "Weight": round(weight, 6),
-                        "Allocation (%)": f"{percent}%",
-                        "Allocation (₹)": f"₹{allocation:.2f}"
-                    })
-    
+                weight = gap * (1 / streak_days)
+                temp_rows.append((day_count + 1, date, mmi, gap, weight))
+                total_weight += weight
                 mmi += mmi_step
                 day_count += 1
             date += timedelta(days=1)
     
+        # 2nd pass: normalize weights to get allocation
+        allocation_total = 0
+        for i, (day_num, date, mmi, gap, weight) in enumerate(temp_rows):
+            weight_norm = weight / total_weight
+            allocation = investable_amount * weight_norm
+            allocation_total += allocation
+    
+            allocation_rows.append({
+                "Day": day_num,
+                "Date": date.strftime('%a, %d %b %Y'),
+                "Est. MMI": round(mmi, 2),
+                "MMI Gap": round(gap, 2),
+                "Weight": round(weight_norm, 6),
+                "Allocation (%)": f"{round(weight_norm * 100, 2)}%",
+                "Allocation (₹)": f"₹{allocation:.2f}"
+            })
+    
+        # Correction if needed to match exact investable amount
+        total_alloc = sum(float(row['Allocation (₹)'].replace('₹', '')) for row in allocation_rows)
+        diff = investable_amount - total_alloc
+        if abs(diff) > 0.01:
+            allocation_rows[-1]['Allocation (₹)'] = f"₹{(float(allocation_rows[-1]['Allocation (₹)'].replace('₹', '')) + diff):.2f}"
+    
         return pd.DataFrame(allocation_rows)
-
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
