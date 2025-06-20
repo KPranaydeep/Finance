@@ -306,33 +306,6 @@ class MarketMoodAnalyzer:
                 else:
                     st.success("🟢 Market in Fear Phase - Look for entry opportunities")
 
-def show_cli_analysis(analyzer):
-    mood = analyzer.current_mood
-    streak = analyzer.current_streak
-    mmi = analyzer.current_mmi
-    date = analyzer.mmi_last_date.strftime('%d %b %Y')
-
-    fear_res = analyzer._analyze_mood('Fear')
-    greed_res = analyzer._analyze_mood('Greed')
-    res = fear_res if mood == 'Fear' else greed_res
-    confidence_flip_day = analyzer._get_confidence_flip_date(res['survival_days'], res['survival_prob'])
-
-    st.subheader("🧠 MMI Historical Analysis Console")
-    st.code(f"""
-📅 MARKET MOOD ANALYSIS - {date}
-MMI Value: {mmi:.2f}
-Market Mood: {mood}
-Current Streak: {streak} days
-
-Fear Streaks: {len(fear_res['runs'])} runs | Avg: {np.mean(fear_res['runs']):.1f} days
-Greed Streaks: {len(greed_res['runs'])} runs | Avg: {np.mean(greed_res['runs']):.1f} days
-    """, language='text')
-
-    if confidence_flip_day:
-        days_until_flip = confidence_flip_day - streak
-        flip_date = analyzer.mmi_last_date + timedelta(days=days_until_flip)
-        st.info(f"🔮 95% chance flip from {mood} by {flip_date.strftime('%d %b %Y')} (in {days_until_flip} days)")
-
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
 
@@ -524,7 +497,6 @@ if submitted:
 # 🧩 Hook into Streamlit logic after analyzer.display_mood_analysis()
 if analyzer:
     analyzer.display_mood_analysis()
-    show_cli_analysis(analyzer)
 
     if analyzer.current_mood == "Fear":
         st.success("🟢 MMI indicates Fear – You may plan allocation")
