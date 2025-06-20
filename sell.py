@@ -485,42 +485,40 @@ try:
 except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
+st.sidebar.markdown("### 📝 Add Today's MMI")
 
-# ========== Add Today’s MMI Entry ==========
-st.subheader("📝 Add Today's MMI")
-
-with st.form("add_today_mmi"):
-    today_mmi = st.number_input("Enter Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
+with st.sidebar.form("add_today_mmi"):
+    today_mmi = st.number_input("Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
     today = datetime.today().date()
-    submitted = st.form_submit_button("Add to MongoDB")
+    submitted = st.form_submit_button("📥 Save to MongoDB")
 
-    if submitted:
-        try:
-            # Fetch today's Nifty value
-            nifty_ticker = yf.Ticker("^NSEI")
-            nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
+if submitted:
+    try:
+        # Fetch today's Nifty value
+        nifty_ticker = yf.Ticker("^NSEI")
+        nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
 
-            # Insert into MongoDB
-            mmi_collection.insert_one({
-                "Date": datetime.combine(today, datetime.min.time()),
-                "MMI": today_mmi,
-                "Nifty": nifty_today
-            })
+        # Insert into MongoDB
+        mmi_collection.insert_one({
+            "Date": datetime.combine(today, datetime.min.time()),
+            "MMI": today_mmi,
+            "Nifty": nifty_today
+        })
 
-            st.success(f"✅ Added today's MMI ({today_mmi}) and Nifty ({nifty_today:.2f}) to MongoDB")
+        st.sidebar.success(f"✅ Saved MMI: {today_mmi} | Nifty: {nifty_today:.2f}")
 
-            # Refresh analyzer with updated data
-            df_from_db = read_mmi_from_mongodb()
-            if not df_from_db.empty:
-                analyzer = MarketMoodAnalyzer(df_from_db)
-                st.success("🔄 Analysis updated with latest data")
-            else:
-                analyzer = None
-                st.warning("⚠️ MongoDB returned no data. Please check your upload.")
-
-        except Exception as e:
+        # Refresh analyzer with updated data
+        df_from_db = read_mmi_from_mongodb()
+        if not df_from_db.empty:
+            analyzer = MarketMoodAnalyzer(df_from_db)
+            st.sidebar.success("🔄 Analyzer updated with new data")
+        else:
             analyzer = None
-            st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
+            st.sidebar.warning("⚠️ MongoDB returned no data")
+
+    except Exception as e:
+        analyzer = None
+        st.sidebar.error(f"❌ Error: {e}")
 
 # ========== Display Mood Analysis ==========
 # 🧩 Hook into Streamlit logic after analyzer.display_mood_analysis()
