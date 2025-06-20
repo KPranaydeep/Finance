@@ -534,18 +534,22 @@ if analyzer:
 
         with st.form("allocation_plan_form"):
             amt = st.number_input("Investable Amount (₹)", min_value=1000.0, step=1000.0)
-            days = st.slider("Days to Spread Investment", 5, 30, 15)
             submit_alloc = st.form_submit_button("Generate Allocation Plan")
 
         if submit_alloc:
             alloc_df = analyzer.generate_allocation_plan(amt)
             st.dataframe(alloc_df)
-            save_allocation_plan("default_user", alloc_df, amt, days, {
+
+            # Extract total days from the plan
+            total_days = len(alloc_df)
+
+            save_allocation_plan("default_user", alloc_df, amt, total_days, {
                 'mmi': analyzer.current_mmi,
                 'mood': analyzer.current_mood,
                 'streak': analyzer.current_streak,
                 'date': analyzer.mmi_last_date.strftime('%Y-%m-%d')
             })
+
             st.download_button("Download Allocation CSV", alloc_df.to_csv(index=False), file_name="allocation_plan.csv")
 
         with st.expander("🗂 View Last Saved Allocation Plan"):
