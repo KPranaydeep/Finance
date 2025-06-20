@@ -306,23 +306,6 @@ Greed Streaks: {len(greed_res['runs'])} runs | Avg: {np.mean(greed_res['runs']):
         flip_date = analyzer.mmi_last_date + timedelta(days=days_until_flip)
         st.info(f"🔮 95% chance flip from {mood} by {flip_date.strftime('%d %b %Y')} (in {days_until_flip} days)")
 
-# 🧩 Add interactive plot
-import matplotlib.pyplot as plt
-
-def plot_mmi_forecast(analyzer):
-    forecast_df = analyzer._generate_survival_based_forecast()
-    recent_df = analyzer.df.tail(60)
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(recent_df['Date'], recent_df['MMI'], label='Historical MMI', color='gray')
-    ax.plot(forecast_df['Date'], forecast_df['Forecasted_MMI'], label='Forecasted MMI', linestyle='--', color='orange')
-
-    ax.axhline(50, color='black', linestyle=':')
-    ax.set_ylim(0, 100)
-    ax.set_title("MMI Trend + Forecast")
-    ax.legend()
-    st.pyplot(fig)
-
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
 
@@ -518,7 +501,6 @@ with st.form("add_today_mmi"):
 if analyzer:
     analyzer.display_mood_analysis()
     show_cli_analysis(analyzer)
-    plot_mmi_forecast(analyzer)
 
     if analyzer.current_mood == "Fear":
         st.success("🟢 MMI indicates Fear – You may plan allocation")
