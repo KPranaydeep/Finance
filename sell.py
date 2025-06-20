@@ -556,13 +556,15 @@ if analyzer:
             else:
                 st.info("No saved plan yet.")
 
-st.header("📤 Upload Your Holdings")
+if analyzer and analyzer.current_mood == "Greed":
+    st.header("📤 Upload Your Holdings")
 
-with st.expander("📤 Upload Your Stock Holdings File"):
     uploaded_holdings = st.file_uploader(
         "Upload your stock holdings file (.xlsx format only — Groww or Kite)",
-        type=['xlsx']
+        type=['xlsx'],
+        key="upload_holdings_greed"
     )
+
 
 # Add these functions to your existing code
 def get_april_first_current_year():
