@@ -28,18 +28,6 @@ except Exception as e:
 db = client['finance_db']
 collection = db['sell_plan_params']
 mmi_collection = db['mmi_data']
-allocation_collection = db['allocation_plans']
-
-def save_allocation_plan(user_id, plan_df, total_amount, days, mmi_snapshot):
-    record = {
-        'user_id': user_id,
-        'timestamp': datetime.utcnow(),
-        'investable_amount': total_amount,
-        'total_days': days,
-        'mmi_snapshot': mmi_snapshot,
-        'plan': plan_df.to_dict(orient='records')  # convert DataFrame to dict list
-    }
-    allocation_collection.insert_one(record)
 
 def is_market_closed():
     try:
@@ -152,39 +140,6 @@ class MarketMoodAnalyzer:
             if s <= confidence:
                 return d
         return None
-    def generate_allocation_plan(self, investable_amount, total_days):
-        mmi_today = self.current_mmi
-        streak_days = self.current_streak
-        mmi_step = (50 - mmi_today) / (total_days - 1)
-    
-        date = self.today_date + timedelta(days=1)
-        mmi = mmi_today
-        day_count = 0
-        allocation_rows = []
-    
-        while day_count < total_days:
-            if date.weekday() < 5:  # Only weekdays (Mon-Fri) are market days
-                gap = max(0, 50 - mmi)
-                weight = gap * (1 / streak_days) * (1 / total_days)
-                allocation = weight * investable_amount
-                percent = int(round((allocation / investable_amount) * 100))
-    
-                if percent > 0:  # Avoid showing 0% allocations
-                    allocation_rows.append({
-                        "Day": day_count + 1,
-                        "Date": date.strftime('%a, %d %b %Y'),
-                        "Est. MMI": round(mmi, 2),
-                        "MMI Gap": round(gap, 2),
-                        "Weight": round(weight, 6),
-                        "Allocation (%)": f"{percent}%",
-                        "Allocation (₹)": f"₹{allocation:.2f}"
-                    })
-    
-                mmi += mmi_step
-                day_count += 1
-            date += timedelta(days=1)
-    
-        return pd.DataFrame(allocation_rows)
 
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
@@ -238,6 +193,7 @@ class MarketMoodAnalyzer:
                     st.warning("🛑 Market in Greed Phase - Consider profit booking")
                 else:
                     st.success("🟢 Market in Fear Phase - Look for entry opportunities")
+
 
 # ==================== STOCK HOLDINGS ANALYSIS ====================
 @st.cache_data
@@ -413,48 +369,9 @@ with st.form("add_today_mmi"):
             analyzer = None
             st.error(f"❌ Failed to fetch Nifty or save to DB: {e}")
 
+# ========== Display Mood Analysis ==========
 if analyzer:
     analyzer.display_mood_analysis()
-    if analyzer.current_mood == "Fear":
-        st.success("🟢 MMI indicates *Fear* – market may offer entry opportunities")
-
-        # Existing logic
-        from buy import show_buy_plan
-        show_buy_plan(analyzer)
-
-        # 🔥 NEW: Allocation Plan UI
-        st.subheader("📊 Generate Smart Allocation Plan")
-
-        with st.form("allocation_plan_form"):
-            investable_amount = st.number_input("Enter total investable amount (₹)", min_value=1000.0, step=1000.0)
-            total_days = st.slider("Number of days to spread investment", min_value=5, max_value=30, value=15)
-            submitted = st.form_submit_button("Generate Allocation Plan")
-
-        if submitted and investable_amount > 0:
-            allocation_df = analyzer.generate_allocation_plan(investable_amount, total_days)
-
-            if not allocation_df.empty:
-                st.success("✅ Allocation plan generated")
-                st.dataframe(allocation_df)
-
-                USER_ID = "default_user"  # Can replace with login-based ID
-                from datetime import datetime
-                save_allocation_plan(USER_ID, allocation_df, investable_amount, total_days, {
-                    "mmi": analyzer.current_mmi,
-                    "mood": analyzer.current_mood,
-                    "streak": analyzer.current_streak,
-                    "date": analyzer.mmi_last_date.strftime("%Y-%m-%d")
-                })
-
-                csv = allocation_df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Allocation Plan", csv, "allocation_plan.csv", "text/csv")
-
-        with st.expander("📂 View Last Saved Allocation Plan"):
-            last_plan = get_latest_allocation_plan("default_user")
-            if last_plan is not None:
-                st.dataframe(last_plan)
-            else:
-                st.info("No saved allocation plan found.")
 
 st.header("📤 Upload Your Holdings")
 
