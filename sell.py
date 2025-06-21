@@ -501,6 +501,17 @@ if analyzer:
 
     if analyzer.current_mood == "Fear":
         st.success("🟢 MMI indicates Fear – You may plan allocation")
+        st.markdown("enter the amoutt of money you can invest rewrite reasonbley")
+        st.markdown("""
+            💡 **Planning Your Investment**
+            
+            Since the market is currently in a *Fear* phase (MMI < 50), it may be a good time to start deploying capital gradually.
+            Enter the total amount you'd like to invest.  
+            The tool will generate a staggered buy allocation plan across the next few market days based on historical mood patterns.
+            
+            This approach helps reduce timing risk and allows disciplined entry during uncertain times.
+            """)
+
 
         with st.form("allocation_plan_form"):
             amt = st.number_input("Investable Amount (₹)", min_value=1000.0, step=1000.0)
