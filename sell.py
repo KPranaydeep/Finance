@@ -459,6 +459,7 @@ except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
 st.sidebar.markdown("### 📝 Add Today's MMI")
+st.markdown("📊 [Visit Tickertape Market Mood Index](https://www.tickertape.in/market-mood-index)")
 
 with st.sidebar.form("add_today_mmi"):
     today_mmi = st.number_input("Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
