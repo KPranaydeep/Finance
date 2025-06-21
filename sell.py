@@ -501,7 +501,7 @@ if analyzer:
 
     if analyzer.current_mood == "Fear":
         st.success("🟢 MMI indicates Fear – You may plan allocation")
-        st.markdown("enter the amoutt of money you can invest rewrite reasonbley")
+
         st.markdown("""
             💡 **Planning Your Investment**
             
