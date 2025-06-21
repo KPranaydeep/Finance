@@ -514,7 +514,7 @@ if analyzer:
 
 
         with st.form("allocation_plan_form"):
-            amt = st.number_input("Investable Amount (₹)", min_value=1000.0, step=1000.0)
+            amt = st.number_input("Investable Amount (₹)", min_value=100.0, step=1000.0)
             submit_alloc = st.form_submit_button("Generate Allocation Plan")
 
         if submit_alloc:
