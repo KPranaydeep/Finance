@@ -207,7 +207,6 @@ class MarketMoodAnalyzer:
             if total_days < 5:
                 total_days = 5  # fallback minimum
     
-        # Same as before from here
         mmi_today = self.current_mmi
         streak_days = self.current_streak
         mmi_step = (50 - mmi_today) / max(1, (total_days - 1))
@@ -216,12 +215,12 @@ class MarketMoodAnalyzer:
         mmi = mmi_today
         day_count = 0
         allocation_rows = []
-    
         total_weight = 0
         temp_rows = []
     
+        # Collect valid trading days with weights
         while day_count < total_days:
-            if date.weekday() < 5:
+            if date.weekday() < 5:  # Monday=0, ..., Friday=4
                 gap = max(0, 50 - mmi)
                 weight = gap * (1 / streak_days)
                 temp_rows.append((day_count + 1, date, mmi, gap, weight))
@@ -229,6 +228,9 @@ class MarketMoodAnalyzer:
                 mmi += mmi_step
                 day_count += 1
             date += timedelta(days=1)
+    
+        # Correct final date to be the last trading date
+        confidence_date = temp_rows[-1][1] if temp_rows else self.today_date
     
         allocation_total = 0
         for i, (day_num, date, mmi, gap, weight) in enumerate(temp_rows):
@@ -246,11 +248,12 @@ class MarketMoodAnalyzer:
                 "Allocation (₹)": f"₹{allocation:.2f}"
             })
     
+        # Adjust for rounding error
         total_alloc = sum(float(row['Allocation (₹)'].replace('₹', '')) for row in allocation_rows)
         diff = investable_amount - total_alloc
         if abs(diff) > 0.01:
             allocation_rows[-1]['Allocation (₹)'] = f"₹{(float(allocation_rows[-1]['Allocation (₹)'].replace('₹', '')) + diff):.2f}"
-        confidence_date = self.today_date + timedelta(days=total_days - 1)  # Last trading day
+    
         return pd.DataFrame(allocation_rows), confidence_date
 
     def display_mood_analysis(self):
