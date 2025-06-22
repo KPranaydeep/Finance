@@ -196,41 +196,39 @@ class MarketMoodAnalyzer:
         return None
 
     def generate_allocation_plan(self, investable_amount):
-        """Generate MMI-aware staggered allocation plan using expected mood flip"""
+        """Generate MMI-aware staggered allocation plan where last day is the confidence flip date"""
         days_until_flip = self._get_days_until_confidence_flip()
     
         if days_until_flip is None:
             st.warning("⚠️ Could not forecast flip — defaulting to 15 market days.")
-            total_days = 15
+            target_flip_date = self.today_date + timedelta(days=21)
         else:
-            total_days = self._count_trading_days(self.today_date, days_until_flip)
-            if total_days < 5:
-                total_days = 5  # fallback minimum
+            target_flip_date = self.mmi_last_date + timedelta(days=days_until_flip)
+    
+        # Generate trading days between tomorrow and flip date (inclusive)
+        all_days = pd.date_range(start=self.today_date + timedelta(days=1), end=target_flip_date, freq='B')
+        if len(all_days) < 5:
+            st.warning("⚠️ Not enough trading days before flip — using minimum of 5")
+            all_days = pd.date_range(start=self.today_date + timedelta(days=1), periods=5, freq='B')
     
         mmi_today = self.current_mmi
         streak_days = self.current_streak
-        mmi_step = (50 - mmi_today) / max(1, (total_days - 1))
+        mmi_step = (50 - mmi_today) / max(1, (len(all_days) - 1))
     
-        date = self.today_date + timedelta(days=1)
-        mmi = mmi_today
-        day_count = 0
         allocation_rows = []
         total_weight = 0
+        mmi = mmi_today
         temp_rows = []
     
-        # Collect valid trading days with weights
-        while day_count < total_days:
-            if date.weekday() < 5:  # Monday=0, ..., Friday=4
-                gap = max(0, 50 - mmi)
-                weight = gap * (1 / streak_days)
-                temp_rows.append((day_count + 1, date, mmi, gap, weight))
-                total_weight += weight
-                mmi += mmi_step
-                day_count += 1
-            date += timedelta(days=1)
+        for i, date in enumerate(all_days):
+            gap = max(0, 50 - mmi)
+            weight = gap * (1 / streak_days)
+            temp_rows.append((i + 1, date, mmi, gap, weight))
+            total_weight += weight
+            mmi += mmi_step
     
-        # Correct final date to be the last trading date
-        confidence_date = temp_rows[-1][1] if temp_rows else self.today_date
+        # Use last date as confidence_date
+        confidence_date = all_days[-1].date()
     
         allocation_total = 0
         for i, (day_num, date, mmi, gap, weight) in enumerate(temp_rows):
@@ -248,7 +246,6 @@ class MarketMoodAnalyzer:
                 "Allocation (₹)": f"₹{allocation:.2f}"
             })
     
-        # Adjust for rounding error
         total_alloc = sum(float(row['Allocation (₹)'].replace('₹', '')) for row in allocation_rows)
         diff = investable_amount - total_alloc
         if abs(diff) > 0.01:
