@@ -250,8 +250,8 @@ class MarketMoodAnalyzer:
         diff = investable_amount - total_alloc
         if abs(diff) > 0.01:
             allocation_rows[-1]['Allocation (₹)'] = f"₹{(float(allocation_rows[-1]['Allocation (₹)'].replace('₹', '')) + diff):.2f}"
-    
-        return pd.DataFrame(allocation_rows)
+        confidence_date = self.today_date + timedelta(days=total_days - 1)  # Last trading day
+        return pd.DataFrame(allocation_rows), confidence_date
 
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
@@ -316,6 +316,7 @@ def save_allocation_plan(user_id, plan_df, total_amount, days, mmi_snapshot):
         'investable_amount': total_amount,
         'total_days': days,
         'mmi_snapshot': mmi_snapshot,
+        'confidence_date': mmi_snapshot.get('confidence_date'),  # ✅ save it directly
         'plan': plan_df.to_dict(orient='records')
     })
 
@@ -518,19 +519,20 @@ if analyzer:
             submit_alloc = st.form_submit_button("Generate Allocation Plan")
 
         if submit_alloc:
-            alloc_df = analyzer.generate_allocation_plan(amt)
+            alloc_df, confidence_date = analyzer.generate_allocation_plan(amt)
             st.dataframe(alloc_df)
-
+        
             # Extract total days from the plan
             total_days = len(alloc_df)
-
+        
             save_allocation_plan("default_user", alloc_df, amt, total_days, {
                 'mmi': analyzer.current_mmi,
                 'mood': analyzer.current_mood,
                 'streak': analyzer.current_streak,
-                'date': analyzer.mmi_last_date.strftime('%Y-%m-%d')
+                'date': analyzer.mmi_last_date.strftime('%Y-%m-%d'),
+                'confidence_date': confidence_date.strftime('%Y-%m-%d')  # ✅ New field
             })
-
+        
             st.download_button("Download Allocation CSV", alloc_df.to_csv(index=False), file_name="allocation_plan.csv")
 
         with st.expander("🗂 View Last Saved Allocation Plan"):
