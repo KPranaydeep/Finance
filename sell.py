@@ -207,6 +207,11 @@ class MarketMoodAnalyzer:
     
         # Generate trading days between tomorrow and flip date (inclusive)
         all_days = pd.date_range(start=self.today_date + timedelta(days=1), end=target_flip_date, freq='B')
+    
+        # If flip is far enough, restrict to Mondays only
+        if days_until_flip is not None and days_until_flip >= 14:
+            all_days = [day for day in all_days if day.weekday() == 0]  # Monday = 0
+    
         if len(all_days) < 5:
             st.warning("⚠️ Not enough trading days before flip — using minimum of 5")
             all_days = pd.date_range(start=self.today_date + timedelta(days=1), periods=5, freq='B')
