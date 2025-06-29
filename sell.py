@@ -735,7 +735,7 @@ if uploaded_holdings:
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
-st.markdown("## 🧠 Community Stock Ideas from Google Sheet")
+st.markdown("## 📌 Recommended Stocks to Explore")
 
 # Define Google Sheet info
 sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
