@@ -734,3 +734,21 @@ if uploaded_holdings:
                 st.info("⏳ Check back tomorrow when market conditions may improve")
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
+
+
+# Define URL
+sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
+sheet_name = "Sheet1"
+url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+
+# Load data
+try:
+    df = pd.read_csv(url)
+    column_a = df.iloc[1:, 0]  # Skip A1, take from A2
+    non_empty = column_a.dropna().astype(str).str.strip()
+    
+    st.subheader("📋 Non-Empty Values from A2:A")
+    st.write(non_empty.tolist())
+
+except Exception as e:
+    st.error(f"Error loading data: {e}")
