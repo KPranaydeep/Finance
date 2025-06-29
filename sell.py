@@ -746,7 +746,7 @@ csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:cs
 try:
     # Load and clean data
     df_reco = pd.read_csv(csv_url)
-    column_a = df_reco.iloc[1:, 0].dropna().astype(str).str.strip()  # Skip header (A1), get non-empty A2:A
+    column_a = df_reco.iloc[0:, 0].dropna().astype(str).str.strip()  # Skip header (A1), get non-empty A2:A
     column_a = column_a[column_a != ""]  # Additional filtering for empty strings
 
     if not column_a.empty:
