@@ -734,24 +734,27 @@ if uploaded_holdings:
                 st.info("⏳ Check back tomorrow when market conditions may improve")
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
-
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
 st.markdown("## 🧠 Community Stock Ideas from Google Sheet")
 
-# Define Google Sheet CSV link
+# Define Google Sheet info
 sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
 sheet_name = "Sheet1"
 csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
+
+# Show link to open Google Sheet
+st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
 
 try:
     # Load and clean data
     df_reco = pd.read_csv(csv_url)
-    column_a = df_reco.iloc[0:, 0].dropna().astype(str).str.strip()  # Skip header (A1), get non-empty A2:A
-    column_a = column_a[column_a != ""]  # Additional filtering for empty strings
+    column_a = df_reco.iloc[0:, 0].dropna().astype(str).str.strip()  # A2:A
+    column_a = column_a[column_a != ""]  # Filter empty strings
 
     if not column_a.empty:
-        st.success("✅ Loaded stock recommendations from Google Sheet")
-        st.markdown("These are **community-sourced stock ideas**. Do your own research before investing.")
+        st.success("✅ Loaded stock recommendations from the sheet")
+        st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
         st.write("🔍 **Suggested Stocks:**")
         st.markdown(
             f"<ul style='list-style-type: square; padding-left: 1.5em;'>"
@@ -760,7 +763,7 @@ try:
             unsafe_allow_html=True
         )
     else:
-        st.warning("⚠️ No stock recommendations found in A2:A of the sheet.")
+        st.warning("⚠️ No non-empty stock entries found in A2:A")
 
 except Exception as e:
     st.error("❌ Failed to load Google Sheet data.")
