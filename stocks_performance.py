@@ -13,13 +13,13 @@ st.title("📊 Stock Performance Tracker")
 st.markdown("## 🎯 June 2025 Targets")
 
 st.markdown("""
-### ✅ **Target Summary (By 30 June 2025)**
+### 🎯 **Target Summary (By 31 July 2025)**
 
 | Scenario     | **Target ROI (%)** | **Target Annualized Return (%)** |
 |--------------|--------------------|----------------------------------|
-| 🟢 Conservative | `6.3`              | `28 – 30`                         |
-| 🟡 Realistic    | `6.8`              | `31.5 – 33.5`                     |
-| 🔴 Stretch      | `7.5`              | `35 – 37`                         |
+| 🟢 Conservative | `6.8`              | `30.5 – 31`                       |
+| 🟡 Realistic    | `7.2`              | `32.5 – 33.5`                     |
+| 🔴 Stretch      | `7.6`              | `34.5 – 36`                       |
 """)
 
 st.markdown("""
