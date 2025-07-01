@@ -261,18 +261,30 @@ class MarketMoodAnalyzer:
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
-        # 🧮 Calculate min and max streaks
-        fear_min = np.min(fear_res['runs']) if len(fear_res['runs']) > 0 else None
-        fear_max = np.max(fear_res['runs']) if len(fear_res['runs']) > 0 else None
-        greed_min = np.min(greed_res['runs']) if len(greed_res['runs']) > 0 else None
-        greed_max = np.max(greed_res['runs']) if len(greed_res['runs']) > 0 else None
+        from scipy import stats
+
+        # 📊 Statistical summaries for streak lengths
+        fear_runs = fear_res['runs']
+        greed_runs = greed_res['runs']
         
-        # 📊 Display as metrics or expanded info
-        st.markdown("**🔍 Streak Statistics**")
-        st.markdown(f"""
-        - 🐻 **Fear Streaks**: Min = `{fear_min}` days, Max = `{fear_max}` days  
-        - 🐂 **Greed Streaks**: Min = `{greed_min}` days, Max = `{greed_max}` days
-        """)
+        fear_mean = np.mean(fear_runs) if len(fear_runs) else None
+        fear_median = np.median(fear_runs) if len(fear_runs) else None
+        fear_mode = int(stats.mode(fear_runs, keepdims=False).mode) if len(fear_runs) else None
+        
+        greed_mean = np.mean(greed_runs) if len(greed_runs) else None
+        greed_median = np.median(greed_runs) if len(greed_runs) else None
+        greed_mode = int(stats.mode(greed_runs, keepdims=False).mode) if len(greed_runs) else None
+        
+        # 📈 Display neatly
+        st.markdown("**📘 Historical Streak Statistics (Days)**")
+        st.table(pd.DataFrame({
+            "Mood": ["Fear", "Greed"],
+            "Min": [np.min(fear_runs), np.min(greed_runs)],
+            "Median": [fear_median, greed_median],
+            "Mean": [round(fear_mean, 1), round(greed_mean, 1)],
+            "Mode": [fear_mode, greed_mode],
+            "Max": [np.max(fear_runs), np.max(greed_runs)]
+        }))
 
         res = fear_res if self.current_mood == 'Fear' else greed_res
     
