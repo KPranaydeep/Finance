@@ -424,29 +424,29 @@ def read_mmi_from_mongodb():
         return pd.DataFrame()
 
 # ========== Upload full MMI dataset ==========
-st.sidebar.markdown("### 📂 Upload MMI Dataset")
-uploaded_mmi_csv = st.sidebar.file_uploader(
-    "Upload full MMI dataset (CSV format)",
-    type=["csv"],
-    key="upload_mmi_db"
-)
+with st.expander("📂 Upload Full MMI Dataset", expanded=False):
+    uploaded_mmi_csv = st.file_uploader(
+        "Upload full MMI dataset (CSV format)",
+        type=["csv"],
+        key="upload_mmi_db"
+    )
 
-uploaded_bytes = None
-if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
-    uploaded_bytes = uploaded_mmi_csv.read()
-    try:
-        mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
-        mmi_df.columns = ['Date', 'MMI', 'Nifty']
-        mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
+    uploaded_bytes = None
+    if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
+        uploaded_bytes = uploaded_mmi_csv.read()
+        try:
+            mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
+            mmi_df.columns = ['Date', 'MMI', 'Nifty']
+            mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
 
-        # Store to MongoDB
-        mmi_collection.delete_many({})
-        mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
+            # Store to MongoDB
+            mmi_collection.delete_many({})
+            mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
 
-        st.success("✅ MMI data uploaded and saved to MongoDB")
-    except Exception as e:
-        st.error(f"❌ Error processing MMI CSV: {e}")
-        uploaded_bytes = None  # reset on failure
+            st.success("✅ MMI data uploaded and saved to MongoDB")
+        except Exception as e:
+            st.error(f"❌ Error processing MMI CSV: {e}")
+            uploaded_bytes = None  # reset on failure
 
 # ========== MMI SECTION (Load Analyzer from MongoDB or Uploaded File) ==========
 try:
@@ -464,41 +464,41 @@ try:
 except Exception as e:
     analyzer = None
     st.error(f"❌ Error loading MMI data: {str(e)}")
-st.sidebar.markdown("### 📝 Add Today's MMI")
 st.markdown("📊 [Visit Tickertape Market Mood Index](https://www.tickertape.in/market-mood-index)")
 
-with st.sidebar.form("add_today_mmi"):
-    today_mmi = st.number_input("Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
-    today = datetime.today().date()
-    submitted = st.form_submit_button("📥 Save to MongoDB")
+with st.expander("📝 Add Today's MMI", expanded=False):
+    with st.form("add_today_mmi"):
+        today_mmi = st.number_input("Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
+        today = datetime.today().date()
+        submitted = st.form_submit_button("📥 Save to MongoDB")
 
-if submitted:
-    try:
-        # Fetch today's Nifty value
-        nifty_ticker = yf.Ticker("^NSEI")
-        nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
+    if submitted:
+        try:
+            # Fetch today's Nifty value
+            nifty_ticker = yf.Ticker("^NSEI")
+            nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
 
-        # Insert into MongoDB
-        mmi_collection.insert_one({
-            "Date": datetime.combine(today, datetime.min.time()),
-            "MMI": today_mmi,
-            "Nifty": nifty_today
-        })
+            # Insert into MongoDB
+            mmi_collection.insert_one({
+                "Date": datetime.combine(today, datetime.min.time()),
+                "MMI": today_mmi,
+                "Nifty": nifty_today
+            })
 
-        st.sidebar.success(f"✅ Saved MMI: {today_mmi} | Nifty: {nifty_today:.2f}")
+            st.success(f"✅ Saved MMI: {today_mmi} | Nifty: {nifty_today:.2f}")
 
-        # Refresh analyzer with updated data
-        df_from_db = read_mmi_from_mongodb()
-        if not df_from_db.empty:
-            analyzer = MarketMoodAnalyzer(df_from_db)
-            st.sidebar.success("🔄 Analyzer updated with new data")
-        else:
+            # Refresh analyzer with updated data
+            df_from_db = read_mmi_from_mongodb()
+            if not df_from_db.empty:
+                analyzer = MarketMoodAnalyzer(df_from_db)
+                st.success("🔄 Analyzer updated with new data")
+            else:
+                analyzer = None
+                st.warning("⚠️ MongoDB returned no data")
+
+        except Exception as e:
             analyzer = None
-            st.sidebar.warning("⚠️ MongoDB returned no data")
-
-    except Exception as e:
-        analyzer = None
-        st.sidebar.error(f"❌ Error: {e}")
+            st.error(f"❌ Error: {e}")
 
 # ========== Display Mood Analysis ==========
 # 🧩 Hook into Streamlit logic after analyzer.display_mood_analysis()
