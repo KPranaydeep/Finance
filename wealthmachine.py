@@ -259,33 +259,10 @@ class MarketMoodAnalyzer:
         return pd.DataFrame(allocation_rows), confidence_date
 
     def display_mood_analysis(self):
+        from scipy import stats  # Only needed here
+    
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
-        from scipy import stats
-
-        # 📊 Statistical summaries for streak lengths
-        fear_runs = fear_res['runs']
-        greed_runs = greed_res['runs']
-        
-        fear_mean = np.mean(fear_runs) if len(fear_runs) else None
-        fear_median = np.median(fear_runs) if len(fear_runs) else None
-        fear_mode = int(stats.mode(fear_runs, keepdims=False).mode) if len(fear_runs) else None
-        
-        greed_mean = np.mean(greed_runs) if len(greed_runs) else None
-        greed_median = np.median(greed_runs) if len(greed_runs) else None
-        greed_mode = int(stats.mode(greed_runs, keepdims=False).mode) if len(greed_runs) else None
-        
-        # 📈 Display neatly
-        st.markdown("**📘 Historical Streak Statistics (Days)**")
-        st.table(pd.DataFrame({
-            "Mood": ["Fear", "Greed"],
-            "Min": [np.min(fear_runs), np.min(greed_runs)],
-            "Median": [fear_median, greed_median],
-            "Mean": [round(fear_mean, 1), round(greed_mean, 1)],
-            "Mode": [fear_mode, greed_mode],
-            "Max": [np.max(fear_runs), np.max(greed_runs)]
-        }))
-
         res = fear_res if self.current_mood == 'Fear' else greed_res
     
         confidence_flip_day = self._get_confidence_flip_date(
@@ -297,7 +274,7 @@ class MarketMoodAnalyzer:
             st.subheader("📈 Current Market Mood Analysis")
     
             col1, col2, col3 = st.columns(3)
-            col1.metric("Current MMI", f"{self.current_mmi:.2f}", 
+            col1.metric("Current MMI", f"{self.current_mmi:.2f}",
                         "Fear" if self.current_mmi <= 50 else "Greed")
             col2.metric("Current Streak", f"{self.current_streak} days")
     
@@ -317,32 +294,60 @@ class MarketMoodAnalyzer:
                 else:
                     flip_status = f"in {days_left} days"
     
-                col3.metric("Expected Flip Date", 
-                            confidence_date.strftime('%d %b %Y'), 
+                col3.metric("Expected Flip Date",
+                            confidence_date.strftime('%d %b %Y'),
                             flip_status)
     
             st.markdown("**Historical Patterns**")
+    
+            # 🧮 Streak Stats
+            fear_runs = fear_res['runs']
+            greed_runs = greed_res['runs']
+    
+            fear_min = np.min(fear_runs) if len(fear_runs) else None
+            fear_max = np.max(fear_runs) if len(fear_runs) else None
+            fear_mean = np.mean(fear_runs) if len(fear_runs) else None
+            fear_median = np.median(fear_runs) if len(fear_runs) else None
+            fear_mode = int(stats.mode(fear_runs, keepdims=False).mode) if len(fear_runs) else None
+    
+            greed_min = np.min(greed_runs) if len(greed_runs) else None
+            greed_max = np.max(greed_runs) if len(greed_runs) else None
+            greed_mean = np.mean(greed_runs) if len(greed_runs) else None
+            greed_median = np.median(greed_runs) if len(greed_runs) else None
+            greed_mode = int(stats.mode(greed_runs, keepdims=False).mode) if len(greed_runs) else None
+    
+            # 📘 Table Summary
+            st.markdown("**📘 Historical Streak Statistics (Days)**")
+            st.table(pd.DataFrame({
+                "Mood": ["Fear", "Greed"],
+                "Min": [fear_min, greed_min],
+                "Median": [fear_median, greed_median],
+                "Mean": [round(fear_mean, 1), round(greed_mean, 1)],
+                "Mode": [fear_mode, greed_mode],
+                "Max": [fear_max, greed_max]
+            }))
+    
             hist_col1, hist_col2 = st.columns(2)
-            hist_col1.metric("Fear Streaks", 
-                             f"{len(fear_res['runs'])}", 
-                             f"Avg: {np.mean(fear_res['runs']):.1f} days")
-            hist_col2.metric("Greed Streaks", 
-                             f"{len(greed_res['runs'])}", 
-                             f"Avg: {np.mean(greed_res['runs']):.1f} days")
-            # 🧠 Replace existing mood suggestion logic
-            avg_fear = np.mean(fear_res['runs'])
-            avg_greed = np.mean(greed_res['runs'])
-            
+            hist_col1.metric("Fear Streaks",
+                             f"{len(fear_runs)}",
+                             f"Avg: {fear_mean:.1f} days")
+            hist_col2.metric("Greed Streaks",
+                             f"{len(greed_runs)}",
+                             f"Avg: {greed_mean:.1f} days")
+    
+            # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
-                if self.current_streak < avg_greed:
-                    st.warning("📉 Market in Greed but early in the cycle – Ideal time to **book profits**, rotate into safe assets, and **hold cash** for potential corrections.")
+                threshold = (greed_max - self.current_streak) * 0.277
+                if self.current_streak < greed_mean:
+                    st.warning(f"📉 Market in Greed but early in the cycle – Ideal time to **book profits**, rotate into safe assets, and **hold cash** for potential corrections.\n\n📊 Consider booking profits if returns > **{threshold:.1f}%**.")
                 else:
                     st.warning("🛑 Market in Greed – Consider **gradual profit booking**.")
             else:
-                if self.current_streak < avg_fear:
+                if self.current_streak < fear_mean:
                     st.success("🟢 Market in Fear but early in the cycle – Great opportunity to **accumulate stocks** with fresh capital.")
                 else:
                     st.success("📘 Market in Fear – Be cautious and only accumulate **selectively**.")
+
 
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
