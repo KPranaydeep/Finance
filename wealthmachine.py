@@ -298,43 +298,42 @@ class MarketMoodAnalyzer:
                             confidence_date.strftime('%d %b %Y'),
                             flip_status)
     
-            st.markdown("**Historical Patterns**")
-    
-            # 🧮 Streak Stats
-            fear_runs = fear_res['runs']
-            greed_runs = greed_res['runs']
-    
-            fear_min = np.min(fear_runs) if len(fear_runs) else None
-            fear_max = np.max(fear_runs) if len(fear_runs) else None
-            fear_mean = np.mean(fear_runs) if len(fear_runs) else None
-            fear_median = np.median(fear_runs) if len(fear_runs) else None
-            fear_mode = int(stats.mode(fear_runs, keepdims=False).mode) if len(fear_runs) else None
-    
-            greed_min = np.min(greed_runs) if len(greed_runs) else None
-            greed_max = np.max(greed_runs) if len(greed_runs) else None
-            greed_mean = np.mean(greed_runs) if len(greed_runs) else None
-            greed_median = np.median(greed_runs) if len(greed_runs) else None
-            greed_mode = int(stats.mode(greed_runs, keepdims=False).mode) if len(greed_runs) else None
-    
-            # 📘 Table Summary
-            st.markdown("**📘 Historical Streak Statistics (Days)**")
-            st.table(pd.DataFrame({
-                "Mood": ["Fear", "Greed"],
-                "Min": [fear_min, greed_min],
-                "Median": [fear_median, greed_median],
-                "Mean": [round(fear_mean, 1), round(greed_mean, 1)],
-                "Mode": [fear_mode, greed_mode],
-                "Max": [fear_max, greed_max]
-            }))
-    
-            hist_col1, hist_col2 = st.columns(2)
-            hist_col1.metric("Fear Streaks",
-                             f"{len(fear_runs)}",
-                             f"Avg: {fear_mean:.1f} days")
-            hist_col2.metric("Greed Streaks",
-                             f"{len(greed_runs)}",
-                             f"Avg: {greed_mean:.1f} days")
-    
+            with st.expander("📊 Show Historical Streak Patterns", expanded=False):
+                # 🧮 Streak Stats
+                fear_runs = fear_res['runs']
+                greed_runs = greed_res['runs']
+            
+                fear_min = np.min(fear_runs) if len(fear_runs) else None
+                fear_max = np.max(fear_runs) if len(fear_runs) else None
+                fear_mean = np.mean(fear_runs) if len(fear_runs) else None
+                fear_median = np.median(fear_runs) if len(fear_runs) else None
+                fear_mode = int(stats.mode(fear_runs, keepdims=False).mode) if len(fear_runs) else None
+            
+                greed_min = np.min(greed_runs) if len(greed_runs) else None
+                greed_max = np.max(greed_runs) if len(greed_runs) else None
+                greed_mean = np.mean(greed_runs) if len(greed_runs) else None
+                greed_median = np.median(greed_runs) if len(greed_runs) else None
+                greed_mode = int(stats.mode(greed_runs, keepdims=False).mode) if len(greed_runs) else None
+            
+                # 📘 Table Summary
+                st.markdown("**📘 Historical Streak Statistics (Days)**")
+                st.table(pd.DataFrame({
+                    "Mood": ["Fear", "Greed"],
+                    "Min": [fear_min, greed_min],
+                    "Median": [fear_median, greed_median],
+                    "Mean": [round(fear_mean, 1), round(greed_mean, 1)],
+                    "Mode": [fear_mode, greed_mode],
+                    "Max": [fear_max, greed_max]
+                }))
+            
+                hist_col1, hist_col2 = st.columns(2)
+                hist_col1.metric("Fear Streaks",
+                                 f"{len(fear_runs)}",
+                                 f"Avg: {fear_mean:.1f} days")
+                hist_col2.metric("Greed Streaks",
+                                 f"{len(greed_runs)}",
+                                 f"Avg: {greed_mean:.1f} days")
+
             # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
                 threshold = (greed_max - self.current_streak) * 0.277
