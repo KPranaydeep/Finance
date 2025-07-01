@@ -304,12 +304,20 @@ class MarketMoodAnalyzer:
             hist_col2.metric("Greed Streaks", 
                              f"{len(greed_res['runs'])}", 
                              f"Avg: {np.mean(greed_res['runs']):.1f} days")
-    
-            if confidence_flip_day:
-                if self.current_mood == 'Greed':
-                    st.warning("🛑 Market in Greed Phase - Consider profit booking")
+            # 🧠 Replace existing mood suggestion logic
+            avg_fear = np.mean(fear_res['runs'])
+            avg_greed = np.mean(greed_res['runs'])
+            
+            if self.current_mood == 'Greed':
+                if self.current_streak < avg_greed:
+                    st.warning("📉 Market in Greed but early in the cycle – Ideal time to **book profits**, rotate into safe assets, and **hold cash** for potential corrections.")
                 else:
-                    st.success("🟢 Market in Fear Phase - Look for entry opportunities")
+                    st.warning("🛑 Market in Greed – Consider **gradual profit booking**.")
+            else:
+                if self.current_streak < avg_fear:
+                    st.success("🟢 Market in Fear but early in the cycle – Great opportunity to **accumulate stocks** with fresh capital.")
+                else:
+                    st.success("📘 Market in Fear – Be cautious and only accumulate **selectively**.")
 
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
