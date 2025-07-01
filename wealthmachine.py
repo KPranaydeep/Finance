@@ -261,6 +261,19 @@ class MarketMoodAnalyzer:
     def display_mood_analysis(self):
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
+        # 🧮 Calculate min and max streaks
+        fear_min = np.min(fear_res['runs']) if len(fear_res['runs']) > 0 else None
+        fear_max = np.max(fear_res['runs']) if len(fear_res['runs']) > 0 else None
+        greed_min = np.min(greed_res['runs']) if len(greed_res['runs']) > 0 else None
+        greed_max = np.max(greed_res['runs']) if len(greed_res['runs']) > 0 else None
+        
+        # 📊 Display as metrics or expanded info
+        st.markdown("**🔍 Streak Statistics**")
+        st.markdown(f"""
+        - 🐻 **Fear Streaks**: Min = `{fear_min}` days, Max = `{fear_max}` days  
+        - 🐂 **Greed Streaks**: Min = `{greed_min}` days, Max = `{greed_max}` days
+        """)
+
         res = fear_res if self.current_mood == 'Fear' else greed_res
     
         confidence_flip_day = self._get_confidence_flip_date(
