@@ -333,18 +333,27 @@ class MarketMoodAnalyzer:
                 hist_col2.metric("Greed Streaks",
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
-
             # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
                 threshold = (greed_max - self.current_streak) * 0.277
+            
                 if self.current_streak < greed_mean:
-                    st.warning(f"""📉 Market in Greed but early in the cycle – Ideal time to **book profits**, rotate into safe assets, and **hold cash** for potential corrections.
+                    st.warning(f"""
+            📉 **Market in Greed** but early in the cycle – Ideal time to:
+            - **Book profits**
+            - **Rotate into safe assets**
+            - **Hold cash** for potential corrections
             
-            📊 Consider booking profits if your portfolio returns exceed **{threshold:.1f}%**.""")
+            📊 **Action Tip**  
+            Consider booking profits if your portfolio returns exceed **{threshold:.1f}%**.
+                    """)
+            
                 else:
-                    st.warning(f"""🛑 Market in Greed – Current streak of `{self.current_streak}` days is **above the historical average** of `{greed_mean:.1f}` days.
+                    st.warning(f"""
+            🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
+            **Above average**: `{greed_mean:.1f}` days
             
-            📉 **Now is an optimal time to book profits** and shift your gains into **low-volatility instruments** like:
+            📉 Now is an optimal time to **book profits** and shift your gains into:
             - 💵 Cash or liquid funds  
             - 🧱 Short-duration bonds  
             - 🟡 Commodities like **Gold**, **Silver**, or other non-equity hedges  
@@ -354,12 +363,22 @@ class MarketMoodAnalyzer:
             - Selling pressure typically builds as investors lock in gains
             - A shift from Greed to Fear may increase volatility and downside risk
             
-            📊 Suggested Action: **Book profits if returns exceed `{threshold:.1f}%`**, and rotate into capital-preserving strategies.""")
+            📊 **Suggested Action**  
+            Book profits if returns exceed **{threshold:.1f}%**, and rotate into **capital-preserving strategies**
+                    """)
+            
             else:
                 if self.current_streak < fear_mean:
-                    st.success("🟢 Market in Fear but early in the cycle – Great opportunity to **accumulate stocks** with fresh capital.")
+                    st.success("""
+            🟢 **Market in Fear** but early in the cycle –  
+            Great opportunity to **accumulate stocks** with fresh capital.
+                    """)
                 else:
-                    st.success("📘 Market in Fear – Be cautious and only accumulate **selectively**, as the fear phase may be maturing.")
+                    st.success("""
+            📘 **Market in Fear** –  
+            Be cautious and only accumulate **selectively**,  
+            as the fear phase may be maturing.
+                    """)
             
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
