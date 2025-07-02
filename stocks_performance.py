@@ -10,23 +10,23 @@ from pymongo.server_api import ServerApi
 st.set_page_config(page_title="📈 Stock Performance Tracker", layout="centered")
 st.title("📊 Stock Performance Tracker")
 
-st.markdown("## 🎯 June 2025 Targets")
+st.markdown("## 🎯 July 2025 Targets")
 
 st.markdown("""
 ### 🎯 **Target Summary (By 31 July 2025)**
 
-| Scenario     | **Target ROI (%)** | **Target Annualized Return (%)** |
-|--------------|--------------------|----------------------------------|
-| 🟢 Conservative | `6.8`              | `30.5 – 31`                       |
+| Scenario       | **Target ROI (%)** | **Target Annualized Return (%)** |
+|----------------|--------------------|----------------------------------|
+| 🟢 Conservative | `6.8`              | `30.5 – 31.0`                     |
 | 🟡 Realistic    | `7.2`              | `32.5 – 33.5`                     |
-| 🔴 Stretch      | `7.6`              | `34.5 – 36`                       |
+| 🔴 Stretch      | `7.6`              | `34.5 – 36.0`                     |
 """)
 
 st.markdown("""
 ### 📌 Notes:
-- **ROI** = Cumulative Net Profit / Buy Value × 100
-- **Annualized Return** = Adjusted for time decay: faster ROI earlier in the month increases annualized return.
-- With ~13 days left in June, **ROI growth will now be the main lever** for boosting annualized return.
+- **ROI** = (Cumulative Net Profit / Buy Value) × 100
+- **Annualized Return** accounts for time decay — achieving ROI earlier in the month improves the annualized figure.
+- With ~29 days left in July, **ROI acceleration early in the month** is key to surpassing stretch targets.
 """)
 
 # --- MongoDB Setup ---
