@@ -190,4 +190,9 @@ with open("max_roi.json", "w") as f:
 
 st.success(f"✅ max_roi.json saved with value: {max_roi:.2f}%")
 
+import json
+
+with open("max_roi.json", "r") as f:
+    data = json.load(f)
+    print("Loaded max_roi =", data.get("max_roi"))
 
