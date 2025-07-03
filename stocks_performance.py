@@ -150,6 +150,18 @@ if not df.empty:
     ax3.grid(True, linestyle='--', alpha=0.6)
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
     fig3.autofmt_xdate()
+    
+    # --- Annotate max ROI ---
+    max_roi = (df_plot['ROI'].max()) * 100  # In percentage
+    ax3.text(
+        1.0, -0.15,  # X and Y relative coordinates (bottom right)
+        f"Max ROI: {max_roi:.2f}%",
+        ha='right', va='center',
+        fontsize=10, color='green',
+        transform=ax3.transAxes,
+        bbox=dict(facecolor='white', edgecolor='green', boxstyle='round,pad=0.3')
+    )
+    
     st.pyplot(fig3)
 
     # --- Display Table ---
