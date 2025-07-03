@@ -152,10 +152,10 @@ if not df.empty:
     fig3.autofmt_xdate()
     
     # --- Annotate Max ROI inside bottom-right of the chart area ---
-    max_roi = (df_plot['ROI'].max())
+    max_roi = (df_plot['ROI'].max())*100
     
     ax3.text(
-        0.95, 0.05,  # X, Y in Axes coordinates (0-1 range)
+        0.95, 0.03,  # X, Y in Axes coordinates (0-1 range)
         f"Max ROI: {max_roi:.2f}%",
         transform=ax3.transAxes,
         ha='right', va='bottom',
