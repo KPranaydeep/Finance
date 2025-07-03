@@ -12,8 +12,7 @@ from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
-
-import json
+st.caption(f"🧪 Debug: Loaded min_threshold = {min_threshold:.2f}% from max_roi.json")
 
 def get_max_roi_from_file():
     try:
