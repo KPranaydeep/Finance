@@ -16,13 +16,15 @@ def get_max_roi_from_file():
     try:
         with open("max_roi.json", "r") as f:
             data = json.load(f)
+            print("🔍 Debug File Contents:", data)  # Add this line
             return data.get("max_roi", 0.0)
     except FileNotFoundError:
         return 0.0
 
+
 min_threshold = get_max_roi_from_file()
 st.caption(f"🧪 Debug: Loaded min_threshold = {min_threshold:.2f}% from max_roi.json")
-
+🧪 Debug: Loaded min_threshold = 0.00% from max_roi.json
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
 
