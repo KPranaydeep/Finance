@@ -351,15 +351,17 @@ class MarketMoodAnalyzer:
             
                 if self.current_streak < greed_mean:
                     st.warning(f"""
-            📉 **Market in Greed** but early in the cycle – Ideal time to:
-            - **Book profits**
-            - **Rotate into safe assets**
-            - **Hold cash** for potential corrections
-            
-            📊 **Action Tip**  
-            Consider booking profits if your portfolio returns exceed **{threshold:.1f}%**.  
-            If you are rotating aggressively, consider using **{min_threshold:.0f}%** as a lower bound.
-                    """)
+             📉 **Market in Greed** – but still early in the cycle.  
+             This phase is ideal for:
+
+             - 🏦 **Booking profits** on outperformers  
+             - 🔁 **Rotating into safer assets**  
+             - 💵 **Holding cash** to prepare for possible pullbacks  
+
+             📊 **Action Tip**  
+             If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
+             For more active strategies, start rotating once returns cross **{min_threshold:.0f}%** to stay agile and reduce downside risk.
+                   """)
                 else:
                     st.warning(f"""
             🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
