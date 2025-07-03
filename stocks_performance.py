@@ -86,6 +86,14 @@ with st.expander("➕ Add New Entry"):
 if not df.empty:
     df['Net Profit'] = df['Sell'] - df['Buy'] - df['Charges']
     df['ROI'] = df['Net Profit'] / df['Buy']
+    if not df.empty:
+        df['ROI'] = (df['Sell'] - df['Buy'] - df['Charges']) / df['Buy']
+        max_roi = df['ROI'].max()
+    else:
+        max_roi = 0  # fallback
+    def get_max_roi():
+        return max_roi
+
     df['Charges %'] = df['Charges'] / df['Buy'] * 100
     df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
     df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
@@ -144,3 +152,5 @@ if not df.empty:
 
     # with st.expander("📋 Show Performance Table"):
     #     st.dataframe(df_display)
+
+
