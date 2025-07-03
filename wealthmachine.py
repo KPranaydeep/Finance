@@ -21,7 +21,7 @@ def get_max_roi_from_file():
         return 0.0
 
 min_threshold = get_max_roi_from_file()
-st.caption(f"🧪 Debug: Loaded min_threshold = {min_threshold:.2f}% from max_roi.json")
+# st.caption(f"🧪 Debug: Loaded min_threshold = {min_threshold:.2f}% from max_roi.json")
 
 
 # Replace <db_password> with your actual MongoDB password
@@ -362,7 +362,7 @@ class MarketMoodAnalyzer:
             
             📊 **Action Tip**  
             If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
-            For more active strategies, start rotating once returns cross **{active_threshold:.2f}%** to stay agile and reduce downside risk.
+            For more active strategies, start rotating once returns cross **{active_threshold:.1f}%** to stay agile and reduce downside risk.
                     """)
                 else:
                     st.warning(f"""
