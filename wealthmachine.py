@@ -350,22 +350,23 @@ class MarketMoodAnalyzer:
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
             # 🧠 Dynamic Mood Suggestion
-            if self.current_mood == 'Greed':
-                threshold = (greed_max - self.current_streak) * 0.277
+            if self.current_streak < greed_mean:
+                # Safety fallback: use threshold if min_threshold is invalid or zero
+                active_threshold = min_threshold if min_threshold > 0 else threshold
             
-                if self.current_streak < greed_mean:
-                    st.warning(f"""
-             📉 **Market in Greed** – but still early in the cycle.  
-             This phase is ideal for:
+                st.warning(f"""
+            📉 **Market in Greed** – but still early in the cycle.  
+            This phase is ideal for:
+            
+            - 🏦 **Booking profits** on outperformers  
+            - 🔁 **Rotating into safer assets**  
+            - 💵 **Holding cash** to prepare for possible pullbacks  
+            
+            📊 **Action Tip**  
+            If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
+            For more active strategies, start rotating once returns cross **{active_threshold:.2f}%** to stay agile and reduce downside risk.
+                """)
 
-             - 🏦 **Booking profits** on outperformers  
-             - 🔁 **Rotating into safer assets**  
-             - 💵 **Holding cash** to prepare for possible pullbacks  
-
-             📊 **Action Tip**  
-             If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
-             For more active strategies, start rotating once returns cross **{min_threshold:.2f}%** to stay agile and reduce downside risk.
-                   """)
                 else:
                     st.warning(f"""
             🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
