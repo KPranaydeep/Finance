@@ -181,4 +181,10 @@ df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astyp
 # with st.expander("📋 Show Performance Table"):
 #     st.dataframe(df_display)
 
+# Example — max_roi should be calculated earlier in your code
+max_roi = holdings_df['Profit/Loss (%)'].max() / 100  # convert to decimal
+
+# Write to JSON (overwrite if already exists)
+with open("max_roi.json", "w") as f:
+    json.dump({"max_roi": round(max_roi * 100, 2)}, f)
 
