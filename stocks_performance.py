@@ -115,76 +115,76 @@ def get_max_roi():
 
     return max_roi
 
-    df['Charges %'] = df['Charges'] / df['Buy'] * 100
-    df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
-    df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
+df['Charges %'] = df['Charges'] / df['Buy'] * 100
+df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
+df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
 
-    # ✅ Sort by Date and remove duplicates (keep last entry if duplicate dates exist)
-    df_plot = df.sort_values('Date').groupby('Date', as_index=False).last()
+# ✅ Sort by Date and remove duplicates (keep last entry if duplicate dates exist)
+df_plot = df.sort_values('Date').groupby('Date', as_index=False).last()
 
-    import matplotlib.dates as mdates
+import matplotlib.dates as mdates
 
-    # --- Plot 1: Charges % over Time ---
-    st.subheader("📉 Charges % Over Time")
-    fig1, ax1 = plt.subplots(figsize=(10, 4), dpi=150)
-    ax1.plot(df_plot['Date'].values, df_plot['Charges %'].values, marker='o', linestyle='-', color='crimson')
-    ax1.set_ylabel("Charges (% of Buy)", fontsize=12)
-    ax1.set_xlabel("Date", fontsize=12)
-    ax1.set_title("Charges % Over Time", fontsize=14, weight='bold')
-    ax1.grid(True, linestyle='--', alpha=0.6)
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-    fig1.autofmt_xdate()
-    st.pyplot(fig1)
+# --- Plot 1: Charges % over Time ---
+st.subheader("📉 Charges % Over Time")
+fig1, ax1 = plt.subplots(figsize=(10, 4), dpi=150)
+ax1.plot(df_plot['Date'].values, df_plot['Charges %'].values, marker='o', linestyle='-', color='crimson')
+ax1.set_ylabel("Charges (% of Buy)", fontsize=12)
+ax1.set_xlabel("Date", fontsize=12)
+ax1.set_title("Charges % Over Time", fontsize=14, weight='bold')
+ax1.grid(True, linestyle='--', alpha=0.6)
+ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+fig1.autofmt_xdate()
+st.pyplot(fig1)
 
-    # --- Plot 2: Annualized Return over Time ---
-    st.subheader("📈 Annualized Return Over Time")
-    fig2, ax2 = plt.subplots(figsize=(10, 4), dpi=150)
-    ax2.plot(df_plot['Date'].values, df_plot['Annualized Return'].values * 100, marker='s', linestyle='-', color='darkgreen')
-    ax2.set_ylabel("Annualized Return (%)", fontsize=12)
-    ax2.set_xlabel("Date", fontsize=12)
-    ax2.set_title("Annualized Return vs Time", fontsize=14, weight='bold')
-    ax2.grid(True, linestyle='--', alpha=0.6)
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-    fig2.autofmt_xdate()
-    st.pyplot(fig2)
+# --- Plot 2: Annualized Return over Time ---
+st.subheader("📈 Annualized Return Over Time")
+fig2, ax2 = plt.subplots(figsize=(10, 4), dpi=150)
+ax2.plot(df_plot['Date'].values, df_plot['Annualized Return'].values * 100, marker='s', linestyle='-', color='darkgreen')
+ax2.set_ylabel("Annualized Return (%)", fontsize=12)
+ax2.set_xlabel("Date", fontsize=12)
+ax2.set_title("Annualized Return vs Time", fontsize=14, weight='bold')
+ax2.grid(True, linestyle='--', alpha=0.6)
+ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+fig2.autofmt_xdate()
+st.pyplot(fig2)
 
-    # --- Plot 3: ROI over Time ---
-    st.subheader("📊 ROI Over Time")
-    fig3, ax3 = plt.subplots(figsize=(10, 4), dpi=150)
-    ax3.plot(df_plot['Date'].values, df_plot['ROI'].values * 100, marker='^', linestyle='-', color='navy')
-    ax3.set_ylabel("ROI (%)", fontsize=12)
-    ax3.set_xlabel("Date", fontsize=12)
-    ax3.set_title("ROI vs Time", fontsize=14, weight='bold')
-    ax3.grid(True, linestyle='--', alpha=0.6)
-    ax3.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-    fig3.autofmt_xdate()
-    
-    # --- Annotate Max ROI inside bottom-right of the chart area ---
-    max_roi = (df_plot['ROI'].max())*100
-    
-    ax3.text(
-        0.99, 0.03,  # X, Y in Axes coordinates (0-1 range)
-        f"Max ROI: {max_roi:.2f}%",
-        transform=ax3.transAxes,
-        ha='right', va='bottom',
-        fontsize=10, color='green',
-        bbox=dict(facecolor='white', edgecolor='green', boxstyle='round,pad=0.3')
-    )
-    
-    st.pyplot(fig3)
+# --- Plot 3: ROI over Time ---
+st.subheader("📊 ROI Over Time")
+fig3, ax3 = plt.subplots(figsize=(10, 4), dpi=150)
+ax3.plot(df_plot['Date'].values, df_plot['ROI'].values * 100, marker='^', linestyle='-', color='navy')
+ax3.set_ylabel("ROI (%)", fontsize=12)
+ax3.set_xlabel("Date", fontsize=12)
+ax3.set_title("ROI vs Time", fontsize=14, weight='bold')
+ax3.grid(True, linestyle='--', alpha=0.6)
+ax3.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+fig3.autofmt_xdate()
 
-    # --- Display Table ---
-    # Keep only the latest entry per date (in case of multiple entries per date)
-    df_display = df.sort_values('Date').groupby('Date', as_index=False).last()
-    df_display['Buy'] = df_display['Buy'].map('₹{:,.2f}'.format)
-    df_display['Sell'] = df_display['Sell'].map('₹{:,.2f}'.format)
-    df_display['Charges'] = df_display['Charges'].map('₹{:,.2f}'.format)
-    df_display['Net Profit'] = df_display['Net Profit'].map('₹{:,.2f}'.format)
-    df_display['ROI'] = (df['ROI'] * 100).round(2).astype(str) + '%'
-    df_display['Charges %'] = df['Charges %'].round(2).astype(str) + '%'
-    df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
+# --- Annotate Max ROI inside bottom-right of the chart area ---
+max_roi = (df_plot['ROI'].max())*100
 
-    # with st.expander("📋 Show Performance Table"):
-    #     st.dataframe(df_display)
+ax3.text(
+    0.99, 0.03,  # X, Y in Axes coordinates (0-1 range)
+    f"Max ROI: {max_roi:.2f}%",
+    transform=ax3.transAxes,
+    ha='right', va='bottom',
+    fontsize=10, color='green',
+    bbox=dict(facecolor='white', edgecolor='green', boxstyle='round,pad=0.3')
+)
+
+st.pyplot(fig3)
+
+# --- Display Table ---
+# Keep only the latest entry per date (in case of multiple entries per date)
+df_display = df.sort_values('Date').groupby('Date', as_index=False).last()
+df_display['Buy'] = df_display['Buy'].map('₹{:,.2f}'.format)
+df_display['Sell'] = df_display['Sell'].map('₹{:,.2f}'.format)
+df_display['Charges'] = df_display['Charges'].map('₹{:,.2f}'.format)
+df_display['Net Profit'] = df_display['Net Profit'].map('₹{:,.2f}'.format)
+df_display['ROI'] = (df['ROI'] * 100).round(2).astype(str) + '%'
+df_display['Charges %'] = df['Charges %'].round(2).astype(str) + '%'
+df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astype(str) + '%'
+
+# with st.expander("📋 Show Performance Table"):
+#     st.dataframe(df_display)
 
 
