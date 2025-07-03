@@ -338,7 +338,6 @@ class MarketMoodAnalyzer:
             # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
                 threshold = (greed_max - self.current_streak) * 0.277
-                min_threshold = get_max_roi()
             
                 if self.current_streak < greed_mean:
                     st.warning(f"""
