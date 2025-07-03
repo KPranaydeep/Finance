@@ -92,7 +92,20 @@ if not df.empty:
     else:
         max_roi = 0  # fallback
     def get_max_roi():
-        return max_roi
+    data = list(collection.find({}, {"_id": 0}))
+    df = pd.DataFrame(data)
+
+    if df.empty:
+        return 0
+
+    df['Buy'] = pd.to_numeric(df['Buy'], errors='coerce')
+    df['Sell'] = pd.to_numeric(df['Sell'], errors='coerce')
+    df['Charges'] = pd.to_numeric(df['Charges'], errors='coerce')
+
+    df = df.dropna(subset=['Buy', 'Sell', 'Charges'])
+
+    df['ROI'] = (df['Sell'] - df['Buy'] - df['Charges']) / df['Buy']
+    return df['ROI'].max()
 
     df['Charges %'] = df['Charges'] / df['Buy'] * 100
     df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
