@@ -13,13 +13,15 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
 
+import json
+
 def get_max_roi_from_file():
     try:
         with open("max_roi.json", "r") as f:
             data = json.load(f)
-            return data.get("max_roi", 0) * 100  # convert to percentage
+            return data.get("max_roi", 0.0)
     except FileNotFoundError:
-        return 0
+        return 0.0
 
 min_threshold = get_max_roi_from_file()
 
