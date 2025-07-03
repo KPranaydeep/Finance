@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from stocks_performance import get_max_roi
-min_threshold = get_max_roi()
+min_threshold = get_max_roi()*100
 
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
