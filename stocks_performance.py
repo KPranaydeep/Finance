@@ -86,38 +86,18 @@ with st.expander("➕ Add New Entry"):
 if not df.empty:
     df['Net Profit'] = df['Sell'] - df['Buy'] - df['Charges']
     df['ROI'] = df['Net Profit'] / df['Buy']
-    if not df.empty:
-        df['ROI'] = (df['Sell'] - df['Buy'] - df['Charges']) / df['Buy']
-        max_roi = df['ROI'].max()
-    else:
-        max_roi = 0  # fallback
-import json
-import os
-
-def get_max_roi():
-    data = list(collection.find({}, {"_id": 0}))
-    df = pd.DataFrame(data)
-
-    if df.empty or not {'Buy', 'Sell', 'Charges'}.issubset(df.columns):
-        return 0
-
-    df['Buy'] = pd.to_numeric(df['Buy'], errors='coerce')
-    df['Sell'] = pd.to_numeric(df['Sell'], errors='coerce')
-    df['Charges'] = pd.to_numeric(df['Charges'], errors='coerce')
-    df = df.dropna(subset=['Buy', 'Sell', 'Charges'])
-
-    df['ROI'] = (df['Sell'] - df['Buy'] - df['Charges']) / df['Buy']
     max_roi = df['ROI'].max()
 
-    # Save max ROI to file
+    # Debug print (optional)
+    print("✅ max_roi calculated:", max_roi)
+    
+    # Write as percentage
     with open("max_roi.json", "w") as f:
-        json.dump({"max_roi": max_roi}, f)
+        json.dump({"max_roi": round(max_roi * 100, 2)}, f)
 
-    return max_roi
-
-df['Charges %'] = df['Charges'] / df['Buy'] * 100
-df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
-df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
+    df['Charges %'] = df['Charges'] / df['Buy'] * 100
+    df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
+    df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
 
 # ✅ Sort by Date and remove duplicates (keep last entry if duplicate dates exist)
 df_plot = df.sort_values('Date').groupby('Date', as_index=False).last()
