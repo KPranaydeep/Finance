@@ -151,18 +151,22 @@ if not df.empty:
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
     fig3.autofmt_xdate()
     
-    # --- Annotate max ROI ---
-    max_roi = (df_plot['ROI'].max()) * 100  # In percentage
-    ax3.text(
-        1.0, -0.15,  # X and Y relative coordinates (bottom right)
-        f"Max ROI: {max_roi:.2f}%",
-        ha='right', va='center',
+    # --- Annotate Max ROI inside the chart ---
+    max_roi_idx = df_plot['ROI'].idxmax()
+    max_roi_date = df_plot.loc[max_roi_idx, 'Date']
+    max_roi_value = df_plot.loc[max_roi_idx, 'ROI'] * 100
+    
+    ax3.annotate(
+        f"📈 Max ROI: {max_roi_value:.2f}%",
+        xy=(max_roi_date, max_roi_value),
+        xytext=(max_roi_date, max_roi_value + 2),  # Slightly above the point
+        arrowprops=dict(arrowstyle='->', color='green', lw=1),
         fontsize=10, color='green',
-        transform=ax3.transAxes,
         bbox=dict(facecolor='white', edgecolor='green', boxstyle='round,pad=0.3')
     )
     
     st.pyplot(fig3)
+
 
     # --- Display Table ---
     # Keep only the latest entry per date (in case of multiple entries per date)
