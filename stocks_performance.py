@@ -82,22 +82,36 @@ with st.expander("➕ Add New Entry"):
         st.experimental_rerun()
         st.success("✅ Entry added!")
 
+import json
+
 # --- Calculations ---
-if not df.empty:
+max_roi = 0.0  # Default value in case of empty or invalid data
+
+if not df.empty and {'Buy', 'Sell', 'Charges'}.issubset(df.columns):
+    df['Buy'] = pd.to_numeric(df['Buy'], errors='coerce')
+    df['Sell'] = pd.to_numeric(df['Sell'], errors='coerce')
+    df['Charges'] = pd.to_numeric(df['Charges'], errors='coerce')
+    df = df.dropna(subset=['Buy', 'Sell', 'Charges'])
+
     df['Net Profit'] = df['Sell'] - df['Buy'] - df['Charges']
     df['ROI'] = df['Net Profit'] / df['Buy']
-    max_roi = df['ROI'].max()
-
-    # Debug print (optional)
-    print("✅ max_roi calculated:", max_roi)
-    
-    # Write as percentage
-    with open("max_roi.json", "w") as f:
-        json.dump({"max_roi": round(max_roi * 100, 2)}, f)
-
     df['Charges %'] = df['Charges'] / df['Buy'] * 100
     df['Days Held'] = (df['Date'] - pd.to_datetime("2025-04-01")).dt.days + 1
     df['Annualized Return'] = ((1 + df['ROI']) ** (365 / df['Days Held'])) - 1
+
+    # --- Max ROI Handling ---
+    if not df['ROI'].empty:
+        max_roi = df['ROI'].max()
+        try:
+            with open("max_roi.json", "w") as f:
+                json.dump({"max_roi": round(max_roi * 100, 2)}, f)
+            print(f"✅ max_roi written: {max_roi * 100:.2f}%")
+        except Exception as e:
+            print("❌ Error writing max_roi.json:", e)
+    else:
+        print("⚠️ ROI column is empty – max_roi not written.")
+else:
+    print("⚠️ Insufficient data or columns missing to calculate ROI.")
 
 # ✅ Sort by Date and remove duplicates (keep last entry if duplicate dates exist)
 df_plot = df.sort_values('Date').groupby('Date', as_index=False).last()
