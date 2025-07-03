@@ -181,11 +181,11 @@ df_display['Annualized Return'] = (df['Annualized Return'] * 100).round(2).astyp
 # with st.expander("📋 Show Performance Table"):
 #     st.dataframe(df_display)
 
-# ✅ Use df['ROI'] which is already calculated
-max_roi = df['ROI'].max() * 100  # keep it in percent
+# # ✅ Use df['ROI'] which is already calculated
+# max_roi = df['ROI'].max() * 100  # keep it in percent
 
-# ✅ Write to JSON
-with open("max_roi.json", "w") as f:
-    json.dump({"max_roi": round(max_roi, 2)}, f)
+# # ✅ Write to JSON
+# with open("max_roi.json", "w") as f:
+#     json.dump({"max_roi": round(max_roi, 2)}, f)
 
-st.success(f"✅ max_roi.json saved with value: {max_roi:.2f}%")
+# st.success(f"✅ max_roi.json saved with value: {max_roi:.2f}%")
