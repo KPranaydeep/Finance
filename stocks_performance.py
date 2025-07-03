@@ -155,7 +155,7 @@ if not df.empty:
     max_roi = (df_plot['ROI'].max())
     
     ax3.text(
-        0.98, 0.02,  # X, Y in Axes coordinates (0-1 range)
+        0.95, 0.05,  # X, Y in Axes coordinates (0-1 range)
         f"Max ROI: {max_roi:.2f}%",
         transform=ax3.transAxes,
         ha='right', va='bottom',
