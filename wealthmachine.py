@@ -11,6 +11,9 @@ from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from stocks_performance import get_max_roi
+min_threshold = get_max_roi()
+
 
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
@@ -336,6 +339,7 @@ class MarketMoodAnalyzer:
             # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
                 threshold = (greed_max - self.current_streak) * 0.277
+                min_threshold = get_max_roi()
             
                 if self.current_streak < greed_mean:
                     st.warning(f"""
@@ -345,9 +349,9 @@ class MarketMoodAnalyzer:
             - **Hold cash** for potential corrections
             
             📊 **Action Tip**  
-            Consider booking profits if your portfolio returns exceed **{threshold:.1f}%**.
+            Consider booking profits if your portfolio returns exceed **{threshold:.1f}%**.  
+            If you are rotating aggressively, consider using **{min_threshold:.0f}%** as a lower bound.
                     """)
-            
                 else:
                     st.warning(f"""
             🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
@@ -364,9 +368,9 @@ class MarketMoodAnalyzer:
             - A shift from Greed to Fear may increase volatility and downside risk
             
             📊 **Suggested Action**  
-            Book profits if returns exceed **{threshold:.1f}%**, and rotate into **capital-preserving strategies**
+            Book profits if returns exceed **{min_threshold:.0f}%**, and rotate into **capital-preserving strategies**
                     """)
-            
+
             else:
                 if self.current_streak < fear_mean:
                     st.success("""
