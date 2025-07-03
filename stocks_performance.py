@@ -157,10 +157,9 @@ if not df.empty:
     max_roi_value = df_plot.loc[max_roi_idx, 'ROI'] * 100
     
     ax3.annotate(
-        f"📈 Max ROI: {max_roi_value:.2f}%",
+        f"Max ROI: {max_roi_value:.2f}%",
         xy=(max_roi_date, max_roi_value),
-        xytext=(max_roi_date, max_roi_value + 2),  # Slightly above the point
-        arrowprops=dict(arrowstyle='->', color='green', lw=1),
+        xytext=(max_roi_date, max_roi_value),  # Slightly above the point
         fontsize=10, color='green',
         bbox=dict(facecolor='white', edgecolor='green', boxstyle='round,pad=0.3')
     )
