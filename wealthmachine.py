@@ -349,10 +349,14 @@ class MarketMoodAnalyzer:
                 hist_col2.metric("Greed Streaks",
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
+
             # 🧠 Dynamic Mood Suggestion
-            if self.current_streak < greed_mean:
+            if self.current_mood == 'Greed':
+                threshold = (greed_max - self.current_streak) * 0.277
                 active_threshold = min_threshold if min_threshold > 0 else threshold
-                st.warning(f"""
+            
+                if self.current_streak < greed_mean:
+                    st.warning(f"""
             📉 **Market in Greed** – but still early in the cycle.  
             This phase is ideal for:
             
@@ -363,9 +367,9 @@ class MarketMoodAnalyzer:
             📊 **Action Tip**  
             If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
             For more active strategies, start rotating once returns cross **{active_threshold:.2f}%** to stay agile and reduce downside risk.
-                """)
-            else:
-                st.warning(f"""
+                    """)
+                else:
+                    st.warning(f"""
             🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
             **Above average**: `{greed_mean:.1f}` days
             
@@ -381,9 +385,9 @@ class MarketMoodAnalyzer:
             
             📊 **Suggested Action**  
             Book profits if returns exceed **{min_threshold:.0f}%**, and rotate into **capital-preserving strategies**
-                """)
-
-            else:
+                    """)
+            
+            elif self.current_mood == 'Fear':
                 if self.current_streak < fear_mean:
                     st.success("""
             🟢 **Market in Fear** but early in the cycle –  
@@ -395,6 +399,7 @@ class MarketMoodAnalyzer:
             Be cautious and only accumulate **selectively**,  
             as the fear phase may be maturing.
                     """)
+
             
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
