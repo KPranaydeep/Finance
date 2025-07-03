@@ -11,8 +11,18 @@ from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from stocks_performance import get_max_roi
-min_threshold = get_max_roi()*100
+import json
+
+def get_max_roi_from_file():
+    try:
+        with open("max_roi.json", "r") as f:
+            data = json.load(f)
+            return data.get("max_roi", 0) * 100  # convert to percentage
+    except FileNotFoundError:
+        return 0
+
+min_threshold = get_max_roi_from_file()
+
 
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
