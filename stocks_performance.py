@@ -189,11 +189,3 @@ with open("max_roi.json", "w") as f:
     json.dump({"max_roi": round(max_roi, 2)}, f)
 
 st.success(f"✅ max_roi.json saved with value: {max_roi:.2f}%")
-
-import json
-
-with open("max_roi.json", "r") as f:
-    data = json.load(f)
-    st.caption(f"📥 Loaded `max_roi` = {data.get('max_roi')}% from file")
-
-
