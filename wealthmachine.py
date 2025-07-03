@@ -21,7 +21,7 @@ def get_max_roi_from_file():
     except FileNotFoundError:
         return 0
 
-min_threshold = get_max_roi_from_file()*100
+min_threshold = get_max_roi_from_file()
 
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
@@ -359,7 +359,7 @@ class MarketMoodAnalyzer:
 
              📊 **Action Tip**  
              If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
-             For more active strategies, start rotating once returns cross **{min_threshold:.0f}%** to stay agile and reduce downside risk.
+             For more active strategies, start rotating once returns cross **{min_threshold:.2f}%** to stay agile and reduce downside risk.
                    """)
                 else:
                     st.warning(f"""
