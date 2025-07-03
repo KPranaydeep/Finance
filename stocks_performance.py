@@ -194,5 +194,6 @@ import json
 
 with open("max_roi.json", "r") as f:
     data = json.load(f)
-    print("Loaded max_roi =", data.get("max_roi"))
+    st.caption(f"📥 Loaded `max_roi` = {data.get('max_roi')}% from file")
+
 
