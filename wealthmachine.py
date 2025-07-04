@@ -345,19 +345,19 @@ class MarketMoodAnalyzer:
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
             # 🔁 Capital Allocation Suggestion Based on MMI
-            st.warning("### 💰 Capital Allocation")
+            st.info("### 💰 Capital Allocation")
 
             if self.current_mmi < 50:
                 invest_pct = (50 - self.current_mmi) * 2
                 st.info(f"""
-                😊  **Fear in Market (MMI = {self.current_mmi:.2f})**  
+                😊  **Fear in Market MMI = {self.current_mmi:.2f}**  
                 👉 **Invest `{invest_pct:.1f}%`** of your deployable cash.  
                 🪙 Fear offers value buys, consider accumulating high-quality assets at lower valuations.
                 """)
             elif self.current_mmi > 50:
                 liquid_hold_pct = (self.current_mmi - 50) * 2
                 st.info(f"""
-                😬  **Greed in Market (MMI = {self.current_mmi:.2f})**
+                😬  **Greed in Market MMI = {self.current_mmi:.2f}**
                 
                 👉  Hold at least `{liquid_hold_pct:.1f}%` of total capital in liquid, low-risk instruments.  
                     Ideally, keep this amount not invested and easily liquidable in your account.
