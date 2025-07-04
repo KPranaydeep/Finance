@@ -447,7 +447,6 @@ class MarketMoodAnalyzer:
             Be cautious and only accumulate **selectively**,  
             as the fear phase may be maturing.
                     """)
-
             
 # 🧩 Finally — show allocation planner
 allocation_collection = db['allocation_plans']
