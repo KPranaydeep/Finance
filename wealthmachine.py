@@ -356,7 +356,7 @@ class MarketMoodAnalyzer:
                 """)
             elif self.current_mmi > 50:
                 liquid_hold_pct = (self.current_mmi - 50) * 2
-                st.warning(f"""
+                st.info(f"""
                 😬  **Greed in Market (MMI = {self.current_mmi:.2f})**  
                 👉 Hold at least `{liquid_hold_pct:.1f}%` of total capital in liquid, low-risk instruments, ideally as not invested and liquidable in your account. 
                 🧠 Wait for better valuations to re-enter. Greed phases often precede corrections.
