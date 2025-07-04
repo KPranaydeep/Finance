@@ -23,7 +23,6 @@ def get_max_roi_from_file():
 min_threshold = get_max_roi_from_file()
 # st.caption(f"🧪 Debug: Loaded min_threshold = {min_threshold:.2f}% from max_roi.json")
 
-
 # Replace <db_password> with your actual MongoDB password
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
 
@@ -346,7 +345,7 @@ class MarketMoodAnalyzer:
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
             # 🔁 Capital Allocation Suggestion Based on MMI
-            st.warning("### 💰 Capital Allocation Suggestion")
+            st.warning("### 💰 Capital Allocation")
 
             if self.current_mmi < 50:
                 invest_pct = (50 - self.current_mmi) * 2
