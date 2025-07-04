@@ -358,12 +358,8 @@ class MarketMoodAnalyzer:
                 liquid_hold_pct = (self.current_mmi - 50) * 2
                 st.info(f"""
                 😬  **Greed in Market (MMI = {self.current_mmi:.2f})**
-                
-                👉  Hold at least `{liquid_hold_pct:.1f}%` of total capital in liquid, low-risk instruments.  
-                    Ideally, keep this amount not invested and easily liquidable in your account.
-                
-                🧠  Wait for better valuations to re-enter.  
-                    Greed phases often precede corrections.
+                👉  Hold at least `{liquid_hold_pct:.1f}%` of total capital in liquid, low-risk instruments. Ideally, keep this amount not invested and easily liquidable in your account.
+                🧠  Wait for better valuations to re-enter. Greed phases often precede corrections.
                 """)
             else:
                 st.info("""
