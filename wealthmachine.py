@@ -345,6 +345,28 @@ class MarketMoodAnalyzer:
                 hist_col2.metric("Greed Streaks",
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
+            # 🔁 Capital Allocation Suggestion Based on MMI
+            st.markdown("### 💰 Capital Allocation Suggestion")
+
+            if self.current_mmi < 50:
+                invest_pct = (50 - self.current_mmi) * 2
+                st.info(f"""
+                😟 **Fear in Market (MMI = {self.current_mmi:.2f})**  
+                👉 Suggestion: **Invest `{invest_pct:.1f}%`** of your deployable cash  
+                🪙 Fear offers value buys — consider accumulating high-quality assets at lower valuations.
+                """)
+            elif self.current_mmi > 50:
+                liquid_hold_pct = (self.current_mmi - 50) * 2
+                st.warning(f"""
+                😄 **Greed in Market (MMI = {self.current_mmi:.2f})**  
+                👉 Suggestion: **Hold at least `{liquid_hold_pct:.1f}%`** of total capital in **liquid, low-risk** instruments  
+                🧠 Wait for better valuations to re-enter — greed phases often precede corrections.
+                """)
+            else:
+                st.info("""
+                ⚖️ **MMI at Neutral (50)**  
+                No strong directional bias — consider balanced allocation between equity and liquid assets.
+                """)
 
             # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
