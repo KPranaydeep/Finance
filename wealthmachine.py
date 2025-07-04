@@ -346,7 +346,7 @@ class MarketMoodAnalyzer:
                                  f"{len(greed_runs)}",
                                  f"Avg: {greed_mean:.1f} days")
             # 🔁 Capital Allocation Suggestion Based on MMI
-            st.markdown("### 💰 Capital Allocation Suggestion")
+            st.warning("### 💰 Capital Allocation Suggestion")
 
             if self.current_mmi < 50:
                 invest_pct = (50 - self.current_mmi) * 2
