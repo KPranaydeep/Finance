@@ -313,7 +313,31 @@ class MarketMoodAnalyzer:
                 # 🧮 Streak Stats
                 fear_runs = fear_res['runs']
                 greed_runs = greed_res['runs']
-            
+                # 📈 Expected Streak with 95% Confidence Interval
+                def compute_95_ci(data):
+                    n = len(data)
+                    if n < 2:
+                        return None, None  # Not enough data
+                    mean = np.mean(data)
+                    std = np.std(data, ddof=1)
+                    stderr = std / np.sqrt(n)
+                    margin = 1.96 * stderr  # 95% confidence
+                    return mean, (mean - margin, mean + margin)
+
+                fear_mean_ci, fear_ci_range = compute_95_ci(fear_runs)
+                greed_mean_ci, greed_ci_range = compute_95_ci(greed_runs)
+
+                st.markdown("**📐 Expected Streak Duration (95% Confidence Interval)**")
+                ci_df = pd.DataFrame({
+                    "Mood": ["Fear", "Greed"],
+                    "Mean Streak (days)": [f"{fear_mean_ci:.1f}", f"{greed_mean_ci:.1f}"],
+                    "95% CI (days)": [
+                        f"{fear_ci_range[0]:.1f} – {fear_ci_range[1]:.1f}" if fear_ci_range else "N/A",
+                        f"{greed_ci_range[0]:.1f} – {greed_ci_range[1]:.1f}" if greed_ci_range else "N/A"
+                    ]
+                })
+                st.table(ci_df)
+
                 fear_min = np.min(fear_runs) if len(fear_runs) else None
                 fear_max = np.max(fear_runs) if len(fear_runs) else None
                 fear_mean = np.mean(fear_runs) if len(fear_runs) else None
@@ -387,8 +411,8 @@ class MarketMoodAnalyzer:
             - 💵 **Holding cash** to prepare for possible pullbacks  
             
             📊 **Action Tip**  
-            If your portfolio has gained over **{threshold:.1f}%**, it’s wise to secure some gains.  
-            For more active strategies, start rotating once returns cross **{active_threshold:.1f}%** to stay agile and reduce downside risk.
+            If your portfolio has gained over **{threshold:.0f}%**, it’s wise to secure some gains.  
+            For more active strategies, start rotating once returns cross **{active_threshold:.0f}%** to stay agile and reduce downside risk.
                     """)
                 else:
                     st.warning(f"""
