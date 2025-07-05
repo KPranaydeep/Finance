@@ -11,3 +11,4 @@ scikit-learn
 lifelines
 pymongo[srv]
 python-dotenv
+seaborn
