@@ -45,6 +45,16 @@ with st.sidebar:
             st.success(f"Deleted habit '{habit_to_delete}' and all its records.")
         else:
             st.error("Please provide both user and habit name.")
+    
+    st.divider()
+
+    habit_to_reset = st.text_input("Reset Votes for Habit (Exact Name)")
+    if st.button("♻️ Reset Votes Only"):
+        if user and habit_to_reset:
+            result = votes_collection.delete_many({"user": user, "habit": habit_to_reset})
+            st.success(f"Reset successful! {result.deleted_count} vote(s) deleted for '{habit_to_reset}'.")
+        else:
+            st.error("Please provide both user and habit name.")
 
 # === Main: Habit Vote ===
 if user:
