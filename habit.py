@@ -74,33 +74,31 @@ if selected_user:
         for habit_name in habit_counts["habit"]:
             st.markdown(f"### 📌 Habit: {habit_name}")
             habit_df = df[df["habit"] == habit_name]
-            heatmap_df = habit_df.groupby("date").size().reset_index(name="count")
-            heatmap_df.set_index("date", inplace=True)
+            daily_counts = habit_df.groupby("date").size().reset_index(name="count")
 
-            all_dates = pd.date_range(start=heatmap_df.index.min(), end=heatmap_df.index.max())
-            heatmap_df = heatmap_df.reindex(all_dates, fill_value=0)
-            heatmap_df.index.name = "date"
+            all_dates = pd.date_range(end=datetime.today(), periods=365)
+            heatmap_df = pd.DataFrame({"date": all_dates})
+            heatmap_df = heatmap_df.merge(daily_counts, how="left", on="date")
+            heatmap_df["count"].fillna(0, inplace=True)
 
-            calendar_df = heatmap_df.copy().reset_index()
-            calendar_df["dow"] = calendar_df["date"].dt.weekday
-            calendar_df["week"] = calendar_df["date"].dt.isocalendar().week
-            calendar_df["year"] = calendar_df["date"].dt.isocalendar().year
+            heatmap_df["dow"] = heatmap_df["date"].dt.weekday
+            heatmap_df["week"] = heatmap_df["date"].dt.strftime('%U').astype(int)
 
-            pivot = calendar_df.pivot_table(index="dow", columns=["year", "week"], values="count", fill_value=0)
-            pivot = pivot.reindex(index=range(7), fill_value=0)  # Ensure all 7 days are present
+            pivot = heatmap_df.pivot("dow", "week", "count").fillna(0).reindex(index=range(7), fill_value=0)
 
-            fig, ax = plt.subplots(figsize=(12, 2))
-            sns.heatmap(pivot, cmap="Greens", cbar=False, linewidths=0.5, ax=ax)
+            fig, ax = plt.subplots(figsize=(20, 2))
+            cmap = sns.light_palette("green", as_cmap=True)
+            sns.heatmap(pivot, cmap=cmap, cbar=False, linewidths=0.5, ax=ax)
             ax.set_yticks(range(7))
             ax.set_yticklabels(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], rotation=0)
-            ax.set_title(f"Heatmap: {habit_name}", loc='left')
+            ax.set_xticks([])
+            ax.set_title(f"🗓️ GitHub-style Habit Tracker: {habit_name}", loc='left')
             st.pyplot(fig)
 
             if habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0] >= 254:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
     else:
         st.info("No records found for this user yet.")
-
 # Explanation
 st.markdown("---")
 st.markdown("✅ **One repetition** means recording the habit being done **once per day**. After 254 repetitions (votes), the habit is considered **automated**.")
