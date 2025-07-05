@@ -93,11 +93,9 @@ if selected_user:
                     colorbar=True,
                     textformat="{:.0f}",
                     textcolor="black",
-                    figsize=(10, 6),          # 🛠️ Adjusted width & height
-                    linewidth=1,              # 🧱 Better grid separation
-                    yearlabel_kws={"color": "black", "fontsize": 14},
-                    weekdaylabel_kws={"fontsize": 12},
-                    monthlabel_kws={"fontsize": 12}
+                    figsize=(10, 6),
+                    linewidth=1,
+                    yearlabel_kws={"color": "black", "fontsize": 14}
                 )
                 st.pyplot(fig)
            
