@@ -49,14 +49,13 @@ with st.sidebar:
 if user:
     habits = habits_collection.distinct("habit", {"user": user})
     if habits:
-        selected_habit = st.selectbox("Select a Habit to Submit Today's Vote", habits)
-        if st.button("✅ Record Today's Vote"):
+        selected_habit = st.selectbox("Select a Habit to Submit Vote", habits)
+        repetitions = st.number_input("How many times did you repeat this habit today?", min_value=1, max_value=50, step=1, value=1)
+        if st.button("✅ Record Today's Vote(s)"):
             today = datetime.now().date().isoformat()
-            if not votes_collection.find_one({"user": user, "habit": selected_habit, "date": today}):
-                votes_collection.insert_one({"user": user, "habit": selected_habit, "date": today})
-                st.success("Vote recorded for today!")
-            else:
-                st.info("Vote already recorded today for this habit.")
+            for _ in range(repetitions):
+                votes_collection.insert_one({"user": user, "habit": selected_habit, "date": today, "timestamp": datetime.now()})
+            st.success(f"{repetitions} vote(s) recorded for today!")
 
 # Main display
 st.subheader("📅 Your Habit Calendar")
