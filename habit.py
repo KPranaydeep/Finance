@@ -84,7 +84,11 @@ if selected_user:
             heatmap_df["dow"] = heatmap_df["date"].dt.weekday
             heatmap_df["week"] = heatmap_df["date"].dt.strftime('%U').astype(int)
 
-            pivot = heatmap_df.pivot("dow", "week", "count").fillna(0).reindex(index=range(7), fill_value=0)
+            heatmap_df["dow"] = heatmap_df["dow"].astype(str)
+            heatmap_df["week"] = heatmap_df["week"].astype(str)
+
+            pivot = heatmap_df.pivot_table(index="dow", columns="week", values="count", fill_value=0)
+            pivot = pivot.reindex(index=[str(i) for i in range(7)], fill_value=0)
 
             fig, ax = plt.subplots(figsize=(20, 2))
             cmap = sns.light_palette("green", as_cmap=True)
@@ -99,6 +103,7 @@ if selected_user:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
     else:
         st.info("No records found for this user yet.")
+
 # Explanation
 st.markdown("---")
 st.markdown("✅ **One repetition** means recording the habit being done **once per day**. After 254 repetitions (votes), the habit is considered **automated**.")
