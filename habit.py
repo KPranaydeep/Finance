@@ -121,7 +121,7 @@ if selected_user:
                 # ✅ Add repetition note below calendar using plt.figtext
                 plt.figtext(
                     0.5, -0.05,
-                    f"🧮 {votes_left} repetition(s) left to automate '{habit_name}'",
+                    f"{votes_left} repetition(s) left to automate '{habit_name}'",
                     ha="center", fontsize=10, color="darkgreen"
                 )
                 
