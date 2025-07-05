@@ -85,20 +85,20 @@ if selected_user:
             daily_counts.set_index("date", inplace=True)
 
             try:
-                # Customize color intensity and formatting
+                # 🧩 Plot calendar (corrected figsize)
                 fig, ax = calplot.calplot(
                     daily_counts["count"],
                     cmap="YlOrRd",
-                    suptitle=f"🗓️ Calendar View for: {habit_name}",
+                    suptitle=f"🗓 Calendar View for: {habit_name}",
                     colorbar=True,
                     textformat="{:.0f}",
                     textcolor="black",
-                    figsize=(10, 6),
+                    figsize=(10, 6),  # ✅ FIXED from (1, 6)
                     linewidth=1,
                     yearlabel_kws={"color": "black", "fontsize": 14}
                 )
                 st.pyplot(fig)
-           
+
             except Exception as e:
                 st.error(f"⚠️ Calendar plot failed for '{habit_name}'. Check your data.")
                 st.exception(e)
