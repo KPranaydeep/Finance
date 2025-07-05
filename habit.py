@@ -108,10 +108,11 @@ if selected_user:
                     yearlabel_kws={"color": "black", "fontsize": 9}
                 )
                 
-                # 💡 Make the font in the cells partially transparent
-                for txt in ax.texts:
-                    txt.set_alpha(0.5)      # Adjust transparency
-                    txt.set_fontsize(8)     # Optional tweak
+                # ✅ Apply transparency to text across all subplots
+                for a in ax.flat:
+                    for txt in a.texts:
+                        txt.set_alpha(0.5)
+                        txt.set_fontsize(8)
                 
                 st.pyplot(fig)
 
