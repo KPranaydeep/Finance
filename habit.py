@@ -45,6 +45,8 @@ with st.sidebar:
         else:
             st.error("Please provide both user and habit name.")
 
+import calplot
+
 # Habit vote submission
 if user:
     habits = habits_collection.distinct("habit", {"user": user})
@@ -75,34 +77,22 @@ if selected_user:
             st.markdown(f"### 📌 Habit: {habit_name}")
             habit_df = df[df["habit"] == habit_name]
             daily_counts = habit_df.groupby("date").size().reset_index(name="count")
+            daily_counts.set_index("date", inplace=True)
 
-            all_dates = pd.date_range(end=datetime.today(), periods=365)
-            heatmap_df = pd.DataFrame({"date": all_dates})
-            heatmap_df = heatmap_df.merge(daily_counts, how="left", on="date")
-            heatmap_df["count"].fillna(0, inplace=True)
-
-            heatmap_df["dow"] = heatmap_df["date"].dt.weekday
-            heatmap_df["week"] = heatmap_df["date"].dt.strftime('%U').astype(int)
-
-            heatmap_df["dow"] = heatmap_df["dow"].astype(str)
-            heatmap_df["week"] = heatmap_df["week"].astype(str)
-
-            pivot = heatmap_df.pivot_table(index="dow", columns="week", values="count", fill_value=0)
-            pivot = pivot.reindex(index=[str(i) for i in range(7)], fill_value=0)
-
-            fig, ax = plt.subplots(figsize=(20, 2))
-            cmap = sns.light_palette("green", as_cmap=True)
-            sns.heatmap(pivot, cmap=cmap, cbar=False, linewidths=0.5, ax=ax)
-            ax.set_yticks(range(7))
-            ax.set_yticklabels(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], rotation=0)
-            ax.set_xticks([])
-            ax.set_title(f"🗓️ GitHub-style Habit Tracker: {habit_name}", loc='left')
+            fig, ax = calplot.calplot(
+                daily_counts["count"],
+                cmap="Greens",
+                suptitle=f"🗓️ Calendar View for: {habit_name}",
+                colorbar=False,
+                figsize=(14, 4)
+            )
             st.pyplot(fig)
 
             if habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0] >= 254:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
     else:
         st.info("No records found for this user yet.")
+
 
 # Explanation
 st.markdown("---")
