@@ -89,11 +89,11 @@ if selected_user:
                 fig, ax = calplot.calplot(
                     daily_counts["count"],
                     cmap="YlOrRd",
-                    suptitle=f"🗓 Calendar View for: {habit_name}",
+                    suptitle=f"Calendar View for: {habit_name}",
                     colorbar=True,
                     textformat="{:.0f}",
                     textcolor="black",
-                    figsize=(10, 6),  # ✅ FIXED from (1, 6)
+                    figsize=(10, 3),  # ✅ FIXED from (1, 6)
                     linewidth=1,
                     yearlabel_kws={"color": "black", "fontsize": 14}
                 )
