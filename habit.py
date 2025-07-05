@@ -108,24 +108,24 @@ if selected_user:
                     yearlabel_kws={"color": "black", "fontsize": 9}
                 )
                 
-                # 💬 Add transparent text
+                # 🪄 Transparency for text
                 for a in ax.flat:
                     for txt in a.texts:
                         txt.set_alpha(0.5)
                         txt.set_fontsize(8)
                 
-                # ✅ Calculate repetitions left
+                # 🧮 Calculate repetitions left
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
                 votes_left = max(0, 254 - total_votes)
                 
-                # ✏️ Annotate the figure with votes left
-                fig.figtext(
-                    0.5, -0.05,  # position below calendar
+                # ✅ Add repetition note below calendar using plt.figtext
+                plt.figtext(
+                    0.5, -0.05,
                     f"🧮 {votes_left} repetition(s) left to automate '{habit_name}'",
                     ha="center", fontsize=10, color="darkgreen"
                 )
                 
-                # 🔽 Display
+                # 📊 Render
                 st.pyplot(fig)
 
             except Exception as e:
