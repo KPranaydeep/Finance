@@ -88,17 +88,19 @@ if selected_user:
                 # Customize color intensity and formatting
                 fig, ax = calplot.calplot(
                     daily_counts["count"],
-                    cmap="YlOrRd",  # 🔶 Better contrast than "YlGn"
+                    cmap="YlOrRd",
                     suptitle=f"🗓️ Calendar View for: {habit_name}",
                     colorbar=True,
-                    figsize=(14, 4),
-                    linewidth=0,
-                    textformat="{:.0f}",  # ✅ Show exact vote count
-                    textcolor="black",    # 🖤 readable on light background
-                    yearlabel_kws={"color": "black"},
+                    textformat="{:.0f}",
+                    textcolor="black",
+                    figsize=(10, 6),          # 🛠️ Adjusted width & height
+                    linewidth=1,              # 🧱 Better grid separation
+                    yearlabel_kws={"color": "black", "fontsize": 14},
+                    weekdaylabel_kws={"fontsize": 12},
+                    monthlabel_kws={"fontsize": 12}
                 )
                 st.pyplot(fig)
-            
+           
             except Exception as e:
                 st.error(f"⚠️ Calendar plot failed for '{habit_name}'. Check your data.")
                 st.exception(e)
