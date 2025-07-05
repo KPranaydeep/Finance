@@ -4,6 +4,8 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import calendar
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # MongoDB setup
 uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
@@ -74,25 +76,27 @@ if selected_user:
 
         for habit_name in habit_counts["habit"]:
             st.markdown(f"### 📌 Habit: `{habit_name}`")
-            habit_days = df[df["habit"] == habit_name]["day"].tolist()
+            habit_df = df[df["habit"] == habit_name]
+            heatmap_df = habit_df.groupby("date").size().reset_index(name="count")
+            heatmap_df.set_index("date", inplace=True)
 
-            vote_calendar = pd.DataFrame({"date": habit_days})
-            vote_calendar["check"] = 1
-            vote_calendar.set_index("date", inplace=True)
+            all_dates = pd.date_range(start=heatmap_df.index.min(), end=heatmap_df.index.max())
+            heatmap_df = heatmap_df.reindex(all_dates, fill_value=0)
+            heatmap_df.index.name = "date"
 
-            start_date = df["day"].min()
-            end_date = datetime.now().date()
-            full_range = pd.date_range(start=start_date, end=end_date)
-            full_df = pd.DataFrame(index=full_range)
-            merged = full_df.join(vote_calendar, how="left").fillna(0)
+            calendar_df = heatmap_df.copy()
+            calendar_df = calendar_df.reset_index()
+            calendar_df["dow"] = calendar_df["date"].dt.weekday
+            calendar_df["week"] = calendar_df["date"].dt.isocalendar().week
+            calendar_df["year"] = calendar_df["date"].dt.isocalendar().year
 
-            merged["Month"] = merged.index.to_series().apply(lambda x: x.strftime('%b %Y'))
-            months = merged["Month"].unique()
+            pivot = calendar_df.pivot_table(index="dow", columns=["year", "week"], values="count", fill_value=0)
 
-            for month in months:
-                month_df = merged[merged["Month"] == month]
-                st.markdown(f"#### {month}")
-                st.bar_chart(month_df["check"])
+            fig, ax = plt.subplots(figsize=(12, 2))
+            sns.heatmap(pivot, cmap="Greens", cbar=False, linewidths=0.5, ax=ax)
+            ax.set_yticklabels(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], rotation=0)
+            ax.set_title(f"Heatmap: {habit_name}", loc='left')
+            st.pyplot(fig)
 
             if habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0] >= 254:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
