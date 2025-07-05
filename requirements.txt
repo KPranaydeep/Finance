@@ -12,3 +12,4 @@ lifelines
 pymongo[srv]
 python-dotenv
 seaborn
+calplot
