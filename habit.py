@@ -98,14 +98,14 @@ if selected_user:
                 # 🧩 Plot calendar (corrected figsize)
                 fig, ax = calplot.calplot(
                     daily_counts["count"],
-                    cmap="YlOrRd",
+                    cmap="YlGn",
                     suptitle=f"Calendar View for: {habit_name}",
                     colorbar=True,
                     textformat="{:.0f}",
                     textcolor="black",
                     figsize=(10, 2),  # ✅ FIXED from (1, 6)
-                    linewidth=1,
-                    yearlabel_kws={"color": "black", "fontsize": 14}
+                    linewidth=0.1,
+                    yearlabel_kws={"color": "black", "fontsize": 9}
                 )
                 st.pyplot(fig)
 
