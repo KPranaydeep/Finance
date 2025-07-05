@@ -46,6 +46,8 @@ with st.sidebar:
             st.error("Please provide both user and habit name.")
 
 import calplot
+import matplotlib.pyplot as plt
+import io
 
 # Habit vote submission
 if user:
@@ -81,23 +83,23 @@ if selected_user:
             # Make sure index is datetime
             daily_counts.index = pd.to_datetime(daily_counts.index)
 
-            fig = calplot.calplot(
+            fig, ax = plt.subplots(figsize=(14, 4))
+            calplot.calplot(
                 data=daily_counts["count"],
                 cmap="YlGn",
-                suptitle=f"🗓️ Calendar View for: {habit_name}",
+                ax=ax,
                 colorbar=False,
-                figsize=(14, 4),
-                linewidth=0,
+                suptitle=f"🗓️ Calendar View for: {habit_name}",
                 yearlabel_kws={"color": "black"}
             )
-            st.pyplot(fig)
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png")
+            st.image(buf)
 
             if habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0] >= 254:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
     else:
         st.info("No records found for this user yet.")
-
-
 
 # Explanation
 st.markdown("---")
