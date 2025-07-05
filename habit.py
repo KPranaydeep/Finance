@@ -93,7 +93,7 @@ if selected_user:
                     colorbar=True,
                     textformat="{:.0f}",
                     textcolor="black",
-                    figsize=(10, 1),  # ✅ FIXED from (1, 6)
+                    figsize=(10, 2),  # ✅ FIXED from (1, 6)
                     linewidth=1,
                     yearlabel_kws={"color": "black", "fontsize": 14}
                 )
