@@ -68,9 +68,8 @@ if selected_user:
 
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
-        df["day"] = df["date"].dt.date
 
-        habit_counts = df.groupby("habit")["day"].count().reset_index().rename(columns={"day": "votes"})
+        habit_counts = df.groupby("habit")["date"].count().reset_index().rename(columns={"date": "votes"})
         st.dataframe(habit_counts)
 
         for habit_name in habit_counts["habit"]:
@@ -79,8 +78,11 @@ if selected_user:
             daily_counts = habit_df.groupby("date").size().reset_index(name="count")
             daily_counts.set_index("date", inplace=True)
 
-            fig, ax = calplot.calplot(
-                daily_counts["count"],
+            # Make sure index is datetime
+            daily_counts.index = pd.to_datetime(daily_counts.index)
+
+            fig = calplot.calplot(
+                data=daily_counts["count"],
                 cmap="YlGn",
                 suptitle=f"🗓️ Calendar View for: {habit_name}",
                 colorbar=False,
@@ -94,6 +96,7 @@ if selected_user:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
     else:
         st.info("No records found for this user yet.")
+
 
 
 # Explanation
