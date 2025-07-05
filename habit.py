@@ -66,15 +66,13 @@ if selected_user:
 
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
-        df.sort_values("date", inplace=True)
         df["day"] = df["date"].dt.date
-        df = df.drop_duplicates(["habit", "day"])
 
         habit_counts = df.groupby("habit")["day"].count().reset_index().rename(columns={"day": "votes"})
         st.dataframe(habit_counts)
 
         for habit_name in habit_counts["habit"]:
-            st.markdown(f"### 📌 Habit: `{habit_name}`")
+            st.markdown(f"### 📌 Habit: {habit_name}")
             habit_df = df[df["habit"] == habit_name]
             heatmap_df = habit_df.groupby("date").size().reset_index(name="count")
             heatmap_df.set_index("date", inplace=True)
@@ -83,16 +81,17 @@ if selected_user:
             heatmap_df = heatmap_df.reindex(all_dates, fill_value=0)
             heatmap_df.index.name = "date"
 
-            calendar_df = heatmap_df.copy()
-            calendar_df = calendar_df.reset_index()
+            calendar_df = heatmap_df.copy().reset_index()
             calendar_df["dow"] = calendar_df["date"].dt.weekday
             calendar_df["week"] = calendar_df["date"].dt.isocalendar().week
             calendar_df["year"] = calendar_df["date"].dt.isocalendar().year
 
             pivot = calendar_df.pivot_table(index="dow", columns=["year", "week"], values="count", fill_value=0)
+            pivot = pivot.reindex(index=range(7), fill_value=0)  # Ensure all 7 days are present
 
             fig, ax = plt.subplots(figsize=(12, 2))
             sns.heatmap(pivot, cmap="Greens", cbar=False, linewidths=0.5, ax=ax)
+            ax.set_yticks(range(7))
             ax.set_yticklabels(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], rotation=0)
             ax.set_title(f"Heatmap: {habit_name}", loc='left')
             st.pyplot(fig)
