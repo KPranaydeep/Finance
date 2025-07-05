@@ -10,6 +10,7 @@ uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retr
 client = MongoClient(uri, server_api=ServerApi('1'))
 db = client.get_database("Finance")
 habits_collection = db.get_collection("habit_tracker")
+votes_collection = db.get_collection("habit_votes")
 
 # Streamlit config
 st.set_page_config(page_title="Habit Vote Tracker", layout="wide")
@@ -25,7 +26,7 @@ with st.sidebar:
         if user and habit:
             existing = habits_collection.find_one({"user": user, "habit": habit})
             if not existing:
-                habits_collection.insert_one({"user": user, "habit": habit, "date": None})
+                habits_collection.insert_one({"user": user, "habit": habit})
                 st.success(f"New habit '{habit}' added!")
             else:
                 st.warning("This habit already exists.")
@@ -36,21 +37,21 @@ with st.sidebar:
     habit_to_delete = st.text_input("Delete a Habit (Exact Name)")
     if st.button("🗑️ Delete Habit"):
         if user and habit_to_delete:
-            result = habits_collection.delete_many({"user": user, "habit": habit_to_delete})
-            if result.deleted_count > 0:
-                st.success(f"Deleted habit '{habit_to_delete}' and all its records.")
-            else:
-                st.warning("No such habit found.")
+            habits_collection.delete_many({"user": user, "habit": habit_to_delete})
+            votes_collection.delete_many({"user": user, "habit": habit_to_delete})
+            st.success(f"Deleted habit '{habit_to_delete}' and all its records.")
+        else:
+            st.error("Please provide both user and habit name.")
 
 # Habit vote submission
 if user:
-    habits = habits_collection.distinct("habit", {"user": user, "date": {"$ne": None}})
+    habits = habits_collection.distinct("habit", {"user": user})
     if habits:
         selected_habit = st.selectbox("Select a Habit to Submit Today's Vote", habits)
         if st.button("✅ Record Today's Vote"):
             today = datetime.now().date().isoformat()
-            if not habits_collection.find_one({"user": user, "habit": selected_habit, "date": today}):
-                habits_collection.insert_one({"user": user, "habit": selected_habit, "date": today})
+            if not votes_collection.find_one({"user": user, "habit": selected_habit, "date": today}):
+                votes_collection.insert_one({"user": user, "habit": selected_habit, "date": today})
                 st.success("Vote recorded for today!")
             else:
                 st.info("Vote already recorded today for this habit.")
@@ -59,7 +60,7 @@ if user:
 st.subheader("📅 Your Habit Calendar")
 selected_user = st.text_input("Enter your name to view calendar")
 if selected_user:
-    records = list(habits_collection.find({"user": selected_user, "date": {"$ne": None}}))
+    records = list(votes_collection.find({"user": selected_user}))
     df = pd.DataFrame(records)
 
     if not df.empty:
