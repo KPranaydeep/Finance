@@ -81,10 +81,12 @@ if selected_user:
 
             fig, ax = calplot.calplot(
                 daily_counts["count"],
-                cmap="Greens",
+                cmap="YlGn",
                 suptitle=f"🗓️ Calendar View for: {habit_name}",
                 colorbar=False,
-                figsize=(14, 4)
+                figsize=(14, 4),
+                linewidth=0,
+                yearlabel_kws={"color": "black"}
             )
             st.pyplot(fig)
 
