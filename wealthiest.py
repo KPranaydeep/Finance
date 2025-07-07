@@ -167,7 +167,7 @@ class MarketMoodAnalyzer:
         return pd.DataFrame(forecast, columns=['Date', 'Forecasted_MMI'])
 
     def _get_forecast_horizon(self, confidence=0.05):
-    """Estimate horizon till flip using both streak and intensity"""
+        """Estimate horizon till flip using both streak and intensity"""
         streak_data = self.run_lengths[self.current_mood]
         if len(streak_data) < 2:
             return 5  # fallback if insufficient data
@@ -188,7 +188,7 @@ class MarketMoodAnalyzer:
         return max(1, x - current)
 
     def _get_current_streak_stats(self):
-    """Returns streak length and cumulative intensity (MMI deviation from 50)"""
+        """Returns streak length and cumulative intensity (MMI deviation from 50)"""
         current_streak = 1
         total_deviation = abs(50 - self.df['MMI'].iloc[-1])
     
