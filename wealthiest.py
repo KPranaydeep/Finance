@@ -211,7 +211,27 @@ class MarketMoodAnalyzer:
     def _analyze_mood(self, mood):
         data = np.array(self.run_lengths[mood])
         days, S = self._empirical_survival_hazard(data)
-        return {'runs': data, 'survival_days': days, 'survival_prob': S}
+    
+        # Collect MMI values streak-wise
+        mmi_streaks = []
+        current_streak = []
+    
+        for _, row in self.df.iterrows():
+            if row['Mood'] == mood:
+                current_streak.append(row['MMI'])
+            elif current_streak:
+                mmi_streaks.append(current_streak)
+                current_streak = []
+    
+        if current_streak:
+            mmi_streaks.append(current_streak)
+    
+        return {
+            'runs': data,
+            'survival_days': days,
+            'survival_prob': S,
+            'mmi_streaks': mmi_streaks  # ✅ Added key
+        }
 
     def _get_confidence_flip_date(self, survival_days, survival_prob, confidence=0.05):
         for d, s in zip(survival_days, survival_prob):
