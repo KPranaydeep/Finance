@@ -460,6 +460,9 @@ class MarketMoodAnalyzer:
                 No strong directional bias — consider balanced allocation between equity and liquid assets.
                 """)
 
+            greed_intensity_mean = np.mean(greed_intensities) if greed_intensities else 0
+            fear_intensity_mean = np.mean(fear_intensities) if fear_intensities else 0
+
             # 🧠 Dynamic Mood Suggestion
             if self.current_mood == 'Greed':
                 threshold = (greed_max - self.current_streak) * 0.277
