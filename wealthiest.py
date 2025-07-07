@@ -466,7 +466,7 @@ class MarketMoodAnalyzer:
                 active_threshold = min_threshold if min_threshold > 0 else threshold
             
                 # if self.current_streak < greed_mean:
-                if self.current_streak < greed_ci_range[0]:
+                if self.current_streak < greed_intensity_mean:
                     st.warning(f"""
             📉 **Market in Greed** – but still early in the cycle.  
             This phase is ideal for:
@@ -499,7 +499,7 @@ class MarketMoodAnalyzer:
                     """)
             
             elif self.current_mood == 'Fear':
-                if self.current_streak < fear_ci_range[0]:
+                if self.current_streak < fear_intensity_mean:
                 # if self.current_streak < fear_mean:
                     st.success("""
             🟢 **Market in Fear** but early in the cycle –  
