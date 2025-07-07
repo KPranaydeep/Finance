@@ -116,17 +116,6 @@ class MarketMoodAnalyzer:
         trading_days = pd.date_range(start=start_date + timedelta(days=1), end=end_date, freq='B')
         return len(trading_days)
 
-    def _get_days_until_confidence_flip(self, confidence=0.05):
-        """Returns number of calendar days until the current mood is expected to flip"""
-        mood = self.current_mood
-        res = self._analyze_mood(mood)
-        confidence_flip_day = self._get_confidence_flip_date(res['survival_days'], res['survival_prob'], confidence)
-    
-        if confidence_flip_day is not None:
-            return max(1, confidence_flip_day - self.current_streak)
-        else:
-            return None
-
     def _prepare_mmi_data_from_df(self, df):
         return self._process_dataframe(df)
 
