@@ -188,7 +188,7 @@ class MarketMoodAnalyzer:
         return max(1, x - current)
 
     def _get_current_streak_stats(self):
-        """Returns streak length and cumulative intensity (MMI deviation from 50)"""
+        """Returns streak length and average daily intensity (|MMI − 50| / streak length)"""
         current_streak = 1
         total_deviation = abs(50 - self.df['MMI'].iloc[-1])
     
@@ -199,7 +199,8 @@ class MarketMoodAnalyzer:
             else:
                 break
     
-        return current_streak, total_deviation
+        average_intensity = total_deviation / current_streak
+        return current_streak, average_intensity
 
     @staticmethod
     def _empirical_survival_hazard(data):
@@ -316,12 +317,11 @@ class MarketMoodAnalyzer:
         mood_container = st.container()
         with mood_container:
             st.subheader("📈 Current Market Mood Analysis")
-    
+        
             col1, col2, col3 = st.columns(3)
-            col1.metric("Current MMI", f"{self.current_mmi:.2f}",
-                        "Fear" if self.current_mmi <= 50 else "Greed")
-            col2.metric("Current Streak", f"{self.current_streak} days")
-            col3.metric("Streak Intensity", f"{self.current_intensity:.1f}")
+            col1.metric("📊 Current MMI", f"{self.current_mmi:.2f}", self.current_mood)
+            col2.metric("📆 Streak Duration", f"{self.current_streak} days")
+            col3.metric("🔥 Avg. Daily Intensity", f"{self.current_intensity:.2f}")
     
             if confidence_flip_day is not None:
                 days_until_flip = confidence_flip_day - self.current_streak
@@ -348,9 +348,13 @@ class MarketMoodAnalyzer:
                 fear_runs = fear_res['runs']
                 greed_runs = greed_res['runs']
                 # 1️⃣ Compute Historical Intensities
-                fear_intensities = [sum(50 - mmi for mmi in streak) for streak in fear_res['mmi_streaks']]
-                greed_intensities = [sum(mmi - 50 for mmi in streak) for streak in greed_res['mmi_streaks']]
-                
+                fear_intensities = [
+                    sum(50 - mmi for mmi in streak) / len(streak) for streak in fear_res['mmi_streaks']
+                ]
+                greed_intensities = [
+                    sum(mmi - 50 for mmi in streak) / len(streak) for streak in greed_res['mmi_streaks']
+                ]
+
                 # 2️⃣ Compute Stats
                 def get_stats(data):
                     if len(data) == 0:
@@ -469,7 +473,7 @@ class MarketMoodAnalyzer:
                 active_threshold = min_threshold if min_threshold > 0 else threshold
             
                 # if self.current_streak < greed_mean:
-                if self.current_streak < greed_intensity_mean:
+                if self.current_intensity < greed_intensity_mean:
                     st.warning(f"""
             📉 **Market in Greed** – but still early in the cycle.  
             This phase is ideal for:
@@ -502,7 +506,7 @@ class MarketMoodAnalyzer:
                     """)
             
             elif self.current_mood == 'Fear':
-                if self.current_streak < fear_intensity_mean:
+                if self.current_intensity < fear_intensity_mean:
                 # if self.current_streak < fear_mean:
                     st.success("""
             🟢 **Market in Fear** but early in the cycle –  
