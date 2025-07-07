@@ -327,6 +327,36 @@ class MarketMoodAnalyzer:
                 # 🧮 Streak Stats
                 fear_runs = fear_res['runs']
                 greed_runs = greed_res['runs']
+                # 1️⃣ Compute Historical Intensities
+                fear_intensities = [sum(50 - mmi for mmi in streak) for streak in fear_res['mmi_streaks']]
+                greed_intensities = [sum(mmi - 50 for mmi in streak) for streak in greed_res['mmi_streaks']]
+                
+                # 2️⃣ Compute Stats
+                def get_stats(data):
+                    if len(data) == 0:
+                        return None, None, None, None, None
+                    return (
+                        int(np.min(data)),
+                        float(np.median(data)),
+                        float(np.mean(data)),
+                        int(stats.mode(data, keepdims=False).mode),
+                        int(np.max(data))
+                    )
+                
+                fear_intensity_stats = get_stats(fear_intensities)
+                greed_intensity_stats = get_stats(greed_intensities)
+                
+                # 3️⃣ Display Table
+                st.markdown("**🔥 Historical Intensity Statistics (MMI Points)**")
+                st.table(pd.DataFrame({
+                    "Mood": ["Fear", "Greed"],
+                    "Min": [fear_intensity_stats[0], greed_intensity_stats[0]],
+                    "Median": [fear_intensity_stats[1], greed_intensity_stats[1]],
+                    "Mean": [round(fear_intensity_stats[2], 1), round(greed_intensity_stats[2], 1)],
+                    "Mode": [fear_intensity_stats[3], greed_intensity_stats[3]],
+                    "Max": [fear_intensity_stats[4], greed_intensity_stats[4]]
+                }))
+
                 # 📈 Expected Streak with 95% Confidence Interval
                 def compute_95_ci(data):
                     n = len(data)
