@@ -314,10 +314,9 @@ class MarketMoodAnalyzer:
         fear_res = self._analyze_mood('Fear')
         greed_res = self._analyze_mood('Greed')
         res = fear_res if self.current_mood == 'Fear' else greed_res
-    
-        confidence_flip_day = self._get_confidence_flip_date(
-            res['survival_days'], res['survival_prob']
-        )
+
+        days_until_flip = self._get_forecast_horizon()
+        confidence_date = self.mmi_last_date + timedelta(days=days_until_flip)
     
         mood_container = st.container()
         with mood_container:
@@ -343,10 +342,10 @@ class MarketMoodAnalyzer:
                         flip_status = "today"
                 else:
                     flip_status = f"in {days_left} days"
-    
+
                 col3.metric("Expected Flip Date",
                             confidence_date.strftime('%d %b %Y'),
-                            flip_status)
+                            f"in {days_until_flip} days")
     
             with st.expander("📊 Show Historical Streak Patterns", expanded=False):
                 # 🧮 Streak Stats
