@@ -185,8 +185,9 @@ class MarketMoodAnalyzer:
         Returns: calendar days until flip (at least 1).
         """
         # predict median survival given current intensity
-        df_pred = pd.DataFrame([{"intensity": self.current_intensity}])
-        median_survival = self.cox_model.predict_median(df_pred).iloc[0]
+        # ✅ Safe for both Series and float
+        pred = self.cox_model.predict_median(df_pred)
+        median_survival = pred.iloc[0] if hasattr(pred, 'iloc') else pred
     
         # remaining days = (median survival) − (days already in streak)
         rem = median_survival - self.current_streak
