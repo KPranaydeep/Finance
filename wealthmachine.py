@@ -418,7 +418,7 @@ class MarketMoodAnalyzer:
                 else:
                     st.warning(f"""
             🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
-            **Above average**: `{greed_mean:.1f}` days
+            **Average**: `{greed_mean:.0f}` days
             
             📉 Now is an optimal time to **book profits** and shift your gains into:
             - 💵 Cash or liquid funds  
