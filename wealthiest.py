@@ -315,9 +315,13 @@ class MarketMoodAnalyzer:
         res = fear_res if self.current_mood == 'Fear' else greed_res
 
         days_until_flip = self._get_forecast_horizon()
+        confidence_flip_day = self._get_confidence_flip_date(
+            res['survival_days'], res['survival_prob']
+        )
         confidence_date = self.mmi_last_date + timedelta(days=days_until_flip)
-    
+        
         mood_container = st.container()
+
         with mood_container:
             st.subheader("📈 Current Market Mood Analysis")
         
