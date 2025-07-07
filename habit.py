@@ -99,7 +99,7 @@ if selected_user:
                 fig, ax = calplot.calplot(
                     daily_counts["count"],
                     cmap="YlGn",
-                    suptitle=f"Calendar View for: {habit_name}",
+                    suptitle=f"{habit_name}",
                     colorbar=True,
                     textformat="{:.0f}",
                     textcolor="black",
