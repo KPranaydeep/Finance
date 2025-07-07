@@ -168,38 +168,38 @@ class MarketMoodAnalyzer:
 
     def _get_forecast_horizon(self, confidence=0.05):
     """Estimate horizon till flip using both streak and intensity"""
-    streak_data = self.run_lengths[self.current_mood]
-    if len(streak_data) < 2:
-        return 5  # fallback if insufficient data
-
-    shape, loc, scale = weibull_min.fit(streak_data, floc=0)
-    current = self.current_streak
-
-    # Modify survival threshold based on intensity (more intense → sooner flip)
-    adj_confidence = confidence + min(0.03, self.current_intensity / (10 * self.current_streak * 2))
-    adj_confidence = min(adj_confidence, 0.2)  # cap it to prevent overshoot
-
-    x = current
-    while weibull_min.sf(x, shape, loc, scale) > adj_confidence:
-        x += 1
-        if x > 10 * max(streak_data):
-            break
-
-    return max(1, x - current)
+        streak_data = self.run_lengths[self.current_mood]
+        if len(streak_data) < 2:
+            return 5  # fallback if insufficient data
+    
+        shape, loc, scale = weibull_min.fit(streak_data, floc=0)
+        current = self.current_streak
+    
+        # Modify survival threshold based on intensity (more intense → sooner flip)
+        adj_confidence = confidence + min(0.03, self.current_intensity / (10 * self.current_streak * 2))
+        adj_confidence = min(adj_confidence, 0.2)  # cap it to prevent overshoot
+    
+        x = current
+        while weibull_min.sf(x, shape, loc, scale) > adj_confidence:
+            x += 1
+            if x > 10 * max(streak_data):
+                break
+    
+        return max(1, x - current)
 
     def _get_current_streak_stats(self):
     """Returns streak length and cumulative intensity (MMI deviation from 50)"""
-    current_streak = 1
-    total_deviation = abs(50 - self.df['MMI'].iloc[-1])
-
-    for i in range(len(self.df) - 2, -1, -1):
-        if self.df['Mood'].iloc[i] == self.current_mood:
-            current_streak += 1
-            total_deviation += abs(50 - self.df['MMI'].iloc[i])
-        else:
-            break
-
-    return current_streak, total_deviation
+        current_streak = 1
+        total_deviation = abs(50 - self.df['MMI'].iloc[-1])
+    
+        for i in range(len(self.df) - 2, -1, -1):
+            if self.df['Mood'].iloc[i] == self.current_mood:
+                current_streak += 1
+                total_deviation += abs(50 - self.df['MMI'].iloc[i])
+            else:
+                break
+    
+        return current_streak, total_deviation
 
     @staticmethod
     def _empirical_survival_hazard(data):
