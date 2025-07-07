@@ -184,12 +184,10 @@ class MarketMoodAnalyzer:
         Use CoxPH median survival time adjusted for current average intensity.
         Returns: calendar days until flip (at least 1).
         """
-        # predict median survival given current intensity
-        # ✅ Safe for both Series and float
+        df_pred = pd.DataFrame([{"intensity": self.current_intensity}])
         pred = self.cox_model.predict_median(df_pred)
         median_survival = pred.iloc[0] if hasattr(pred, 'iloc') else pred
     
-        # remaining days = (median survival) − (days already in streak)
         rem = median_survival - self.current_streak
         return max(1, int(rem))
 
