@@ -314,10 +314,23 @@ class MarketMoodAnalyzer:
         greed_res = self._analyze_mood('Greed')
         res = fear_res if self.current_mood == 'Fear' else greed_res
 
-        days_until_flip = self._get_forecast_horizon()
+        # Step 1: Get survival-based flip day (absolute streak length where S ≤ 5%)
         confidence_flip_day = self._get_confidence_flip_date(
             res['survival_days'], res['survival_prob']
         )
+        
+        # Step 2: Compute remaining days by subtracting current streak
+        if confidence_flip_day is not None:
+            days_until_flip = int(confidence_flip_day - self.current_streak)
+        else:
+            # Fallback to CoxPH model
+            days_until_flip = self._get_forecast_horizon()
+        
+        # Step 3: Constrain within historical bounds (optional safety)
+        historical_max = np.max(res['runs']) if len(res['runs']) else 30
+        days_until_flip = min(days_until_flip, int(historical_max - self.current_streak))
+        
+        # Step 4: Final flip date
         confidence_date = self.mmi_last_date + timedelta(days=days_until_flip)
         
         mood_container = st.container()
@@ -337,18 +350,8 @@ class MarketMoodAnalyzer:
                 days_left = (confidence_date - self.today_date).days
     
                 # ✅ Final flip display logic
-                if days_left <= 0:
-                    if is_market_closed() or raw_confidence_date < self.today_date:
-                        confidence_date = get_next_trading_day(self.today_date)
-                        flip_status = f"on {confidence_date.strftime('%A')}"
-                    else:
-                        flip_status = "today"
-                else:
-                    flip_status = f"in {days_left} days"
-
-                col3.metric("Expected Flip Date",
-                            confidence_date.strftime('%d %b %Y'),
-                            f"in {days_until_flip} days")
+                flip_status = f"in {days_until_flip} days" if days_until_flip > 0 else "today"
+                col3.metric("Expected Flip Date", confidence_date.strftime('%d %b %Y'), flip_status)
     
             with st.expander("📊 Show Historical Streak Patterns", expanded=False):
                 # 🧮 Streak Stats
