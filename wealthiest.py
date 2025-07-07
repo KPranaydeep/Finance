@@ -11,6 +11,7 @@ from lifelines import KaplanMeierFitter
 from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from lifelines import CoxPHFitter
 import json
 def get_max_roi_from_file():
     try:
@@ -101,6 +102,7 @@ class MarketMoodAnalyzer:
         self.current_mmi = self.df['MMI'].iloc[-1]
         self.current_mood = 'Fear' if self.current_mmi <= 50 else 'Greed'
         self.current_streak, self.current_intensity = self._get_current_streak_stats()
+        self._train_survival_model()
 
     def _prepare_mmi_data_from_bytes(self, mmi_bytes):
         if not mmi_bytes:
@@ -166,26 +168,40 @@ class MarketMoodAnalyzer:
     
         return pd.DataFrame(forecast, columns=['Date', 'Forecasted_MMI'])
 
-    def _get_forecast_horizon(self, confidence=0.05):
-        """Estimate horizon till flip using both streak and intensity"""
-        streak_data = self.run_lengths[self.current_mood]
-        if len(streak_data) < 2:
-            return 5  # fallback if insufficient data
+    def _compute_historical_intensities(self, mood):
+        """Return list of avg daily intensities for each historical streak of `mood`."""
+        intensities = []
+        mmi_streaks = self._analyze_mood(mood)['mmi_streaks']
+        for streak in mmi_streaks:
+            # avg daily |MMI−50|
+            intensities.append(sum(abs(x-50) for x in streak) / len(streak))
+        return intensities
     
-        shape, loc, scale = weibull_min.fit(streak_data, floc=0)
-        current = self.current_streak
+    def _train_survival_model(self):
+        """Fit a CoxPH model: duration ~ intensity."""
+        records = []
+        for mood in ["Fear", "Greed"]:
+            lengths = self.run_lengths[mood]
+            intensities = self._compute_historical_intensities(mood)
+            for L, I in zip(lengths, intensities):
+                records.append({"duration": L, "intensity": I, "event": 1})
+        df = pd.DataFrame(records)
     
-        # Modify survival threshold based on intensity (more intense → sooner flip)
-        adj_confidence = confidence + min(0.03, self.current_intensity / (10 * self.current_streak * 2))
-        adj_confidence = min(adj_confidence, 0.2)  # cap it to prevent overshoot
+        self.cox_model = CoxPHFitter()
+        self.cox_model.fit(df, duration_col="duration", event_col="event")
+
+    def _get_forecast_horizon(self):
+        """
+        Use CoxPH median survival time adjusted for current average intensity.
+        Returns: calendar days until flip (at least 1).
+        """
+        # predict median survival given current intensity
+        df_pred = pd.DataFrame([{"intensity": self.current_intensity}])
+        median_survival = self.cox_model.predict_median(df_pred).iloc[0]
     
-        x = current
-        while weibull_min.sf(x, shape, loc, scale) > adj_confidence:
-            x += 1
-            if x > 10 * max(streak_data):
-                break
-    
-        return max(1, x - current)
+        # remaining days = (median survival) − (days already in streak)
+        rem = median_survival - self.current_streak
+        return max(1, int(rem))
 
     def _get_current_streak_stats(self):
         """Returns streak length and average daily intensity (|MMI − 50| / streak length)"""
@@ -242,7 +258,7 @@ class MarketMoodAnalyzer:
 
     def generate_allocation_plan(self, investable_amount):
         """Generate MMI-aware staggered allocation plan where last day is the confidence flip date"""
-        days_until_flip = self._get_days_until_confidence_flip()
+        days_until_flip = self._get_forecast_horizon()
     
         if days_until_flip is None:
             st.warning("⚠️ Could not forecast flip — defaulting to 15 market days.")
