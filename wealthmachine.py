@@ -75,6 +75,29 @@ def get_latest_input_params(user_id):
         sort=[('timestamp', -1)]
     )
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
+@st.cache_data
+def should_use_leverage(ticker="^NSEI", days=200):
+    try:
+        data = yf.download(ticker, period="400d")
+        data.dropna(inplace=True)
+
+        data['200_MA'] = data['Close'].rolling(window=days).mean()
+        latest_close = data['Close'].iloc[-1]
+        latest_ma = data['200_MA'].iloc[-1]
+
+        leverage_flag = latest_close > latest_ma
+        return {
+            "should_leverage": leverage_flag,
+            "latest_close": round(latest_close, 2),
+            "ma_value": round(latest_ma, 2)
+        }
+    except Exception as e:
+        return {
+            "should_leverage": False,
+            "latest_close": None,
+            "ma_value": None,
+            "error": str(e)
+        }
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
@@ -906,3 +929,19 @@ if uploaded_holdings:
                 st.info("⏳ Check back tomorrow when market conditions may improve")
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
+
+with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=True):
+    result = should_use_leverage()
+    
+    if result.get("error"):
+        st.error(f"⚠️ Error fetching data: {result['error']}")
+    else:
+        st.metric("NIFTY Close", f"{result['latest_close']}")
+        st.metric("200-Day MA", f"{result['ma_value']}")
+        
+        if result["should_leverage"]:
+            st.success("✅ NIFTY is above its 200-day Moving Average → **Leverage allowed**")
+            st.markdown("📈 You may use futures/options or increase equity exposure.")
+        else:
+            st.warning("🛑 NIFTY is below its 200-day MA → **Avoid leverage**")
+            st.markdown("💼 Stay defensive: shift to cash/T-Bills/liquid funds.")
