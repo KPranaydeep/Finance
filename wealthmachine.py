@@ -82,10 +82,12 @@ def should_use_leverage(ticker="^NSEI", days=200):
         data.dropna(inplace=True)
 
         data['200_MA'] = data['Close'].rolling(window=days).mean()
+        
+        # Ensure we access the latest single values (not Series)
         latest_close = data['Close'].iloc[-1]
         latest_ma = data['200_MA'].iloc[-1]
 
-        leverage_flag = latest_close > latest_ma
+        leverage_flag = bool(latest_close > latest_ma)  # Ensure it's a plain bool
         return {
             "should_leverage": leverage_flag,
             "latest_close": round(latest_close, 2),
