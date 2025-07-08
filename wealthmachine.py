@@ -86,16 +86,19 @@ def should_use_leverage(ticker="^NSEI", days=200):
 
         data['200_MA'] = data['Close'].rolling(window=days).mean()
 
-        latest_row = data.dropna().iloc[-1]  # Ensures both Close and MA are valid
+        latest_row = data.dropna().iloc[-1]
         latest_close = float(latest_row['Close'])
         latest_ma = float(latest_row['200_MA'])
+
+        pct_above_ma = (latest_close - latest_ma) / latest_ma  # Raw percentage (e.g., 0.056 for 5.6%)
 
         leverage_flag = latest_close > latest_ma
 
         return {
             "should_leverage": leverage_flag,
             "latest_close": round(latest_close, 2),
-            "ma_value": round(latest_ma, 2)
+            "ma_value": round(latest_ma, 2),
+            "pct_above_ma": pct_above_ma
         }
 
     except Exception as e:
@@ -103,8 +106,17 @@ def should_use_leverage(ticker="^NSEI", days=200):
             "should_leverage": False,
             "latest_close": None,
             "ma_value": None,
+            "pct_above_ma": None,
             "error": str(e)
         }
+
+def compute_lamf_pct(pct_above_ma, mmi, cap=0.45):
+    """Only call this if should_leverage is True."""
+    fear_factor = 1 - (mmi / 100)
+    alpha = cap / (0.10 * 1.0)  # assuming 10% max above MA, MMI=0
+    lamf_pct = alpha * pct_above_ma * fear_factor
+    return min(max(lamf_pct, 0.0), cap)
+
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
@@ -945,10 +957,23 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
     else:
         st.metric("NIFTY Close", f"{result['latest_close']}")
         st.metric("200-Day MA", f"{result['ma_value']}")
-        
+
         if result["should_leverage"]:
-            st.success("✅ NIFTY is above its 200-day Moving Average → **Leverage allowed**")
-            st.markdown("📈 You may use futures/options or increase equity exposure.")
+            st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
+
+            # 📥 Get user-inputted MMI (or plug in analyzer.current_mmi)
+            mmi = st.slider("📊 Market Mood Index (MMI)", 0, 100, 30)
+            pct_above_ma = result["pct_above_ma"]
+
+            lamf_pct = compute_lamf_pct(pct_above_ma, mmi)
+            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=10_00_000)
+            lamf_amt = mf_corpus * lamf_pct
+
+            st.metric("LAMF % Recommended", f"{lamf_pct * 100:.1f}%")
+            st.metric("Max LAMF Amount", f"₹{lamf_amt:,.0f}")
+            st.caption("📈 Formula: `% above 200-DMA × (1 - MMI/100)` capped at 45%")
+
         else:
-            st.warning("🛑 NIFTY is below its 200-day MA → **Avoid leverage**")
-            st.markdown("💼 Stay defensive: shift to cash/T-Bills/liquid funds.")
+            st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
+            st.markdown("💼 Stay defensive: consider shifting to cash, T-Bills, or liquid funds.")
+
