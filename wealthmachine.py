@@ -77,24 +77,24 @@ def get_latest_input_params(user_id):
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
 @st.cache_data
 def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
+    import yfinance as yf
+    import pandas as pd
+
     try:
-        # Download full OHLC data — not just ['Close']
         data = yf.download(ticker, period="400d")
-
         if 'Close' not in data.columns:
-            raise ValueError("Missing 'Close' column in the downloaded data.")
+            raise ValueError("Missing 'Close' column in downloaded data.")
 
-        # Keep 'Close' as Series
-        close_series = data['Close']
+        # Compute MA as a Series
+        close_series = data['Close'].copy()
         ma_series = close_series.rolling(window=days).mean()
 
-        # Combine into DataFrame with Series
-        df = pd.DataFrame({
-            'Close': close_series,
-            '200_MA': ma_series
-        })
-
+        # Use index from original data to construct new DataFrame
+        df = pd.DataFrame(index=close_series.index)
+        df['Close'] = close_series
+        df['200_MA'] = ma_series
         df['pct_above_ma'] = (df['Close'] - df['200_MA']) / df['200_MA']
+
         valid_rows = df.dropna(subset=['200_MA'])
         latest_row = valid_rows.iloc[-1]
 
@@ -102,9 +102,11 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
         latest_ma = float(latest_row['200_MA'])
         current_pct_above = float(latest_row['pct_above_ma'])
 
+        # Find historical max % above 200-DMA
         positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
         max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10
 
+        # Compute scaling factor alpha (cap = 45%)
         alpha = cap / max_pct_above_ma if max_pct_above_ma > 0 else 0.0
         leverage_flag = latest_close > latest_ma
 
@@ -127,7 +129,6 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
             "alpha": 0.0,
             "error": str(e)
         }
-
 
 def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=0.45):
     """
