@@ -75,27 +75,28 @@ def get_latest_input_params(user_id):
         sort=[('timestamp', -1)]
     )
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
-
 @st.cache_data
 def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
     try:
         data = yf.download(ticker, period="400d")
-        data = data.dropna().copy()  # ✅ Keep all columns
+        
+        if 'Close' not in data.columns:
+            raise ValueError("No 'Close' column in downloaded data.")
 
-        if len(data) < days + 1:
-            raise ValueError("Not enough data to compute moving average.")
+        data = data[['Close']].copy()  # ✅ Only keep 'Close'
+        data['200_MA'] = data['Close'].rolling(window=days).mean()  # ✅ Single-column rolling MA
 
-        data['200_MA'] = data['Close'].rolling(window=days).mean()
-        data['pct_above_ma'] = (data['Close'] - data['200_MA']) / data['200_MA']  # ✅ All Series ops
+        # ✅ Calculate % above MA safely using Series
+        data['pct_above_ma'] = data['Close'].sub(data['200_MA']).div(data['200_MA'])
 
-        valid_rows = data.dropna(subset=['200_MA'])
+        valid_rows = data.dropna(subset=['200_MA'])  # Only keep rows with valid MA
         latest_row = valid_rows.iloc[-1]
 
         latest_close = float(latest_row['Close'])
         latest_ma = float(latest_row['200_MA'])
         current_pct_above = float(latest_row['pct_above_ma'])
 
-        # Only consider positive deltas (Close > MA)
+        # Get max % above MA historically (only positive values)
         positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
         max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10
 
@@ -121,6 +122,7 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
             "alpha": 0.0,
             "error": str(e)
         }
+
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
