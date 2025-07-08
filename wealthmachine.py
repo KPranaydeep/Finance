@@ -76,7 +76,7 @@ def get_latest_input_params(user_id):
     )
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
 @st.cache_data
-def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
+def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
     import yfinance as yf
     import pandas as pd
 
