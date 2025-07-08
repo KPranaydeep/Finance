@@ -75,19 +75,20 @@ def get_latest_input_params(user_id):
         sort=[('timestamp', -1)]
     )
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
+
 @st.cache_data
 def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
     try:
         data = yf.download(ticker, period="400d")
-        data = data[['Close']].dropna().copy()
+        data = data.dropna().copy()  # ✅ Keep all columns
 
         if len(data) < days + 1:
             raise ValueError("Not enough data to compute moving average.")
 
         data['200_MA'] = data['Close'].rolling(window=days).mean()
-        data['pct_above_ma'] = (data['Close'] - data['200_MA']) / data['200_MA']
+        data['pct_above_ma'] = (data['Close'] - data['200_MA']) / data['200_MA']  # ✅ All Series ops
 
-        valid_rows = data.dropna()
+        valid_rows = data.dropna(subset=['200_MA'])
         latest_row = valid_rows.iloc[-1]
 
         latest_close = float(latest_row['Close'])
@@ -96,7 +97,7 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
 
         # Only consider positive deltas (Close > MA)
         positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
-        max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10  # fallback 10%
+        max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10
 
         alpha = cap / max_pct_above_ma if max_pct_above_ma > 0 else 0.0
         leverage_flag = latest_close > latest_ma
@@ -120,11 +121,6 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
             "alpha": 0.0,
             "error": str(e)
         }
-
-def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=0.45):
-    fear_factor = 1 - (mmi / 100)
-    lamf_pct = alpha * pct_above_ma * fear_factor
-    return min(max(lamf_pct, 0.0), cap)
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
