@@ -123,6 +123,14 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
             "error": str(e)
         }
 
+def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=0.45):
+    """
+    Compute the percentage of Mutual Fund corpus to allocate as LAMF
+    based on how much NIFTY is above 200-day MA and current Market Mood Index (MMI).
+    """
+    fear_factor = 1 - (mmi / 100)  # MMI=0 → max fear, MMI=100 → max greed
+    lamf_pct = alpha * pct_above_ma * fear_factor
+    return min(max(lamf_pct, 0.0), cap)  # Clamp to [0, cap]
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
@@ -968,7 +976,7 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
         if result["should_leverage"]:
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
-            mmi = st.slider("📊 Market Mood Index (MMI)", 0, 100, 30)
+            mmi = st.input("📊 Market Mood Index (MMI)", 0, 100, 50)
             lamf_pct = compute_lamf_pct(
                 result["pct_above_ma"],
                 mmi,
