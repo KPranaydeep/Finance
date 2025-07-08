@@ -962,7 +962,7 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
             # 📥 Get user-inputted MMI (or plug in analyzer.current_mmi)
-            mmi = st.slider("📊 Market Mood Index (MMI)", 0, 100, 30)
+            mmi = st.number_input("📊 Market Mood Index (MMI)", 0, 100, 50)
             pct_above_ma = result["pct_above_ma"]
 
             lamf_pct = compute_lamf_pct(pct_above_ma, mmi)
