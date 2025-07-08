@@ -937,7 +937,7 @@ if uploaded_holdings:
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
-with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=True):
+with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=False):
     result = should_use_leverage()
     
     if result.get("error"):
