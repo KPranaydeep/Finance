@@ -95,7 +95,8 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
         current_pct_above = float(latest_row['pct_above_ma'])
 
         # Only consider positive deltas (Close > MA)
-        max_pct_above_ma = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma'].max()
+        positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
+        max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10  # fallback 10%
 
         alpha = cap / max_pct_above_ma if max_pct_above_ma > 0 else 0.0
         leverage_flag = latest_close > latest_ma
