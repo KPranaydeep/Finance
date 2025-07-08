@@ -130,7 +130,7 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
             "error": str(e)
         }
 
-def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=0.45):
+def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=3.0):
     """
     Compute the percentage of Mutual Fund corpus to allocate as LAMF
     based on how much NIFTY is above 200-day MA and current Market Mood Index (MMI).
