@@ -995,7 +995,7 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
                 result["alpha"]
             )
 
-            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=10_00_000)
+            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=10_00_000.0)
             lamf_amt = mf_corpus * lamf_pct
 
             st.metric("LAMF % Recommended", f"{lamf_pct * 100:.1f}%")
