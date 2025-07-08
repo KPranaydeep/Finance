@@ -1000,7 +1000,6 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
 
             st.metric("LAMF % Recommended", f"{lamf_pct * 100:.1f}%")
             st.metric("Max LAMF Amount", f"₹{lamf_amt:,.0f}")
-            st.caption("📈 Based on live % above 200-DMA, max observed trend strength & MMI — capped at 45%")
 
         else:
             st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
