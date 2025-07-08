@@ -78,25 +78,30 @@ def get_latest_input_params(user_id):
 @st.cache_data
 def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
     try:
+        # Download full OHLC data — not just ['Close']
         data = yf.download(ticker, period="400d")
-        
+
         if 'Close' not in data.columns:
-            raise ValueError("No 'Close' column in downloaded data.")
+            raise ValueError("Missing 'Close' column in the downloaded data.")
 
-        data = data[['Close']].copy()  # ✅ Only keep 'Close'
-        data['200_MA'] = data['Close'].rolling(window=days).mean()  # ✅ Single-column rolling MA
+        # Keep 'Close' as Series
+        close_series = data['Close']
+        ma_series = close_series.rolling(window=days).mean()
 
-        # ✅ Calculate % above MA safely using Series
-        data['pct_above_ma'] = data['Close'].sub(data['200_MA']).div(data['200_MA'])
+        # Combine into DataFrame with Series
+        df = pd.DataFrame({
+            'Close': close_series,
+            '200_MA': ma_series
+        })
 
-        valid_rows = data.dropna(subset=['200_MA'])  # Only keep rows with valid MA
+        df['pct_above_ma'] = (df['Close'] - df['200_MA']) / df['200_MA']
+        valid_rows = df.dropna(subset=['200_MA'])
         latest_row = valid_rows.iloc[-1]
 
         latest_close = float(latest_row['Close'])
         latest_ma = float(latest_row['200_MA'])
         current_pct_above = float(latest_row['pct_above_ma'])
 
-        # Get max % above MA historically (only positive values)
         positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
         max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10
 
@@ -122,6 +127,7 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
             "alpha": 0.0,
             "error": str(e)
         }
+
 
 def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=0.45):
     """
