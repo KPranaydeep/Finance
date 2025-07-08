@@ -79,20 +79,25 @@ def get_latest_input_params(user_id):
 def should_use_leverage(ticker="^NSEI", days=200):
     try:
         data = yf.download(ticker, period="400d")
-        data.dropna(inplace=True)
+        data = data[['Close']].dropna().copy()
+
+        if len(data) < days + 1:
+            raise ValueError("Not enough data to compute moving average.")
 
         data['200_MA'] = data['Close'].rolling(window=days).mean()
-        
-        # Ensure we access the latest single values (not Series)
-        latest_close = data['Close'].iloc[-1]
-        latest_ma = data['200_MA'].iloc[-1]
 
-        leverage_flag = bool(latest_close > latest_ma)  # Ensure it's a plain bool
+        latest_row = data.dropna().iloc[-1]  # Ensures both Close and MA are valid
+        latest_close = float(latest_row['Close'])
+        latest_ma = float(latest_row['200_MA'])
+
+        leverage_flag = latest_close > latest_ma
+
         return {
             "should_leverage": leverage_flag,
             "latest_close": round(latest_close, 2),
             "ma_value": round(latest_ma, 2)
         }
+
     except Exception as e:
         return {
             "should_leverage": False,
