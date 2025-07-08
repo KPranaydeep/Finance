@@ -971,12 +971,17 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
     else:
         st.metric("NIFTY Close", f"{result['latest_close']}")
         st.metric("200-Day MA", f"{result['ma_value']}")
-        st.metric("Max Observed % Above MA", f"{result['max_pct_above_ma'] * 100:.2f}%")
+
+        # ✅ Safe check for max_pct_above_ma
+        if result.get("max_pct_above_ma") is not None:
+            st.metric("Max Observed % Above MA", f"{result['max_pct_above_ma'] * 100:.2f}%")
 
         if result["should_leverage"]:
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
-            mmi = st.input("📊 Market Mood Index (MMI)", 0, 100, 50)
+            # ⚠️ You had st.input — should be st.slider or st.number_input
+            mmi = st.slider("📊 Market Mood Index (MMI)", 0, 100, 50)
+
             lamf_pct = compute_lamf_pct(
                 result["pct_above_ma"],
                 mmi,
@@ -993,3 +998,4 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
         else:
             st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
             st.markdown("💼 Stay defensive: shift to cash/T-Bills/liquid funds.")
+
