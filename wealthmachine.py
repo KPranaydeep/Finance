@@ -987,7 +987,7 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
             # ⚠️ You had st.input — should be st.slider or st.number_input
-            mmi = st.input("📊 Market Mood Index (MMI)", 0, 100, 50.0)
+            mmi = st.number_input("📊 Market Mood Index (MMI)", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
 
             lamf_pct = compute_lamf_pct(
                 result["pct_above_ma"],
