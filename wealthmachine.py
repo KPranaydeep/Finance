@@ -76,7 +76,7 @@ def get_latest_input_params(user_id):
     )
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
 @st.cache_data
-def should_use_leverage(ticker="^NSEI", days=200):
+def should_use_leverage(ticker="^NSEI", days=200, cap=0.45):
     try:
         data = yf.download(ticker, period="400d")
         data = data[['Close']].dropna().copy()
@@ -85,20 +85,28 @@ def should_use_leverage(ticker="^NSEI", days=200):
             raise ValueError("Not enough data to compute moving average.")
 
         data['200_MA'] = data['Close'].rolling(window=days).mean()
+        data['pct_above_ma'] = (data['Close'] - data['200_MA']) / data['200_MA']
 
-        latest_row = data.dropna().iloc[-1]
+        valid_rows = data.dropna()
+        latest_row = valid_rows.iloc[-1]
+
         latest_close = float(latest_row['Close'])
         latest_ma = float(latest_row['200_MA'])
+        current_pct_above = float(latest_row['pct_above_ma'])
 
-        pct_above_ma = (latest_close - latest_ma) / latest_ma  # Raw percentage (e.g., 0.056 for 5.6%)
+        # Only consider positive deltas (Close > MA)
+        max_pct_above_ma = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma'].max()
 
+        alpha = cap / max_pct_above_ma if max_pct_above_ma > 0 else 0.0
         leverage_flag = latest_close > latest_ma
 
         return {
             "should_leverage": leverage_flag,
             "latest_close": round(latest_close, 2),
             "ma_value": round(latest_ma, 2),
-            "pct_above_ma": pct_above_ma
+            "pct_above_ma": current_pct_above,
+            "max_pct_above_ma": max_pct_above_ma,
+            "alpha": alpha
         }
 
     except Exception as e:
@@ -107,16 +115,15 @@ def should_use_leverage(ticker="^NSEI", days=200):
             "latest_close": None,
             "ma_value": None,
             "pct_above_ma": None,
+            "max_pct_above_ma": None,
+            "alpha": 0.0,
             "error": str(e)
         }
 
-def compute_lamf_pct(pct_above_ma, mmi, cap=0.45):
-    """Only call this if should_leverage is True."""
+def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=0.45):
     fear_factor = 1 - (mmi / 100)
-    alpha = cap / (0.10 * 1.0)  # assuming 10% max above MA, MMI=0
     lamf_pct = alpha * pct_above_ma * fear_factor
     return min(max(lamf_pct, 0.0), cap)
-
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
@@ -951,29 +958,31 @@ if uploaded_holdings:
 
 with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=False):
     result = should_use_leverage()
-    
+
     if result.get("error"):
         st.error(f"⚠️ Error fetching data: {result['error']}")
     else:
         st.metric("NIFTY Close", f"{result['latest_close']}")
         st.metric("200-Day MA", f"{result['ma_value']}")
+        st.metric("Max Observed % Above MA", f"{result['max_pct_above_ma'] * 100:.2f}%")
 
         if result["should_leverage"]:
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
-            # 📥 Get user-inputted MMI (or plug in analyzer.current_mmi)
-            mmi = st.number_input("📊 Market Mood Index (MMI)", 0, 100, 50)
-            pct_above_ma = result["pct_above_ma"]
+            mmi = st.slider("📊 Market Mood Index (MMI)", 0, 100, 30)
+            lamf_pct = compute_lamf_pct(
+                result["pct_above_ma"],
+                mmi,
+                result["alpha"]
+            )
 
-            lamf_pct = compute_lamf_pct(pct_above_ma, mmi)
             mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=10_00_000)
             lamf_amt = mf_corpus * lamf_pct
 
             st.metric("LAMF % Recommended", f"{lamf_pct * 100:.1f}%")
             st.metric("Max LAMF Amount", f"₹{lamf_amt:,.0f}")
-            st.caption("📈 Formula: `% above 200-DMA × (1 - MMI/100)` capped at 45%")
+            st.caption("📈 Based on live % above 200-DMA, max observed trend strength & MMI — capped at 45%")
 
         else:
             st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
-            st.markdown("💼 Stay defensive: consider shifting to cash, T-Bills, or liquid funds.")
-
+            st.markdown("💼 Stay defensive: shift to cash/T-Bills/liquid funds.")
