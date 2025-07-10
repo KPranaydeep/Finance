@@ -23,19 +23,6 @@ st.markdown("Every action you take is a vote for the type of person you wish to 
 with st.sidebar:
     st.header("✨ Manage Habits")
     user = st.text_input("Your Name")
-    habit = st.text_input("New Habit Name", placeholder="e.g., Morning Pages")
-
-    if st.button("➕ Add New Habit"):
-        if user and habit:
-            if not habits_collection.find_one({"user": user, "habit": habit}):
-                habits_collection.insert_one({"user": user, "habit": habit})
-                st.success(f"New habit '{habit}' added!")
-            else:
-                st.warning("This habit already exists.")
-        else:
-            st.error("Please enter both name and habit.")
-
-    st.divider()
 
     habit_to_delete = st.text_input("Delete a Habit (Exact Name)")
     if st.button("🗑️ Delete Habit"):
@@ -45,7 +32,7 @@ with st.sidebar:
             st.success(f"Deleted habit '{habit_to_delete}' and all its records.")
         else:
             st.error("Please provide both user and habit name.")
-    
+
     st.divider()
 
     habit_to_reset = st.text_input("Reset Votes for Habit (Exact Name)")
@@ -55,6 +42,27 @@ with st.sidebar:
             st.success(f"Reset successful! {result.deleted_count} vote(s) deleted for '{habit_to_reset}'.")
         else:
             st.error("Please provide both user and habit name.")
+
+# === Expanded Section: Create New Habit ===
+with st.expander("➕ Create a New Habit", expanded=False):
+    st.subheader("🆕 Add a New Habit")
+    creator_user = st.text_input("👤 Your Name (to create habit)", key="create_user")
+    new_habit = st.text_input("📝 Habit Name", placeholder="e.g., Morning Pages", key="habit_name")
+    description = st.text_area("🗒️ Description or Intention for the Habit", placeholder="Why are you building this habit?", key="habit_desc")
+
+    if st.button("✅ Save Habit"):
+        if creator_user and new_habit:
+            if not habits_collection.find_one({"user": creator_user, "habit": new_habit}):
+                habits_collection.insert_one({
+                    "user": creator_user,
+                    "habit": new_habit,
+                    "description": description
+                })
+                st.success(f"Habit '{new_habit}' created successfully!")
+            else:
+                st.warning("This habit already exists.")
+        else:
+            st.error("Please enter both user and habit name.")
 
 # === Main: Habit Vote ===
 if user:
@@ -89,13 +97,16 @@ if selected_user:
         st.dataframe(habit_counts)
 
         for habit_name in habit_counts["habit"]:
+            habit_doc = habits_collection.find_one({"user": selected_user, "habit": habit_name})
             st.markdown(f"### 📌 Habit: {habit_name}")
+            if habit_doc and "description" in habit_doc:
+                st.caption(f"🗒️ {habit_doc['description']}")
+
             habit_df = df[df["habit"] == habit_name]
             daily_counts = habit_df.groupby("date").size().reset_index(name="count")
             daily_counts.set_index("date", inplace=True)
 
             try:
-                # 🧩 Plot calendar (corrected figsize)
                 fig, ax = calplot.calplot(
                     daily_counts["count"],
                     cmap="YlGn",
@@ -107,25 +118,21 @@ if selected_user:
                     linewidth=0.1,
                     yearlabel_kws={"color": "black", "fontsize": 9}
                 )
-                
-                # 🪄 Transparency for text
+
                 for a in ax.flat:
                     for txt in a.texts:
                         txt.set_alpha(0.5)
                         txt.set_fontsize(8)
-                
-                # 🧮 Calculate repetitions left
+
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
                 votes_left = max(0, 254 - total_votes)
-                
-                # ✅ Add repetition note below calendar using plt.figtext
+
                 plt.figtext(
                     0.5, -0.05,
                     f"{votes_left} repetition(s) left to automate '{habit_name}'",
                     ha="center", fontsize=10, color="darkgreen"
                 )
-                
-                # 📊 Render
+
                 st.pyplot(fig)
 
             except Exception as e:
