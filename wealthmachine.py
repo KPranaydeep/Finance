@@ -867,16 +867,24 @@ if uploaded_holdings:
         # Sell plan logic - MODIFIED SECTION
         # Set a default user ID (could later be tied to login/email)
         USER_ID = "default_user"
+
+        # 📂 Additional uploader to fetch Net P&L and Charges from report file
+        uploaded_report = st.file_uploader("📄 Upload your P&L Report file (B9 = Net P&L, C26 = Charges)", type=["xlsx"])
         
-        # Fetch latest saved values from MongoDB
-        if uploaded_file is not None:
-            net_pl_from_file, charges_from_file = extract_net_pl_and_charges(uploaded_file)
-            net_pl_default = net_pl_from_file
-            charges_default = charges_from_file
-        else:
-            latest_params = get_latest_input_params(USER_ID)
-            net_pl_default = float(latest_params.get('net_pl', 0.0))
-            charges_default = float(latest_params.get('charges', 0.0))
+        # Fetch saved values from MongoDB (default fallback)
+        latest_params = get_latest_input_params(USER_ID)
+        net_pl_default = float(latest_params.get('net_pl', 0.0))
+        charges_default = float(latest_params.get('charges', 0.0))
+        
+        # ⬇️ If report file is uploaded, override defaults from file
+        if uploaded_report is not None:
+            try:
+                net_pl_from_file, charges_from_file = extract_net_pl_and_charges(uploaded_report)
+                net_pl_default = net_pl_from_file
+                charges_default = charges_from_file
+                st.success("✅ Auto-filled Net P&L and Charges from uploaded report.")
+            except Exception as e:
+                st.error(f"⚠️ Failed to extract values from report: {e}")
 
         # latest_params = get_latest_input_params(USER_ID)
         
