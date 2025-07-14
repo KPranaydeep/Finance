@@ -836,15 +836,12 @@ import openpyxl
 
 def extract_net_pl_and_charges(file) -> tuple:
     wb = openpyxl.load_workbook(file, data_only=True)
-    ws = wb.active
+    ws = wb.active  # Or wb['Sheet1'] if known
 
     net_pl = ws['B9'].value or 0.0
-    charges = ws['C26'].value
+    charges = ws['B26'].value or 0.0
 
-    print("DEBUG >> C26 raw value:", charges, type(charges))  # Add this line
-
-    charges = float(charges or 0.0)
-    return float(net_pl), charges
+    return float(net_pl), float(charges)
 
 # ==== PROFIT BOOKING SECTION ====
 if uploaded_holdings:
@@ -871,7 +868,7 @@ if uploaded_holdings:
         USER_ID = "default_user"
 
         # 📂 Upload optional Net P&L Report
-        uploaded_report = st.file_uploader("📄 Upload your P&L Report (B9 = Net P&L, C26 = Charges)", type=["xlsx"])
+        uploaded_report = st.file_uploader("📄 Upload your P&L Report (B9 = Net P&L, B26 = Charges)", type=["xlsx"])
 
         # Load defaults from saved MongoDB values
         latest_params = get_latest_input_params(USER_ID)
