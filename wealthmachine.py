@@ -836,24 +836,24 @@ import openpyxl
 
 def extract_net_pl_and_charges(file) -> tuple:
     wb = openpyxl.load_workbook(file, data_only=True)
-    ws = wb.active  # Or wb['Sheet1'] if you know the name
+    ws = wb.active  # Or wb['Sheet1'] if known
 
     net_pl = ws['B9'].value or 0.0
     charges = ws['C26'].value or 0.0
 
     return float(net_pl), float(charges)
 
-# Modify the profit booking section in your Streamlit app
+# ==== PROFIT BOOKING SECTION ====
 if uploaded_holdings:
     st.header("💼 Your Portfolio Analysis")
     merged_df = analyze_holdings(uploaded_holdings)
-    
+
     if merged_df is not None:
         # Display holdings
         st.subheader("🧾 Current Holdings")
-        st.dataframe(merged_df[['Symbol', 'Company Name', 'Quantity', 'Average Price', 
-                              'Live LTP', 'Current Value', 'Profit/Loss', 'Profit/Loss (%)']])
-        
+        st.dataframe(merged_df[['Symbol', 'Company Name', 'Quantity', 'Average Price',
+                                'Live LTP', 'Current Value', 'Profit/Loss', 'Profit/Loss (%)']])
+
         # Portfolio summary
         total_invested = merged_df['Invested Amount'].sum()
         total_current_value = merged_df['Current Value'].sum()
@@ -863,20 +863,19 @@ if uploaded_holdings:
         col1, col2, col3 = st.columns(3)
         col1.metric("💰 Total Invested", f"₹{total_invested:,.2f}")
         col2.metric("📈 Current Value", f"₹{total_current_value:,.2f}")
-        col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl/total_invested)*100:.2f}%")
-        # Sell plan logic - MODIFIED SECTION
-        # Set a default user ID (could later be tied to login/email)
+        col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl / total_invested) * 100:.2f}%")
+
         USER_ID = "default_user"
 
-        # 📂 Additional uploader to fetch Net P&L and Charges from report file
-        uploaded_report = st.file_uploader("📄 Upload your P&L Report file (B9 = Net P&L, C26 = Charges)", type=["xlsx"])
-        
-        # Fetch saved values from MongoDB (default fallback)
+        # 📂 Upload optional Net P&L Report
+        uploaded_report = st.file_uploader("📄 Upload your P&L Report (B9 = Net P&L, C26 = Charges)", type=["xlsx"])
+
+        # Load defaults from saved MongoDB values
         latest_params = get_latest_input_params(USER_ID)
         net_pl_default = float(latest_params.get('net_pl', 0.0))
         charges_default = float(latest_params.get('charges', 0.0))
-        
-        # ⬇️ If report file is uploaded, override defaults from file
+
+        # Override if report uploaded
         if uploaded_report is not None:
             try:
                 net_pl_from_file, charges_from_file = extract_net_pl_and_charges(uploaded_report)
@@ -886,70 +885,55 @@ if uploaded_holdings:
             except Exception as e:
                 st.error(f"⚠️ Failed to extract values from report: {e}")
 
-        # latest_params = get_latest_input_params(USER_ID)
-        
         st.subheader("🎯 Profit Booking Strategy")
         st.subheader("🔧 Adjust Profit Booking Parameters")
-        
-        # Load previous values as defaults
-        net_pl = st.number_input("Enter net P&L (INR)", 
-                         value=net_pl_default, 
-                         min_value=0.0, 
-                         step=1000.0)
 
-        charges = st.number_input("Enter charges (INR)", 
-                                  value=charges_default, 
-                                  min_value=0.0, 
-                                  step=100.0)
+        # User inputs
+        net_pl = st.number_input("Enter net P&L (INR)",
+                                 value=net_pl_default,
+                                 min_value=0.0,
+                                 step=1000.0)
 
-        # net_pl = st.number_input("Enter net P&L (INR)", 
-        #                          value=float(latest_params.get('net_pl', 0.0)), 
-        #                          min_value=0.0, 
-        #                          step=1000.0)
-        
-        # charges = st.number_input("Enter charges (INR)", 
-        #                           value=float(latest_params.get('charges', 0.0)), 
-        #                           min_value=0.0, 
-        #                           step=100.0)
-        
-        target_net_daily_pct = st.number_input("Target net daily return (%)", 
-                                               value=float(latest_params.get('target_pct', 0.28)), 
-                                               min_value=0.01, 
-                                               max_value=5.0, 
+        charges_input = st.number_input("Enter charges (INR)",
+                                        value=charges_default,
+                                        min_value=0.0,
+                                        step=100.0)
+
+        target_net_daily_pct = st.number_input("Target net daily return (%)",
+                                               value=float(latest_params.get('target_pct', 0.28)),
+                                               min_value=0.01,
+                                               max_value=5.0,
                                                step=0.01)
-        
-        # Save values when form submitted or app rerun
-        save_input_params(USER_ID, net_pl, charges, target_net_daily_pct)
 
-        # ✅ Fix starts here — remove one indentation level from this line onward
+        # Save input values
+        save_input_params(USER_ID, net_pl, charges_input, target_net_daily_pct)
+
         if net_pl > 0:
-            sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct)
+            sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges_input, target_net_daily_pct)
             daily_return_pct = round((sell_limit_multiplier - 1) * 100, 4)
             st.markdown(f"💡 *Dynamic sell limit calculated at {daily_return_pct}% above buy price*")
 
-            # Choose rotation strategy
             rotation_option = st.radio(
                 "Select rotation strategy for calculating target profit:",
                 ["Daily", "Weekly", "Monthly"],
                 index=0,
                 horizontal=True
             )
-            
-            # Calculate target based on selected rotation
+
+            # Determine profit target
             if rotation_option == "Daily":
                 default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
             elif rotation_option == "Weekly":
                 default_target = round(total_invested * (sell_limit_multiplier - 1) * 4.84615385, 2)
-            else:  # Monthly Rotation
+            else:
                 default_target = round(total_invested * (sell_limit_multiplier - 1) * 21, 2)
-            
-            target_rupees = st.number_input("Enter target profit (₹)", 
-                                            value=default_target, 
-                                            min_value=0.0, 
+
+            target_rupees = st.number_input("Enter target profit (₹)",
+                                            value=default_target,
+                                            min_value=0.0,
                                             step=100.0)
-                                    
-            # --- Move entire sell plan logic here ---
-            # Filter profitable stocks
+
+            # Filter profitable holdings
             profitable_df = merged_df[merged_df['Profit/Loss'] > 0].copy()
             profitable_df = profitable_df.sort_values(by='Profit/Loss (%)', ascending=False)
             profitable_df['Sell Limit (₹)'] = (profitable_df['Live LTP'] * sell_limit_multiplier).round(2)
@@ -990,14 +974,9 @@ if uploaded_holdings:
                 sell_plan_df = pd.DataFrame(sell_plan_rows)
                 st.success(f"✅ Suggested Sell Plan to Book ₹{cumulative_profit:.2f} Profit")
                 st.dataframe(sell_plan_df)
+
                 csv = sell_plan_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "📥 Download Sell Plan",
-                    csv,
-                    "sell_plan.csv",
-                    "text/csv",
-                    key='download-sell-plan'
-                )
+                st.download_button("📥 Download Sell Plan", csv, "sell_plan.csv", "text/csv", key='download-sell-plan')
             else:
                 st.warning("📉 Not enough profitable stocks to meet target")
                 st.info("⏳ Check back tomorrow when market conditions may improve")
