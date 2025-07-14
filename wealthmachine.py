@@ -750,33 +750,45 @@ if analyzer:
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
 st.markdown("## 📌 Recommended Stocks to Explore")
 
-# Define Google Sheet info
+# Google Sheet configuration
 sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
 sheet_name = "Sheet1"
 csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
 sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
 
-# Show link to open Google Sheet
+# Link to open the original Google Sheet
 st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
 
 try:
-    # Load and clean data
+    # Load the sheet with header row
     df_reco = pd.read_csv(csv_url)
-    column_a = df_reco.iloc[0:, 0].dropna().astype(str).str.strip()  # A2:A
-    column_a = column_a[column_a != ""]  # Filter empty strings
 
-    if not column_a.empty:
-        st.success("✅ Loaded stock recommendations from the sheet")
+    # Optional: Limit to rows 2 to 992 (i.e., up to B992)
+    df_reco = df_reco.iloc[0:991]  # Zero-based index: row 0 = header, so rows 0 to 990 = A2:B992
+
+    # Drop rows with missing stock names
+    df_reco.dropna(subset=["stock"], inplace=True)
+    df_reco["stock"] = df_reco["stock"].astype(str).str.strip()
+    df_reco["buy price limit"] = df_reco["buy price limit"].astype(str).str.strip()
+
+    df_reco = df_reco[df_reco["stock"] != ""]
+
+    if not df_reco.empty:
+        st.success("✅ Successfully loaded stock recommendations.")
         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
-        st.write("🔍 **Suggested Stocks:**")
+        st.markdown("### 🔍 Suggested Stocks:")
         st.markdown(
-            f"<ul style='list-style-type: square; padding-left: 1.5em;'>"
-            + "".join([f"<li>{s}</li>" for s in column_a])
+            "<ul style='list-style-type: square; padding-left: 1.5em;'>"
+            + "".join([
+                f"<li><b>{row['stock']}</b>: Buy ≤ ₹{row['buy price limit']}</li>"
+                if row['buy price limit'] else f"<li>{row['stock']}</li>"
+                for _, row in df_reco.iterrows()
+            ])
             + "</ul>",
             unsafe_allow_html=True
         )
     else:
-        st.warning("⚠️ No non-empty stock entries found in A2:A")
+        st.warning("⚠️ No valid stock entries found in A2:B992.")
 
 except Exception as e:
     st.error("❌ Failed to load Google Sheet data.")
