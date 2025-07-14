@@ -763,32 +763,25 @@ try:
     # Load CSV without header
     df_raw = pd.read_csv(csv_url, header=None)
 
-    # Slice A2:B992 => rows 1 to 991, columns 0 and 1
-    df_reco = df_raw.iloc[1:992, 0:2]  # Skip header row, get A2:B992
+    # Slice A2:B992 => rows 1 to 991 (0-indexed), columns 0 and 1
+    df_reco = df_raw.iloc[1:992, 0:2]  # Skip the header row, get rows A2 to B992
 
-    # Rename columns
-    df_reco.columns = ["stock", "buy price limit"]
+    # Rename columns to meaningful names
+    df_reco.columns = ["Stock", "Buy Price Limit"]
 
-    # Clean and filter
-    df_reco.dropna(subset=["stock"], inplace=True)
-    df_reco["stock"] = df_reco["stock"].astype(str).str.strip()
-    df_reco["buy price limit"] = df_reco["buy price limit"].astype(str).str.strip()
-    df_reco = df_reco[df_reco["stock"] != ""]
+    # Clean and filter data
+    df_reco.dropna(subset=["Stock"], inplace=True)
+    df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
+    df_reco["Buy Price Limit"] = df_reco["Buy Price Limit"].astype(str).str.strip()
+    df_reco = df_reco[df_reco["Stock"] != ""]
 
     if not df_reco.empty:
         st.success("✅ Successfully loaded stock recommendations.")
         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
-        st.markdown("### 🔍 Suggested Stocks:")
-        st.markdown(
-            "<ul style='list-style-type: square; padding-left: 1.5em;'>"
-            + "".join([
-                f"<li><b>{row['stock']}</b>: Buy ≤ ₹{row['buy price limit']}</li>"
-                if row['buy price limit'] else f"<li>{row['stock']}</li>"
-                for _, row in df_reco.iterrows()
-            ])
-            + "</ul>",
-            unsafe_allow_html=True
-        )
+
+        # Display as a table
+        st.dataframe(df_reco.reset_index(drop=True), use_container_width=True)
+
     else:
         st.warning("⚠️ No valid stock entries found in A2:B992.")
 
