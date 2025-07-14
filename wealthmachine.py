@@ -881,7 +881,7 @@ if uploaded_holdings:
             rotation_option = st.radio(
                 "Select rotation strategy for calculating target profit:",
                 ["Daily", "Weekly", "Monthly"],
-                index=2,
+                index=0,
                 horizontal=True
             )
             
