@@ -836,12 +836,15 @@ import openpyxl
 
 def extract_net_pl_and_charges(file) -> tuple:
     wb = openpyxl.load_workbook(file, data_only=True)
-    ws = wb.active  # Or wb['Sheet1'] if known
+    ws = wb.active
 
     net_pl = ws['B9'].value or 0.0
-    charges = ws['C26'].value or 0.0
+    charges = ws['C26'].value
 
-    return float(net_pl), float(charges)
+    print("DEBUG >> C26 raw value:", charges, type(charges))  # Add this line
+
+    charges = float(charges or 0.0)
+    return float(net_pl), charges
 
 # ==== PROFIT BOOKING SECTION ====
 if uploaded_holdings:
