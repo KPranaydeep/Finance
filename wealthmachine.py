@@ -763,24 +763,29 @@ try:
     # Load CSV without header
     df_raw = pd.read_csv(csv_url, header=None)
 
-    # Slice A2:B992 => rows 1 to 991 (0-indexed), columns 0 and 1
-    df_reco = df_raw.iloc[1:992, 0:2]  # Skip the header row, get rows A2 to B992
-
-    # Rename columns to meaningful names
+    # Slice A2:B992 => rows 1 to 991, columns A and B
+    df_reco = df_raw.iloc[1:992, 0:2]
     df_reco.columns = ["Stock", "Buy Price Limit"]
 
-    # Clean and filter data
+    # Clean up
     df_reco.dropna(subset=["Stock"], inplace=True)
     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
     df_reco["Buy Price Limit"] = df_reco["Buy Price Limit"].astype(str).str.strip()
     df_reco = df_reco[df_reco["Stock"] != ""]
+    df_reco.reset_index(drop=True, inplace=True)
 
     if not df_reco.empty:
         st.success("✅ Successfully loaded stock recommendations.")
         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
 
-        # Display as a table
-        st.dataframe(df_reco.reset_index(drop=True), use_container_width=True)
+        # Apply minimal styling
+        styled_df = df_reco.style.set_table_styles([
+            {"selector": "th", "props": [("padding", "4px"), ("font-size", "13px")]},
+            {"selector": "td", "props": [("padding", "4px"), ("font-size", "13px")]}
+        ])
+
+        # Display auto-fit, minimal table
+        st.dataframe(styled_df, use_container_width=True)
 
     else:
         st.warning("⚠️ No valid stock entries found in A2:B992.")
