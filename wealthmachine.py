@@ -832,6 +832,17 @@ def calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct=0.28):
     sell_limit_pct = target_net_daily_pct + daily_charges_pct
     return round(1 + (sell_limit_pct/100), 6)  # Convert to multiplier (e.g., 1.005298)
 
+import openpyxl
+
+def extract_net_pl_and_charges(file) -> tuple:
+    wb = openpyxl.load_workbook(file, data_only=True)
+    ws = wb.active  # Or wb['Sheet1'] if you know the name
+
+    net_pl = ws['B9'].value or 0.0
+    charges = ws['C26'].value or 0.0
+
+    return float(net_pl), float(charges)
+
 # Modify the profit booking section in your Streamlit app
 if uploaded_holdings:
     st.header("💼 Your Portfolio Analysis")
@@ -858,21 +869,40 @@ if uploaded_holdings:
         USER_ID = "default_user"
         
         # Fetch latest saved values from MongoDB
-        latest_params = get_latest_input_params(USER_ID)
+        if uploaded_file is not None:
+            net_pl_from_file, charges_from_file = extract_net_pl_and_charges(uploaded_file)
+            net_pl_default = net_pl_from_file
+            charges_default = charges_from_file
+        else:
+            latest_params = get_latest_input_params(USER_ID)
+            net_pl_default = float(latest_params.get('net_pl', 0.0))
+            charges_default = float(latest_params.get('charges', 0.0))
+
+        # latest_params = get_latest_input_params(USER_ID)
         
         st.subheader("🎯 Profit Booking Strategy")
         st.subheader("🔧 Adjust Profit Booking Parameters")
         
         # Load previous values as defaults
         net_pl = st.number_input("Enter net P&L (INR)", 
-                                 value=float(latest_params.get('net_pl', 0.0)), 
-                                 min_value=0.0, 
-                                 step=1000.0)
-        
+                         value=net_pl_default, 
+                         min_value=0.0, 
+                         step=1000.0)
+
         charges = st.number_input("Enter charges (INR)", 
-                                  value=float(latest_params.get('charges', 0.0)), 
+                                  value=charges_default, 
                                   min_value=0.0, 
                                   step=100.0)
+
+        # net_pl = st.number_input("Enter net P&L (INR)", 
+        #                          value=float(latest_params.get('net_pl', 0.0)), 
+        #                          min_value=0.0, 
+        #                          step=1000.0)
+        
+        # charges = st.number_input("Enter charges (INR)", 
+        #                           value=float(latest_params.get('charges', 0.0)), 
+        #                           min_value=0.0, 
+        #                           step=100.0)
         
         target_net_daily_pct = st.number_input("Target net daily return (%)", 
                                                value=float(latest_params.get('target_pct', 0.28)), 
