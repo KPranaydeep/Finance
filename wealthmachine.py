@@ -760,17 +760,19 @@ sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing
 st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
 
 try:
-    # Load the sheet with header row
-    df_reco = pd.read_csv(csv_url)
+    # Load CSV without header
+    df_raw = pd.read_csv(csv_url, header=None)
 
-    # Optional: Limit to rows 2 to 992 (i.e., up to B992)
-    df_reco = df_reco.iloc[0:991]  # Zero-based index: row 0 = header, so rows 0 to 990 = A2:B992
+    # Slice A2:B992 => rows 1 to 991, columns 0 and 1
+    df_reco = df_raw.iloc[1:992, 0:2]  # Skip header row, get A2:B992
 
-    # Drop rows with missing stock names
+    # Rename columns
+    df_reco.columns = ["stock", "buy price limit"]
+
+    # Clean and filter
     df_reco.dropna(subset=["stock"], inplace=True)
     df_reco["stock"] = df_reco["stock"].astype(str).str.strip()
     df_reco["buy price limit"] = df_reco["buy price limit"].astype(str).str.strip()
-
     df_reco = df_reco[df_reco["stock"] != ""]
 
     if not df_reco.empty:
