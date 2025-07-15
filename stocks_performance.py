@@ -143,11 +143,11 @@ ax2.plot(dates, annualized_returns, marker='s', linestyle='-', color='darkgreen'
 mean_annualized = annualized_returns.mean()
 
 # Plot the horizontal line
-ax2.axhline(mean_annualized, color='orange', linestyle='--', linewidth=1.5, label=f"Area-Equivalent Line ({mean_annualized:.2f}%)")
+ax2.axhline(mean_annualized, color='red', linestyle='--', linewidth=1.5, label=f"Area-Equivalent Line ({mean_annualized:.2f}%)")
 
 # Annotate the line
 ax2.text(dates[-1], mean_annualized + 0.5, f"Mean: {mean_annualized:.2f}%", 
-         color='orange', ha='right', va='bottom', fontsize=10)
+         color='red', ha='right', va='bottom', fontsize=10)
 
 # Labeling
 ax2.set_ylabel("Annualized Return (%)", fontsize=12)
