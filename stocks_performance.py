@@ -133,13 +133,31 @@ st.pyplot(fig1)
 # --- Plot 2: Annualized Return over Time ---
 st.subheader("📈 Annualized Return Over Time")
 fig2, ax2 = plt.subplots(figsize=(10, 4), dpi=150)
-ax2.plot(df_plot['Date'].values, df_plot['Annualized Return'].values * 100, marker='s', linestyle='-', color='darkgreen')
+
+# Plot the actual data
+dates = df_plot['Date'].values
+annualized_returns = df_plot['Annualized Return'].values * 100
+ax2.plot(dates, annualized_returns, marker='s', linestyle='-', color='darkgreen', label="Annualized Return")
+
+# Calculate the mean value (area-equivalent line)
+mean_annualized = annualized_returns.mean()
+
+# Plot the horizontal line
+ax2.axhline(mean_annualized, color='orange', linestyle='--', linewidth=1.5, label=f"Area-Equivalent Line ({mean_annualized:.2f}%)")
+
+# Annotate the line
+ax2.text(dates[-1], mean_annualized + 0.5, f"Mean: {mean_annualized:.2f}%", 
+         color='orange', ha='right', va='bottom', fontsize=10)
+
+# Labeling
 ax2.set_ylabel("Annualized Return (%)", fontsize=12)
 ax2.set_xlabel("Date", fontsize=12)
 ax2.set_title("Annualized Return vs Time", fontsize=14, weight='bold')
 ax2.grid(True, linestyle='--', alpha=0.6)
+ax2.legend()
 ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
 fig2.autofmt_xdate()
+
 st.pyplot(fig2)
 
 # --- Plot 3: ROI over Time ---
