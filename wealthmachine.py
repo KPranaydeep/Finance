@@ -1009,8 +1009,8 @@ def should_use_leverage():
             return {"error": "Insufficient data (<200 rows) to compute 200-day MA."}
 
         df["200ma"] = df["Close"].rolling(window=200).mean()
-        latest_close = df["Close"].iloc[-1]         # ✅ scalar
-        ma_value = df["200ma"].iloc[-1]             # ✅ scalar
+        latest_close = df["Close"].iloc[-1].item()
+        ma_value = df["200ma"].iloc[-1].item()
 
         if pd.isna(ma_value) or pd.isna(latest_close):  # ✅ both return single bool
             return {"error": "Computed values are NaN — possibly due to missing data."}
