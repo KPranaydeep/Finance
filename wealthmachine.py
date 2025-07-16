@@ -75,38 +75,37 @@ def get_latest_input_params(user_id):
         sort=[('timestamp', -1)]
     )
     return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
+
+# --- Cached Leverage Decision Function ---
 @st.cache_data
 def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
-    import yfinance as yf
-    import pandas as pd
-
     try:
         data = yf.download(ticker, period="400d")
         if 'Close' not in data.columns:
             raise ValueError("Missing 'Close' column in downloaded data.")
 
-        # Compute MA as a Series
         close_series = data['Close'].copy()
         ma_series = close_series.rolling(window=days).mean()
 
-        # Use index from original data to construct new DataFrame
         df = pd.DataFrame(index=close_series.index)
         df['Close'] = close_series
         df['200_MA'] = ma_series
         df['pct_above_ma'] = (df['Close'] - df['200_MA']) / df['200_MA']
 
         valid_rows = df.dropna(subset=['200_MA'])
-        latest_row = valid_rows.iloc[-1]
 
+        if valid_rows.empty:
+            raise ValueError("No valid rows to calculate leverage — insufficient data.")
+
+        latest_row = valid_rows.iloc[-1]
         latest_close = float(latest_row['Close'])
         latest_ma = float(latest_row['200_MA'])
         current_pct_above = float(latest_row['pct_above_ma'])
 
-        # Find historical max % above 200-DMA
+        # Max observed % above MA (only positive cases)
         positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
         max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10
 
-        # Compute scaling factor alpha (cap = 45%)
         alpha = cap / max_pct_above_ma if max_pct_above_ma > 0 else 0.0
         leverage_flag = latest_close > latest_ma
 
@@ -130,14 +129,12 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
             "error": str(e)
         }
 
+# --- LAMF Allocation Calculator ---
 def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=3.0):
-    """
-    Compute the percentage of Mutual Fund corpus to allocate as LAMF
-    based on how much NIFTY is above 200-day MA and current Market Mood Index (MMI).
-    """
     fear_factor = 1 - (mmi / 100)  # MMI=0 → max fear, MMI=100 → max greed
     lamf_pct = alpha * pct_above_ma * fear_factor
-    return min(max(lamf_pct, 0.0), cap)  # Clamp to [0, cap]
+    return min(max(lamf_pct, 0.0), cap)
+
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
 st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
@@ -983,52 +980,37 @@ if uploaded_holdings:
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
-@st.cache_data
-def get_nifty_data():
-    try:
-        df = yf.download("^NSEI", period="1y", interval="1d")
-        df = df[["Close"]].dropna()
-        df.reset_index(inplace=True)
-        return df
-    except Exception:
-        return None
+# --- UI Section ---
+with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=False):
+    result = should_use_leverage()
 
-def should_use_leverage():
-    df = get_nifty_data()
+    if result.get("error"):
+        st.error(f"⚠️ Error fetching data: {result['error']}")
+    else:
+        st.metric("📈 NIFTY Close", f"{result['latest_close']}")
+        st.metric("📊 200-Day MA", f"{result['ma_value']}")
+        st.metric("🔺 Max % Above MA", f"{result['max_pct_above_ma'] * 100:.2f}%")
 
-    if df is None or df.empty:
-        return {"error": "No NIFTY data available."}
+        if result["should_leverage"]:
+            st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
-    if len(df) < 200:
-        return {"error": f"Insufficient data (<200 rows). Only {len(df)} rows available."}
+            mmi = st.number_input("📊 Market Mood Index (MMI)", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
+            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=10_00_000.0, step=10_000.0)
 
-    df["200ma"] = df["Close"].rolling(window=200).mean()
+            lamf_pct = compute_lamf_pct(
+                result["pct_above_ma"],
+                mmi,
+                result["alpha"]
+            )
+            lamf_amt = mf_corpus * lamf_pct
 
-    # Drop rows with NaNs (first 199 rows)
-    df = df.dropna(subset=["200ma"])
+            st.metric("📌 LAMF % Recommended", f"{lamf_pct * 100:.2f}%")
+            st.metric("💸 Max LAMF Amount", f"₹{lamf_amt:,.0f}")
 
-    if df.empty:
-        return {"error": "No rows with valid 200-day MA."}
-
-    latest_close = df["Close"].iloc[-1]
-    ma_value = df["200ma"].iloc[-1]
-
-    if pd.isna(ma_value) or pd.isna(latest_close):
-        return {"error": "Latest computed MA or Close is NaN."}
-
-    pct_above_ma = (latest_close - ma_value) / ma_value
-    max_pct_above_ma = ((df["Close"] - df["200ma"]) / df["200ma"]).max()
-
-    return {
-        "latest_close": latest_close,
-        "ma_value": ma_value,
-        "pct_above_ma": pct_above_ma,
-        "max_pct_above_ma": max_pct_above_ma,
-        "should_leverage": pct_above_ma > 0,
-        "alpha": max_pct_above_ma  # or use fixed alpha like 0.15
-    }
-
-
+        else:
+            st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
+            st.markdown("💼 Stay defensive: shift to cash, T-Bills, or liquid funds.")
+            
 # 📅 Calculate dates
 today = datetime.today().date()
 exit_date = today + timedelta(days=36)
