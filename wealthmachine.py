@@ -983,11 +983,6 @@ if uploaded_holdings:
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
-import streamlit as st
-import pandas as pd
-import yfinance as yf
-
-# --- Helper Function ---
 @st.cache_data
 def get_nifty_data():
     try:
@@ -999,82 +994,39 @@ def get_nifty_data():
         return None
 
 def should_use_leverage():
-    try:
-        df = get_nifty_data()
+    df = get_nifty_data()
 
-        if df is None or df.empty:
-            return {"error": "No NIFTY data available."}
+    if df is None or df.empty:
+        return {"error": "No NIFTY data available."}
 
-        if len(df) < 200:
-            return {"error": "Insufficient data (<200 rows) to compute 200-day MA."}
+    if len(df) < 200:
+        return {"error": f"Insufficient data (<200 rows). Only {len(df)} rows available."}
 
-        df["200ma"] = df["Close"].rolling(window=200).mean()
-        latest_close = df["Close"].iloc[-1].item()
-        ma_value = df["200ma"].iloc[-1].item()
+    df["200ma"] = df["Close"].rolling(window=200).mean()
 
-        if pd.isna(ma_value) or pd.isna(latest_close):  # ✅ both return single bool
-            return {"error": "Computed values are NaN — possibly due to missing data."}
+    # Drop rows with NaNs (first 199 rows)
+    df = df.dropna(subset=["200ma"])
 
-        pct_above_ma = (latest_close - ma_value) / ma_value
-        max_pct_above_ma = ((df["Close"] - df["200ma"]) / df["200ma"]).max()
+    if df.empty:
+        return {"error": "No rows with valid 200-day MA."}
 
-        return {
-            "latest_close": latest_close,
-            "ma_value": ma_value,
-            "pct_above_ma": pct_above_ma,
-            "max_pct_above_ma": max_pct_above_ma,
-            "should_leverage": latest_close > ma_value,
-            "alpha": 0.5
-        }
+    latest_close = df["Close"].iloc[-1]
+    ma_value = df["200ma"].iloc[-1]
 
-    except Exception as e:
-        return {"error": str(e)}
+    if pd.isna(ma_value) or pd.isna(latest_close):
+        return {"error": "Latest computed MA or Close is NaN."}
 
+    pct_above_ma = (latest_close - ma_value) / ma_value
+    max_pct_above_ma = ((df["Close"] - df["200ma"]) / df["200ma"]).max()
 
-# --- LAMF Calculation ---
-def compute_lamf_pct(pct_above_ma, mmi, alpha):
-    confidence = min(max(mmi / 100, 0), 1)
-    return min(max(pct_above_ma * alpha * confidence, 0), 1)
-
-# --- Safe formatting function ---
-def safe_format(val, digits=2):
-    return f"{val:.{digits}f}" if isinstance(val, (int, float)) else "—"
-
-# --- Streamlit UI ---
-with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=False):
-    result = should_use_leverage()
-
-    if result.get("error"):
-        st.error(f"⚠️ Error fetching data: {result['error']}")
-    else:
-        st.metric("📈 NIFTY Close", safe_format(result.get("latest_close")))
-        st.metric("📉 200-Day MA", safe_format(result.get("ma_value")))
-
-        max_pct = result.get("max_pct_above_ma")
-        if isinstance(max_pct, (int, float)):
-            st.metric("📊 Max % Above MA (1Y)", f"{max_pct * 100:.2f}%")
-
-        if result.get("should_leverage"):
-            st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
-
-            mmi = st.number_input("📊 Market Mood Index (MMI)", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
-
-            lamf_pct = compute_lamf_pct(
-                result["pct_above_ma"],
-                mmi,
-                result["alpha"]
-            )
-
-            mf_corpus = st.number_input("💼 Mutual Fund Corpus (₹)", value=10_00_000.0, step=10_000.0)
-            lamf_amt = mf_corpus * lamf_pct
-
-            st.metric("✅ LAMF % Recommended", f"{lamf_pct * 100:.1f}%")
-            st.metric("💰 Max LAMF Amount", f"₹{lamf_amt:,.0f}")
-
-        else:
-            st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
-            st.markdown("💼 Stay defensive: shift to cash, T-Bills, or liquid funds.")
-
+    return {
+        "latest_close": latest_close,
+        "ma_value": ma_value,
+        "pct_above_ma": pct_above_ma,
+        "max_pct_above_ma": max_pct_above_ma,
+        "should_leverage": pct_above_ma > 0,
+        "alpha": max_pct_above_ma  # or use fixed alpha like 0.15
+    }
 
 
 # 📅 Calculate dates
