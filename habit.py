@@ -104,8 +104,11 @@ if selected_user:
 
             habit_df = df[df["habit"] == habit_name]
             daily_counts = habit_df.groupby("date").size()
-            daily_counts = daily_counts[daily_counts > 0]  # ✅ skip zeroes
             
+            # ✅ calplot expects full date index → but we only pass actual counts > 0
+            daily_counts = daily_counts[daily_counts > 0]  # Filter out zeros
+            
+            # ✅ Avoid zero display by ensuring only non-zero days are passed
             try:
                 fig, ax = calplot.calplot(
                     daily_counts,
@@ -121,8 +124,11 @@ if selected_user:
             
                 for a in ax.flat:
                     for txt in a.texts:
-                        txt.set_alpha(0.5)
-                        txt.set_fontsize(8)
+                        if txt.get_text() == '0':
+                            txt.set_visible(False)  # ✅ HIDE zeros explicitly
+                        else:
+                            txt.set_alpha(0.5)
+                            txt.set_fontsize(8)
             
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
                 votes_left = max(0, 254 - total_votes)
@@ -138,6 +144,7 @@ if selected_user:
             except Exception as e:
                 st.error(f"⚠️ Calendar plot failed for '{habit_name}'. Check your data.")
                 st.exception(e)
+
 
             if habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0] >= 254:
                 st.success(f"🎉 Habit '{habit_name}' has been automated (254 votes)! Keep it up!")
