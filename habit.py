@@ -103,12 +103,12 @@ if selected_user:
                 st.caption(f"🗒️ {habit_doc['description']}")
 
             habit_df = df[df["habit"] == habit_name]
-            daily_counts = habit_df.groupby("date").size().reset_index(name="count")
-            daily_counts.set_index("date", inplace=True)
-
+            daily_counts = habit_df.groupby("date").size()
+            daily_counts = daily_counts[daily_counts > 0]  # ✅ skip zeroes
+            
             try:
                 fig, ax = calplot.calplot(
-                    daily_counts["count"],
+                    daily_counts,
                     cmap="YlGn",
                     suptitle=f"{habit_name}",
                     colorbar=True,
@@ -118,23 +118,23 @@ if selected_user:
                     linewidth=0.1,
                     yearlabel_kws={"color": "black", "fontsize": 9}
                 )
-
+            
                 for a in ax.flat:
                     for txt in a.texts:
                         txt.set_alpha(0.5)
                         txt.set_fontsize(8)
-
+            
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
                 votes_left = max(0, 254 - total_votes)
-
+            
                 plt.figtext(
                     0.5, -0.05,
                     f"{votes_left} repetition(s) left to automate '{habit_name}'",
                     ha="center", fontsize=10, color="darkgreen"
                 )
-
+            
                 st.pyplot(fig)
-
+            
             except Exception as e:
                 st.error(f"⚠️ Calendar plot failed for '{habit_name}'. Check your data.")
                 st.exception(e)
