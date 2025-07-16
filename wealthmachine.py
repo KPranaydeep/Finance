@@ -983,15 +983,19 @@ if uploaded_holdings:
         else:
             st.error("❌ Cannot calculate sell limit with zero or negative P&L")
 
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+
 # --- Helper Function ---
 @st.cache_data
 def get_nifty_data():
     try:
-        df = yf.download("^NSEI", period="1y", interval="1d")  # NIFTY 50 index
+        df = yf.download("^NSEI", period="1y", interval="1d")
         df = df[["Close"]].dropna()
         df.reset_index(inplace=True)
         return df
-    except Exception as e:
+    except Exception:
         return None
 
 def should_use_leverage():
@@ -1008,8 +1012,8 @@ def should_use_leverage():
         latest_close = df["Close"].iloc[-1]
         ma_value = df["200ma"].iloc[-1]
 
-        if pd.isna(ma_value):
-            return {"error": "200-day MA is NaN — possibly due to insufficient valid data points."}
+        if pd.isna(ma_value) or pd.isna(latest_close):
+            return {"error": "Computed values are NaN — possibly due to insufficient valid data points."}
 
         pct_above_ma = (latest_close - ma_value) / ma_value
         max_pct_above_ma = ((df["Close"] - df["200ma"]) / df["200ma"]).max()
@@ -1020,7 +1024,7 @@ def should_use_leverage():
             "pct_above_ma": pct_above_ma,
             "max_pct_above_ma": max_pct_above_ma,
             "should_leverage": latest_close > ma_value,
-            "alpha": 0.5  # tune as needed
+            "alpha": 0.5  # configurable parameter
         }
 
     except Exception as e:
@@ -1028,9 +1032,12 @@ def should_use_leverage():
 
 # --- LAMF Calculation ---
 def compute_lamf_pct(pct_above_ma, mmi, alpha):
-    # Example formula: adjust based on your model
     confidence = min(max(mmi / 100, 0), 1)
     return min(max(pct_above_ma * alpha * confidence, 0), 1)
+
+# --- Safe formatting function ---
+def safe_format(val, digits=2):
+    return f"{val:.{digits}f}" if isinstance(val, (int, float)) else "—"
 
 # --- Streamlit UI ---
 with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=False):
@@ -1039,13 +1046,14 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
     if result.get("error"):
         st.error(f"⚠️ Error fetching data: {result['error']}")
     else:
-        st.metric("📈 NIFTY Close", f"{result['latest_close']:.2f}")
-        st.metric("📉 200-Day MA", f"{result['ma_value']:.2f}")
+        st.metric("📈 NIFTY Close", safe_format(result.get("latest_close")))
+        st.metric("📉 200-Day MA", safe_format(result.get("ma_value")))
 
-        if result.get("max_pct_above_ma") is not None:
-            st.metric("📊 Max % Above MA (1Y)", f"{result['max_pct_above_ma'] * 100:.2f}%")
+        max_pct = result.get("max_pct_above_ma")
+        if isinstance(max_pct, (int, float)):
+            st.metric("📊 Max % Above MA (1Y)", f"{max_pct * 100:.2f}%")
 
-        if result["should_leverage"]:
+        if result.get("should_leverage"):
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
             mmi = st.number_input("📊 Market Mood Index (MMI)", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
@@ -1065,6 +1073,7 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
         else:
             st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
             st.markdown("💼 Stay defensive: shift to cash, T-Bills, or liquid funds.")
+
 
 
 # 📅 Calculate dates
