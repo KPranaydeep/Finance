@@ -1009,11 +1009,11 @@ def should_use_leverage():
             return {"error": "Insufficient data (<200 rows) to compute 200-day MA."}
 
         df["200ma"] = df["Close"].rolling(window=200).mean()
-        latest_close = df["Close"].iloc[-1]
-        ma_value = df["200ma"].iloc[-1]
+        latest_close = df["Close"].iloc[-1]         # ✅ scalar
+        ma_value = df["200ma"].iloc[-1]             # ✅ scalar
 
-        if pd.isna(ma_value) or pd.isna(latest_close):
-            return {"error": "Computed values are NaN — possibly due to insufficient valid data points."}
+        if pd.isna(ma_value) or pd.isna(latest_close):  # ✅ both return single bool
+            return {"error": "Computed values are NaN — possibly due to missing data."}
 
         pct_above_ma = (latest_close - ma_value) / ma_value
         max_pct_above_ma = ((df["Close"] - df["200ma"]) / df["200ma"]).max()
@@ -1024,11 +1024,12 @@ def should_use_leverage():
             "pct_above_ma": pct_above_ma,
             "max_pct_above_ma": max_pct_above_ma,
             "should_leverage": latest_close > ma_value,
-            "alpha": 0.5  # configurable parameter
+            "alpha": 0.5
         }
 
     except Exception as e:
         return {"error": str(e)}
+
 
 # --- LAMF Calculation ---
 def compute_lamf_pct(pct_above_ma, mmi, alpha):
