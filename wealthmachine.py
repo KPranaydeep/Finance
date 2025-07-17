@@ -757,14 +757,14 @@ sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing
 st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
 
 try:
-    # Load CSV without header
+    # Load CSV without header (Google Sheets export format)
     df_raw = pd.read_csv(csv_url, header=None)
 
-    # Slice A2:B992 => rows 1 to 991, columns A and B
-    df_reco = df_raw.iloc[1:992, 0:2]
-    df_reco.columns = ["Stock", "Buy Price Limit"]
+    # Slice rows 1 to 991 (i.e., A2 to A992), columns A to C (0:3)
+    df_reco = df_raw.iloc[1:992, 0:3]
+    df_reco.columns = ["Stock", "Buy Price Limit", "Sell Price Limit"]
 
-    # Clean up
+    # Clean and format
     df_reco.dropna(subset=["Stock"], inplace=True)
     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
     df_reco["Buy Price Limit"] = df_reco["Buy Price Limit"].astype(str).str.strip()
@@ -772,7 +772,6 @@ try:
     df_reco.reset_index(drop=True, inplace=True)
 
     if not df_reco.empty:
-        # st.success("✅ Successfully loaded stock recommendations.")
         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
 
         # Apply minimal styling
@@ -781,11 +780,11 @@ try:
             {"selector": "td", "props": [("padding", "4px"), ("font-size", "13px")]}
         ])
 
-        # Display auto-fit, minimal table
+        # Display the styled table
         st.dataframe(styled_df, use_container_width=True)
 
     else:
-        st.warning("⚠️ No valid stock entries found in A2:B992.")
+        st.warning("⚠️ No valid stock entries found between rows A2 to B992.")
 
 except Exception as e:
     st.error("❌ Failed to load Google Sheet data.")
