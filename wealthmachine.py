@@ -772,7 +772,7 @@ try:
     df_reco.reset_index(drop=True, inplace=True)
 
     if not df_reco.empty:
-        st.success("✅ Successfully loaded stock recommendations.")
+        # st.success("✅ Successfully loaded stock recommendations.")
         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
 
         # Apply minimal styling
