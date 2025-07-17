@@ -2,8 +2,8 @@ name: 🌐 Keep Streamlit Apps Awake
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Run every 10 minutes
-  workflow_dispatch:        # Allow manual run
+    - cron: '*/5 * * * *'  # ✅ Test: Every 5 mins (change to */10 or 0 */11 later)
+  workflow_dispatch:         # ✅ Allow manual run anytime
 
 jobs:
   ping-apps:
