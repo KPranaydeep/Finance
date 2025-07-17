@@ -2,7 +2,7 @@ name: 🌐 Keep Streamlit Apps Awake
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # Run every 10 minutes
+    - cron: '*/5 * * * *'  # Run every 10 minutes
   workflow_dispatch:        # Allow manual run
 
 jobs:
