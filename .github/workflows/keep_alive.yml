@@ -1,0 +1,31 @@
+name: 🌐 Keep Streamlit Apps Awake
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # Run every 10 minutes
+  workflow_dispatch:        # Allow manual run
+
+jobs:
+  ping-apps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔁 Ping Streamlit Apps
+        run: |
+          urls=(
+            "https://finance-master.streamlit.app/"
+            "https://rewiring.streamlit.app/"
+            "https://lamfsimulatorpy-dupueqmb2r5eo52ad4tkvf.streamlit.app/"
+            "https://finance-retire.streamlit.app/"
+            "https://sellplan.streamlit.app/"
+            "https://stocks-performance.streamlit.app/"
+            "https://finance-knqvcpyxszgty2sbj2gsqt.streamlit.app/"
+            "https://wealthiest.streamlit.app/"
+            "https://wealthmachine.streamlit.app/"
+            "https://screentimetracker.streamlit.app/"
+          )
+
+          for url in "${urls[@]}"
+          do
+            echo "🔗 Pinging $url"
+            curl --retry 3 --silent --show-error "$url" > /dev/null || echo "❌ Failed: $url"
+          done
