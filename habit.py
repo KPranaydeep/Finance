@@ -106,10 +106,7 @@ if selected_user:
             daily_counts = habit_df.groupby("date").size()
             daily_counts = daily_counts[daily_counts > 0]  # filter 0s
             daily_counts.index.name = "date"
-            
-            # Confirm no zeroes
-            st.write("Daily counts being plotted:", daily_counts.unique())  # Debug
-            
+
             try:
                 fig, ax = calplot.calplot(
                     daily_counts,
