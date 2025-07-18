@@ -103,16 +103,13 @@ if selected_user:
                 st.caption(f"🗒️ {habit_doc['description']}")
 
             habit_df = df[df["habit"] == habit_name]
-            # Get full date range between first and last vote
-            full_range = pd.date_range(start=habit_df["date"].min(), end=habit_df["date"].max())
-            # Group by date and filter out 0s entirely
             daily_counts = habit_df.groupby("date").size()
-            daily_counts = daily_counts[daily_counts > 0]  # ✅ Only >0 entries passed to calplot
-            daily_counts.index.name = "date"  # required by calplot
-
-
-
-            # ✅ Avoid zero display by ensuring only non-zero days are passed
+            daily_counts = daily_counts[daily_counts > 0]  # filter 0s
+            daily_counts.index.name = "date"
+            
+            # Confirm no zeroes
+            st.write("Daily counts being plotted:", daily_counts.unique())  # Debug
+            
             try:
                 fig, ax = calplot.calplot(
                     daily_counts,
@@ -125,10 +122,10 @@ if selected_user:
                     linewidth=0.1,
                     yearlabel_kws={"color": "black", "fontsize": 9}
                 )
-
+            
                 for a in ax.flat:
                     for txt in a.texts:
-                        txt.set_alpha(0.0)  # or 0.0 for fully transparent
+                        txt.set_alpha(0.4)        # Make labels semi-transparent
                         txt.set_fontsize(8)
             
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
