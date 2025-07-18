@@ -103,8 +103,10 @@ if selected_user:
                 st.caption(f"🗒️ {habit_doc['description']}")
 
             habit_df = df[df["habit"] == habit_name]
-            daily_counts = habit_df.groupby("date").size()
-            daily_counts = daily_counts[daily_counts > 0]  # ✅ Keep only non-zero entries
+            # Get full date range between first and last vote
+            full_range = pd.date_range(start=habit_df["date"].min(), end=habit_df["date"].max())
+            daily_counts = habit_df.groupby("date").size().reindex(full_range, fill_value=0)
+            daily_counts.index.name = "date"  # calplot requires index name
            
             # ✅ Avoid zero display by ensuring only non-zero days are passed
             try:
