@@ -104,10 +104,8 @@ if selected_user:
 
             habit_df = df[df["habit"] == habit_name]
             daily_counts = habit_df.groupby("date").size()
-            
-            # ✅ calplot expects full date index → but we only pass actual counts > 0
-            daily_counts = daily_counts[daily_counts > 0]  # Filter out zeros
-            
+            daily_counts = daily_counts[daily_counts > 0]  # ✅ Keep only non-zero entries
+           
             # ✅ Avoid zero display by ensuring only non-zero days are passed
             try:
                 fig, ax = calplot.calplot(
@@ -127,7 +125,7 @@ if selected_user:
                         if txt.get_text() == '0':
                             txt.set_visible(False)  # ✅ HIDE zeros explicitly
                         else:
-                            txt.set_alpha(0.5)
+                            txt.set_alpha(0.0)
                             txt.set_fontsize(8)
             
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
