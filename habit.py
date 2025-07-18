@@ -108,21 +108,12 @@ if selected_user:
             daily_counts = habit_df.groupby("date").size().reindex(full_range, fill_value=0)
             daily_counts.index.name = "date"  # calplot requires index name
 
-            import numpy as np
-            from matplotlib.colors import ListedColormap
-            from matplotlib import cm
-            
-            orig_cmap = cm.get_cmap("YlGn", 256)
-            colors = orig_cmap(np.linspace(0, 1, 256))
-            colors[0] = [1, 1, 1, 1]  # RGBA for white (to represent 0 count as no color)
-            custom_cmap = ListedColormap(colors)
-
 
             # ✅ Avoid zero display by ensuring only non-zero days are passed
             try:
                 fig, ax = calplot.calplot(
                     daily_counts,
-                    cmap=custom_cmap,
+                    cmap="YlGn",
                     suptitle=f"{habit_name}",
                     colorbar=True,
                     textformat="{:.0f}",
