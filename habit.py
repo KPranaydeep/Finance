@@ -122,7 +122,7 @@ if selected_user:
             
                 for a in ax.flat:
                     for txt in a.texts:
-                        txt.set_alpha(0.4)        # Make labels semi-transparent
+                        txt.set_alpha(0.0)        # Make labels semi-transparent
                         txt.set_fontsize(8)
             
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
