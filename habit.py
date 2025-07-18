@@ -125,14 +125,11 @@ if selected_user:
                     linewidth=0.1,
                     yearlabel_kws={"color": "black", "fontsize": 9}
                 )
-            
+
                 for a in ax.flat:
                     for txt in a.texts:
-                        if txt.get_text() == '0':
-                            txt.set_visible(False)  # ✅ HIDE zeros explicitly
-                        else:
-                            txt.set_alpha(0.0)
-                            txt.set_fontsize(8)
+                        txt.set_alpha(0.0)  # or 0.0 for fully transparent
+                        txt.set_fontsize(8)
             
                 total_votes = habit_counts.loc[habit_counts["habit"] == habit_name, "votes"].values[0]
                 votes_left = max(0, 254 - total_votes)
