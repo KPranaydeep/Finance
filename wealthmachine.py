@@ -765,9 +765,9 @@ try:
     # Load CSV without header (Google Sheets export format)
     df_raw = pd.read_csv(csv_url, header=None)
 
-    # Slice rows 1 to 991 (i.e., A2 to A992), columns A to C (0:3)
-    df_reco = df_raw.iloc[1:992, 0:3]
-    df_reco.columns = ["Stock", "Buy Price Limit", "Sell Price Limit"]
+    # Slice rows 1 to 991 (i.e., A2 to A992), columns A to D (0:4)
+    df_reco = df_raw.iloc[1:992, 0:4]
+    df_reco.columns = ["Stock", "Buy Price Limit", "Sell Price Limit", "Recommendation"]
 
     # Clean and format
     df_reco.dropna(subset=["Stock"], inplace=True)
