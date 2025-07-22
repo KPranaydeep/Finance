@@ -146,7 +146,7 @@ if "df" in st.session_state:
     st.markdown("#### 🎯 Set Your Net Profit Goal")
     col1, col2 = st.columns(2)
     with col1:
-        goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=200000, step=10000)
+        goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=225000, step=1000)
     with col2:
         goal_deadline = st.date_input("Enter Deadline Date", value=month_end)
 
