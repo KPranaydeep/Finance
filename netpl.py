@@ -100,15 +100,19 @@ if "df" in st.session_state:
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
     daily_pnl[daily_pnl == 0] = np.nan
 
+    # --- Normalize daily_pnl values ---
+    normalized_pnl = (daily_pnl - daily_pnl.min()) / (daily_pnl.max() - daily_pnl.min())
+    
+    # --- Plot with calplot using normalized data ---
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         fig1, ax1 = calplot.calplot(
-            daily_pnl,
+            normalized_pnl,
             cmap='RdYlGn',
             suptitle='Realised P&L Calendar Heatmap',
             colorbar=True,
             linewidth=1,
             edgecolor='black',
-            how='minmax',
+            how='sum',  # keep sum; values are already normalized
             figsize=(16, 3)
         )
         st.pyplot(fig1)
