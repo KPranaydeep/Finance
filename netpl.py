@@ -119,7 +119,7 @@ if "df" in st.session_state:
         progress = df[df["Sell date"] <= pd.to_datetime(goal_deadline)]["Realised P&L"].sum()
 
         st.info(f"""
-        ✅ Realised P&L till **{goal_deadline.strftime('%d %b %Y')}**: {format_indian_currency(progress)}  
+        ✅ Realised P&L till **{goal_deadline.strftime("%a, %d %B %Y")}**: {format_indian_currency(progress)}  
         🎯 Goal: {format_indian_currency(goal_amount)}  
         📈 Progress: {progress / goal_amount * 100:.1f}%  
         📊 Predicted P&L by Deadline: {format_indian_currency(predicted_pnl)}
