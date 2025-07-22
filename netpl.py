@@ -151,20 +151,15 @@ if "df" in st.session_state:
         remaining = predicted_pnl - progress
         
         st.info(f"""
-        ✅ Realised P&L till **{goal_deadline.strftime("%a, %d %b %Y")}**  
-        {format_indian_currency(progress)}
+        ✅ Realised P&L till **{goal_deadline.strftime("%a, %d %b %Y")}**: {format_indian_currency(progress)}
         
-        🎯 Goal  
-        {format_indian_currency(goal_amount)}
+        🎯 Goal: {format_indian_currency(goal_amount)}
         
-        📈 Progress  
-        {progress / goal_amount * 100:.1f}%
+        📈 Progress: {progress / goal_amount * 100:.1f}%
         
-        📊 Predicted P&L by Deadline  
-        {format_indian_currency(predicted_pnl)}
+        📊 Predicted P&L by Deadline: {format_indian_currency(predicted_pnl)}
         
-        🧭 Expected Earnings from Now till Deadline  
-        {format_indian_currency(remaining)}
+        🧭 Expected Earnings from Now till Deadline: {format_indian_currency(remaining)}
         """)
 
         if model.coef_[0] != 0:
