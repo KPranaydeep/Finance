@@ -146,7 +146,7 @@ if "df" in st.session_state:
             goal_achieve_date is not None and
             df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline)
         ):
-            formatted_goal_date = pd.to_datetime(goal_achieve_date).strftime("%A, %d %B %Y")
+            formatted_goal_date = pd.to_datetime(goal_achieve_date).strftime("%a, %d %B %Y")
             ax3.axvline(goal_achieve_date, color='black', linestyle='--', label=f"Goal Hit: {formatted_goal_date}")
             ax3.scatter(goal_achieve_date, goal_amount, color='black', s=80)
 
