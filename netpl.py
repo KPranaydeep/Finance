@@ -21,11 +21,11 @@ def format_indian_currency(value):
     try:
         value = float(value)
         if value >= 1e7:
-            return f"₹{value / 1e7:.2f} Cr"
+            return f"₹{value / 1e7:.1f} Cr"
         elif value >= 1e5:
-            return f"₹{value / 1e5:.2f} Lakhs"
+            return f"₹{value / 1e5:.1f} Lakhs"
         elif value >= 1e3:
-            return f"₹{value / 1e3:.2f} K"
+            return f"₹{value / 1e3:.1f} K"
         else:
             return f"₹{value:,.0f}"
     except:
