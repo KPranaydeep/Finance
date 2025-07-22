@@ -51,28 +51,39 @@ with st.expander("📁 Upload Excel File", expanded=False):
     uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
 
     if uploaded_file is not None:
-        try:
-            xls = pd.ExcelFile(uploaded_file)
-            df = xls.parse("Trade Level", skiprows=30)
-            df.columns = [
-                "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
-                "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
-            ]
-            df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
-            df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
-            df = df.dropna(subset=["Sell date", "Realised P&L"])
-            df = df.sort_values("Sell date")
-            df["Cumulative P&L"] = df["Realised P&L"].cumsum()
+        if "uploaded_data" not in st.session_state:
+            try:
+                # Read file contents and store buffer
+                file_content = uploaded_file.read()
+                st.session_state["uploaded_data"] = file_content  # Save raw bytes
+                st.session_state["file_name"] = uploaded_file.name
+                st.rerun()  # Trigger rerun to use cached data
+            except Exception as e:
+                st.error(f"❌ Failed to read file: {e}")
+        else:
+            st.success(f"✅ {st.session_state['file_name']} already loaded.")
 
-            # Save only on fresh upload
-            st.session_state["df"] = df
-            st.success("✅ File uploaded and saved in session!")
+# --- 📦 Load DataFrame from cached bytes ---
+if "uploaded_data" in st.session_state:
+    try:
+        from io import BytesIO
+        xls = pd.ExcelFile(BytesIO(st.session_state["uploaded_data"]))
+        df = xls.parse("Trade Level", skiprows=30)
+        df.columns = [
+            "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
+            "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
+        ]
+        df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
+        df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
+        df = df.dropna(subset=["Sell date", "Realised P&L"])
+        df = df.sort_values("Sell date")
+        df["Cumulative P&L"] = df["Realised P&L"].cumsum()
 
-        except Exception as e:
-            st.error(f"❌ Failed to process file: {e}")
+        st.session_state["df"] = df  # Save DataFrame
+    except Exception as e:
+        st.error(f"❌ Error loading data from cached file: {e}")
 
 # --- 📊 Main Visualisation Block ---
-# Use stored dataframe if available
 if "df" in st.session_state:
     df = st.session_state["df"]
 
