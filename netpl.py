@@ -46,10 +46,11 @@ def get_regression_prediction(df, deadline):
 st.set_page_config(layout="centered", page_title="📈 P&L Tracker")
 st.title("📈 Stock P&L Tracker & Projection")
 
-# --- 📁 File Upload ---
+# --- 📁 File Upload Section ---
 with st.expander("📁 Upload Excel File", expanded=False):
     uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
-    if uploaded_file:
+
+    if uploaded_file is not None:
         try:
             xls = pd.ExcelFile(uploaded_file)
             df = xls.parse("Trade Level", skiprows=30)
@@ -62,22 +63,24 @@ with st.expander("📁 Upload Excel File", expanded=False):
             df = df.dropna(subset=["Sell date", "Realised P&L"])
             df = df.sort_values("Sell date")
             df["Cumulative P&L"] = df["Realised P&L"].cumsum()
-            st.success("✅ File uploaded and processed successfully!")
 
-            st.session_state["df"] = df  # Store for downstream use
+            # Save only on fresh upload
+            st.session_state["df"] = df
+            st.success("✅ File uploaded and saved in session!")
 
         except Exception as e:
-            st.error(f"❌ Error reading file: {e}")
+            st.error(f"❌ Failed to process file: {e}")
 
 # --- 📊 Main Visualisation Block ---
+# Use stored dataframe if available
 if "df" in st.session_state:
     df = st.session_state["df"]
 
-    # --- 📅 Daily Aggregation ---
+    # 🗓️ Daily aggregation
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
     daily_pnl[daily_pnl == 0] = np.nan
 
-    # --- 📅 Calendar Heatmap ---
+    # Show Calendar Heatmap
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         fig1, ax1 = calplot.calplot(
             daily_pnl,
@@ -153,3 +156,5 @@ if "df" in st.session_state:
         ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
         fig3.autofmt_xdate()
         st.pyplot(fig3)
+else:
+    st.info("📂 Please upload your Stocks_PnL_Report.xlsx file to begin.")
