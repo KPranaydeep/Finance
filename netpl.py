@@ -8,6 +8,7 @@ import calplot
 import matplotlib as mpl
 import warnings
 import logging
+from io import BytesIO
 
 # --- 🧽 Suppress font warnings ---
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
@@ -48,48 +49,46 @@ st.title("📈 Stock P&L Tracker & Projection")
 
 # --- 📁 File Upload Section ---
 @st.cache_data
+def load_excel_data(file_bytes):
+    xls = pd.ExcelFile(BytesIO(file_bytes))
+    df = xls.parse("Trade Level", skiprows=30)
+    df.columns = [
+        "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
+        "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
+    ]
+    df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
+    df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
+    df = df.dropna(subset=["Sell date", "Realised P&L"])
+    df = df.sort_values("Sell date")
+    df["Cumulative P&L"] = df["Realised P&L"].cumsum()
+    return df
+
+# Upload File
 with st.expander("📁 Upload Excel File", expanded=False):
     uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
-
-    if uploaded_file is not None and "uploaded_data" not in st.session_state:
-        try:
-            file_content = uploaded_file.read()
-            st.session_state["uploaded_data"] = file_content
-            st.session_state["file_name"] = uploaded_file.name
-            st.rerun()  # Refresh to load from session
-        except Exception as e:
-            st.error(f"❌ Failed to read file: {e}")
+    if uploaded_file and "uploaded_data" not in st.session_state:
+        file_content = uploaded_file.read()
+        st.session_state["uploaded_data"] = file_content
+        st.session_state["file_name"] = uploaded_file.name
+        st.rerun()
     elif "uploaded_data" in st.session_state:
         st.success(f"✅ {st.session_state['file_name']} already loaded.")
 
-# --- 📦 Load DataFrame from cached bytes ---
-if "uploaded_data" in st.session_state and "df" not in st.session_state:
-    try:
-        from io import BytesIO
-        xls = pd.ExcelFile(BytesIO(st.session_state["uploaded_data"]))
-        df = xls.parse("Trade Level", skiprows=30)
-        df.columns = [
-            "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
-            "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
-        ]
-        df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
-        df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
-        df = df.dropna(subset=["Sell date", "Realised P&L"])
-        df = df.sort_values("Sell date")
-        df["Cumulative P&L"] = df["Realised P&L"].cumsum()
-        st.session_state["df"] = df
-    except Exception as e:
-        st.error(f"❌ Error loading data from cached file: {e}")
+# Load DataFrame
+if "uploaded_data" in st.session_state:
+    if "df" not in st.session_state:
+        try:
+            st.session_state["df"] = load_excel_data(st.session_state["uploaded_data"])
+        except Exception as e:
+            st.error(f"❌ Failed to parse Excel file: {e}")
 
-# --- 📊 Main Visualisation Block ---
 if "df" in st.session_state:
     df = st.session_state["df"]
 
-    # 🗓️ Daily aggregation
+    # --- 🗓️ Daily aggregation ---
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
     daily_pnl[daily_pnl == 0] = np.nan
 
-    # Show Calendar Heatmap
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         fig1, ax1 = calplot.calplot(
             daily_pnl,
@@ -103,7 +102,6 @@ if "df" in st.session_state:
         )
         st.pyplot(fig1)
 
-    # --- 📈 Cumulative P&L ---
     with st.expander("📈 Cumulative Realised P&L Over Time", expanded=True):
         date_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max())
         daily_cumsum = daily_pnl.reindex(date_range, fill_value=0).cumsum()
@@ -115,7 +113,7 @@ if "df" in st.session_state:
         ax2.grid(True)
         st.pyplot(fig2)
 
-    # --- 🎯 Goal Inputs ---
+    # --- 🎯 Goal Tracking ---
     st.subheader("🎯 Set Your Realised P&L Goal")
     col1, col2 = st.columns(2)
     with col1:
@@ -134,29 +132,24 @@ if "df" in st.session_state:
         📊 Predicted P&L by Deadline: {format_indian_currency(predicted_pnl)}
         """)
 
-        # --- ⏱ Goal Achievement Estimation ---
         if model.coef_[0] != 0:
             days_to_goal_achieve = (goal_amount - model.intercept_) / model.coef_[0]
             goal_achieve_date = df["Sell date"].min() + pd.Timedelta(days=int(days_to_goal_achieve))
         else:
             goal_achieve_date = None
 
-        # --- 📉 Cumulative P&L vs Goal Plot ---
         fig3, ax3 = plt.subplots(figsize=(14, 6))
         ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
         ax3.axhline(progress, color='blue', linestyle='--', label=f"Progress {format_indian_currency(progress)}")
         ax3.axhline(goal_amount, color='green', linestyle='--', label=f"Goal {format_indian_currency(goal_amount)}")
-        formatted_deadline = pd.to_datetime(goal_deadline).strftime("%a, %d %b %Y")
-        ax3.axvline(pd.to_datetime(goal_deadline), color='red', linestyle='--', label=f"Deadline: {formatted_deadline}")
+        deadline_label = pd.to_datetime(goal_deadline).strftime("%a, %d %b %Y")
+        ax3.axvline(pd.to_datetime(goal_deadline), color='red', linestyle='--', label=f"Deadline: {deadline_label}")
         ax3.scatter(pd.to_datetime(goal_deadline), predicted_pnl, color='orange', s=100, label="Predicted P&L")
         ax3.plot(future_dates, future_y, color='gray', linestyle=':', label="Linear Projection")
 
-        if (
-            goal_achieve_date is not None and
-            df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline)
-        ):
-            formatted_goal_date = pd.to_datetime(goal_achieve_date).strftime("%a, %d %b %Y")
-            ax3.axvline(goal_achieve_date, color='black', linestyle='--', label=f"Goal Hit: {formatted_goal_date}")
+        if goal_achieve_date and df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline):
+            goal_label = goal_achieve_date.strftime("%a, %d %b %Y")
+            ax3.axvline(goal_achieve_date, color='black', linestyle='--', label=f"Goal Hit: {goal_label}")
             ax3.scatter(goal_achieve_date, goal_amount, color='black', s=80)
 
         ax3.set_title("Cumulative Realised P&L vs Goal")
