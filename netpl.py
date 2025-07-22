@@ -47,6 +47,8 @@ def get_regression_prediction(df, deadline):
 # --- 🧭 App Configuration ---
 st.set_page_config(layout="centered", page_title="📈 P&L Tracker")
 st.subheader("📈 Stock P&L Tracker & Projection")
+st.markdown("### 📈 Stock P&L Tracker & Projection")  # Smaller than subheader
+
 
 # --- 📁 File Handling for Cross-Device ---
 STORAGE_FILENAME = "stored_pnl_data.xlsx"
