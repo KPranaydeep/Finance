@@ -138,7 +138,7 @@ if "df" in st.session_state:
         st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
-    st.markdown("#### 🎯 Set Your Realised P&L Goal")
+    st.markdown("#### 🎯 Set Your Net Profit Goal")
     col1, col2 = st.columns(2)
     with col1:
         goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=200000, step=10000)
