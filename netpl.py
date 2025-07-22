@@ -137,7 +137,7 @@ if "df" in st.session_state:
         ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
         ax3.axhline(progress, color='blue', linestyle='--', label=f"Progress {format_indian_currency(progress)}")
         ax3.axhline(goal_amount, color='green', linestyle='--', label=f"Goal {format_indian_currency(goal_amount)}")
-        formatted_deadline = pd.to_datetime(goal_deadline).strftime("%A, %d %B %Y")
+        formatted_deadline = pd.to_datetime(goal_deadline).strftime("%a, %d %B %Y")
         ax3.axvline(pd.to_datetime(goal_deadline), color='red', linestyle='--', label=f"Deadline: {formatted_deadline}")
         ax3.scatter(pd.to_datetime(goal_deadline), predicted_pnl, color='orange', s=100, label="Predicted P&L")
         ax3.plot(future_dates, future_y, color='gray', linestyle=':', label="Linear Projection")
@@ -146,7 +146,8 @@ if "df" in st.session_state:
             goal_achieve_date is not None and
             df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline)
         ):
-            ax3.axvline(goal_achieve_date, color='black', linestyle='--', label=f"Goal Hit: {goal_achieve_date.date()}")
+            formatted_goal_date = pd.to_datetime(goal_achieve_date).strftime("%A, %d %B %Y")
+            ax3.axvline(goal_achieve_date, color='black', linestyle='--', label=f"Goal Hit: {formatted_goal_date}")
             ax3.scatter(goal_achieve_date, goal_amount, color='black', s=80)
 
         ax3.set_title("Cumulative Realised P&L vs Goal")
