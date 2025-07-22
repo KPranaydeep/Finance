@@ -47,6 +47,7 @@ st.set_page_config(layout="centered", page_title="📈 P&L Tracker")
 st.title("📈 Stock P&L Tracker & Projection")
 
 # --- 📁 File Upload Section ---
+@st.cache_data
 with st.expander("📁 Upload Excel File", expanded=False):
     uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
 
