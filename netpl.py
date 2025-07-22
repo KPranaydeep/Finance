@@ -108,7 +108,7 @@ if "df" in st.session_state:
             colorbar=True,
             linewidth=1,
             edgecolor='black',
-            how='sum',
+            how='minmax',
             figsize=(16, 3)
         )
         st.pyplot(fig1)
