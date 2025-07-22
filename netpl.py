@@ -24,6 +24,8 @@ def format_indian_currency(value):
             return f"₹{value / 1e7:.2f} Cr"
         elif value >= 1e5:
             return f"₹{value / 1e5:.2f} Lakhs"
+        elif value >= 1e3:
+            return f"₹{value / 1e3:.2f} K"
         else:
             return f"₹{value:,.0f}"
     except:
