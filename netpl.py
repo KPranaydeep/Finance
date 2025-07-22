@@ -46,7 +46,6 @@ def get_regression_prediction(df, deadline):
 
 # --- 🧭 App Configuration ---
 st.set_page_config(layout="centered", page_title="📈 P&L Tracker")
-st.subheader("📈 Stock P&L Tracker & Projection")
 st.markdown("#### 📈 Stock P&L Tracker & Projection")  # Smaller than subheader
 
 
@@ -139,7 +138,7 @@ if "df" in st.session_state:
         st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
-    st.subheader("🎯 Set Your Realised P&L Goal")
+    st.markdown("#### 🎯 Set Your Realised P&L Goal")
     col1, col2 = st.columns(2)
     with col1:
         goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=200000, step=10000)
