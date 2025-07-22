@@ -43,7 +43,7 @@ def get_regression_prediction(df, deadline):
     return predicted_value, future_dates, future_y, model
 
 # --- 🧭 App Configuration ---
-st.set_page_config(layout="wide", page_title="📈 P&L Tracker")
+st.set_page_config(layout="centered", page_title="📈 P&L Tracker")
 st.title("📈 Stock P&L Tracker & Projection")
 
 # --- 📁 File Upload ---
