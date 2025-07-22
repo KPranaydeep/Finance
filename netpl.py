@@ -107,7 +107,7 @@ if "df" in st.session_state:
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         fig1, ax1 = calplot.calplot(
             normalized_pnl,
-            cmap='RdYlGn',
+            cmap='seagreen',
             suptitle='Realised P&L Calendar Heatmap',
             colorbar=True,
             linewidth=1,
