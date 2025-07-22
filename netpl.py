@@ -100,19 +100,27 @@ if "df" in st.session_state:
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
     daily_pnl[daily_pnl == 0] = np.nan
 
-    # --- Normalize daily_pnl values ---
-    normalized_pnl = (daily_pnl - daily_pnl.min()) / (daily_pnl.max() - daily_pnl.min())
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LinearSegmentedColormap
     
-    # --- Plot with calplot using normalized data ---
+    # Normalize daily_pnl between -1 and 1 (preserving sign)
+    normalized_pnl = daily_pnl.copy()
+    max_abs = max(abs(daily_pnl.min()), daily_pnl.max())
+    normalized_pnl = daily_pnl / max_abs
+    
+    # Custom red-to-green colormap (no yellow)
+    cmap = LinearSegmentedColormap.from_list("RedGreen", ["red", "white", "green"], N=256)
+    
+    # Plot
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         fig1, ax1 = calplot.calplot(
             normalized_pnl,
-            cmap='seagreen',
-            suptitle='Realised P&L Calendar Heatmap',
+            cmap=cmap,
+            suptitle='📊 Daily Realised P&L (Normalized)',
             colorbar=True,
             linewidth=1,
             edgecolor='black',
-            how='sum',  # keep sum; values are already normalized
+            how='sum',
             figsize=(16, 3)
         )
         st.pyplot(fig1)
