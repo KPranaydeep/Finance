@@ -48,7 +48,7 @@ def get_regression_prediction(df, deadline):
 # --- 📊 Main App ---
 st.set_page_config(layout="wide", page_title="📈 P&L Tracker")
 
-st.title("📈 Stock Realised P&L Tracker + Goal Projection")
+st.title("📈 Stock P&L Tracker & Projection")
 
 # --- 📁 File Upload ---
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
