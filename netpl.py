@@ -138,12 +138,17 @@ if "df" in st.session_state:
         st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
+    from datetime import datetime
+    
+    # Get current month's last date
+    today = pd.to_datetime("today")
+    month_end = today.replace(day=1) + pd.offsets.MonthEnd(1)
     st.markdown("#### 🎯 Set Your Net Profit Goal")
     col1, col2 = st.columns(2)
     with col1:
         goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=200000, step=10000)
     with col2:
-        goal_deadline = st.date_input("Enter Deadline Date", value=pd.to_datetime("2025-12-31"))
+        goal_deadline = st.date_input("Enter Deadline Date", value=month_end)
 
     if goal_amount and goal_deadline:
         predicted_pnl, future_dates, future_y, model = get_regression_prediction(df, pd.to_datetime(goal_deadline))
