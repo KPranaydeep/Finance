@@ -64,24 +64,17 @@ with st.expander("📁 Upload Excel File", expanded=False):
             st.success(f"✅ {st.session_state['file_name']} already loaded.")
 
 # --- 📦 Load DataFrame from cached bytes ---
-if "uploaded_data" in st.session_state:
+if uploaded_file is not None and "uploaded_data" not in st.session_state:
     try:
-        from io import BytesIO
-        xls = pd.ExcelFile(BytesIO(st.session_state["uploaded_data"]))
-        df = xls.parse("Trade Level", skiprows=30)
-        df.columns = [
-            "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
-            "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
-        ]
-        df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
-        df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
-        df = df.dropna(subset=["Sell date", "Realised P&L"])
-        df = df.sort_values("Sell date")
-        df["Cumulative P&L"] = df["Realised P&L"].cumsum()
-
-        st.session_state["df"] = df  # Save DataFrame
+        # Read and store bytes once
+        file_content = uploaded_file.read()
+        st.session_state["uploaded_data"] = file_content
+        st.session_state["file_name"] = uploaded_file.name
+        st.rerun()
     except Exception as e:
-        st.error(f"❌ Error loading data from cached file: {e}")
+        st.error(f"❌ Failed to read file: {e}")
+elif "uploaded_data" in st.session_state:
+    st.success(f"✅ {st.session_state['file_name']} already loaded.")
 
 # --- 📊 Main Visualisation Block ---
 if "df" in st.session_state:
