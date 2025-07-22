@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,7 +8,6 @@ import calplot
 import matplotlib as mpl
 import warnings
 import logging
-from io import BytesIO
 
 # --- 🧽 Suppress font warnings ---
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
@@ -45,9 +42,8 @@ def get_regression_prediction(df, deadline):
 
     return predicted_value, future_dates, future_y, model
 
-# --- 📊 Main App ---
+# --- 🧭 App Configuration ---
 st.set_page_config(layout="wide", page_title="📈 P&L Tracker")
-
 st.title("📈 Stock P&L Tracker & Projection")
 
 # --- 📁 File Upload ---
@@ -68,26 +64,16 @@ with st.expander("📁 Upload Excel File", expanded=False):
             df["Cumulative P&L"] = df["Realised P&L"].cumsum()
             st.success("✅ File uploaded and processed successfully!")
 
-            # Store in session state for rest of app
-            st.session_state["df"] = df
+            st.session_state["df"] = df  # Store for downstream use
 
         except Exception as e:
-            st.error(f"❌ Error: {e}")
-# Continue only if df is available
+            st.error(f"❌ Error reading file: {e}")
+
+# --- 📊 Main Visualisation Block ---
 if "df" in st.session_state:
     df = st.session_state["df"]
-    # Rename and clean columns
-    df.columns = [
-        "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
-        "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
-    ]
-    df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
-    df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
-    df = df.dropna(subset=["Sell date", "Realised P&L"])
-    df = df.sort_values("Sell date")
-    df["Cumulative P&L"] = df["Realised P&L"].cumsum()
 
-    # Daily aggregation
+    # --- 📅 Daily Aggregation ---
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
     daily_pnl[daily_pnl == 0] = np.nan
 
@@ -126,7 +112,6 @@ if "df" in st.session_state:
         goal_deadline = st.date_input("Enter Deadline Date", value=pd.to_datetime("2025-12-31"))
 
     if goal_amount and goal_deadline:
-        # Run regression
         predicted_pnl, future_dates, future_y, model = get_regression_prediction(df, pd.to_datetime(goal_deadline))
         progress = df[df["Sell date"] <= pd.to_datetime(goal_deadline)]["Realised P&L"].sum()
 
@@ -137,14 +122,14 @@ if "df" in st.session_state:
         📊 Predicted P&L by Deadline: {format_indian_currency(predicted_pnl)}
         """)
 
-        # Estimate goal achievement date
+        # --- ⏱ Goal Achievement Estimation ---
         if model.coef_[0] != 0:
             days_to_goal_achieve = (goal_amount - model.intercept_) / model.coef_[0]
             goal_achieve_date = df["Sell date"].min() + pd.Timedelta(days=int(days_to_goal_achieve))
         else:
             goal_achieve_date = None
 
-        # --- 📈 Plot P&L vs Goal ---
+        # --- 📉 Cumulative P&L vs Goal Plot ---
         fig3, ax3 = plt.subplots(figsize=(14, 6))
         ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
         ax3.axhline(progress, color='blue', linestyle='--', label=f"Progress {format_indian_currency(progress)}")
