@@ -51,15 +51,31 @@ st.set_page_config(layout="wide", page_title="📈 P&L Tracker")
 st.title("📈 Stock P&L Tracker & Projection")
 
 # --- 📁 File Upload ---
-uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-if uploaded_file:
-    xls = pd.ExcelFile(uploaded_file)
-    try:
-        df = xls.parse("Trade Level", skiprows=30)
-    except:
-        st.error("❌ Could not parse sheet named 'Trade Level' with skiprows=30.")
-        st.stop()
+with st.expander("📁 Upload Excel File", expanded=False):
+    uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
+    if uploaded_file:
+        try:
+            xls = pd.ExcelFile(uploaded_file)
+            df = xls.parse("Trade Level", skiprows=30)
+            df.columns = [
+                "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
+                "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
+            ]
+            df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors='coerce')
+            df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors='coerce')
+            df = df.dropna(subset=["Sell date", "Realised P&L"])
+            df = df.sort_values("Sell date")
+            df["Cumulative P&L"] = df["Realised P&L"].cumsum()
+            st.success("✅ File uploaded and processed successfully!")
 
+            # Store in session state for rest of app
+            st.session_state["df"] = df
+
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+# Continue only if df is available
+if "df" in st.session_state:
+    df = st.session_state["df"]
     # Rename and clean columns
     df.columns = [
         "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
