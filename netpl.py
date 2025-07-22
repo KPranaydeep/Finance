@@ -116,12 +116,12 @@ if "df" in st.session_state:
         fig1, ax1 = calplot.calplot(
             normalized_pnl,
             cmap=cmap,
-            suptitle='📊 Daily Realised P&L (Normalized)',
+            suptitle='Daily Realised P&L (Normalized)',
             colorbar=True,
             linewidth=1,
             edgecolor='black',
             how='sum',
-            figsize=(16, 3)
+            figsize=(16, 2)
         )
         st.pyplot(fig1)
 
