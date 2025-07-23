@@ -141,6 +141,7 @@ if "df" in st.session_state:
         ax2.set_title("Cumulative Realised P&L Over Time")
         ax2.set_ylabel("₹")
         ax2.grid(True)
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
         st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
