@@ -200,7 +200,7 @@ if "df" in st.session_state:
         ax3.grid(True, linestyle='--', alpha=0.3)
         ax3.legend()
         ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
-        fig3.autofmt_xdate()
+        # fig3.autofmt_xdate()
         st.pyplot(fig3)
 
          # 💬 Caption if goal is unreachable
