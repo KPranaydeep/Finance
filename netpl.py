@@ -201,5 +201,9 @@ if "df" in st.session_state:
         ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
         fig3.autofmt_xdate()
         st.pyplot(fig3)
+
+         # 💬 Caption if goal is unreachable
+        if goal_achieve_date is None or goal_achieve_date > pd.to_datetime(goal_deadline):
+            st.caption("💡 *Be patient and consistent — you might hit your profit goal next month!* 💪")
 else:
     st.info("📂 Please upload your Stocks_PnL_Report.xlsx file to begin.")
