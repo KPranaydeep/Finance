@@ -78,13 +78,17 @@ if os.path.exists(STORAGE_FILENAME) and "uploaded_data" not in st.session_state:
 # Upload File
 with st.expander("📁 Upload Excel File", expanded=False):
     uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
-    if uploaded_file and "uploaded_data" not in st.session_state:
+    if uploaded_file:
         file_content = uploaded_file.read()
         st.session_state["uploaded_data"] = file_content
         st.session_state["file_name"] = uploaded_file.name
         with open(STORAGE_FILENAME, "wb") as f:
             f.write(file_content)
-        st.rerun()
+        try:
+            st.session_state["df"] = load_excel_data(file_content)
+            st.success(f"✅ File '{uploaded_file.name}' successfully loaded and data updated.")
+        except Exception as e:
+            st.error(f"❌ Failed to parse uploaded file: {e}")
     elif "uploaded_data" in st.session_state:
         st.success(f"✅ {st.session_state['file_name']} already loaded.")
 
