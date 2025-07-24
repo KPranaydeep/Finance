@@ -1017,18 +1017,18 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
             
 # 📅 Calculate dates
 today = datetime.today().date()
-exit_date = today + timedelta(days=36)
+exit_date = today + timedelta(days=30)
 
 # 📌 Display holding rule
 st.markdown(f"""
 ### 📌 Sell or Hold Strategy
 
-- ✅ **Hold for 36 days** from today (**{today.strftime('%b %d, %Y')}**)  
+- ✅ **Hold for 30 days** from today (**{today.strftime('%b %d, %Y')}**)  
   ➤ Target exit on **{exit_date.strftime('%b %d, %Y')}**
 
 - 📉 **If in loss after 36 days**, continue to **hold until breakeven**
 
-- 💰 **Sell anytime** before or after if **net profit ≥ 7%** using brokerage-inclusive estimates:
+- 💰 **Sell anytime** before or after if **net profit ≥ 9%** using brokerage-inclusive estimates:
   - [Groww Brokerage Calculator](https://groww.in/calculators/brokerage-calculator)
   - [Zerodha Brokerage Calculator](https://zerodha.com/brokerage-calculator/#tab-equities)
 
