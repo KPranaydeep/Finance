@@ -767,12 +767,12 @@ try:
 
     # Slice rows 1 to 991 (i.e., A2 to A992), columns A to D (0:4)
     df_reco = df_raw.iloc[1:992, 0:4]
-    df_reco.columns = ["Stock", "Buy Price Limit", "Sell Price Limit", "Recommendation"]
+    df_reco.columns = ["Stock", "Buy", "Sell", "Recommendation"]
 
     # Clean and format
     df_reco.dropna(subset=["Stock"], inplace=True)
     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
-    df_reco["Buy Price Limit"] = df_reco["Buy Price Limit"].astype(str).str.strip()
+    df_reco["Buy"] = df_reco["Buy"].astype(str).str.strip()
     df_reco = df_reco[df_reco["Stock"] != ""]
     df_reco.reset_index(drop=True, inplace=True)
 
@@ -789,7 +789,7 @@ try:
         st.dataframe(styled_df, use_container_width=True)
 
     else:
-        st.warning("⚠️ No valid stock entries found between rows A2 to B992.")
+        st.warning("⚠️ No valid stock entries found between rows A2 to D992.")
 
 except Exception as e:
     st.error("❌ Failed to load Google Sheet data.")
