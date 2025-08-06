@@ -1015,21 +1015,30 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
             st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
             st.markdown("💼 Stay defensive: shift to cash, T-Bills, or liquid funds.")
             
+import streamlit as st
+from datetime import datetime, timedelta
+
+# 🎯 Input your target profit %
+target_profit_percent = 7.2
+
+# 📆 Auto-calculate holding period
+holding_days = round((target_profit_percent * 7) / 5 / 0.278)
+
 # 📅 Calculate dates
 today = datetime.today().date()
-exit_date = today + timedelta(days=30)
+exit_date = today + timedelta(days=holding_days)
 
 # 📌 Display holding rule
 st.markdown(f"""
 ### 📌 Sell or Hold Strategy
 
-- ✅ **Hold for 30 days** from today (**{today.strftime('%b %d, %Y')}**)  
+- ✅ **Hold for {holding_days} days** from today (**{today.strftime('%b %d, %Y')}**)  
   ➤ Target exit on **{exit_date.strftime('%b %d, %Y')}**
 
-- 📉 **If in loss after 36 days**, continue to **hold until breakeven**
+- 📉 **If in loss after {holding_days} days**, continue to **hold until breakeven**
 
-- 💰 **Sell anytime** before or after if **net profit ≥ 9%** using brokerage-inclusive estimates:
+- 💰 **Sell anytime** after if **net profit ≥ {target_profit_percent}%** using brokerage-inclusive estimates:
   - [Groww Brokerage Calculator](https://groww.in/calculators/brokerage-calculator)
   - [Zerodha Brokerage Calculator](https://zerodha.com/brokerage-calculator/#tab-equities)
-
 """)
+
