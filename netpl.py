@@ -221,7 +221,13 @@ if "df" in st.session_state:
                 linestyle="--",
                 label=f"Deadline: {deadline_label}"
             )
-            ax3.scatter(pd.to_datetime(goal_deadline), predicted_pnl, s=100, label="Predicted P&L")
+            ax3.scatter(
+                pd.to_datetime(goal_deadline),
+                predicted_pnl,
+                color="green",   # ✅ change from 'orange' to 'green'
+                s=100,
+                label="Predicted P&L"
+            )
             ax3.plot(future_dates, future_y, linestyle=':', label="Linear Projection")
     
             if goal_achieve_date is not None and df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline):
