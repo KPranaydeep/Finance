@@ -50,7 +50,6 @@ def get_regression_prediction(df, deadline):
 st.set_page_config(layout="wide", page_title="📈 P&L Tracker")
 st.markdown("#### 📈 Stock P&L Tracker & Projection")  # Smaller than subheader
 
-
 # --- 📁 File Handling for Cross-Device ---
 STORAGE_FILENAME = "stored_pnl_data.xlsx"
 
@@ -150,10 +149,22 @@ if "df" in st.session_state:
     # Get current month's last date
     today = pd.to_datetime("today")
     month_end = today.replace(day=1) + pd.offsets.MonthEnd(1)
+    start_goal = 100
+    start_date = pd.Timestamp(year=today.year if today.month >= 4 else today.year - 1, month=4, day=1)
+
+    # Days between start_date and today
+    days_diff = (today - start_date).days
+    
+    # Compounding factor (1% daily growth in this example)
+    compounding_factor = 1.01 ** days_diff
+    
+    # Current goal
+    current_goal = start_goal * compounding_factor
+
     st.markdown("#### 🎯 Set Your Net Profit Goal")
     col1, col2 = st.columns(2)
     with col1:
-        goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=225000, step=1000)
+        goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=current_goal, step=1000)
     with col2:
         goal_deadline = st.date_input("Enter Deadline Date", value=month_end)
 
