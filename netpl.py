@@ -232,7 +232,12 @@ if "df" in st.session_state:
     
             if goal_achieve_date is not None and df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline):
                 goal_label = goal_achieve_date.strftime("%A, %d %B %Y")
-                ax3.axvline(goal_achieve_date, linestyle='--', label=f"Goal Hit: {goal_label}")
+                ax3.axvline(
+                    goal_achieve_date,
+                    color="black",     # ✅ explicitly black
+                    linestyle="--",
+                    label=f"Goal Hit: {goal_label}"
+                )
                 ax3.scatter(goal_achieve_date, goal_amount, s=80)
     
             ax3.set_title("Cumulative Realised P&L vs Goal")
