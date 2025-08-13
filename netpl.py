@@ -215,7 +215,12 @@ if "df" in st.session_state:
             ax3.axhline(progress, linestyle='--', label=f"Progress {format_indian_currency(progress)}")
             ax3.axhline(goal_amount, linestyle='--', label=f"Goal {format_indian_currency(goal_amount)}")
             deadline_label = pd.to_datetime(goal_deadline).strftime("%A, %d %B %Y")
-            ax3.axvline(pd.to_datetime(goal_deadline), linestyle='--', label=f"Deadline: {deadline_label}")
+            ax3.axvline(
+                pd.to_datetime(goal_deadline),
+                color="green",             # ✅ set to green
+                linestyle="--",
+                label=f"Deadline: {deadline_label}"
+            )
             ax3.scatter(pd.to_datetime(goal_deadline), predicted_pnl, s=100, label="Predicted P&L")
             ax3.plot(future_dates, future_y, linestyle=':', label="Linear Projection")
     
