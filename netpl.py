@@ -144,78 +144,93 @@ if "df" in st.session_state:
         st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
-    from datetime import datetime
+    from datetime import date
     
-    # Get current month's last date
-    today = pd.to_datetime("today")
-    month_end = today.replace(day=1) + pd.offsets.MonthEnd(1)
-    start_goal = 100
+    # Dates (normalize to midnight to avoid off-by-one)
+    today = pd.to_datetime("today").normalize()
+    month_end = (today.replace(day=1) + pd.offsets.MonthEnd(1)).date()  # st.date_input likes date objects
+    
+    start_goal = 100.0  # float for consistent types
     start_date = pd.Timestamp(year=today.year if today.month >= 4 else today.year - 1, month=4, day=1)
-
-    # Days between start_date and today
-    days_diff = (today - start_date).days
     
-    # Compounding factor (1% daily growth in this example)
+    # Days between start_date and today (clip at >=0 just in case)
+    days_diff = max((today - start_date).days, 0)
+    
+    # Compounding factor (1% daily growth)
     compounding_factor = 1.01 ** days_diff
     
-    # Current goal
-    current_goal = start_goal * compounding_factor
-
+    # Current goal (float)
+    current_goal = float(start_goal * compounding_factor)
+    
     st.markdown("#### 🎯 Set Your Net Profit Goal")
     col1, col2 = st.columns(2)
     with col1:
-        goal_amount = st.number_input("Enter Goal Amount (₹)", min_value=0, value=current_goal, step=1000)
+        # ✅ Make all numeric args floats; add a currency-like format
+        goal_amount = st.number_input(
+            "Enter Goal Amount (₹)",
+            min_value=0.0,
+            value=float(round(current_goal, 2)),
+            step=1000.0,
+            format="%.2f",
+        )
     with col2:
+        # Use a date object as default
         goal_deadline = st.date_input("Enter Deadline Date", value=month_end)
-
+    
     if goal_amount and goal_deadline:
-        predicted_pnl, future_dates, future_y, model = get_regression_prediction(df, pd.to_datetime(goal_deadline))
-        progress = df[df["Sell date"] <= pd.to_datetime(goal_deadline)]["Realised P&L"].sum()
-        remaining = predicted_pnl - progress
-        
-        st.info(f"""
-        ✅ Realised P&L till **{goal_deadline.strftime("%a, %d %b %Y")}**: {format_indian_currency(progress)}
-        
-        🎯 Goal: {format_indian_currency(goal_amount)}
-        
-        📈 Progress: {progress / goal_amount * 100:.1f}%
-        
-        📊 Predicted P&L by Deadline: {format_indian_currency(predicted_pnl)}
-        
-        🧭 Expected Earnings from Now till Deadline: {format_indian_currency(remaining)}
-        """)
-
-        if model.coef_[0] != 0:
-            days_to_goal_achieve = (goal_amount - model.intercept_) / model.coef_[0]
-            goal_achieve_date = df["Sell date"].min() + pd.Timedelta(days=int(days_to_goal_achieve))
+        # Need at least 2 points for regression; otherwise, skip projection safely
+        if len(df["Sell date"].unique()) < 2:
+            st.warning("Not enough data points to project P&L yet. Add more trades for a projection.")
+            progress = df[df["Sell date"] <= pd.to_datetime(goal_deadline)]["Realised P&L"].sum()
+            st.info(f"✅ Realised P&L till **{pd.to_datetime(goal_deadline).strftime('%a, %d %b %Y')}**: {format_indian_currency(progress)}")
         else:
-            goal_achieve_date = None
-
-        fig3, ax3 = plt.subplots(figsize=(14, 6))
-        ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
-        ax3.axhline(progress, color='blue', linestyle='--', label=f"Progress {format_indian_currency(progress)}")
-        ax3.axhline(goal_amount, color='green', linestyle='--', label=f"Goal {format_indian_currency(goal_amount)}")
-        deadline_label = pd.to_datetime(goal_deadline).strftime("%A, %d %B %Y")
-        ax3.axvline(pd.to_datetime(goal_deadline), color='red', linestyle='--', label=f"Deadline: {deadline_label}")
-        ax3.scatter(pd.to_datetime(goal_deadline), predicted_pnl, color='orange', s=100, label="Predicted P&L")
-        ax3.plot(future_dates, future_y, color='gray', linestyle=':', label="Linear Projection")
-
-        if goal_achieve_date and df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline):
-            goal_label = goal_achieve_date.strftime("%A, %d %B %Y")
-            ax3.axvline(goal_achieve_date, color='black', linestyle='--', label=f"Goal Hit: {goal_label}")
-            ax3.scatter(goal_achieve_date, goal_amount, color='black', s=80)
-
-        ax3.set_title("Cumulative Realised P&L vs Goal")
-        ax3.set_xlabel("Date")
-        ax3.set_ylabel("₹ P&L")
-        ax3.grid(True, linestyle='--', alpha=0.3)
-        ax3.legend()
-        ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
-        # fig3.autofmt_xdate()
-        st.pyplot(fig3)
-
-         # 💬 Caption if goal is unreachable
-        if goal_achieve_date is None or goal_achieve_date > pd.to_datetime(goal_deadline):
-            st.caption("💡 *Be patient and consistent — you might hit your profit goal next month!* 💪")
-else:
-    st.info("📂 Please upload your Stocks_PnL_Report.xlsx file to begin.")
+            predicted_pnl, future_dates, future_y, model = get_regression_prediction(df, pd.to_datetime(goal_deadline))
+            progress = df[df["Sell date"] <= pd.to_datetime(goal_deadline)]["Realised P&L"].sum()
+            remaining = predicted_pnl - progress
+    
+            # Avoid divide-by-zero when goal_amount == 0
+            progress_pct = (progress / goal_amount * 100.0) if goal_amount > 0 else 0.0
+    
+            st.info(f"""
+            ✅ Realised P&L till **{pd.to_datetime(goal_deadline).strftime("%a, %d %b %Y")}**: {format_indian_currency(progress)}
+            
+            🎯 Goal: {format_indian_currency(goal_amount)}
+            
+            📈 Progress: {progress_pct:.1f}%
+            
+            📊 Predicted P&L by Deadline: {format_indian_currency(predicted_pnl)}
+            
+            🧭 Expected Earnings from Now till Deadline: {format_indian_currency(remaining)}
+            """)
+    
+            # Compute date when model hits the goal (if slope != 0)
+            if model.coef_[0] != 0:
+                days_to_goal_achieve = (goal_amount - model.intercept_) / model.coef_[0]
+                goal_achieve_date = df["Sell date"].min() + pd.Timedelta(days=int(days_to_goal_achieve))
+            else:
+                goal_achieve_date = None
+    
+            fig3, ax3 = plt.subplots(figsize=(14, 6))
+            ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
+            ax3.axhline(progress, linestyle='--', label=f"Progress {format_indian_currency(progress)}")
+            ax3.axhline(goal_amount, linestyle='--', label=f"Goal {format_indian_currency(goal_amount)}")
+            deadline_label = pd.to_datetime(goal_deadline).strftime("%A, %d %B %Y")
+            ax3.axvline(pd.to_datetime(goal_deadline), linestyle='--', label=f"Deadline: {deadline_label}")
+            ax3.scatter(pd.to_datetime(goal_deadline), predicted_pnl, s=100, label="Predicted P&L")
+            ax3.plot(future_dates, future_y, linestyle=':', label="Linear Projection")
+    
+            if goal_achieve_date is not None and df["Sell date"].min() <= goal_achieve_date <= pd.to_datetime(goal_deadline):
+                goal_label = goal_achieve_date.strftime("%A, %d %B %Y")
+                ax3.axvline(goal_achieve_date, linestyle='--', label=f"Goal Hit: {goal_label}")
+                ax3.scatter(goal_achieve_date, goal_amount, s=80)
+    
+            ax3.set_title("Cumulative Realised P&L vs Goal")
+            ax3.set_xlabel("Date")
+            ax3.set_ylabel("₹ P&L")
+            ax3.grid(True, linestyle='--', alpha=0.3)
+            ax3.legend()
+            ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
+            st.pyplot(fig3)
+    
+            if goal_achieve_date is None or goal_achieve_date > pd.to_datetime(goal_deadline):
+                st.caption("💡 *Be patient and consistent — you might hit your profit goal next month!* 💪")
