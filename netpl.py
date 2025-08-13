@@ -213,7 +213,12 @@ if "df" in st.session_state:
             fig3, ax3 = plt.subplots(figsize=(14, 6))
             ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
             ax3.axhline(progress, linestyle='--', label=f"Progress {format_indian_currency(progress)}")
-            ax3.axhline(goal_amount, linestyle='--', label=f"Goal {format_indian_currency(goal_amount)}")
+            ax3.axhline(
+                goal_amount,
+                color="black",     # ✅ make goal line black
+                linestyle="--",
+                label=f"Goal {format_indian_currency(goal_amount)}"
+            )
             deadline_label = pd.to_datetime(goal_deadline).strftime("%A, %d %B %Y")
             ax3.axvline(
                 pd.to_datetime(goal_deadline),
