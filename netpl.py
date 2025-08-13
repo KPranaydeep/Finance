@@ -150,7 +150,7 @@ if "df" in st.session_state:
     today = pd.to_datetime("today").normalize()
     month_end = (today.replace(day=1) + pd.offsets.MonthEnd(1)).date()  # st.date_input likes date objects
     
-    start_goal = 100.0  # float for consistent types
+    start_goal = 1000.0  # float for consistent types
     start_date = pd.Timestamp(year=today.year if today.month >= 4 else today.year - 1, month=4, day=1)
     
     # Days between start_date and today (clip at >=0 just in case)
