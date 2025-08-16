@@ -23,6 +23,10 @@ import datetime
 # --- CONFIG ---
 GROWTH_RATE = 0.04  # 4% per market day
 
+import pytz
+
+# In main():
+now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
 
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
