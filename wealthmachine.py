@@ -64,7 +64,7 @@ def main():
     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
 
-    if status == "pre_market":
+    if status =! "pre_market":
         if now.weekday() == 5:  # Sunday
             st.success(
                 "📊 Market is closed today (Sunday).\n\n"
