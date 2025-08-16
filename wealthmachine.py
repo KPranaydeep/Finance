@@ -12,9 +12,9 @@ from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
-
 import streamlit as st
 import datetime
+import pandas as pd
 
 # --- CONFIG ---
 GROWTH_RATE = 0.04  # 4% per market day
@@ -70,6 +70,7 @@ def main():
     now = datetime.datetime.now()
     status = get_market_status(now)
 
+    st.header("🎯 Daily Guidance")
     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
     st.write(f"⏰ Current Time: {now.strftime('%H:%M')}")
 
@@ -85,8 +86,31 @@ def main():
     else:
         st.error("⚠️ Unknown status. Please check system time.")
 
+    # --- Weekly Target Table ---
+    if baseline > 0:
+        st.header("📅 Weekly Targets (Next 5 Market Days)")
+        upcoming_days = []
+        profits = []
+        daily_increments = []
+
+        for i in range(1, 6):  # next 5 days
+            target = baseline * ((1 + GROWTH_RATE) ** (market_day_index + i))
+            prev = baseline * ((1 + GROWTH_RATE) ** (market_day_index + i - 1))
+            upcoming_days.append(f"Day {market_day_index + i}")
+            profits.append(round(target, 2))
+            daily_increments.append(round(target - prev, 2))
+
+        df = pd.DataFrame({
+            "Market Day": upcoming_days,
+            "Target Profit (₹)": profits,
+            "Daily Increment (₹)": daily_increments
+        })
+        st.table(df)
+
+
 if __name__ == "__main__":
     main()
+
 
 def get_max_roi_from_file():
     try:
