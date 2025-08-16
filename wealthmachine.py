@@ -21,6 +21,7 @@ import streamlit as st
 import datetime
 import pytz
 
+
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
     """Return market status based on IST time and weekday."""
@@ -38,6 +39,7 @@ def get_market_status(now: datetime.datetime) -> str:
         return "after_market_close"
     else:
         return "market_hours"
+
 
 # --- MAIN APP ---
 def main():
@@ -77,16 +79,26 @@ def main():
         )
 
     elif status == "after_market_close":
-        st.info(
-            f"📉 Market is closed. \n\n Relax and enjoy your evening. \n"
-            f"Come back tomorrow at 9:15 AM to book \n **₹{today_target:,.0f}** profit."
-        )
+        if now.weekday() == 5:  # Saturday
+            st.info(
+                f"📉 Market is closed for the weekend. 🌃 \n\n"
+                f"Come back on **Monday at 9:15 AM** to book \n"
+                f"**₹{today_target:,.0f}** profit."
+            )
+        else:
+            st.info(
+                f"📉 Market is closed. 🌃 \n\n Relax and enjoy your evening. \n"
+                f"Come back tomorrow at 9:15 AM to book \n"
+                f"**₹{today_target:,.0f}** profit."
+            )
 
     else:
         st.error("⚠️ Unknown status. Please check system time.")
 
+
 if __name__ == "__main__":
     main()
+
 
 from datetime import datetime, timedelta
 def get_max_roi_from_file():
