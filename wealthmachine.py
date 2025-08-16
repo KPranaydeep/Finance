@@ -12,6 +12,82 @@ from datetime import datetime, timedelta
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
+
+import streamlit as st
+import datetime
+
+# --- CONFIG ---
+GROWTH_RATE = 0.04  # 4% per market day
+
+# --- HELPERS ---
+def get_market_status(now: datetime.datetime) -> str:
+    """Return market status based on IST time and weekday."""
+    weekday = now.weekday()  # Monday=0 ... Sunday=6
+    hour, minute = now.hour, now.minute
+
+    if weekday == 5:  # Saturday
+        return "after_market_close"
+    if weekday == 6:  # Sunday
+        return "pre_market"
+
+    if hour < 9 or (hour == 9 and minute < 15):
+        return "pre_market"
+    elif (hour > 15) or (hour == 15 and minute >= 30):
+        return "after_market_close"
+    else:
+        return "market_hours"
+
+
+def get_market_day_index() -> int:
+    """Count how many market days have passed since Jan 1 (Mon–Fri only)."""
+    today = datetime.date.today()
+    start = datetime.date(today.year, 1, 1)
+    day_count = 0
+    for d in range((today - start).days + 1):
+        this_day = start + datetime.timedelta(days=d)
+        if this_day.weekday() < 5:  # Mon–Fri = market day
+            day_count += 1
+    return day_count
+
+
+# --- MAIN APP ---
+def main():
+    st.title("📈 Daily Profit Booking Assistant")
+
+    # Input
+    last_30_days_netpl = st.number_input("Enter last 30 days Net P&L (₹)", value=0.0, step=100.0)
+
+    # Baseline
+    baseline = last_30_days_netpl / 30 if last_30_days_netpl > 0 else 0
+
+    # Market day index
+    market_day_index = get_market_day_index()
+
+    # Today's target
+    today_target = baseline * ((1 + GROWTH_RATE) ** market_day_index) if baseline > 0 else 0
+
+    # Show status
+    now = datetime.datetime.now()
+    status = get_market_status(now)
+
+    st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
+    st.write(f"⏰ Current Time: {now.strftime('%H:%M')}")
+
+    if status == "pre_market":
+        st.success(f"✅ Book **₹{today_target:,.2f}** profit when market opens.\n\nCome back after 3:30 PM today.")
+    elif status == "market_hours":
+        st.warning(f"🎯 Target for today: **₹{today_target:,.2f}**.\n\n"
+                   f"If you’ve already booked it: Why are you still here? 🚪 "
+                   f"Come back tomorrow. Life is more than money. 🌱")
+    elif status == "after_market_close":
+        st.info("📉 Market is closed. Relax and enjoy your evening. 🌃 "
+                "Come back pre-market tomorrow at 9:15 AM.")
+    else:
+        st.error("⚠️ Unknown status. Please check system time.")
+
+if __name__ == "__main__":
+    main()
+
 def get_max_roi_from_file():
     try:
         with open("max_roi.json", "r") as f:
