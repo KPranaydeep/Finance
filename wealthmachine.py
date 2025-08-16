@@ -82,7 +82,7 @@ def main():
                    f"Come back tomorrow. Life is more than money. 🌱")
     elif status == "after_market_close":
         st.info("📉 Market is closed. Relax and enjoy your evening. 🌃 "
-                "Come back pre-market tomorrow at 9:15 AM.")
+                "Come back tomorrow at 9:15 AM to book **₹{today_target:,.2f}** profit. ")
     else:
         st.error("⚠️ Unknown status. Please check system time.")
 
