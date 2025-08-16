@@ -20,12 +20,12 @@ GROWTH_RATE = 0.04  # 4% per market day
 import streamlit as st
 import datetime
 import pytz
-
+import pandas as pd
 
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
     """Return market status based on IST time and weekday."""
-    weekday = now.weekday()  # Monday=0 ... Sunday=6
+    weekday = now.weekday() + 1 # Monday=0 ... Sunday=6
     hour, minute = now.hour, now.minute
 
     if weekday == 5:  # Saturday
@@ -39,7 +39,6 @@ def get_market_status(now: datetime.datetime) -> str:
         return "after_market_close"
     else:
         return "market_hours"
-
 
 # --- MAIN APP ---
 def main():
@@ -66,10 +65,29 @@ def main():
     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
 
     if status == "pre_market":
-        st.success(
-            f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
-            "Come back after 3:30 PM today."
-        )
+        if now.weekday() == 6:  # Sunday
+            st.success(
+                "📊 Market is closed today (Sunday).\n\n"
+                "Here’s your **profit booking plan for next week** 👇"
+            )
+
+            # Generate Monday–Friday targets
+            targets = []
+            for i in range(1, 6):
+                target = baseline * ((1 + GROWTH_RATE) ** i)
+                day_name = (now + datetime.timedelta(days=i)).strftime("%A")
+                targets.append({"Day": day_name, "Target (₹)": f"{target:,.0f}"})
+
+            df = pd.DataFrame(targets)
+            st.table(df)
+
+            st.info("✅ Stick to these daily targets and avoid greed. 🌱")
+
+        else:
+            st.success(
+                f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
+                "Come back after 3:30 PM today."
+            )
 
     elif status == "market_hours":
         st.warning(
@@ -95,10 +113,8 @@ def main():
     else:
         st.error("⚠️ Unknown status. Please check system time.")
 
-
 if __name__ == "__main__":
     main()
-
 
 from datetime import datetime, timedelta
 def get_max_roi_from_file():
