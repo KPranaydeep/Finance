@@ -81,7 +81,7 @@ def main():
 
     st.header("🎯 Daily Guidance")
     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
-    st.write(f"⏰ Current Time (IST): {now.strftime('%H:%M')}")
+    st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
 
     if status == "pre_market":
         st.success(
