@@ -43,7 +43,7 @@ def get_market_status(now: datetime.datetime) -> str:
 
 # --- MAIN APP ---
 def main():
-    st.header("📈 Daily Profit Booking Assistant")
+    st.subheader("📈 Daily Profit Booking Assistant")
 
     # Input: Last 30 days Net P&L
     last_30_days_netpl = st.number_input(
