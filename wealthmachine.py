@@ -76,7 +76,7 @@ def main():
     today_target = baseline * ((1 + GROWTH_RATE) ** market_day_index) if baseline > 0 else 0
 
     # Show status
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
     status = get_market_status(now)
 
     st.header("🎯 Daily Guidance")
