@@ -78,8 +78,8 @@ def main():
 
     elif status == "after_market_close":
         st.info(
-            f"📉 Market is closed. \n\n Relax and enjoy your evening. 🌃 \n\n"
-            f"Come back tomorrow at 9:15 AM to book \n\n **₹{today_target:,.0f}** profit."
+            f"📉 Market is closed. \n Relax and enjoy your evening. 🌃 \n"
+            f"Come back tomorrow at 9:15 AM to book \n **₹{today_target:,.0f}** profit."
         )
 
     else:
