@@ -19,14 +19,13 @@ import pandas as pd
 import streamlit as st
 import pandas as pd
 import datetime
-
 # --- CONFIG ---
 GROWTH_RATE = 0.04  # 4% per market day
 
+import streamlit as st
+import datetime
 import pytz
 
-# In main():
-now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
 
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
@@ -47,38 +46,26 @@ def get_market_status(now: datetime.datetime) -> str:
         return "market_hours"
 
 
-def get_market_day_index() -> int:
-    """Count how many market days have passed since Jan 1 (Mon–Fri only)."""
-    today = datetime.date.today()
-    start = datetime.date(today.year, 1, 1)
-    day_count = 0
-    for d in range((today - start).days + 1):
-        this_day = start + datetime.timedelta(days=d)
-        if this_day.weekday() < 5:  # Mon–Fri = market day
-            day_count += 1
-    return day_count
-
-
 # --- MAIN APP ---
 def main():
     st.title("📈 Daily Profit Booking Assistant")
 
-    # Input
-    last_30_days_netpl = st.number_input("Enter last 30 days Net P&L (₹)", value=0.0, step=100.0)
+    # Input: Last 30 days Net P&L
+    last_30_days_netpl = st.number_input(
+        "Enter last 30 days Net P&L (₹)", value=0.0, step=100.0
+    )
 
-    # Baseline (average daily profit over last 30 days)
+    # Baseline = average daily profit of last 30 days
     baseline = last_30_days_netpl / 30 if last_30_days_netpl > 0 else 0
 
-    # Market day index
-    market_day_index = get_market_day_index()
+    # Today’s target = baseline × (1 + growth_rate)
+    today_target = baseline * (1 + GROWTH_RATE) if baseline > 0 else 0
 
-    # Today's target
-    today_target = baseline * ((1 + GROWTH_RATE) ** market_day_index) if baseline > 0 else 0
-
-    # Show status
+    # Current IST time
     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
     status = get_market_status(now)
 
+    # --- Display Guidance ---
     st.header("🎯 Daily Guidance")
     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
@@ -105,30 +92,9 @@ def main():
     else:
         st.error("⚠️ Unknown status. Please check system time.")
 
-    # --- Weekly Target Table ---
-    if baseline > 0:
-        st.header("📅 Weekly Targets (Next 5 Market Days)")
-        upcoming_days, profits, daily_increments = [], [], []
-
-        for i in range(1, 6):  # next 5 days
-            target = baseline * ((1 + GROWTH_RATE) ** (market_day_index + i))
-            prev = baseline * ((1 + GROWTH_RATE) ** (market_day_index + i - 1))
-            upcoming_days.append(f"Day {market_day_index + i}")
-            profits.append(round(target, 2))
-            daily_increments.append(round(target - prev, 2))
-
-        df = pd.DataFrame({
-            "Market Day": upcoming_days,
-            "Target Profit (₹)": profits,
-            "Daily Increment (₹)": daily_increments
-        })
-
-        st.table(df)
-
 
 if __name__ == "__main__":
     main()
-
 
 from datetime import datetime, timedelta
 def get_max_roi_from_file():
