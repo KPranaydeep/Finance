@@ -25,8 +25,8 @@ import pandas as pd
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
     """Return market status based on IST time and weekday."""
-    weekday = now.weekday() + 1 # Monday=0 ... Sunday=6
-    hour, minute = now.hour - 2 , now.minute
+    weekday = now.weekday() # Monday=0 ... Sunday=6
+    hour, minute = now.hour , now.minute
 
     if weekday == 5:  # Saturday
         return "after_market_close"
@@ -65,7 +65,7 @@ def main():
     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
 
     if status == "pre_market":
-        if now.weekday() == 6:  # Sunday
+        if now.weekday() == 5:  # Sunday
             st.success(
                 "📊 Market is closed today (Sunday).\n\n"
                 "Here’s your **profit booking plan for next week** 👇"
@@ -86,7 +86,6 @@ def main():
         else:
             st.success(
                 f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
-                "Come back after 3:30 PM today."
             )
 
     elif status == "market_hours":
