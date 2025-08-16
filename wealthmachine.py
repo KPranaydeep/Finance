@@ -1,6 +1,4 @@
-import pandas as pd
 import numpy as np
-import streamlit as st
 import yfinance as yf
 import requests
 import os
@@ -12,9 +10,6 @@ from lifelines import KaplanMeierFitter
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
-import streamlit as st
-import datetime
-import pandas as pd
 
 import streamlit as st
 import pandas as pd
@@ -25,7 +20,6 @@ GROWTH_RATE = 0.04  # 4% per market day
 import streamlit as st
 import datetime
 import pytz
-
 
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
@@ -44,7 +38,6 @@ def get_market_status(now: datetime.datetime) -> str:
         return "after_market_close"
     else:
         return "market_hours"
-
 
 # --- MAIN APP ---
 def main():
@@ -72,13 +65,13 @@ def main():
 
     if status == "pre_market":
         st.success(
-            f"✅ Book **₹{today_target:,.2f}** profit when market opens.\n\n"
+            f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
             "Come back after 3:30 PM today."
         )
 
     elif status == "market_hours":
         st.warning(
-            f"🎯 Target for today: **₹{today_target:,.2f}**.\n\n"
+            f"🎯 Target for today: **₹{today_target:,.0f}**.\n\n"
             f"If you’ve already booked it: Why are you still here? 🚪 "
             f"Come back tomorrow. Life is more than money. 🌱"
         )
@@ -86,12 +79,11 @@ def main():
     elif status == "after_market_close":
         st.info(
             f"📉 Market is closed. Relax and enjoy your evening. 🌃 "
-            f"Come back tomorrow at 9:15 AM to book **₹{today_target:,.2f}** profit."
+            f"Come back tomorrow at 9:15 AM to book **₹{today_target:,.0f}** profit."
         )
 
     else:
         st.error("⚠️ Unknown status. Please check system time.")
-
 
 if __name__ == "__main__":
     main()
