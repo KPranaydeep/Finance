@@ -26,7 +26,7 @@ import pandas as pd
 def get_market_status(now: datetime.datetime) -> str:
     """Return market status based on IST time and weekday."""
     weekday = now.weekday() + 1 # Monday=0 ... Sunday=6
-    hour, minute = now.hour, now.minute
+    hour, minute = now.hour - 2 , now.minute
 
     if weekday == 5:  # Saturday
         return "after_market_close"
