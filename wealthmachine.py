@@ -75,14 +75,24 @@ def main():
     st.write(f"⏰ Current Time: {now.strftime('%H:%M')}")
 
     if status == "pre_market":
-        st.success(f"✅ Book **₹{today_target:,.2f}** profit when market opens.\n\nCome back after 3:30 PM today.")
+        st.success(
+            f"✅ Book **₹{today_target:,.2f}** profit when market opens.\n\n"
+            "Come back after 3:30 PM today."
+        )
+    
     elif status == "market_hours":
-        st.warning(f"🎯 Target for today: **₹{today_target:,.2f}**.\n\n"
-                   f"If you’ve already booked it: Why are you still here? 🚪 "
-                   f"Come back tomorrow. Life is more than money. 🌱")
+        st.warning(
+            f"🎯 Target for today: **₹{today_target:,.2f}**.\n\n"
+            f"If you’ve already booked it: Why are you still here? 🚪 "
+            f"Come back tomorrow. Life is more than money. 🌱"
+        )
+    
     elif status == "after_market_close":
-        st.info("📉 Market is closed. Relax and enjoy your evening. 🌃 "
-                "Come back tomorrow at 9:15 AM to book **₹{today_target:,.2f}** profit. ")
+        st.info(
+            f"📉 Market is closed. Relax and enjoy your evening. 🌃 "
+            f"Come back tomorrow at 9:15 AM to book **₹{today_target:,.2f}** profit."
+        )
+
     else:
         st.error("⚠️ Unknown status. Please check system time.")
 
