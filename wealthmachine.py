@@ -16,8 +16,13 @@ import streamlit as st
 import datetime
 import pandas as pd
 
+import streamlit as st
+import pandas as pd
+import datetime
+
 # --- CONFIG ---
 GROWTH_RATE = 0.04  # 4% per market day
+
 
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
@@ -57,7 +62,7 @@ def main():
     # Input
     last_30_days_netpl = st.number_input("Enter last 30 days Net P&L (₹)", value=0.0, step=100.0)
 
-    # Baseline
+    # Baseline (average daily profit over last 30 days)
     baseline = last_30_days_netpl / 30 if last_30_days_netpl > 0 else 0
 
     # Market day index
@@ -72,21 +77,21 @@ def main():
 
     st.header("🎯 Daily Guidance")
     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
-    st.write(f"⏰ Current Time: {now.strftime('%H:%M')}")
+    st.write(f"⏰ Current Time (IST): {now.strftime('%H:%M')}")
 
     if status == "pre_market":
         st.success(
             f"✅ Book **₹{today_target:,.2f}** profit when market opens.\n\n"
             "Come back after 3:30 PM today."
         )
-    
+
     elif status == "market_hours":
         st.warning(
             f"🎯 Target for today: **₹{today_target:,.2f}**.\n\n"
             f"If you’ve already booked it: Why are you still here? 🚪 "
             f"Come back tomorrow. Life is more than money. 🌱"
         )
-    
+
     elif status == "after_market_close":
         st.info(
             f"📉 Market is closed. Relax and enjoy your evening. 🌃 "
@@ -99,9 +104,7 @@ def main():
     # --- Weekly Target Table ---
     if baseline > 0:
         st.header("📅 Weekly Targets (Next 5 Market Days)")
-        upcoming_days = []
-        profits = []
-        daily_increments = []
+        upcoming_days, profits, daily_increments = [], [], []
 
         for i in range(1, 6):  # next 5 days
             target = baseline * ((1 + GROWTH_RATE) ** (market_day_index + i))
@@ -115,11 +118,13 @@ def main():
             "Target Profit (₹)": profits,
             "Daily Increment (₹)": daily_increments
         })
+
         st.table(df)
 
 
 if __name__ == "__main__":
     main()
+
 
 from datetime import datetime, timedelta
 def get_max_roi_from_file():
