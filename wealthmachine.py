@@ -43,7 +43,7 @@ def get_market_status(now: datetime.datetime) -> str:
 
 # --- MAIN APP ---
 def main():
-    st.subheader("📈 Daily Profit Booking Assistant")
+    st.header("📈 Daily Profit Booking Assistant")
 
     # Input: Last 30 days Net P&L
     last_30_days_netpl = st.number_input(
@@ -61,7 +61,7 @@ def main():
     status = get_market_status(now)
 
     # --- Display Guidance ---
-    st.header("🎯 Daily Guidance")
+    st.subheader("🎯 Daily Guidance")
     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
 
