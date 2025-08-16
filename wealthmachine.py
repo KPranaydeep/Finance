@@ -226,7 +226,7 @@ def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=3.0):
 
 
 st.set_page_config(layout="wide", page_icon=":moneybag:")
-st.title("📊 Stock Holdings Analysis & Market Mood Dashboard")
+st.header("📊 Stock Holdings Analysis & Market Mood Dashboard")
 
 # ==================== MARKET MOOD ANALYSIS ====================
 from streamlit.runtime.uploaded_file_manager import UploadedFile
