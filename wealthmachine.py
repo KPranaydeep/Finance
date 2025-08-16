@@ -8,7 +8,7 @@ from io import BytesIO
 from itertools import groupby
 from scipy.stats import weibull_min
 from lifelines import KaplanMeierFitter
-from datetime import datetime, timedelta
+
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
@@ -111,7 +111,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-
+from datetime import datetime, timedelta
 def get_max_roi_from_file():
     try:
         with open("max_roi.json", "r") as f:
