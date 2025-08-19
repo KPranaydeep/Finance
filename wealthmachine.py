@@ -15,7 +15,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 # --- CONFIG ---
-GROWTH_RATE = 0.04  # 4% per market day
+GROWTH_RATE = 0.456  # 4% per market day
 
 import streamlit as st
 import datetime
