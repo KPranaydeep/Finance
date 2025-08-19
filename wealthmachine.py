@@ -12,12 +12,8 @@ from pymongo.server_api import ServerApi
 import json
 
 import streamlit as st
-import pandas as pd
-import datetime
 # --- CONFIG ---
 GROWTH_RATE = 0.456  # 4% per market day
-
-import streamlit as st
 import datetime
 import pytz
 import pandas as pd
