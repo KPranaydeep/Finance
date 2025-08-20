@@ -207,12 +207,10 @@ if "df" in st.session_state:
             import time
             
             progress_bar = st.progress(0)
-            placeholder = st.empty()
             
             # Animate smoothly up to progress_pct
             for i in range(int(progress_pct) + 1):
                 progress_bar.progress(i / 100.0)
-                placeholder.text(f"📊 Progress: {i:.1f}%")
                 time.sleep(0.02)
             
             # Final precise percentage (handles decimals like 36.5%)
