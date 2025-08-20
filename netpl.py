@@ -216,8 +216,7 @@ if "df" in st.session_state:
                 time.sleep(0.02)
             
             # Final precise percentage (handles decimals like 36.5%)
-            progress_bar.progress(progress_pct / 100.0)
-            placeholder.text(f"📊 Progress: {progress_pct:.1f}%")            
+            progress_bar.progress(progress_pct / 100.0)       
                 
             # Compute date when model hits the goal (if slope != 0)
             if model.coef_[0] != 0:
