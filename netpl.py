@@ -211,7 +211,7 @@ if "df" in st.session_state:
             # Animate smoothly up to progress_pct
             for i in range(int(progress_pct) + 1):
                 progress_bar.progress(i / 100.0)
-                time.sleep(0.25)
+                time.sleep(0.125)
             
             # Final precise percentage (handles decimals like 36.5%)
             progress_bar.progress(progress_pct / 100.0)       
