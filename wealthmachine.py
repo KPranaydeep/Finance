@@ -873,6 +873,7 @@ try:
     df_reco.dropna(subset=["Stock"], inplace=True)
     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
     df_reco["Buy"] = df_reco["Buy"].astype(str).str.strip()
+    df_reco["Sell"] = df_reco["Sell"].astype(str).str.strip()
     df_reco = df_reco[df_reco["Stock"] != ""]
     df_reco.reset_index(drop=True, inplace=True)
 
