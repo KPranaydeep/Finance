@@ -251,11 +251,14 @@ if "df" in st.session_state:
         )
 
         # --- Faster, bounded progress animation ---
+        import time
+
         steps = 50
         target = progress_pct / 100.0
         bar = st.progress(0)
         for i in range(steps + 1):
             bar.progress(min(i / steps, target))
+            time.sleep(0.05)  # ⏳ adjust speed: smaller = faster, larger = slower
 
         # --- Goal hit date (guarded) & plot ---
         goal_achieve_date = None
