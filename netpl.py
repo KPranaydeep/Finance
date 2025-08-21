@@ -258,7 +258,7 @@ if "df" in st.session_state:
         bar = st.progress(0)
         for i in range(steps + 1):
             bar.progress(min(i / steps, target))
-            time.sleep(0.05)  # ⏳ adjust speed: smaller = faster, larger = slower
+            time.sleep(0.3)  # ⏳ adjust speed: smaller = faster, larger = slower
 
         # --- Goal hit date (guarded) & plot ---
         goal_achieve_date = None
