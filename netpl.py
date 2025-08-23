@@ -206,7 +206,7 @@ if "df" in st.session_state:
     today = pd.to_datetime("today").normalize()
     month_end = (today.replace(day=1) + pd.offsets.MonthEnd(1)).date()
 
-    start_goal = 52621.0  # base
+    start_goal = 73200.0  # base
     start_date = pd.Timestamp(year=today.year if today.month >= 4 else today.year - 1, month=4, day=1)
     days_diff = max((today - start_date).days, 0)
     compounding_factor = 1.01 ** days_diff
