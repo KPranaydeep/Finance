@@ -171,20 +171,22 @@ if "df" in st.session_state:
         if daily_pnl.dropna().empty:
             st.info("No daily P&L to display on heatmap yet.")
         else:
-            max_abs = max(abs(daily_pnl.min(skipna=True)), daily_pnl.max(skipna=True))
-            if pd.isna(max_abs) or max_abs == 0:
-                max_abs = 1.0  # fallback to avoid division by zero
-    
+            vmin, vmax = daily_pnl.min(skipna=True), daily_pnl.max(skipna=True)
+            if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
+                vmin, vmax = -1, 1  # fallback safe range
+
             # Custom colormap: red for loss, white for 0, green for profit
             cmap = LinearSegmentedColormap.from_list(
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
-    
+
+            # Ensure 0 always maps to white
+            norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+
             fig1, ax1 = calplot.calplot(
-                daily_pnl,  # <-- use actual ₹ values
+                daily_pnl,
                 cmap=cmap,
-                vmin=-max_abs,   # symmetric color scale around 0
-                vmax=max_abs,
+                norm=norm,     # << instead of vmin/vmax
                 suptitle="Daily Realised P&L (₹)",
                 colorbar=True,
                 linewidth=1,
@@ -192,9 +194,8 @@ if "df" in st.session_state:
                 how="sum",
                 figsize=(16, 2),
             )
-    
-            st.pyplot(fig1)
 
+            st.pyplot(fig1)
     
     import matplotlib.dates as mdates
     from matplotlib.ticker import FuncFormatter
