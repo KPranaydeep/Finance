@@ -155,31 +155,39 @@ if "df" in st.session_state:
     c2.metric("Best Day", format_indian_currency(best_day if pd.notna(best_day) else 0))
     c3.metric("Worst Day", format_indian_currency(worst_day if pd.notna(worst_day) else 0))
 
-    # --- 🗓️ Daily aggregation (only actual trade days) ---
+    # --- 🗓️ Daily aggregation ---
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
+    
+    # Build a full calendar range
+    full_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max(), freq="D")
+    
+    # Reindex → insert non-trading days as NaN, keep actual trade days intact
+    daily_pnl = daily_pnl.reindex(full_range)
     
     # --- Calendar Heatmap ---
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
-        if daily_pnl.empty:
+        if daily_pnl.dropna().empty:
             st.info("No daily P&L to display on heatmap yet.")
         else:
             from matplotlib.colors import LinearSegmentedColormap
     
-            max_abs = max(abs(daily_pnl.min()), daily_pnl.max())
+            max_abs = max(abs(daily_pnl.min(skipna=True)), daily_pnl.max(skipna=True))
             denom = max_abs if (pd.notna(max_abs) and max_abs > 0) else 1.0
             normalized = daily_pnl / denom
     
-            cmap = LinearSegmentedColormap.from_list("RedGreen", ["red", "white", "green"], N=256)
+            cmap = LinearSegmentedColormap.from_list(
+                "RedWhiteGreen", ["red", "white", "green"], N=256
+            )
     
             fig1, ax1 = calplot.calplot(
                 normalized,
                 cmap=cmap,
-                suptitle='Daily Realised P&L (Normalized)',
+                suptitle="Daily Realised P&L (Normalized)",
                 colorbar=True,
                 linewidth=1,
-                edgecolor='black',
-                how='sum',
-                figsize=(16, 2)
+                edgecolor="black",
+                how="sum",
+                figsize=(16, 2),
             )
             st.pyplot(fig1)
 
