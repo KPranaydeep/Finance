@@ -174,19 +174,19 @@ if "df" in st.session_state:
             vmin, vmax = daily_pnl.min(skipna=True), daily_pnl.max(skipna=True)
             if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
                 vmin, vmax = -1, 1  # fallback safe range
-
+    
             # Custom colormap: red for loss, white for 0, green for profit
             cmap = LinearSegmentedColormap.from_list(
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
-
+    
             # Ensure 0 always maps to white
             norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
-
+    
             fig1, ax1 = calplot.calplot(
                 daily_pnl,
                 cmap=cmap,
-                norm=norm,     # << instead of vmin/vmax
+                norm=norm,     # ✅ only norm, no vmin/vmax
                 suptitle="Daily Realised P&L (₹)",
                 colorbar=True,
                 linewidth=1,
@@ -194,7 +194,7 @@ if "df" in st.session_state:
                 how="sum",
                 figsize=(16, 2),
             )
-
+    
             st.pyplot(fig1)
     
     import matplotlib.dates as mdates
