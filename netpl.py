@@ -164,8 +164,8 @@ if "df" in st.session_state:
     # Reindex → insert non-trading days as NaN, keep actual trade days intact
     daily_pnl = daily_pnl.reindex(full_range)
 
-    from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
-    
+    from matplotlib.colors import LinearSegmentedColormap
+
     # --- Calendar Heatmap ---
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         if daily_pnl.dropna().empty:
@@ -175,20 +175,20 @@ if "df" in st.session_state:
             if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
                 vmin, vmax = -1, 1  # fallback safe range
     
-            # Custom colormap: red for loss, white for 0, green for profit
+            # scale into [-1, 1] so 0 stays at center
+            scaled = (daily_pnl - 0) / (vmax - vmin) * 2 - 1
+            scaled = scaled.fillna(0)  # replace NaNs (non-trading days) with 0
+    
             cmap = LinearSegmentedColormap.from_list(
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
     
-            # Build a norm that forces white at 0
-            norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
-    
-            # ✅ Important: pass only norm, not vmin/vmax
             fig1, ax1 = calplot.calplot(
-                daily_pnl,
+                scaled,
                 cmap=cmap,
-                norm=norm,
-                suptitle="Daily Realised P&L (₹)",
+                vmin=-1,
+                vmax=1,
+                suptitle="Daily Realised P&L (₹, scaled)",
                 colorbar=True,
                 linewidth=1,
                 edgecolor="black",
@@ -197,7 +197,6 @@ if "df" in st.session_state:
             )
     
             st.pyplot(fig1)
-
     
     import matplotlib.dates as mdates
     from matplotlib.ticker import FuncFormatter
