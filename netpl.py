@@ -177,16 +177,17 @@ if "df" in st.session_state:
             cmap = LinearSegmentedColormap.from_list(
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
-    
+
             from matplotlib import colors
 
-            # Apply TwoSlopeNorm before calplot
-            norm = colors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
-            normalized = norm(daily_pnl / denom)   # pre-transform
+            # Keep it as Series → calplot needs DatetimeIndex
+            normalized_series = daily_pnl / denom
             
             fig1, ax1 = calplot.calplot(
-                normalized,
+                normalized_series,
                 cmap=cmap,
+                vmin=-1,  # ensures white at zero
+                vmax=1,
                 suptitle="Daily Realised P&L (Normalized)",
                 colorbar=True,
                 linewidth=1,
@@ -194,7 +195,7 @@ if "df" in st.session_state:
                 how="sum",
                 figsize=(16, 2),
             )
-    
+
             st.pyplot(fig1)
     
     import matplotlib.dates as mdates
