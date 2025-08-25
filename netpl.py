@@ -221,7 +221,7 @@ if "df" in st.session_state:
     
             ax2.set_title("Cumulative Realised P&L Over Time")
             ax2.set_ylabel("Realised P&L (₹)")
-            ax2.grid(True, linestyle="--", alpha=0.6)
+            ax2.grid(True, linestyle="--", alpha=0.8)
     
             # Format y-axis with Indian currency
             ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
