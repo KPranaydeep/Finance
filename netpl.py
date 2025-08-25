@@ -166,38 +166,45 @@ if "df" in st.session_state:
 
     from matplotlib.colors import LinearSegmentedColormap
 
+    from matplotlib.colors import ListedColormap
+    import numpy as np
+    
     # --- Calendar Heatmap ---
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         if daily_pnl.dropna().empty:
             st.info("No daily P&L to display on heatmap yet.")
         else:
-            vmin, vmax = daily_pnl.min(skipna=True), daily_pnl.max(skipna=True)
-            if pd.isna(vmin) or pd.isna(vmax) or vmin == vmax:
-                vmin, vmax = -1, 1  # fallback safe range
+            pos = daily_pnl.clip(lower=0)
+            neg = daily_pnl.clip(upper=0).abs()
     
-            # scale into [-1, 1] so 0 stays at center
-            scaled = (daily_pnl - 0) / (vmax - vmin) * 2 - 1
-            scaled = scaled.fillna(0)  # replace NaNs (non-trading days) with 0
+            # Normalize separately
+            pos_norm = pos / pos.max() if pos.max() and pos.max() != 0 else pos
+            neg_norm = neg / neg.max() if neg.max() and neg.max() != 0 else neg
     
-            cmap = LinearSegmentedColormap.from_list(
-                "RedWhiteGreen", ["red", "white", "green"], N=256
-            )
+            # Build final series: +ve [0→1], -ve [-1→0], NaN = 0
+            scaled = pd.Series(index=daily_pnl.index, dtype=float)
+            scaled[daily_pnl > 0] = pos_norm[daily_pnl > 0]        # green side
+            scaled[daily_pnl < 0] = -neg_norm[daily_pnl < 0]       # red side
+            scaled[daily_pnl == 0] = 0                             # treat exact 0 as neutral
+            # leave NaN for non-trade days
+    
+            # Custom colormap: -1 = red, 0 = white, +1 = green
+            cmap = ListedColormap(["red", "white", "green"])
     
             fig1, ax1 = calplot.calplot(
                 scaled,
                 cmap=cmap,
-                vmin=-1,
-                vmax=1,
-                suptitle="Daily Realised P&L (₹, scaled)",
+                vmin=-1, vmax=1,
+                suptitle="Daily Realised P&L (₹, normalized separately)",
                 colorbar=True,
                 linewidth=1,
                 edgecolor="black",
                 how="sum",
                 figsize=(16, 2),
             )
-    
             st.pyplot(fig1)
-    
+
+
     import matplotlib.dates as mdates
     from matplotlib.ticker import FuncFormatter
     
