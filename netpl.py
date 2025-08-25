@@ -173,19 +173,20 @@ if "df" in st.session_state:
         else:
             max_abs = max(abs(daily_pnl.min(skipna=True)), daily_pnl.max(skipna=True))
             denom = max_abs if (pd.notna(max_abs) and max_abs > 0) else 1.0
-            normalized = daily_pnl / denom
     
             cmap = LinearSegmentedColormap.from_list(
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
     
-            # ✅ Ensure white corresponds to zero
-            norm = TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
-    
+            from matplotlib import colors
+
+            # Apply TwoSlopeNorm before calplot
+            norm = colors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
+            normalized = norm(daily_pnl / denom)   # pre-transform
+            
             fig1, ax1 = calplot.calplot(
                 normalized,
                 cmap=cmap,
-                norm=norm,   # <--- this ensures zero is white
                 suptitle="Daily Realised P&L (Normalized)",
                 colorbar=True,
                 linewidth=1,
@@ -193,8 +194,9 @@ if "df" in st.session_state:
                 how="sum",
                 figsize=(16, 2),
             )
+    
             st.pyplot(fig1)
-
+    
     import matplotlib.dates as mdates
     from matplotlib.ticker import FuncFormatter
     
