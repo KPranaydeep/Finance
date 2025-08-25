@@ -155,24 +155,17 @@ if "df" in st.session_state:
     c2.metric("Best Day", format_indian_currency(best_day if pd.notna(best_day) else 0))
     c3.metric("Worst Day", format_indian_currency(worst_day if pd.notna(worst_day) else 0))
 
-    # --- 🗓️ Daily aggregation ---
+    # --- 🗓️ Daily aggregation (only actual trade days) ---
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
-    
-    # Reindex to include all days between first and last trade
-    full_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max(), freq="D")
-    daily_pnl = daily_pnl.reindex(full_range, fill_value=0)
-    
-    # Replace 0 with NaN so calplot colors them as white
-    daily_pnl = daily_pnl.replace(0, np.nan)
     
     # --- Calendar Heatmap ---
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
-        if daily_pnl.dropna().empty:
-            st.info("No non-zero daily P&L to display on heatmap yet.")
+        if daily_pnl.empty:
+            st.info("No daily P&L to display on heatmap yet.")
         else:
             from matplotlib.colors import LinearSegmentedColormap
     
-            max_abs = max(abs(daily_pnl.min(skipna=True)), daily_pnl.max(skipna=True))
+            max_abs = max(abs(daily_pnl.min()), daily_pnl.max())
             denom = max_abs if (pd.notna(max_abs) and max_abs > 0) else 1.0
             normalized = daily_pnl / denom
     
