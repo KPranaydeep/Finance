@@ -290,29 +290,46 @@ if "df" in st.session_state:
                 except Exception:
                     goal_achieve_date = None
 
+        from matplotlib.ticker import FuncFormatter
+
         # Plot only if we have something meaningful
         fig3, ax3 = plt.subplots(figsize=(14, 6))
         ax3.plot(df["Sell date"], df["Cumulative P&L"], marker='o', label="Actual P&L", linewidth=2)
+        
+        # Progress line
         ax3.axhline(progress, linestyle='--', label=f"Progress {format_indian_currency(progress)}")
+        
+        # Goal line
         ax3.axhline(goal_amount, color="black", linestyle="--", label=f"Goal {format_indian_currency(goal_amount)}")
+        
+        # Deadline vertical line
         deadline_label = deadline_ts.strftime("%A, %d %B %Y")
         ax3.axvline(deadline_ts, color="green", linestyle="--", label=f"Deadline: {deadline_label}")
-
+        
+        # Predicted line
         if predicted is not None and future_dates is not None and future_y is not None:
             ax3.scatter(deadline_ts, predicted, s=100, label="Predicted P&L")
             ax3.plot(future_dates, future_y, linestyle=':', label="Linear Projection")
-
+        
+        # Goal achievement date
         if (goal_achieve_date is not None) and (df["Sell date"].min() <= goal_achieve_date <= deadline_ts):
             goal_label = goal_achieve_date.strftime("%A, %d %B %Y")
             ax3.axvline(goal_achieve_date, color="black", linestyle="--", label=f"Goal Hit: {goal_label}")
             ax3.scatter(goal_achieve_date, goal_amount, s=80)
-
+        
+        # Labels and formatting
         ax3.set_title("Cumulative Realised P&L vs Goal")
         ax3.set_xlabel("Date")
-        ax3.set_ylabel("₹ P&L")
+        ax3.set_ylabel("Cumulative P&L (₹)")
         ax3.grid(True, linestyle='--', alpha=0.3)
-        ax3.legend()
+        
+        # ✅ Format Y-axis using Indian currency
+        ax3.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
+        
+        # Format X-axis
         ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
+        
+        ax3.legend()
         st.pyplot(fig3)
 
         if (goal_achieve_date is None) or (goal_achieve_date > pd.to_datetime(goal_deadline)):
