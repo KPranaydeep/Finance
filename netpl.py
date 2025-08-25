@@ -172,31 +172,29 @@ if "df" in st.session_state:
             st.info("No daily P&L to display on heatmap yet.")
         else:
             max_abs = max(abs(daily_pnl.min(skipna=True)), daily_pnl.max(skipna=True))
-            denom = max_abs if (pd.notna(max_abs) and max_abs > 0) else 1.0
+            if pd.isna(max_abs) or max_abs == 0:
+                max_abs = 1.0  # fallback to avoid division by zero
     
+            # Custom colormap: red for loss, white for 0, green for profit
             cmap = LinearSegmentedColormap.from_list(
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
-
-            from matplotlib import colors
-
-            # Keep it as Series → calplot needs DatetimeIndex
-            normalized_series = daily_pnl / denom
-            
+    
             fig1, ax1 = calplot.calplot(
-                normalized_series,
+                daily_pnl,  # <-- use actual ₹ values
                 cmap=cmap,
-                vmin=-1,  # ensures white at zero
-                vmax=1,
-                suptitle="Daily Realised P&L (Normalized)",
+                vmin=-max_abs,   # symmetric color scale around 0
+                vmax=max_abs,
+                suptitle="Daily Realised P&L (₹)",
                 colorbar=True,
                 linewidth=1,
                 edgecolor="black",
                 how="sum",
                 figsize=(16, 2),
             )
-
+    
             st.pyplot(fig1)
+
     
     import matplotlib.dates as mdates
     from matplotlib.ticker import FuncFormatter
