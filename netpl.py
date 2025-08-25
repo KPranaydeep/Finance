@@ -191,6 +191,9 @@ if "df" in st.session_state:
             )
             st.pyplot(fig1)
 
+    import matplotlib.dates as mdates
+    from matplotlib.ticker import FuncFormatter
+    
     # --- 📈 Cumulative Realised P&L Over Time ---
     with st.expander("📈 Cumulative Realised P&L Over Time", expanded=True):
         if daily_pnl.index.size == 0:
@@ -198,13 +201,20 @@ if "df" in st.session_state:
         else:
             date_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max())
             daily_cumsum = daily_pnl.fillna(0).reindex(date_range, fill_value=0).cumsum()
-
+    
             fig2, ax2 = plt.subplots(figsize=(12, 4))
-            ax2.plot(daily_cumsum.index, daily_cumsum.values)
+            ax2.plot(daily_cumsum.index, daily_cumsum.values, linewidth=2)
+    
             ax2.set_title("Cumulative Realised P&L Over Time")
-            ax2.set_ylabel("₹")
-            ax2.grid(True)
-            ax2.xaxis.set_major_formatter(mdates.DateFormatter('%b-%d'))
+            ax2.set_ylabel("Realised P&L (₹)")
+            ax2.grid(True, linestyle="--", alpha=0.6)
+    
+            # Format y-axis with Indian currency
+            ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
+    
+            # Format x-axis as Month-Day
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b-%d"))
+    
             st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
