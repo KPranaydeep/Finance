@@ -165,7 +165,7 @@ if "df" in st.session_state:
     daily_pnl = daily_pnl.reindex(full_range)
 
     from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
-
+    
     # --- Calendar Heatmap ---
     with st.expander("📆 Calendar Heatmap of Daily P&L", expanded=True):
         if daily_pnl.dropna().empty:
@@ -180,13 +180,14 @@ if "df" in st.session_state:
                 "RedWhiteGreen", ["red", "white", "green"], N=256
             )
     
-            # Ensure 0 always maps to white
+            # Build a norm that forces white at 0
             norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
     
+            # ✅ Important: pass only norm, not vmin/vmax
             fig1, ax1 = calplot.calplot(
                 daily_pnl,
                 cmap=cmap,
-                norm=norm,     # ✅ only norm, no vmin/vmax
+                norm=norm,
                 suptitle="Daily Realised P&L (₹)",
                 colorbar=True,
                 linewidth=1,
@@ -196,6 +197,7 @@ if "df" in st.session_state:
             )
     
             st.pyplot(fig1)
+
     
     import matplotlib.dates as mdates
     from matplotlib.ticker import FuncFormatter
