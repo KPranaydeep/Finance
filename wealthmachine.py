@@ -1,4 +1,4 @@
-eimport numpy as np
+import numpy as np
 import yfinance as yf
 import requests
 import os
