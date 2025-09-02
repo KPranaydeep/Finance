@@ -45,13 +45,20 @@ data = {
 
 df = pd.DataFrame(data)
 
+# Custom color scale: green → yellow → magenta
+custom_colorscale = [
+    [0.0, "green"],
+    [0.5, "yellow"],
+    [1.0, "magenta"]
+]
+
 # Treemap
 fig = px.treemap(
     df,
     path=["Asset"],
     values="Allocation (%)",
     color="Allocation (%)",
-    color_continuous_scale="Blues",
+    color_continuous_scale=custom_colorscale,
     title="Portfolio Allocation Treemap"
 )
 
@@ -59,12 +66,13 @@ fig = px.treemap(
 fig.update_traces(
     texttemplate="<b>%{label}</b><br>%{value:.2f}%",
     textposition="middle center",
-    insidetextfont=dict(size=18, color="white")  # auto-fit look
+    insidetextfont=dict(size=18, color="white")
 )
 
 # Streamlit app
 st.title("Portfolio Allocation Visualization")
 st.plotly_chart(fig, use_container_width=True)
+
 
 #---------------
 # --- HELPERS ---
