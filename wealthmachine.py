@@ -47,9 +47,9 @@ df = pd.DataFrame(data)
 
 # Custom color scale: green → yellow → magenta
 custom_colorscale = [
-    [0.0, "green"],
+    [0.0, "magenta"],
     [0.5, "yellow"],
-    [1.0, "magenta"]
+    [1.0, "green"]
 ]
 
 # Treemap
