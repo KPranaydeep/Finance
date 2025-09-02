@@ -70,7 +70,7 @@ fig.update_traces(
 )
 
 # Streamlit app
-st.subheadear("Portfolio Allocation Visualization")
+st.subheader("Portfolio Allocation Visualization")
 st.plotly_chart(fig, use_container_width=True)
 
 
