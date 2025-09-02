@@ -69,9 +69,6 @@ fig.update_traces(
     insidetextfont=dict(size=18, color="white")
 )
 
-# Streamlit app
-st.subheader("Portfolio Allocation Visualization")
-
 with st.expander("📊 Portfolio Allocation Visualization", expanded=True):  
     st.plotly_chart(fig, use_container_width=True)
 
