@@ -32,10 +32,7 @@ df.columns = ["Asset", "Allocation"]
 
 # Clean Allocation column
 df["Allocation"] = (
-    df["Allocation"]
-    .astype(str)
-    .str.replace("%", "", regex=False)
-    .str.strip()
+    df["Allocation"].astype(str).str.replace("%", "", regex=False).str.strip()
 )
 
 # Convert to numeric
@@ -44,8 +41,8 @@ df["Allocation"] = pd.to_numeric(df["Allocation"], errors="coerce")
 # Drop missing rows
 df = df.dropna(subset=["Allocation"])
 
-# ✅ Force dataframe into pure Pandas (avoids narwhals ShapeError)
-df = pd.DataFrame(df)
+# ✅ Ensure this is a real Pandas DataFrame
+df = pd.DataFrame(df.copy())
 
 # --- Treemap ---
 fig = px.treemap(
@@ -61,10 +58,6 @@ fig.update_traces(
 )
 
 st.plotly_chart(fig, use_container_width=True)
-
-
-
-
 
 #---------------
 # --- HELPERS ---
