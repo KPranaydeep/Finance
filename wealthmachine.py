@@ -1,4 +1,4 @@
-import numpy as np
+eimport numpy as np
 import yfinance as yf
 import requests
 import os
@@ -30,8 +30,9 @@ csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM
 sheet_df = pd.read_csv(csv_url)
 
 # Slice rows 18–23 (zero indexed → 17:23)
-df = sheet_df.loc[17:23, ["G", "L"]].copy()
+df = sheet_df.iloc[17:23, [6, 11]].copy()
 df.columns = ["Asset", "Allocation (%)"]
+
 
 # Convert % string to float
 df["Allocation (%)"] = df["Allocation (%)"].str.replace("%", "").astype(float)
