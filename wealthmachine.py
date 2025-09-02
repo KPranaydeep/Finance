@@ -23,48 +23,37 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Google Sheet export link (make sure it's published or accessible)
-# Replace `gid=...` with the correct one for the "Savings" sheet
+# Google Sheet CSV export link
 allocation_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/gviz/tq?tqx=out:csv&sheet=Savings"
 
-# Read sheet from url into DataFrame
-sheet_df = pd.read_csv(allocation_url)
-
-# Slice rows 18–23 (zero-index → 17:23), columns G and L
-df = sheet_df.iloc[17:23, [6, 11]].copy()
-df.columns = ["Asset", "Allocation (%)"]
+# Read sheet
+df = pd.read_csv(allocation_url, usecols=["G", "H"], skiprows=17, nrows=6)
+df.columns = ["Asset", "Allocation"]
 
 # Clean Allocation column
-df["Allocation (%)"] = (
-    df["Allocation (%)"]
+df["Allocation"] = (
+    df["Allocation"]
     .astype(str)
     .str.replace("%", "", regex=False)
     .str.strip()
 )
 
-# Convert safely to numeric
-df["Allocation (%)"] = pd.to_numeric(df["Allocation (%)"], errors="coerce")
+# Convert to numeric
+df["Allocation"] = pd.to_numeric(df["Allocation"], errors="coerce")
 
-# Drop rows where Allocation is missing
-df = df.dropna(subset=["Allocation (%)"])
+# Drop missing rows
+df = df.dropna(subset=["Allocation"])
 
 # --- Treemap ---
 fig = px.treemap(
     df,
     path=["Asset"],
-    values="Allocation (%)",
-    color="Allocation (%)",
-    color_continuous_scale="Blues",
-    title="Portfolio Allocation Treemap"
-)
-
-fig.update_traces(
-    texttemplate="<b>%{label}</b><br>%{value:.2f}%",
-    textposition="middle center",
-    insidetextfont=dict(size=16, color="white")
+    values="Allocation",
+    title="Portfolio Allocation Treemap",
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
