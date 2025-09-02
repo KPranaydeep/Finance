@@ -23,8 +23,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Public Google Sheet CSV link
-csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/edit?usp=sharing"
+# Correct CSV export link (not the share link)
+csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/gviz/tq?tqx=out:csv&sheet=Savings"
 
 # Read sheet into DataFrame
 sheet_df = pd.read_csv(csv_url)
@@ -53,6 +53,7 @@ fig.update_traces(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 #---------------
