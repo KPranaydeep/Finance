@@ -23,21 +23,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Connect to Google Sheets
-conn = st.connection("gsheets", type="gspread")
+# Public Google Sheet CSV link
+csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/export?format=csv&gid=0"
 
-# Fetch the range directly
-df = conn.read(
-    spreadsheet="1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw", 
-    worksheet="Savings",
-    ttl="10m"
-)
+# Read sheet into DataFrame
+sheet_df = pd.read_csv(csv_url)
 
-# Slice rows you want (G18:G23 and L18:L23)
-df = df.loc[17:22, ["G", "L"]]  # zero-indexed, so row 18 is index 17
+# Slice rows 18–23 (zero indexed → 17:23)
+df = sheet_df.loc[17:23, ["G", "L"]].copy()
 df.columns = ["Asset", "Allocation (%)"]
 
-# Convert %
+# Convert % string to float
 df["Allocation (%)"] = df["Allocation (%)"].str.replace("%", "").astype(float)
 
 # --- Treemap ---
