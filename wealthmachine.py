@@ -33,9 +33,15 @@ sheet_df = pd.read_csv(csv_url)
 df = sheet_df.iloc[17:23, [6, 11]].copy()
 df.columns = ["Asset", "Allocation (%)"]
 
-
-# Convert % string to float
-df["Allocation (%)"] = df["Allocation (%)"].str.replace("%", "").astype(float)
+# Remove % sign, strip spaces, drop NaNs, convert safely
+df["Allocation (%)"] = (
+    df["Allocation (%)"]
+    .astype(str)                # ensure string
+    .str.replace("%", "", regex=False)
+    .str.strip()
+    .replace("", "0")           # replace empty with 0
+    .astype(float)
+)
 
 # --- Treemap ---
 fig = px.treemap(
