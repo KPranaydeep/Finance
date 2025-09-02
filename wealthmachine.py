@@ -22,30 +22,37 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
 
-# Data
-data = {
-    "Asset": [
-        "Gold",
-        "Silver",
-        "Bitcoin",
-        "Bonds, Liquid Fund",
-        "Cash, Savings Account",
-        "Indian Equity"
-    ],
-    "Allocation (%)": [
-        3.05,
-        4.58,
-        4.09,
-        13.90,
-        5.00,
-        69.38
-    ]
-}
+# --- Google Sheets connection ---
+# Replace with your service account JSON file
+SCOPE = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
 
-df = pd.DataFrame(data)
+creds = Credentials.from_service_account_file(
+    "service_account.json", scopes=SCOPE
+)
+client = gspread.authorize(creds)
 
-# Treemap
+# Open the sheet
+sheet = client.open_by_url(
+    "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/edit?usp=sharing"
+).worksheet("Savings")
+
+# Fetch values (assets in G18:G23, allocations in L18:L23)
+assets = sheet.get("G18:G23")
+allocations = sheet.get("L18:L23")
+
+# Convert to dataframe
+df = pd.DataFrame({
+    "Asset": [a[0] for a in assets],
+    "Allocation (%)": [float(x[0].replace("%", "")) for x in allocations]
+})
+
+# --- Treemap ---
 fig = px.treemap(
     df,
     path=["Asset"],
@@ -55,17 +62,15 @@ fig = px.treemap(
     title="Portfolio Allocation Treemap"
 )
 
-# Centered labels: Asset name + % with line break
 fig.update_traces(
     texttemplate="<b>%{label}</b><br>%{value:.2f}%",
     textposition="middle center",
-    insidetextfont=dict(size=18, color="white")  # auto-fit look
+    insidetextfont=dict(size=18, color="white")
 )
 
-# Streamlit app
+# --- Streamlit App ---
 st.title("Portfolio Allocation Visualization")
 st.plotly_chart(fig, use_container_width=True)
-
 
 #---------------
 # --- HELPERS ---
