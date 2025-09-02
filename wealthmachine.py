@@ -26,7 +26,7 @@ import plotly.express as px
 # Google Sheet CSV export link
 allocation_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/gviz/tq?tqx=out:csv&sheet=Savings"
 
-# Read sheet
+# Read the sheet into Pandas
 df = pd.read_csv(allocation_url, usecols=["G", "H"], skiprows=17, nrows=6)
 df.columns = ["Asset", "Allocation"]
 
@@ -44,12 +44,20 @@ df["Allocation"] = pd.to_numeric(df["Allocation"], errors="coerce")
 # Drop missing rows
 df = df.dropna(subset=["Allocation"])
 
+# ✅ Force dataframe into pure Pandas (avoids narwhals ShapeError)
+df = pd.DataFrame(df)
+
 # --- Treemap ---
 fig = px.treemap(
     df,
     path=["Asset"],
     values="Allocation",
     title="Portfolio Allocation Treemap",
+)
+
+fig.update_traces(
+    texttemplate="<b>%{label}</b><br>%{value:.2f}%",
+    textposition="middle center"
 )
 
 st.plotly_chart(fig, use_container_width=True)
