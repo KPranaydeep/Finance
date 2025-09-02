@@ -24,7 +24,7 @@ import pandas as pd
 import plotly.express as px
 
 # Public Google Sheet CSV link
-csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/export?format=csv&gid=0"
+csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/edit?usp=sharing"
 
 # Read sheet into DataFrame
 sheet_df = pd.read_csv(csv_url)
