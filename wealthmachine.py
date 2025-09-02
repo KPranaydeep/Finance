@@ -21,6 +21,7 @@ import pandas as pd
 #---------------
 import streamlit as st
 import plotly.express as px
+import pandas as pd
 
 # Data
 data = {
@@ -54,9 +55,17 @@ fig = px.treemap(
     title="Portfolio Allocation Treemap"
 )
 
+# Centered labels: Asset name + % with line break
+fig.update_traces(
+    texttemplate="<b>%{label}</b><br>%{value:.2f}%",
+    textposition="middle center",
+    insidetextfont=dict(size=18, color="white")  # auto-fit look
+)
+
 # Streamlit app
 st.title("Portfolio Allocation Visualization")
 st.plotly_chart(fig, use_container_width=True)
+
 
 #---------------
 # --- HELPERS ---
