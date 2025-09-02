@@ -20,37 +20,25 @@ import pandas as pd
 
 #---------------
 import streamlit as st
-import plotly.express as px
 import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
+import plotly.express as px
 
-# --- Google Sheets connection ---
-# Replace with your service account JSON file
-SCOPE = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
+# Connect to Google Sheets
+conn = st.connection("gsheets", type="gspread")
 
-creds = Credentials.from_service_account_file(
-    "service_account.json", scopes=SCOPE
+# Fetch the range directly
+df = conn.read(
+    spreadsheet="1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw", 
+    worksheet="Savings",
+    ttl="10m"
 )
-client = gspread.authorize(creds)
 
-# Open the sheet
-sheet = client.open_by_url(
-    "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/edit?usp=sharing"
-).worksheet("Savings")
+# Slice rows you want (G18:G23 and L18:L23)
+df = df.loc[17:22, ["G", "L"]]  # zero-indexed, so row 18 is index 17
+df.columns = ["Asset", "Allocation (%)"]
 
-# Fetch values (assets in G18:G23, allocations in L18:L23)
-assets = sheet.get("G18:G23")
-allocations = sheet.get("L18:L23")
-
-# Convert to dataframe
-df = pd.DataFrame({
-    "Asset": [a[0] for a in assets],
-    "Allocation (%)": [float(x[0].replace("%", "")) for x in allocations]
-})
+# Convert %
+df["Allocation (%)"] = df["Allocation (%)"].str.replace("%", "").astype(float)
 
 # --- Treemap ---
 fig = px.treemap(
@@ -68,9 +56,8 @@ fig.update_traces(
     insidetextfont=dict(size=18, color="white")
 )
 
-# --- Streamlit App ---
-st.title("Portfolio Allocation Visualization")
 st.plotly_chart(fig, use_container_width=True)
+
 
 #---------------
 # --- HELPERS ---
