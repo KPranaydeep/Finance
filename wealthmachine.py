@@ -29,19 +29,23 @@ csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM
 # Read sheet into DataFrame
 sheet_df = pd.read_csv(csv_url)
 
-# Slice rows 18–23 (zero indexed → 17:23)
+# Slice rows 18–23 (zero indexed → 17:23), columns G (6) and L (11)
 df = sheet_df.iloc[17:23, [6, 11]].copy()
 df.columns = ["Asset", "Allocation (%)"]
 
-# Remove % sign, strip spaces, drop NaNs, convert safely
+# Clean Allocation column
 df["Allocation (%)"] = (
     df["Allocation (%)"]
-    .astype(str)                # ensure string
+    .astype(str)  # make sure it's string
     .str.replace("%", "", regex=False)
     .str.strip()
-    .replace("", "0")           # replace empty with 0
-    .astype(float)
 )
+
+# Convert safely to numeric
+df["Allocation (%)"] = pd.to_numeric(df["Allocation (%)"], errors="coerce")
+
+# Drop rows where Allocation is missing
+df = df.dropna(subset=["Allocation (%)"])
 
 # --- Treemap ---
 fig = px.treemap(
@@ -60,6 +64,7 @@ fig.update_traces(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 
 
