@@ -20,42 +20,50 @@ import pandas as pd
 
 #---------------
 import streamlit as st
-import pandas as pd
 import plotly.express as px
+import pandas as pd
 
-# Google Sheet CSV export link
-allocation_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/gviz/tq?tqx=out:csv&sheet=Savings"
+# Data
+data = {
+    "Asset": [
+        "Gold",
+        "Silver",
+        "Bitcoin",
+        "Bonds, Liquid Fund",
+        "Cash, Savings Account",
+        "Indian Equity"
+    ],
+    "Allocation (%)": [
+        3.05,
+        4.58,
+        4.09,
+        13.90,
+        5.00,
+        69.38
+    ]
+}
 
-# Read into Pandas
-df = pd.read_csv(allocation_url, usecols=["G", "H"], skiprows=17, nrows=6)
-df.columns = ["Asset", "Allocation"]
+df = pd.DataFrame(data)
 
-# Clean Allocation column
-df["Allocation"] = (
-    df["Allocation"].astype(str).str.replace("%", "", regex=False).str.strip()
-)
-
-# Convert to numeric
-df["Allocation"] = pd.to_numeric(df["Allocation"], errors="coerce")
-
-# Drop missing rows
-df = df.dropna(subset=["Allocation"])
-
-# ✅ Convert to dict for Plotly (bypasses narwhals)
-data = df.to_dict("list")
-
-# --- Treemap ---
+# Treemap
 fig = px.treemap(
-    names=data["Asset"],
-    values=data["Allocation"],
-    title="Portfolio Allocation Treemap",
+    df,
+    path=["Asset"],
+    values="Allocation (%)",
+    color="Allocation (%)",
+    color_continuous_scale="Blues",
+    title="Portfolio Allocation Treemap"
 )
 
+# Centered labels: Asset name + % with line break
 fig.update_traces(
     texttemplate="<b>%{label}</b><br>%{value:.2f}%",
-    textposition="middle center"
+    textposition="middle center",
+    insidetextfont=dict(size=18, color="white")  # auto-fit look
 )
 
+# Streamlit app
+st.title("Portfolio Allocation Visualization")
 st.plotly_chart(fig, use_container_width=True)
 
 #---------------
