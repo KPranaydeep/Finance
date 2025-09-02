@@ -98,7 +98,7 @@ def main():
     # --- Input Section ---
     with st.expander("💰 Input: Last 30 Days Net P&L", expanded=False):
         last_30_days_netpl = st.number_input(
-            "Enter last 30 days Net P&L (₹)", value=0.0, step=100.0
+            "Enter last 30 days Net P&L (₹)", value=20000.0, step=100.0
         )
 
     # Baseline = average daily profit of last 30 days
