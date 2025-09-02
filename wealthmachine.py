@@ -69,7 +69,7 @@ fig.update_traces(
     insidetextfont=dict(size=18, color="white")
 )
 
-with st.expander("📊 Portfolio Allocation Visualization", expanded=True):  
+with st.expander("📊 Portfolio Allocation Visualization", expanded=False):  
     st.plotly_chart(fig, use_container_width=True)
 
 #---------------
