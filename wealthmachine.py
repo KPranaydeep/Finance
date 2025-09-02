@@ -23,20 +23,21 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Correct CSV export link (not the share link)
-csv_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/gviz/tq?tqx=out:csv&sheet=Savings"
+# Google Sheet export link (make sure it's published or accessible)
+# Replace `gid=...` with the correct one for the "Savings" sheet
+allocation_url = "https://docs.google.com/spreadsheets/d/1tpxU2_BEopIMRBF1cvMZXvMF3GCUM3xpcKthw_BYZZw/gviz/tq?tqx=out:csv&sheet=Savings"
 
-# Read sheet into DataFrame
-sheet_df = pd.read_csv(csv_url)
+# Read sheet from url into DataFrame
+sheet_df = pd.read_csv(allocation_url)
 
-# Slice rows 18–23 (zero indexed → 17:23), columns G (6) and L (11)
+# Slice rows 18–23 (zero-index → 17:23), columns G and L
 df = sheet_df.iloc[17:23, [6, 11]].copy()
 df.columns = ["Asset", "Allocation (%)"]
 
 # Clean Allocation column
 df["Allocation (%)"] = (
     df["Allocation (%)"]
-    .astype(str)  # make sure it's string
+    .astype(str)
     .str.replace("%", "", regex=False)
     .str.strip()
 )
@@ -60,7 +61,7 @@ fig = px.treemap(
 fig.update_traces(
     texttemplate="<b>%{label}</b><br>%{value:.2f}%",
     textposition="middle center",
-    insidetextfont=dict(size=18, color="white")
+    insidetextfont=dict(size=16, color="white")
 )
 
 st.plotly_chart(fig, use_container_width=True)
