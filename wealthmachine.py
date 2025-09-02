@@ -18,6 +18,47 @@ import datetime
 import pytz
 import pandas as pd
 
+#---------------
+import streamlit as st
+import plotly.express as px
+
+# Data
+data = {
+    "Asset": [
+        "Gold",
+        "Silver",
+        "Bitcoin",
+        "Bonds, Liquid Fund",
+        "Cash, Savings Account",
+        "Indian Equity"
+    ],
+    "Allocation (%)": [
+        3.05,
+        4.58,
+        4.09,
+        13.90,
+        5.00,
+        69.38
+    ]
+}
+
+df = pd.DataFrame(data)
+
+# Treemap
+fig = px.treemap(
+    df,
+    path=["Asset"],
+    values="Allocation (%)",
+    color="Allocation (%)",
+    color_continuous_scale="Blues",
+    title="Portfolio Allocation Treemap"
+)
+
+# Streamlit app
+st.title("Portfolio Allocation Visualization")
+st.plotly_chart(fig, use_container_width=True)
+
+#---------------
 # --- HELPERS ---
 def get_market_status(now: datetime.datetime) -> str:
     """Return market status based on IST time and weekday."""
