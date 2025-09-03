@@ -11,12 +11,10 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import json
 
-import streamlit as st
 # --- CONFIG ---
 GROWTH_RATE = 0.456  # 4% per market day
 import datetime
 import pytz
-import pandas as pd
 
 #---------------
 import streamlit as st
@@ -98,7 +96,7 @@ def main():
     # --- Input Section ---
     with st.expander("💰 Input: Last 30 Days Net P&L", expanded=False):
         last_30_days_netpl = st.number_input(
-            "Enter last 30 days Net P&L (₹)", value=20000.0, step=100.0
+            "Enter last 30 days Net P&L (₹)", value=22000.0, step=100.0
         )
 
     # Baseline = average daily profit of last 30 days
