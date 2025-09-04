@@ -353,7 +353,5 @@ import math
 
 if model is not None and hasattr(model, "coef_"):
     slope = float(model.coef_[0])  # Net profit per day
-    angle_degrees = math.degrees(math.atan(slope))
 
     st.metric("📈 Net Profit per Day", format_indian_currency(slope))
-    st.metric("📐 Projection Angle", f"{angle_degrees:.2f}°")
