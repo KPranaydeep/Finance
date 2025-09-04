@@ -352,6 +352,14 @@ if "df" in st.session_state:
 import math
 
 if model is not None and hasattr(model, "coef_"):
-    slope = float(model.coef_[0])  # Net profit per day
+    slope = float(model.coef_[0])  # Net profit per day (₹)
 
-    st.metric("📈 Net Profit per Day", format_indian_currency(slope))
+    # Calculations
+    per_day = slope
+    per_month = per_day * (250 / 12)   # ~20.83 trading days/month
+    per_year = per_day * 250           # ~250 trading days/year
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📈 Net Profit / Day", format_indian_currency(per_day))
+    c2.metric("📆 Net Profit / Month", format_indian_currency(per_month))
+    c3.metric("📅 Net Profit / Year", format_indian_currency(per_year))
