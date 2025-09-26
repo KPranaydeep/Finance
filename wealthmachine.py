@@ -90,79 +90,79 @@ def get_market_status(now: datetime.datetime) -> str:
         return "market_hours"
 
 # --- MAIN APP ---
-def main():
-    st.subheader("📈 Daily Profit Booking Assistant")
+# def main():
+#     st.subheader("📈 Daily Profit Booking Assistant")
 
-    # --- Input Section ---
-    with st.expander("💰 Input: Last 30 Days Net P&L", expanded=False):
-        last_30_days_netpl = st.number_input(
-            "Enter last 30 days Net P&L (₹)", value=22000.0, step=100.0
-        )
+#     # --- Input Section ---
+#     with st.expander("💰 Input: Last 30 Days Net P&L", expanded=False):
+#         last_30_days_netpl = st.number_input(
+#             "Enter last 30 days Net P&L (₹)", value=22000.0, step=100.0
+#         )
 
-    # Baseline = average daily profit of last 30 days
-    baseline = last_30_days_netpl / 30 if last_30_days_netpl > 0 else 0
+#     # Baseline = average daily profit of last 30 days
+#     baseline = last_30_days_netpl / 30 if last_30_days_netpl > 0 else 0
 
-    # Today’s target = baseline × (1 + growth_rate)
-    today_target = baseline * (1 + GROWTH_RATE) if baseline > 0 else 0
+#     # Today’s target = baseline × (1 + growth_rate)
+#     today_target = baseline * (1 + GROWTH_RATE) if baseline > 0 else 0
 
-    # Current IST time
-    now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
-    status = get_market_status(now)
+#     # Current IST time
+#     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
+#     status = get_market_status(now)
 
-    # --- Display Guidance ---
-    st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
-    st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
+#     # --- Display Guidance ---
+#     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
+#     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
 
-    if status == "pre_market":
-        if now.weekday() == 6:  # Sunday
-            st.success(
-                "📊 Market is closed today (Sunday).\n\n"
-                "Here’s your **profit booking plan for next week** 👇"
-            )
+#     if status == "pre_market":
+#         if now.weekday() == 6:  # Sunday
+#             st.success(
+#                 "📊 Market is closed today (Sunday).\n\n"
+#                 "Here’s your **profit booking plan for next week** 👇"
+#             )
 
-            # Generate Monday–Friday targets
-            targets = []
-            for i in range(1, 6):
-                target = baseline * ((1 + GROWTH_RATE) ** i)
-                day_name = (now + datetime.timedelta(days=i)).strftime("%A")
-                targets.append({"Day": day_name, "Target (₹)": f"{target:,.0f}"})
+#             # Generate Monday–Friday targets
+#             targets = []
+#             for i in range(1, 6):
+#                 target = baseline * ((1 + GROWTH_RATE) ** i)
+#                 day_name = (now + datetime.timedelta(days=i)).strftime("%A")
+#                 targets.append({"Day": day_name, "Target (₹)": f"{target:,.0f}"})
 
-            df = pd.DataFrame(targets)
-            st.table(df)
+#             df = pd.DataFrame(targets)
+#             st.table(df)
 
-            st.info("✅ Stick to these daily targets and avoid greed. 🌱")
+#             st.info("✅ Stick to these daily targets and avoid greed. 🌱")
 
-        else:
-            st.success(
-                f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
-            )
+#         else:
+#             st.success(
+#                 f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
+#             )
 
-    elif status == "market_hours":
-        st.warning(
-            f"🎯 Target for today: **₹{today_target:,.0f}**.\n\n"
-            f"If you’ve already booked it: Why are you still here? 🚪 "
-            f"Come back tomorrow. Life is more than money. 🌱"
-        )
+#     elif status == "market_hours":
+#         st.warning(
+#             f"🎯 Target for today: **₹{today_target:,.0f}**.\n\n"
+#             f"If you’ve already booked it: Why are you still here? 🚪 "
+#             f"Come back tomorrow. Life is more than money. 🌱"
+#         )
 
-    elif status == "after_market_close":
-        if now.weekday() == 5:  # Saturday
-            st.info(
-                f"📉 Market is closed for the weekend. 🌃 \n\n"
-                f"Come back on **Monday at 9:15 AM** to book \n"
-                f"**₹{today_target:,.0f}** profit."
-            )
-        else:
-            st.info(
-                f"📉 Market is closed. 🌃 \n\n Relax and enjoy your evening. \n"
-                f"Come back tomorrow at 9:15 AM to book \n"
-                f"**₹{today_target:,.0f}** profit."
-            )
+#     elif status == "after_market_close":
+#         if now.weekday() == 5:  # Saturday
+#             st.info(
+#                 f"📉 Market is closed for the weekend. 🌃 \n\n"
+#                 f"Come back on **Monday at 9:15 AM** to book \n"
+#                 f"**₹{today_target:,.0f}** profit."
+#             )
+#         else:
+#             st.info(
+#                 f"📉 Market is closed. 🌃 \n\n Relax and enjoy your evening. \n"
+#                 f"Come back tomorrow at 9:15 AM to book \n"
+#                 f"**₹{today_target:,.0f}** profit."
+#             )
 
-    else:
-        st.error("⚠️ Unknown status. Please check system time.")
+#     else:
+#         st.error("⚠️ Unknown status. Please check system time.")
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
 
 from datetime import datetime, timedelta
 def get_max_roi_from_file():
