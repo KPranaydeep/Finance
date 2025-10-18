@@ -918,15 +918,13 @@ try:
     # Load CSV without header (Google Sheets export format)
     df_raw = pd.read_csv(csv_url, header=None)
 
-    # Slice rows 1 to 991 (i.e., A2 to A992), columns A to D (0:4)
-    df_reco = df_raw.iloc[2:992, 0:4]
-    df_reco.columns = ["Stock", "Buy", "Sell", "Recommendation"]
+    # Slice rows 1 to 991 (i.e., A2 to A992), column A 
+    df_reco = df_raw.iloc[2:992, 0]
+    df_reco.columns = ["Stock"]
 
     # Clean and format
     df_reco.dropna(subset=["Stock"], inplace=True)
     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
-    df_reco["Buy"] = df_reco["Buy"].astype(str).str.strip()
-    df_reco["Sell"] = df_reco["Sell"].astype(str).str.strip()
     df_reco = df_reco[df_reco["Stock"] != ""]
     df_reco.reset_index(drop=True, inplace=True)
 
