@@ -235,11 +235,9 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
     try:
         data = yf.download(ticker, period="400d", progress=False)
 
-        # hard fix: ensure datetime index and sorted order
         data.index = pd.to_datetime(data.index, errors="coerce")
         data = data.sort_index()
         data = data.dropna(subset=["Close"])
-
         if data.empty:
             raise ValueError("No price data after cleaning.")
 
@@ -255,16 +253,16 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
         })
         df["pct_above_ma"] = (df["Close"] - df["200_MA"]) / df["200_MA"]
 
-        valid_rows = df.dropna(subset=["200_MA"])
-        if valid_rows.empty:
-            raise ValueError("No valid rows to calculate leverage — insufficient data.")
+        valid = df.dropna(subset=["200_MA"])
+        if valid.empty:
+            raise ValueError("No valid rows to calculate leverage.")
 
-        latest = valid_rows.iloc[-1]
+        latest = valid.iloc[-1]
         latest_close = float(latest["Close"])
         latest_ma = float(latest["200_MA"])
         pct = float(latest["pct_above_ma"])
 
-        pos = valid_rows[valid_rows["pct_above_ma"] > 0]["pct_above_ma"]
+        pos = valid[valid["pct_above_ma"] > 0]["pct_above_ma"]
         max_pct = float(pos.max()) if not pos.empty else 0.10
 
         alpha = cap / max_pct if max_pct > 0 else 0.0
@@ -276,33 +274,6 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
             "ma_value": round(latest_ma, 2),
             "pct_above_ma": pct,
             "max_pct_above_ma": max_pct,
-            "alpha": alpha
-        }
-
-    except Exception as e:
-        return {
-            "should_leverage": False,
-            "latest_close": None,
-            "ma_value": None,
-            "pct_above_ma": None,
-            "max_pct_above_ma": None,
-            "alpha": 0.0,
-            "error": str(e)
-        }
-
-        # Max observed % above MA (only positive cases)
-        positive_pct = valid_rows[valid_rows['pct_above_ma'] > 0]['pct_above_ma']
-        max_pct_above_ma = float(positive_pct.max()) if not positive_pct.empty else 0.10
-
-        alpha = cap / max_pct_above_ma if max_pct_above_ma > 0 else 0.0
-        leverage_flag = latest_close > latest_ma
-
-        return {
-            "should_leverage": leverage_flag,
-            "latest_close": round(latest_close, 2),
-            "ma_value": round(latest_ma, 2),
-            "pct_above_ma": current_pct_above,
-            "max_pct_above_ma": max_pct_above_ma,
             "alpha": alpha
         }
 
