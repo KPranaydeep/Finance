@@ -234,6 +234,9 @@ def get_latest_input_params(user_id):
 def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
     try:
         data = yf.download(ticker, period="400d", progress=False)
+        st.write("Downloaded columns:", list(data.columns))
+        st.write("Downloaded head:", data.head())
+
 
         # 1. Basic sanity checks
         if data is None or data.empty:
