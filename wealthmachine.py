@@ -32,12 +32,12 @@ data = {
         "Indian Equity"
     ],
     "Allocation (%)": [
-        3.18,
-        4.77,
-        4.33,
-        10.50,
+        3.64,
+        5.43,
+        4.94,
+        0.0,
         5.00,
-        72.22
+        80.99
     ]
 }
 
@@ -235,15 +235,37 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
     try:
         data = yf.download(ticker, period="400d", progress=False)
 
+        # 1. Basic sanity checks
+        if data is None or data.empty:
+            raise ValueError(f"No price data downloaded for ticker {ticker}. "
+                             "Check internet, ticker symbol, or yfinance limits.")
+
+        # 2. Ensure we have a 'Close' column
+        if "Close" not in data.columns:
+            # Some cases only return 'Adj Close'
+            if "Adj Close" in data.columns:
+                data["Close"] = data["Adj Close"]
+            else:
+                raise ValueError(
+                    f"'Close' column not found in downloaded data. "
+                    f"Available columns: {list(data.columns)}"
+                )
+
+        # 3. Normal cleaning logic
         data.index = pd.to_datetime(data.index, errors="coerce")
         data = data.sort_index()
         data = data.dropna(subset=["Close"])
+
         if data.empty:
-            raise ValueError("No price data after cleaning.")
+            raise ValueError("No price data after cleaning non-NaN 'Close' values.")
 
         close_series = data["Close"]
+
         if len(close_series) < days:
-            raise ValueError("Insufficient rows for MA calculation.")
+            raise ValueError(
+                f"Insufficient rows for {days}-day MA calculation "
+                f"(only {len(close_series)} days available)."
+            )
 
         ma_series = close_series.rolling(window=days, min_periods=days).mean()
 
@@ -255,7 +277,7 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
 
         valid = df.dropna(subset=["200_MA"])
         if valid.empty:
-            raise ValueError("No valid rows to calculate leverage.")
+            raise ValueError("No valid rows to calculate leverage (200-MA is NaN).")
 
         latest = valid.iloc[-1]
         latest_close = float(latest["Close"])
