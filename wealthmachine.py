@@ -233,41 +233,34 @@ def get_latest_input_params(user_id):
 @st.cache_data
 def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
     try:
-        data = yf.download(ticker, period="400d", progress=False)
-        st.write("Downloaded columns:", list(data.columns))
-        st.write("Downloaded head:", data.head())
+        data = yf.download(ticker, period="400d", group_by="column", progress=False)
 
+        # 🔹 Handle MultiIndex columns: ('Close', '^NSEI') → 'Close'
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
 
-        # 1. Basic sanity checks
         if data is None or data.empty:
-            raise ValueError(f"No price data downloaded for ticker {ticker}. "
-                             "Check internet, ticker symbol, or yfinance limits.")
+            raise ValueError(f"No price data downloaded for ticker {ticker}.")
 
-        # 2. Ensure we have a 'Close' column
+        # Ensure we have a Close column
         if "Close" not in data.columns:
-            # Some cases only return 'Adj Close'
             if "Adj Close" in data.columns:
                 data["Close"] = data["Adj Close"]
             else:
                 raise ValueError(
-                    f"'Close' column not found in downloaded data. "
-                    f"Available columns: {list(data.columns)}"
+                    f"'Close' column not found. Available: {list(data.columns)}"
                 )
 
-        # 3. Normal cleaning logic
         data.index = pd.to_datetime(data.index, errors="coerce")
         data = data.sort_index()
         data = data.dropna(subset=["Close"])
-
         if data.empty:
             raise ValueError("No price data after cleaning non-NaN 'Close' values.")
 
         close_series = data["Close"]
-
         if len(close_series) < days:
             raise ValueError(
-                f"Insufficient rows for {days}-day MA calculation "
-                f"(only {len(close_series)} days available)."
+                f"Insufficient rows for {days}-day MA (only {len(close_series)})."
             )
 
         ma_series = close_series.rolling(window=days, min_periods=days).mean()
@@ -312,6 +305,7 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
             "alpha": 0.0,
             "error": str(e)
         }
+
 
 # --- LAMF Allocation Calculator ---
 def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=3.0):
