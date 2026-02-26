@@ -1077,7 +1077,10 @@ try:
             st.markdown("### Selected Stocks")
             for stock in st.session_state.display_selection:
                 st.write(f"- {stock}")
-
+except Exception as e:
+    st.error("❌ Failed to load Google Sheet data.")
+    st.code(str(e), language="text")
+    
 # Add these functions to your existing code
 def get_april_first_current_year():
     today = datetime.now()
