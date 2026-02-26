@@ -969,49 +969,49 @@ if analyzer and analyzer.current_mood == "Greed":
     )
     
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
-st.markdown("## 📌 Recommended Stocks to Explore")
+# st.markdown("## 📌 Recommended Stocks to Explore")
 
-# Google Sheet configuration
-sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
-sheet_name = "Sheet1"
-csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
+# # Google Sheet configuration
+# sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
+# sheet_name = "Sheet1"
+# csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+# sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
 
-# Link to open the original Google Sheet
-st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
+# # Link to open the original Google Sheet
+# st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
 
-try:
-    # Load CSV without header (Google Sheets export format)
-    df_raw = pd.read_csv(csv_url, header=None)
+# try:
+#     # Load CSV without header (Google Sheets export format)
+#     df_raw = pd.read_csv(csv_url, header=None)
 
-    # Slice rows 1 to 991 (i.e., A2 to A992), column A 
-    df_reco = df_raw.iloc[1:11, [0]]
-    df_reco.columns = ["Stock"]
+#     # Slice rows 1 to 991 (i.e., A2 to A992), column A 
+#     df_reco = df_raw.iloc[1:11, [0]]
+#     df_reco.columns = ["Stock"]
 
-    # Clean and format
-    df_reco.dropna(subset=["Stock"], inplace=True)
-    df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
-    df_reco = df_reco[df_reco["Stock"] != ""]
-    df_reco.reset_index(drop=True, inplace=True)
+#     # Clean and format
+#     df_reco.dropna(subset=["Stock"], inplace=True)
+#     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
+#     df_reco = df_reco[df_reco["Stock"] != ""]
+#     df_reco.reset_index(drop=True, inplace=True)
 
-    if not df_reco.empty:
-        st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
+#     if not df_reco.empty:
+#         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
 
-        # Apply minimal styling
-        styled_df = df_reco.style.set_table_styles([
-            {"selector": "th", "props": [("padding", "4px"), ("font-size", "13px")]},
-            {"selector": "td", "props": [("padding", "4px"), ("font-size", "13px")]}
-        ])
+#         # Apply minimal styling
+#         styled_df = df_reco.style.set_table_styles([
+#             {"selector": "th", "props": [("padding", "4px"), ("font-size", "13px")]},
+#             {"selector": "td", "props": [("padding", "4px"), ("font-size", "13px")]}
+#         ])
 
-        # Display the styled table
-        st.dataframe(styled_df, use_container_width=True)
+#         # Display the styled table
+#         st.dataframe(styled_df, use_container_width=True)
 
-    else:
-        st.warning("⚠️ No valid stock entries found between rows A2 to D992.")
+#     else:
+#         st.warning("⚠️ No valid stock entries found between rows A2 to D992.")
 
-except Exception as e:
-    st.error("❌ Failed to load Google Sheet data.")
-    st.code(str(e), language='text')
+# except Exception as e:
+#     st.error("❌ Failed to load Google Sheet data.")
+#     st.code(str(e), language='text')
 
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
 st.markdown("## 📌 Recommended Stocks to Explore")
