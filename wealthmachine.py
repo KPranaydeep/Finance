@@ -2,6 +2,7 @@ import numpy as np
 import yfinance as yf
 import requests
 import os
+import random
 from io import BytesIO
 from itertools import groupby
 from scipy.stats import weibull_min
