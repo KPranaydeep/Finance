@@ -1031,7 +1031,7 @@ try:
 
     # Slice rows 1 to 991 (i.e., A2 to A992), column A 
     # Read Stock (A) and Score (B)
-    df_reco = df_raw.iloc[1:, [0, 1]]
+    df_reco = df_raw.iloc[2:, [0, 1]]
     df_reco.columns = ["Stock", "Score"]
     
     # Clean
