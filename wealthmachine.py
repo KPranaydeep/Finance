@@ -1078,9 +1078,6 @@ try:
             for stock in st.session_state.display_selection:
                 st.write(f"- {stock}")
 
-# 
-
-
 # Add these functions to your existing code
 def get_april_first_current_year():
     today = datetime.now()
