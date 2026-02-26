@@ -1002,7 +1002,7 @@ try:
 except Exception as e:
     st.error("❌ Failed to load Google Sheet data.")
     st.code(str(e), language='text')
-
+uploaded_holdings = None  # ✅ Initialize at top (before condition)
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
 st.markdown("## 📌 Recommended Stocks to Explore")
 
