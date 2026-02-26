@@ -1069,7 +1069,7 @@ try:
                 st.write(f"- {stock}")
 ######################################################################################
 
-uploaded_holdings = None  # ✅ Initialize at top (before condition)
+# uploaded_holdings = None  # ✅ Initialize at top (before condition)
 if analyzer and analyzer.current_mood == "Greed":
     st.header("📤 Upload Your Holdings")
 
