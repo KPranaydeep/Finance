@@ -958,6 +958,16 @@ if analyzer:
             else:
                 st.info("No saved plan yet.")
 
+uploaded_holdings = None  # ✅ Initialize at top (before condition)
+if analyzer and analyzer.current_mood == "Greed":
+    st.header("📤 Upload Your Holdings")
+
+    uploaded_holdings = st.file_uploader(
+        "Upload your stock holdings file (.xlsx format only — Groww or Kite)",
+        type=['xlsx'],
+        key="upload_holdings_greed"
+    )
+    
 # ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
 st.markdown("## 📌 Recommended Stocks to Explore")
 
@@ -1069,15 +1079,7 @@ try:
                 st.write(f"- {stock}")
 
 # 
-uploaded_holdings = None  # ✅ Initialize at top (before condition)
-if analyzer and analyzer.current_mood == "Greed":
-    st.header("📤 Upload Your Holdings")
 
-    uploaded_holdings = st.file_uploader(
-        "Upload your stock holdings file (.xlsx format only — Groww or Kite)",
-        type=['xlsx'],
-        key="upload_holdings_greed"
-    )
 
 # Add these functions to your existing code
 def get_april_first_current_year():
