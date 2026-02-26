@@ -1003,6 +1003,71 @@ except Exception as e:
     st.error("❌ Failed to load Google Sheet data.")
     st.code(str(e), language='text')
 
+# ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
+st.markdown("## 📌 Recommended Stocks to Explore")
+
+# Google Sheet configuration
+sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
+sheet_name = "Sheet1"
+csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
+
+# Link to open the original Google Sheet
+st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
+
+try:
+    # Load CSV without header (Google Sheets export format)
+    df_raw = pd.read_csv(csv_url, header=None)
+
+    # Slice rows 1 to 991 (i.e., A2 to A992), column A 
+    # Read Stock (A) and Score (B)
+    df_reco = df_raw.iloc[1:, [0, 1]]
+    df_reco.columns = ["Stock", "Score"]
+    
+    # Clean
+    df_reco.dropna(subset=["Stock"], inplace=True)
+    df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
+    df_reco = df_reco[df_reco["Stock"] != ""]
+    
+    df_reco["Score"] = pd.to_numeric(df_reco["Score"], errors="coerce").fillna(0)
+    df_reco.reset_index(drop=True, inplace=True)
+    
+    if not df_reco.empty:
+    
+        # Sort by score descending
+        df_sorted = df_reco.sort_values(by="Score", ascending=False)
+    
+        # Top 10 by score
+        top_10 = df_sorted.head(10)["Stock"].tolist()
+    
+        # Remaining pool
+        remaining = df_sorted.iloc[10:]["Stock"].tolist()
+    
+        # Combine pool = deterministic top + random 10 from remaining
+        if len(remaining) >= 10:
+            random_10 = random.sample(remaining, 10)
+        else:
+            random_10 = remaining
+    
+        combined_pool = top_10 + random_10   # max 20
+    
+        # Session state init
+        if "display_selection" not in st.session_state:
+            st.session_state.display_selection = []
+    
+        # Button controls display reshuffle only
+        if st.button("🎯 Pick 10 to Display"):
+            if len(combined_pool) >= 10:
+                st.session_state.display_selection = random.sample(combined_pool, 10)
+            else:
+                st.session_state.display_selection = combined_pool
+    
+        # Display
+        if st.session_state.display_selection:
+            st.markdown("### Selected Stocks")
+            for stock in st.session_state.display_selection:
+                st.write(f"- {stock}")
+######################################################################################
 uploaded_holdings = None  # ✅ Initialize at top (before condition)
 
 if analyzer and analyzer.current_mood == "Greed":
