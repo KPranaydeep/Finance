@@ -1184,7 +1184,9 @@ if uploaded_holdings:
         # Save input values
         save_input_params(USER_ID, net_pl, charges_input, target_net_daily_pct)
 
-        if net_pl > 0:
+        if net_pl <= 0:
+            st.error("❌ Cannot calculate sell limit with zero or negative P&L")
+        else:
             sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges_input, target_net_daily_pct)
             daily_return_pct = round((sell_limit_multiplier - 1) * 100, 4)
             st.markdown(f"💡 *Dynamic sell limit calculated at {daily_return_pct}% above buy price*")
@@ -1256,8 +1258,6 @@ if uploaded_holdings:
             else:
                 st.warning("📉 Not enough profitable stocks to meet target")
                 st.info("⏳ Check back tomorrow when market conditions may improve")
-        else:
-            st.error("❌ Cannot calculate sell limit with zero or negative P&L")
             
 import streamlit as st
 from datetime import datetime, timedelta
