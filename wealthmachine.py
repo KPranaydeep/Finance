@@ -329,7 +329,7 @@ with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=
             st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
 
             mmi = st.number_input("📊 Market Mood Index (MMI)", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
-            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=10_00_000.0, step=10_000.0)
+            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=17_00_000.0, step=10_000.0)
 
             lamf_pct = compute_lamf_pct(
                 result["pct_above_ma"],
