@@ -200,7 +200,7 @@ if "df" in st.session_state:
                 linewidth=1,
                 edgecolor="black",
                 how="sum",
-                figsize=(16, 2),
+                figsize=(16, 4),
             )
             st.pyplot(fig1)
 
