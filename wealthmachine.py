@@ -1115,7 +1115,7 @@ def extract_net_pl_and_charges(file) -> tuple:
     ws = wb.active  # Or wb['Sheet1'] if known
 
     net_pl = ws['B9'].value or 0.0
-    charges = ws['B26'].value or 0.0
+    charges = ws['B24'].value or 0.0
 
     return float(net_pl), float(charges)
 
@@ -1144,7 +1144,7 @@ if uploaded_holdings:
         USER_ID = "default_user"
 
         # 📂 Upload optional Net P&L Report
-        uploaded_report = st.file_uploader("📄 Upload your P&L Report (B9 = Net P&L, B26 = Charges)", type=["xlsx"])
+        uploaded_report = st.file_uploader("📄 Upload your P&L Report (B9 = Net P&L, B24 = Charges)", type=["xlsx"])
 
         # Load defaults from saved MongoDB values
         latest_params = get_latest_input_params(USER_ID)
