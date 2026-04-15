@@ -531,7 +531,7 @@ st.title("📊 Portfolio Rebalancer")
 with st.sidebar:
     st.header("Inputs")
     uploaded_file = st.file_uploader("Upload holdings Excel file", type=["xlsx", "xls"])
-    days_to_flip = st.number_input("Expected days to flip", min_value=1, value=30, step=1)
+    days_to_flip = st.number_input("Expected days to flip", min_value=1, value=13, step=1)
     max_dd_pct = st.number_input("Max drawdown input (%)", min_value=0.00, value=1.43, step=0.01, format="%.2f")
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
