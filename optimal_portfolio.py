@@ -53,16 +53,18 @@ def find_header_row(file_bytes, sheet_name=0, search_terms=None, max_rows=40):
         search_terms = ["Stock Name", "ISIN", "Quantity", "Average"]
 
     raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, header=None, nrows=max_rows)
-    for i in range(len(raw)):
-        row_vals = raw.iloc[i].astype(str).str.strip().tolist()
-        if all(any(term.lower() in cell.lower() for cell in row_vals) for term in search_terms):
-            return i
-    return None
 
+    for i in range(len(raw)):
+        row_vals = raw.iloc[i].tolist()
+        row_vals_norm = [safe_lower(v) for v in row_vals]
+
+        if all(any(safe_lower(term) in cell for cell in row_vals_norm) for term in search_terms):
+            return i
+
+    return None
 
 def safe_numeric(series):
     return pd.to_numeric(series, errors="coerce")
-
 
 # =========================================================
 # FILE PARSERS
