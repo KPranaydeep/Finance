@@ -627,12 +627,27 @@ if run_btn:
                 )
                 st.dataframe(optimal_df, use_container_width=True)
 
-        corr_matrix = log_returns.corr()
-        corr_unstacked = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), 1).astype(bool)).stack()
-        top_corrs = corr_unstacked.abs().sort_values(ascending=False).head(5).reset_index()
-        top_corrs.columns = ["Ticker 1", "Ticker 2", "Abs Correlation"]
         st.subheader("Top Correlated Pairs")
-        st.dataframe(top_corrs, use_container_width=True)
+        
+        corr_matrix = log_returns.corr()
+        
+        if corr_matrix.shape[1] < 2:
+            st.info("Need at least 2 stocks to show correlated pairs.")
+        else:
+            upper_mask = np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+            corr_unstacked = corr_matrix.where(upper_mask).stack()
+        
+            if corr_unstacked.empty:
+                st.info("No valid correlated pairs found.")
+            else:
+                top_corrs = (
+                    corr_unstacked.abs()
+                    .sort_values(ascending=False)
+                    .rename("Abs Correlation")
+                    .reset_index()
+                )
+                top_corrs.columns = ["Ticker 1", "Ticker 2", "Abs Correlation"]
+                st.dataframe(top_corrs.head(5), use_container_width=True)
 
         with st.spinner("Fetching latest prices..."):
             latest_prices = log_returns.columns.tolist()
