@@ -121,10 +121,9 @@ def parse_stocks_statement(file_bytes):
 
     return parsed, unmatched
 
-
 def parse_holdings_statement(file_bytes):
     xls = pd.ExcelFile(io.BytesIO(file_bytes))
-    possible_sheets = [s for s in xls.sheet_names if s.lower() == "equity"]
+    possible_sheets = [s for s in xls.sheet_names if safe_lower(s) == "equity"]
     sheet = possible_sheets[0] if possible_sheets else xls.sheet_names[0]
 
     header_row = find_header_row(
@@ -136,7 +135,7 @@ def parse_holdings_statement(file_bytes):
         raise ValueError("Could not detect header row for holdings- file.")
 
     df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet, skiprows=header_row)
-    df.columns = df.columns.astype(str).str.strip()
+    df.columns = [str(c).strip() for c in df.columns]
 
     quantity_col = None
     for candidate in ["Quantity Available", "Quantity", "Available Quantity"]:
@@ -157,18 +156,18 @@ def parse_holdings_statement(file_bytes):
             break
 
     df = df.copy()
-    df["Symbol"] = df["Symbol"].astype(str).str.upper().str.strip()
+    df["Symbol"] = df["Symbol"].apply(lambda x: str(x).strip().upper() if pd.notna(x) else "")
     df["Quantity"] = safe_numeric(df[quantity_col])
     df["Average Price"] = safe_numeric(df["Average Price"])
 
     if stock_name_col:
-        df["Stock Name"] = df[stock_name_col].astype(str).str.strip()
+        df["Stock Name"] = df[stock_name_col].apply(lambda x: str(x).strip() if pd.notna(x) else "")
     else:
         df["Stock Name"] = df["Symbol"]
 
-    df = df.dropna(subset=["Symbol", "Quantity", "Average Price"])
+    df = df.dropna(subset=["Quantity", "Average Price"])
     df = df[df["Quantity"] > 0].copy()
-    df = df[~df["Symbol"].str.lower().isin(["nan", "total", "summary"])].copy()
+    df = df[df["Symbol"].apply(lambda x: safe_lower(x) not in ["", "nan", "total", "summary"])].copy()
 
     df["Invested"] = df["Quantity"] * df["Average Price"]
     total = df["Invested"].sum()
@@ -180,9 +179,8 @@ def parse_holdings_statement(file_bytes):
 
     return parsed, pd.DataFrame()
 
-
 def extract_current_allocation(uploaded_file):
-    file_name = uploaded_file.name.lower()
+    file_name = str(uploaded_file.name).strip().lower()
     file_bytes = uploaded_file.getvalue()
 
     if file_name.startswith("stocks_"):
@@ -199,7 +197,6 @@ def extract_current_allocation(uploaded_file):
     except Exception:
         parsed, unmatched = parse_stocks_statement(file_bytes)
         return parsed, unmatched, "Stocks_ style (fallback auto-detected)"
-
 
 # =========================================================
 # RETURNS / OPTIMIZATION
