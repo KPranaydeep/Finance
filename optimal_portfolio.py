@@ -535,7 +535,7 @@ with st.sidebar:
     max_dd_pct = st.number_input("Max drawdown input (%)", min_value=0.00, value=1.43, step=0.01, format="%.2f")
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
-    drop_bottom_pct = st.slider("Drop bottom % tickers by history length", 0.0, 0.5, 0.1, 0.05)
+    drop_bottom_pct = st.slider("Drop bottom fraction of tickers by history length", min_value=0.0, max_value=0.5, value=0.0, step=0.05)
     use_target_vol = st.checkbox("Use target volatility")
     target_volatility = st.number_input("Target volatility", min_value=0.001, value=0.10, step=0.01, format="%.3f") if use_target_vol else None
     run_btn = st.button("Run analysis", use_container_width=True)
