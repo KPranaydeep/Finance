@@ -43,7 +43,10 @@ def resolve_yahoo_tickers(symbols_base):
             except Exception:
                 continue
     return resolved
-
+def safe_lower(x):
+    if pd.isna(x):
+        return ""
+    return str(x).strip().lower()
 
 def find_header_row(file_bytes, sheet_name=0, search_terms=None, max_rows=40):
     if search_terms is None:
