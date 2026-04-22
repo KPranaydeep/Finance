@@ -532,7 +532,7 @@ with st.sidebar:
     st.header("Inputs")
     uploaded_file = st.file_uploader("Upload holdings Excel file", type=["xlsx", "xls"])
     days_to_flip = st.number_input("Expected days to flip", min_value=1, value=13, step=1)
-    max_dd_pct = st.number_input("Max drawdown input (%)", min_value=0.00, value=0.93, step=0.01, format="%.2f")
+    max_dd_pct = st.number_input("Max drawdown input (%)", min_value=0.00, value=0.86, step=0.01, format="%.2f")
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
     drop_bottom_pct = st.slider("Drop bottom fraction of tickers by history length", min_value=0.0, max_value=0.5, value=0.0, step=0.05)
