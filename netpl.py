@@ -513,6 +513,7 @@ if "df" in st.session_state:
                 nifty_df["NIFTY 50"],
                 linewidth=2,
                 linestyle="--",
+                color="green",
                 label="NIFTY 50",
             )
 
