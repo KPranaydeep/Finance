@@ -14,6 +14,7 @@ from datetime import date
 import time
 from matplotlib.colors import ListedColormap
 from matplotlib.ticker import FuncFormatter
+import yfinance as yf
 
 # --- 🧽 Suppress font warnings ---
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
