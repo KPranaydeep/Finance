@@ -123,6 +123,34 @@ def load_excel_data(file_bytes):
     df["Cumulative P&L"] = df["Realised P&L"].cumsum()
     return df
 
+@st.cache_data(ttl=3600)
+def load_nifty50_data(start_date, end_date):
+    try:
+        nifty = yf.download(
+            "^NSEI",
+            start=start_date,
+            end=end_date + pd.Timedelta(days=1),
+            progress=False,
+            auto_adjust=True,
+        )
+
+        if nifty.empty:
+            return None
+
+        nifty = nifty.reset_index()
+        nifty["Date"] = pd.to_datetime(nifty["Date"]).dt.normalize()
+
+        if "Close" not in nifty.columns:
+            return None
+
+        nifty = nifty[["Date", "Close"]].dropna()
+        nifty = nifty.rename(columns={"Close": "NIFTY 50"})
+
+        return nifty
+
+    except Exception:
+        return None
+        
 # Load from storage if available
 if os.path.exists(STORAGE_FILENAME) and "uploaded_data" not in st.session_state:
     with open(STORAGE_FILENAME, "rb") as f:
@@ -209,23 +237,61 @@ if "df" in st.session_state:
             )
             st.pyplot(fig1)
 
-    # --- 📈 Cumulative Realised P&L Over Time ---
-    with st.expander("📈 Cumulative Realised P&L Over Time", expanded=True):
-        if daily_pnl.index.size == 0:
-            st.info("No dates to plot yet.")
+    # --- 📈 Cumulative Realised P&L Over Time + NIFTY 50 ---
+with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expanded=True):
+    if daily_pnl.index.size == 0:
+        st.info("No dates to plot yet.")
+    else:
+        date_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max())
+        daily_cumsum = daily_pnl.fillna(0).reindex(date_range, fill_value=0).cumsum()
+
+        nifty_df = load_nifty50_data(
+            daily_cumsum.index.min(),
+            daily_cumsum.index.max()
+        )
+
+        fig2, ax_pnl = plt.subplots(figsize=(12, 4))
+
+        # Primary axis: Your cumulative P&L
+        ax_pnl.plot(
+            daily_cumsum.index,
+            daily_cumsum.values,
+            linewidth=2,
+            label="Cumulative Realised P&L"
+        )
+
+        ax_pnl.set_title("Cumulative Realised P&L vs NIFTY 50")
+        ax_pnl.set_ylabel("Realised P&L (₹)")
+        ax_pnl.grid(True, linestyle="--", alpha=0.8)
+        ax_pnl.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
+        ax_pnl.xaxis.set_major_formatter(mdates.DateFormatter("%b-%d"))
+
+        # Secondary axis: NIFTY 50
+        ax_nifty = ax_pnl.twinx()
+
+        if nifty_df is not None and not nifty_df.empty:
+            ax_nifty.plot(
+                nifty_df["Date"],
+                nifty_df["NIFTY 50"],
+                linewidth=2,
+                linestyle="--",
+                label="NIFTY 50"
+            )
+
+            ax_nifty.set_ylabel("NIFTY 50 Index")
+            ax_nifty.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:,.0f}"))
+
+            # Combine legends from both axes
+            lines1, labels1 = ax_pnl.get_legend_handles_labels()
+            lines2, labels2 = ax_nifty.get_legend_handles_labels()
+            ax_pnl.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+
         else:
-            date_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max())
-            daily_cumsum = daily_pnl.fillna(0).reindex(date_range, fill_value=0).cumsum()
+            ax_pnl.legend(loc="upper left")
+            st.warning("Could not load NIFTY 50 data. Check internet access or yfinance availability.")
 
-            fig2, ax2 = plt.subplots(figsize=(12, 4))
-            ax2.plot(daily_cumsum.index, daily_cumsum.values, linewidth=2)
-            ax2.set_title("Cumulative Realised P&L Over Time")
-            ax2.set_ylabel("Realised P&L (₹)")
-            ax2.grid(True, linestyle="--", alpha=0.8)
-            ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
-            ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b-%d"))
-
-            st.pyplot(fig2)
+        fig2.tight_layout()
+        st.pyplot(fig2)
 
     # --- 🎯 Goal Tracking ---
     today = pd.to_datetime("today").normalize()
