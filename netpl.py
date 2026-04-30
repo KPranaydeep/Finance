@@ -10,16 +10,16 @@ import warnings
 import logging
 from io import BytesIO
 import os
-from datetime import date
-import time
 from matplotlib.colors import ListedColormap
 from matplotlib.ticker import FuncFormatter
 import yfinance as yf
+
 
 # --- 🧽 Suppress font warnings ---
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 mpl.rcParams["font.family"] = "DejaVu Sans"
+
 
 # --- Safe defaults to avoid NameError ---
 model = None
@@ -27,6 +27,7 @@ future_dates = None
 future_y = None
 predicted = None
 goal_achieve_date = None
+
 
 # --- 📌 Format Indian currency ---
 def format_indian_currency(value):
@@ -43,7 +44,8 @@ def format_indian_currency(value):
     except Exception:
         return value
 
-# --- 📈 Linear Regression for P&L Forecast (with guards) ---
+
+# --- 📈 Linear Regression for P&L Forecast ---
 def get_regression_prediction(df, deadline):
     if len(df["Sell date"].dropna().unique()) < 2:
         return None, None, None, None
@@ -67,6 +69,7 @@ def get_regression_prediction(df, deadline):
         return predicted_value, future_dates, future_y, Dummy()
 
     model = LinearRegression().fit(X, y)
+
     days_to_goal = (deadline - origin).days
     predicted_value = float(model.predict(np.array([[days_to_goal]]))[0])
 
@@ -76,12 +79,15 @@ def get_regression_prediction(df, deadline):
 
     return predicted_value, future_dates, future_y, model
 
+
 # --- 🧭 App Configuration ---
 st.set_page_config(layout="wide", page_title="📈 P&L Tracker")
 st.markdown("#### 📈 Stock P&L Tracker & Projection")
 
-# --- 📁 File Handling for Cross-Device ---
+
+# --- 📁 File Handling ---
 STORAGE_FILENAME = "stored_pnl_data.xlsx"
+
 
 @st.cache_data
 def load_excel_data(file_bytes):
@@ -95,14 +101,24 @@ def load_excel_data(file_bytes):
 
     df = None
     tried = []
+
     for skip in (30, 0, 1, 2, 3):
         try:
             tried.append(skip)
             temp = xls.parse(sheet_name, skiprows=skip)
             temp = temp.iloc[:, :11]
             temp.columns = [
-                "Stock name", "ISIN", "Quantity", "Buy date", "Buy price", "Buy value",
-                "Sell date", "Sell price", "Sell value", "Realised P&L", "Remark"
+                "Stock name",
+                "ISIN",
+                "Quantity",
+                "Buy date",
+                "Buy price",
+                "Buy value",
+                "Sell date",
+                "Sell price",
+                "Sell value",
+                "Realised P&L",
+                "Remark",
             ]
             df = temp
             break
@@ -114,6 +130,7 @@ def load_excel_data(file_bytes):
 
     df["Sell date"] = pd.to_datetime(df["Sell date"], dayfirst=True, errors="coerce")
     df["Realised P&L"] = pd.to_numeric(df["Realised P&L"], errors="coerce")
+
     df = df.dropna(subset=["Sell date", "Realised P&L"])
 
     if df.empty:
@@ -121,27 +138,40 @@ def load_excel_data(file_bytes):
 
     df = df.sort_values("Sell date")
     df["Cumulative P&L"] = df["Realised P&L"].cumsum()
+
     return df
+
 
 @st.cache_data(ttl=3600)
 def load_nifty50_data(start_date, end_date):
     try:
+        start_date = pd.to_datetime(start_date).normalize()
+        end_date = pd.to_datetime(end_date).normalize()
+
         nifty = yf.download(
             "^NSEI",
             start=start_date,
             end=end_date + pd.Timedelta(days=1),
             progress=False,
             auto_adjust=True,
+            threads=False,
         )
 
-        if nifty.empty:
+        if nifty is None or nifty.empty:
             return None
 
         nifty = nifty.reset_index()
-        nifty["Date"] = pd.to_datetime(nifty["Date"]).dt.normalize()
 
-        if "Close" not in nifty.columns:
+        if isinstance(nifty.columns, pd.MultiIndex):
+            nifty.columns = [
+                col[0] if isinstance(col, tuple) else col
+                for col in nifty.columns
+            ]
+
+        if "Date" not in nifty.columns or "Close" not in nifty.columns:
             return None
+
+        nifty["Date"] = pd.to_datetime(nifty["Date"]).dt.normalize()
 
         nifty = nifty[["Date", "Close"]].dropna()
         nifty = nifty.rename(columns={"Close": "NIFTY 50"})
@@ -150,16 +180,19 @@ def load_nifty50_data(start_date, end_date):
 
     except Exception:
         return None
-        
-# Load from storage if available
+
+
+# --- Load from storage if available ---
 if os.path.exists(STORAGE_FILENAME) and "uploaded_data" not in st.session_state:
     with open(STORAGE_FILENAME, "rb") as f:
         st.session_state["uploaded_data"] = f.read()
         st.session_state["file_name"] = STORAGE_FILENAME
 
-# Upload File
+
+# --- Upload File ---
 with st.expander("📁 Upload Excel File", expanded=False):
     uploaded_file = st.file_uploader("Upload your 'Stocks_PnL_Report.xlsx'", type=["xlsx"])
+
     if uploaded_file:
         file_content = uploaded_file.read()
         st.session_state["uploaded_data"] = file_content
@@ -173,15 +206,22 @@ with st.expander("📁 Upload Excel File", expanded=False):
             st.success(f"✅ File '{uploaded_file.name}' successfully loaded and data updated.")
         except Exception as e:
             st.error(f"❌ Failed to parse uploaded file: {e}")
+
     elif "uploaded_data" in st.session_state:
         st.success(f"✅ {st.session_state['file_name']} already loaded.")
 
-# Load DataFrame
+
+# --- Load DataFrame ---
 if "uploaded_data" in st.session_state and "df" not in st.session_state:
     try:
         st.session_state["df"] = load_excel_data(st.session_state["uploaded_data"])
     except Exception as e:
         st.error(f"❌ Failed to parse Excel file: {e}")
+
+
+# ======================================================================
+# Main App
+# ======================================================================
 
 if "df" in st.session_state:
     df = st.session_state["df"]
@@ -202,7 +242,17 @@ if "df" in st.session_state:
 
     # --- 🗓️ Daily aggregation ---
     daily_pnl = df.groupby("Sell date")["Realised P&L"].sum()
-    full_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max(), freq="D")
+
+    if daily_pnl.empty:
+        st.warning("No daily P&L data available.")
+        st.stop()
+
+    full_range = pd.date_range(
+        start=daily_pnl.index.min(),
+        end=daily_pnl.index.max(),
+        freq="D",
+    )
+
     daily_pnl = daily_pnl.reindex(full_range)
 
     # --- Calendar Heatmap ---
@@ -228,45 +278,53 @@ if "df" in st.session_state:
                 cmap=cmap,
                 vmin=-1,
                 vmax=1,
-                suptitle="Daily Realised P&L (₹, normalized separately)",
+                suptitle="Daily Realised P&L ₹, normalized separately",
                 colorbar=True,
                 linewidth=1,
                 edgecolor="black",
                 how="sum",
                 figsize=(16, 6),
             )
+
             st.pyplot(fig1)
 
     # --- 📈 Cumulative Realised P&L Over Time + NIFTY 50 ---
-with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expanded=True):
-    if daily_pnl.index.size == 0:
-        st.info("No dates to plot yet.")
-    else:
-        date_range = pd.date_range(start=daily_pnl.index.min(), end=daily_pnl.index.max())
-        daily_cumsum = daily_pnl.fillna(0).reindex(date_range, fill_value=0).cumsum()
+    with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expanded=True):
+        date_range = pd.date_range(
+            start=daily_pnl.index.min(),
+            end=daily_pnl.index.max(),
+            freq="D",
+        )
+
+        daily_cumsum = (
+            daily_pnl
+            .fillna(0)
+            .reindex(date_range, fill_value=0)
+            .cumsum()
+        )
 
         nifty_df = load_nifty50_data(
             daily_cumsum.index.min(),
-            daily_cumsum.index.max()
+            daily_cumsum.index.max(),
         )
 
         fig2, ax_pnl = plt.subplots(figsize=(12, 4))
 
-        # Primary axis: Your cumulative P&L
         ax_pnl.plot(
             daily_cumsum.index,
             daily_cumsum.values,
             linewidth=2,
-            label="Cumulative Realised P&L"
+            label="Cumulative Realised P&L",
         )
 
         ax_pnl.set_title("Cumulative Realised P&L vs NIFTY 50")
-        ax_pnl.set_ylabel("Realised P&L (₹)")
+        ax_pnl.set_ylabel("Realised P&L ₹")
         ax_pnl.grid(True, linestyle="--", alpha=0.8)
-        ax_pnl.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
+        ax_pnl.yaxis.set_major_formatter(
+            FuncFormatter(lambda x, _: format_indian_currency(x))
+        )
         ax_pnl.xaxis.set_major_formatter(mdates.DateFormatter("%b-%d"))
 
-        # Secondary axis: NIFTY 50
         ax_nifty = ax_pnl.twinx()
 
         if nifty_df is not None and not nifty_df.empty:
@@ -275,13 +333,14 @@ with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expande
                 nifty_df["NIFTY 50"],
                 linewidth=2,
                 linestyle="--",
-                label="NIFTY 50"
+                label="NIFTY 50",
             )
 
             ax_nifty.set_ylabel("NIFTY 50 Index")
-            ax_nifty.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:,.0f}"))
+            ax_nifty.yaxis.set_major_formatter(
+                FuncFormatter(lambda x, _: f"{x:,.0f}")
+            )
 
-            # Combine legends from both axes
             lines1, labels1 = ax_pnl.get_legend_handles_labels()
             lines2, labels2 = ax_nifty.get_legend_handles_labels()
             ax_pnl.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
@@ -298,17 +357,23 @@ with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expande
     month_end = (today.replace(day=1) + pd.offsets.MonthEnd(1)).date()
 
     start_goal = 78340.0
-    start_date = pd.Timestamp(year=today.year if today.month >= 4 else today.year - 1, month=4, day=1)
+    start_date = pd.Timestamp(
+        year=today.year if today.month >= 4 else today.year - 1,
+        month=4,
+        day=1,
+    )
+
     days_diff = max((today - start_date).days, 0)
     compounding_factor = 1.01 ** days_diff
     current_goal_default = float(start_goal * compounding_factor)
 
     st.markdown("#### 🎯 Set Your Net Profit Goal")
+
     col1, col2 = st.columns(2)
 
     with col1:
         goal_amount = st.number_input(
-            "Enter Goal Amount (₹)",
+            "Enter Goal Amount ₹",
             min_value=0.0,
             value=float(round(current_goal_default, 2)),
             step=1000.0,
@@ -322,23 +387,36 @@ with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expande
         deadline_ts = pd.to_datetime(goal_deadline)
 
         progress = df[df["Sell date"] <= deadline_ts]["Realised P&L"].sum()
-        progress_pct = 0.0 if goal_amount <= 0 else float(np.clip((progress / goal_amount) * 100.0, 0, 100))
+        progress_pct = (
+            0.0
+            if goal_amount <= 0
+            else float(np.clip((progress / goal_amount) * 100.0, 0, 100))
+        )
 
         pred_tuple = get_regression_prediction(df, deadline_ts)
+
         if all(v is not None for v in pred_tuple):
             predicted, future_dates, future_y, model = pred_tuple
 
         remaining = (predicted - progress) if predicted is not None else None
 
         st.info(
-            f"✅ Realised P&L till **{deadline_ts.strftime('%a, %d %b %Y')}**: {format_indian_currency(progress)}\n\n"
+            f"✅ Realised P&L till **{deadline_ts.strftime('%a, %d %b %Y')}**: "
+            f"{format_indian_currency(progress)}\n\n"
             f"🎯 Goal: {format_indian_currency(goal_amount)}\n\n"
             f"📈 Progress: {progress_pct:.1f}%\n\n"
-            + (f"📊 Predicted P&L by Deadline: {format_indian_currency(predicted)}\n\n" if predicted is not None else "")
-            + (f"🧭 Expected Earnings from Now till Deadline: {format_indian_currency(remaining)}\n" if remaining is not None else "")
+            + (
+                f"📊 Predicted P&L by Deadline: {format_indian_currency(predicted)}\n\n"
+                if predicted is not None
+                else ""
+            )
+            + (
+                f"🧭 Expected Earnings from Now till Deadline: {format_indian_currency(remaining)}\n"
+                if remaining is not None
+                else ""
+            )
         )
 
-        # --- Progress bar ---
         bar = st.progress(0)
         bar.progress(int(progress_pct))
 
@@ -350,6 +428,7 @@ with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expande
 
             if slope != 0:
                 days_to_goal_hit = (goal_amount - intercept) / slope
+
                 try:
                     goal_achieve_date = origin + pd.Timedelta(days=int(days_to_goal_hit))
                 except Exception:
@@ -357,32 +436,69 @@ with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expande
 
         # --- Plot goal vs actual ---
         fig3, ax3 = plt.subplots(figsize=(14, 6))
-        ax3.plot(df["Sell date"], df["Cumulative P&L"], marker="o", label="Actual P&L", linewidth=2)
-        ax3.axhline(progress, linestyle="--", label=f"Progress {format_indian_currency(progress)}")
-        ax3.axhline(goal_amount, color="black", linestyle="--", label=f"Goal {format_indian_currency(goal_amount)}")
+
+        ax3.plot(
+            df["Sell date"],
+            df["Cumulative P&L"],
+            marker="o",
+            label="Actual P&L",
+            linewidth=2,
+        )
+
+        ax3.axhline(
+            progress,
+            linestyle="--",
+            label=f"Progress {format_indian_currency(progress)}",
+        )
+
+        ax3.axhline(
+            goal_amount,
+            color="black",
+            linestyle="--",
+            label=f"Goal {format_indian_currency(goal_amount)}",
+        )
 
         deadline_label = deadline_ts.strftime("%A, %d %B %Y")
-        ax3.axvline(deadline_ts, color="green", linestyle="--", label=f"Deadline: {deadline_label}")
+
+        ax3.axvline(
+            deadline_ts,
+            color="green",
+            linestyle="--",
+            label=f"Deadline: {deadline_label}",
+        )
 
         if predicted is not None and future_dates is not None and future_y is not None:
             ax3.scatter(deadline_ts, predicted, s=100, label="Predicted P&L")
             ax3.plot(future_dates, future_y, linestyle=":", label="Linear Projection")
 
-        if goal_achieve_date is not None and (df["Sell date"].min() <= goal_achieve_date <= deadline_ts):
+        if goal_achieve_date is not None and (
+            df["Sell date"].min() <= goal_achieve_date <= deadline_ts
+        ):
             goal_label = goal_achieve_date.strftime("%A, %d %B %Y")
-            ax3.axvline(goal_achieve_date, color="black", linestyle="--", label=f"Goal Hit: {goal_label}")
+
+            ax3.axvline(
+                goal_achieve_date,
+                color="black",
+                linestyle="--",
+                label=f"Goal Hit: {goal_label}",
+            )
+
             ax3.scatter(goal_achieve_date, goal_amount, s=80)
 
         ax3.set_title("Cumulative Realised P&L vs Goal")
         ax3.set_xlabel("Date")
-        ax3.set_ylabel("Cumulative P&L (₹)")
+        ax3.set_ylabel("Cumulative P&L ₹")
         ax3.grid(True, linestyle="--", alpha=0.3)
-        ax3.yaxis.set_major_formatter(FuncFormatter(lambda x, _: format_indian_currency(x)))
+        ax3.yaxis.set_major_formatter(
+            FuncFormatter(lambda x, _: format_indian_currency(x))
+        )
         ax3.xaxis.set_major_formatter(mdates.DateFormatter("%b-%d"))
         ax3.legend()
+
+        fig3.tight_layout()
         st.pyplot(fig3)
 
-        if (goal_achieve_date is None) or (goal_achieve_date > deadline_ts):
+        if goal_achieve_date is None or goal_achieve_date > deadline_ts:
             st.caption("💡 *Be patient and consistent — you might hit your profit goal next month!* 💪")
 
     # --- Profit rate metrics ---
@@ -396,3 +512,6 @@ with st.expander("📈 Cumulative Realised P&L Over Time with NIFTY 50", expande
         c1.metric("📈 Net Profit / Day", format_indian_currency(per_day))
         c2.metric("📆 Net Profit / Month", format_indian_currency(per_month))
         c3.metric("📅 Net Profit / Year", format_indian_currency(per_year))
+
+else:
+    st.info("Please upload your Stocks_PnL_Report.xlsx file to begin.")
