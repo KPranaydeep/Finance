@@ -70,12 +70,12 @@ mode = st.radio("Select Mode", ["Calculate Required Investment", "Calculate Inve
 
 # === MODE 1 ===
 if mode == "Calculate Required Investment":
-    duration_years = st.number_input("Investment Duration (Years)", value=99, step=1)
+    duration_years = st.number_input("Investment Duration (Years)", value=73, step=1)
     final_balance = st.number_input("Final Balance Desired (₹)", value=0, step=100000)
-    monthly_withdrawal = st.number_input("Monthly Withdrawal (₹)", value=63200, step=1000)
+    monthly_withdrawal = st.number_input("Monthly Withdrawal (₹)", value=78240, step=1000)
 
-    annual_r = st.number_input("Expected Annual Return (%)", value=11.75, step=0.1, format="%.2f")
-    annual_g = st.number_input("Annual Increase in Withdrawal (%)", value=6.0, step=0.1, format="%.2f")
+    annual_r = st.number_input("Expected Annual Return (%)", value=9.01, step=0.1, format="%.2f")
+    annual_g = st.number_input("Annual Increase in Withdrawal (%)", value=9.0, step=0.1, format="%.2f")
 
     # Monthly conversion
     monthly_r = (1 + annual_r / 100) ** (1 / 12) - 1
@@ -151,9 +151,9 @@ if mode == "Calculate Required Investment":
 
 # === MODE 2 ===
 elif mode == "Calculate Investment Duration":
-    monthly_withdrawal = st.number_input("Initial Monthly Withdrawal (₹)", value=63200, step=1000)
-    inflation_rate = st.number_input("Annual Inflation Rate (%)", value=6.0, step=0.1)
-    return_rate = st.number_input("Expected Annual Return (%)", value=11.75, step=0.1)
+    monthly_withdrawal = st.number_input("Initial Monthly Withdrawal (₹)", value=78240, step=1000)
+    inflation_rate = st.number_input("Annual Inflation Rate (%)", value=9.0, step=0.1)
+    return_rate = st.number_input("Expected Annual Return (%)", value=9.01, step=0.1)
 
     current_investment_lakhs = st.number_input(
         "Current Investment (₹ in Lakhs)", min_value=0.0, value=20.0, step=1.0, format="%.2f"
