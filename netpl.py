@@ -346,7 +346,7 @@ if "df" in st.session_state:
     today = pd.to_datetime("today").normalize()
     month_end = (today.replace(day=1) + pd.offsets.MonthEnd(1)).date()
 
-    start_goal = 78340.0
+    start_goal = 78240.0
 
     start_date = pd.Timestamp(
         year=today.year if today.month >= 4 else today.year - 1,
