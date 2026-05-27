@@ -13,7 +13,6 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-
 # =========================================================
 # HELPERS
 # =========================================================
@@ -36,7 +35,7 @@ def resolve_yahoo_tickers(symbols_base):
     for sym in symbols_base:
         for suffix in [".NS", ".BO"]:
             try:
-                test = yf.download(sym + suffix, period="5d", progress=False, auto_adjust=False)
+                test = yf.download(sym + suffix, period="5d", progress=False, auto_adjust=True)
                 if test is not None and not test.empty:
                     resolved[sym] = sym + suffix
                     break
@@ -214,7 +213,7 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
 
     effective_end = (end_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
 
-    df = yf.download(symbols, start=start_date, end=effective_end, progress=False, auto_adjust=False)["Close"]
+    df = yf.download(symbols, start=start_date, end=effective_end, progress=False, auto_adjust=True)["Close"]
     if isinstance(df, pd.Series):
         df = df.to_frame()
 
@@ -479,7 +478,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
 @st.cache_data(show_spinner=False)
 def get_latest_price_map(latest_prices):
-    price_history = yf.download(latest_prices, period="15d", progress=False, auto_adjust=False)["Close"]
+    price_history = yf.download(latest_prices, period="15d", progress=False, auto_adjust=True)["Close"]
 
     if isinstance(price_history, pd.Series):
         price_history = price_history.to_frame()
@@ -629,7 +628,6 @@ if run_btn:
                 )
                 st.dataframe(optimal_df, use_container_width=True)
 
-
         st.subheader("Top Correlated Pairs")
         
         corr_matrix = log_returns.corr()
@@ -654,7 +652,6 @@ if run_btn:
         
                 st.dataframe(top_corrs.head(5), use_container_width=True)
         
-
         with st.spinner("Fetching latest prices..."):
             latest_prices = log_returns.columns.tolist()
             price_map = get_latest_price_map(latest_prices)
