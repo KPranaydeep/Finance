@@ -86,6 +86,27 @@ def normalize_nse_symbol(value):
     return symbol
 
 
+def resolve_nse_symbol(symbol, available_symbols, allow_be_fallback=False):
+    """Resolve broker-style NSE symbols against canonical NSE symbols.
+
+    The broker may append the trading-series suffix ``-BE`` to the NSE symbol.
+    We first try the exact value. When it ends in ``-BE``, we retry with the
+    suffix removed. For additions, ``allow_be_fallback=True`` permits the
+    trimmed base symbol even when the external equity mapping is stale or
+    incomplete; Yahoo price lookup is then used by the normal add workflow.
+    """
+    normalized = normalize_nse_symbol(symbol)
+    if normalized in available_symbols:
+        return normalized
+
+    if normalized.endswith("-BE"):
+        base_symbol = normalized[:-3].rstrip("-").strip()
+        if base_symbol and (base_symbol in available_symbols or allow_be_fallback):
+            return base_symbol
+
+    return None
+
+
 def parse_symbol_input(raw_text):
     parts = re.split(r"[,;\n]+", raw_text or "")
     symbols = []
@@ -171,8 +192,21 @@ def add_symbols_to_master(symbols):
         return [], [], [], []
 
     company_lookup = get_nse_company_lookup()
-    valid_symbols = [s for s in symbols if s in company_lookup]
-    invalid_symbols = [s for s in symbols if s not in company_lookup]
+    available_symbols = set(company_lookup)
+
+    valid_symbols = []
+    invalid_symbols = []
+    seen_resolved = set()
+
+    for entered_symbol in symbols:
+        resolved_symbol = resolve_nse_symbol(
+            entered_symbol, available_symbols, allow_be_fallback=True
+        )
+        if resolved_symbol is None:
+            invalid_symbols.append(entered_symbol)
+        elif resolved_symbol not in seen_resolved:
+            valid_symbols.append(resolved_symbol)
+            seen_resolved.add(resolved_symbol)
 
     with get_db_connection() as conn:
         existing = {
@@ -214,7 +248,7 @@ def add_symbols_to_master(symbols):
                 """,
                 (
                     symbol,
-                    company_lookup[symbol],
+                    company_lookup.get(symbol, symbol),
                     1.0,
                     initial_price,
                     now,
@@ -232,29 +266,33 @@ def remove_symbols_from_master(symbols):
         return [], []
 
     with get_db_connection() as conn:
-        existing = {
+        all_existing = {
             row["symbol"]
-            for row in conn.execute(
-                "SELECT symbol FROM master_holdings WHERE symbol IN ({})".format(
-                    ",".join("?" for _ in symbols)
-                ),
-                symbols,
-            ).fetchall()
+            for row in conn.execute("SELECT symbol FROM master_holdings").fetchall()
         }
 
-        removed = [s for s in symbols if s in existing]
-        missing = [s for s in symbols if s not in existing]
+        resolved_to_remove = []
+        missing = []
+        seen_resolved = set()
 
-        if removed:
+        for entered_symbol in symbols:
+            resolved_symbol = resolve_nse_symbol(entered_symbol, all_existing)
+            if resolved_symbol is None:
+                missing.append(entered_symbol)
+            elif resolved_symbol not in seen_resolved:
+                resolved_to_remove.append(resolved_symbol)
+                seen_resolved.add(resolved_symbol)
+
+        if resolved_to_remove:
             conn.execute(
                 "DELETE FROM master_holdings WHERE symbol IN ({})".format(
-                    ",".join("?" for _ in removed)
+                    ",".join("?" for _ in resolved_to_remove)
                 ),
-                removed,
+                resolved_to_remove,
             )
             conn.commit()
 
-    return removed, missing
+    return resolved_to_remove, missing
 
 
 def save_holding_values(edited_df):
