@@ -104,20 +104,17 @@ def ensure_latest_analysis_table(conn):
 
 def init_holdings_db():
     with get_db_connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS master_holdings (
-                symbol TEXT PRIMARY KEY,
-                stock_name TEXT NOT NULL,
-                quantity REAL NOT NULL DEFAULT 1,
-                average_price REAL,
-                added_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
+    conn.execute("DROP TABLE IF EXISTS latest_analysis")
+
+    conn.execute("""
+        CREATE TABLE latest_analysis (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            saved_at TEXT NOT NULL,
+            payload_json TEXT NOT NULL
         )
-        ensure_latest_analysis_table(conn)
-        conn.commit()
+    """)
+    conn.commit()
+    
 
 
 
