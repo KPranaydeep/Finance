@@ -308,12 +308,17 @@ def render_live_holdings_banner(placeholder):
     return unique_count
 
 from datetime import datetime
-import pandas as pd
+from zoneinfo import ZoneInfo
 
+def format_ist_time(value):
+    dt = datetime.fromisoformat(value)
 
-def format_time(value: str) -> str:
-    """Convert ISO datetime string to hh:mm am/pm format."""
-    return datetime.fromisoformat(value).strftime("%I:%M %p").lower()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+
+    dt_ist = dt.astimezone(ZoneInfo("Asia/Kolkata"))
+
+    return dt_ist.strftime("%d %b %Y, %I:%M %p IST")
 
 
 def _json_safe_value(value):
