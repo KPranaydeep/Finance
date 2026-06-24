@@ -1219,7 +1219,6 @@ else:
         .sort_values("Invested", ascending=False)
         .drop(columns=["Invested"])
     )
-
     edited_df = st.data_editor(
         editable_df,
         use_container_width=True,
@@ -1238,13 +1237,14 @@ else:
         },
         key="holdings_editor",
     )
-        if st.button("Save quantity and price changes", use_container_width=True):
-            try:
-                save_holding_values(edited_df)
-                st.success("Master holdings values saved.")
-                master_df = load_master_holdings()
-            except Exception as exc:
-                st.error(f"Could not save holdings: {exc}")
+
+    if st.button("Save quantity and price changes", use_container_width=True):
+        try:
+            save_holding_values(edited_df)
+            st.success("Master holdings values saved.")
+            master_df = load_master_holdings()
+        except Exception as exc:
+            st.error(f"Could not save holdings: {exc}")
 
 if run_btn:
     try:
