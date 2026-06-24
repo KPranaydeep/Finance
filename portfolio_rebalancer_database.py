@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import re
@@ -81,13 +80,279 @@ def init_holdings_db():
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS latest_analysis (
-                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-                analyzed_at TEXT NOT NULL,
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                saved_at TEXT NOT NULL,
                 payload_json TEXT NOT NULL
             )
             """
         )
         conn.commit()
+
+
+
+def make_json_safe(value):
+    """Convert pandas/numpy/datetime values into portable JSON values."""
+    if isinstance(value, dict):
+        return {str(key): make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_safe(item) for item in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        numeric = float(value)
+        return numeric if np.isfinite(numeric) else None
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return value.isoformat()
+    if value is pd.NA:
+        return None
+    return value
+
+
+def save_latest_analysis(payload):
+    """Persist the latest successful analysis as a singleton SQLite record."""
+    if not isinstance(payload, dict):
+        raise ValueError("Analysis payload must be a dictionary.")
+
+    safe_payload = make_json_safe(payload)
+    saved_at = str(
+        safe_payload.get("saved_at")
+        or datetime.now().isoformat(timespec="seconds")
+    )
+    safe_payload["saved_at"] = saved_at
+    payload_json = json.dumps(
+        safe_payload,
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    )
+
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO latest_analysis (id, saved_at, payload_json)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                saved_at = excluded.saved_at,
+                payload_json = excluded.payload_json
+            """,
+            (saved_at, payload_json),
+        )
+        conn.commit()
+
+    return safe_payload
+
+
+def load_latest_analysis():
+    """Load the latest saved analysis, returning None when no result exists."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM latest_analysis WHERE id = 1"
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    payload = json.loads(row["payload_json"])
+    if not isinstance(payload, dict):
+        raise ValueError("The saved analysis record is not a valid JSON object.")
+    return payload
+
+
+def latest_analysis_backup_bytes():
+    """Return the latest saved analysis as a downloadable UTF-8 JSON file."""
+    payload = load_latest_analysis()
+    if payload is None:
+        return None
+
+    return json.dumps(
+        make_json_safe(payload),
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def restore_latest_analysis_backup(uploaded_file):
+    """Validate and restore an analysis-result JSON backup."""
+    if uploaded_file is None:
+        raise ValueError("Choose an analysis backup JSON file first.")
+
+    raw_bytes = uploaded_file.getvalue()
+    try:
+        payload = json.loads(raw_bytes.decode("utf-8-sig"))
+    except Exception as exc:
+        raise ValueError(f"Could not read the JSON backup: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("The analysis backup must contain one JSON object.")
+
+    required_keys = {
+        "saved_at",
+        "holdings_analyzed",
+        "total_invested",
+        "current_stats",
+        "optimal_stats",
+        "rebalancing_plan",
+    }
+    missing = sorted(required_keys - set(payload))
+    if missing:
+        raise ValueError(
+            "This is not a complete analysis backup. Missing: "
+            + ", ".join(missing)
+        )
+
+    return save_latest_analysis(payload)
+
+
+def render_saved_analysis(placeholder):
+    """Display the latest saved analysis immediately below the live banner."""
+    placeholder.empty()
+
+    with placeholder.container():
+        payload = load_latest_analysis()
+
+        if payload is None:
+            st.info(
+                "No saved analysis yet. Run analysis once or upload an analysis backup."
+            )
+            return
+
+        st.subheader("💾 Last Saved Analysis")
+        st.caption(f"Saved at: {payload.get('saved_at', 'Unknown')}")
+
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        summary_col1.metric(
+            "Holdings analysed",
+            int(payload.get("holdings_analyzed") or 0),
+        )
+        summary_col2.metric(
+            "Total invested",
+            f"₹{float(payload.get('total_invested') or 0):,.2f}",
+        )
+        summary_col3.metric(
+            "Executable trades",
+            int(payload.get("executable_trade_count") or 0),
+        )
+
+        backup_json = json.dumps(
+            make_json_safe(payload),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
+        backup_date = str(payload.get("saved_at", ""))[:10] or "latest"
+
+        st.download_button(
+            "Download complete analysis backup JSON",
+            data=backup_json,
+            file_name=f"portfolio_analysis_backup_{backup_date}.json",
+            mime="application/json",
+            use_container_width=True,
+            key=(
+                "download_saved_analysis_main_"
+                + str(payload.get("saved_at", "none"))
+            ),
+        )
+
+        current_stats = payload.get("current_stats") or {}
+        optimal_stats = payload.get("optimal_stats") or {}
+
+        if current_stats or optimal_stats:
+            with st.expander("Saved portfolio statistics", expanded=True):
+                stats_col1, stats_col2 = st.columns(2)
+
+                with stats_col1:
+                    st.markdown("**Current Portfolio**")
+                    if current_stats:
+                        current_saved_df = pd.DataFrame(
+                            {
+                                "Metric": list(current_stats.keys()),
+                                "Value": list(current_stats.values()),
+                            }
+                        )
+                        current_saved_df["Value"] = current_saved_df.apply(
+                            lambda row: (
+                                f"{float(row['Value']):.2f}"
+                                if row["Metric"] == "Sharpe Ratio"
+                                else f"{float(row['Value']):.2%}"
+                            ),
+                            axis=1,
+                        )
+                        st.dataframe(
+                            current_saved_df,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                with stats_col2:
+                    st.markdown("**Optimized Portfolio**")
+                    if optimal_stats:
+                        optimal_saved_df = pd.DataFrame(
+                            {
+                                "Metric": list(optimal_stats.keys()),
+                                "Value": list(optimal_stats.values()),
+                            }
+                        )
+                        optimal_saved_df["Value"] = optimal_saved_df.apply(
+                            lambda row: (
+                                f"{float(row['Value']):.2f}"
+                                if row["Metric"] == "Sharpe Ratio"
+                                else f"{float(row['Value']):.2%}"
+                            ),
+                            axis=1,
+                        )
+                        st.dataframe(
+                            optimal_saved_df,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+        settings = payload.get("settings") or {}
+        history = payload.get("history") or {}
+        if settings or history:
+            with st.expander("Saved analysis settings and coverage", expanded=False):
+                if settings:
+                    st.json(settings)
+                if history:
+                    st.json(history)
+
+        top_correlations = payload.get("top_correlations") or []
+        if top_correlations:
+            with st.expander("Saved top correlated pairs", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(top_correlations),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        rebalancing_plan = payload.get("rebalancing_plan") or []
+        with st.expander("Saved rebalancing plan", expanded=False):
+            if rebalancing_plan:
+                saved_rebal_df = pd.DataFrame(rebalancing_plan)
+                st.dataframe(
+                    style_rebalance_df(saved_rebal_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.success("The saved analysis had no executable trades.")
+
+        warnings_payload = payload.get("warnings") or {}
+        warning_lines = []
+        for warning_name, warning_values in warnings_payload.items():
+            if warning_values:
+                if isinstance(warning_values, list):
+                    warning_text = ", ".join(map(str, warning_values))
+                else:
+                    warning_text = str(warning_values)
+                warning_lines.append(f"{warning_name}: {warning_text}")
+
+        if warning_lines:
+            with st.expander("Saved warnings", expanded=False):
+                for warning_line in warning_lines:
+                    st.warning(warning_line)
 
 
 def normalize_nse_symbol(value):
@@ -155,117 +420,7 @@ def load_master_holdings():
             """,
             conn,
         )
-    # Derived display/export column. This is calculated from the saved
-    # Quantity and Average Price; it is not independently stored in SQLite.
-    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
-    df["Average Price"] = pd.to_numeric(df["Average Price"], errors="coerce")
-    df["Current (Invested)"] = df["Quantity"] * df["Average Price"]
-
-    ordered_columns = [
-        "Symbol",
-        "Stock Name",
-        "Quantity",
-        "Average Price",
-        "Current (Invested)",
-        "Added At",
-        "Updated At",
-    ]
-    return df[ordered_columns]
-
-
-def export_master_holdings_csv():
-    """Export the complete master holdings table as a portable CSV backup."""
-    df = load_master_holdings()
-    return df.to_csv(index=False).encode("utf-8-sig")
-
-
-def import_master_holdings_csv(uploaded_file, replace_existing=True):
-    """Restore holdings from a CSV backup.
-
-    When ``replace_existing`` is True, the current master table is replaced.
-    Otherwise, uploaded rows are merged and existing symbols are updated.
-    """
-    if uploaded_file is None:
-        raise ValueError("Choose a holdings backup CSV file first.")
-
-    file_bytes = uploaded_file.getvalue()
-    if not file_bytes:
-        raise ValueError("The uploaded backup file is empty.")
-
-    restored = pd.read_csv(io.BytesIO(file_bytes))
-    restored.columns = [str(c).strip() for c in restored.columns]
-
-    required = ["Symbol", "Stock Name", "Quantity", "Average Price"]
-    missing = [c for c in required if c not in restored.columns]
-    if missing:
-        raise ValueError(f"Backup is missing required columns: {missing}")
-
-    restored = restored.copy()
-    restored["Symbol"] = restored["Symbol"].map(normalize_nse_symbol)
-    restored["Stock Name"] = restored["Stock Name"].fillna("").astype(str).str.strip()
-    restored["Quantity"] = pd.to_numeric(restored["Quantity"], errors="coerce")
-    restored["Average Price"] = pd.to_numeric(restored["Average Price"], errors="coerce")
-
-    restored = restored[restored["Symbol"] != ""].copy()
-    restored = restored.drop_duplicates(subset=["Symbol"], keep="last")
-
-    if restored.empty:
-        raise ValueError("The backup does not contain any valid symbols.")
-    if restored["Quantity"].isna().any() or (restored["Quantity"] <= 0).any():
-        raise ValueError("Every restored holding must have Quantity greater than zero.")
-
-    invalid_prices = restored["Average Price"].notna() & (restored["Average Price"] <= 0)
-    if invalid_prices.any():
-        raise ValueError("Average Price must be greater than zero when provided.")
-
-    now = datetime.now().isoformat(timespec="seconds")
-    if "Added At" not in restored.columns:
-        restored["Added At"] = now
-    if "Updated At" not in restored.columns:
-        restored["Updated At"] = now
-
-    restored["Added At"] = restored["Added At"].fillna(now).astype(str)
-    restored["Updated At"] = restored["Updated At"].fillna(now).astype(str)
-    restored["Stock Name"] = restored.apply(
-        lambda row: row["Stock Name"] if row["Stock Name"] else row["Symbol"], axis=1
-    )
-
-    with get_db_connection() as conn:
-        try:
-            conn.execute("BEGIN")
-            if replace_existing:
-                conn.execute("DELETE FROM master_holdings")
-
-            for _, row in restored.iterrows():
-                average_price = (
-                    None if pd.isna(row["Average Price"]) else float(row["Average Price"])
-                )
-                conn.execute(
-                    """
-                    INSERT INTO master_holdings
-                        (symbol, stock_name, quantity, average_price, added_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(symbol) DO UPDATE SET
-                        stock_name = excluded.stock_name,
-                        quantity = excluded.quantity,
-                        average_price = excluded.average_price,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        row["Symbol"],
-                        row["Stock Name"],
-                        float(row["Quantity"]),
-                        average_price,
-                        row["Added At"],
-                        row["Updated At"],
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
-    return len(restored)
+    return df
 
 
 def get_unique_holdings_count():
@@ -299,246 +454,13 @@ def render_live_holdings_banner(placeholder):
                 ● LIVE DATABASE STATUS
             </div>
             <div style="font-size: 1.45rem; font-weight: 800; margin-top: 4px;">
-                Current holdings: {unique_count}
+                Current unique holdings count: {unique_count}
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     return unique_count
-
-from datetime import datetime
-from zoneinfo import ZoneInfo
-def format_ist_time(value):
-    dt = datetime.fromisoformat(value)
-
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
-
-    return dt.strftime("%d %b %Y, %I:%M %p IST")
-
-
-def _json_safe_value(value):
-    """Convert pandas/numpy values into JSON-safe Python values."""
-    if value is None:
-        return None
-
-    if isinstance(value, (pd.Timestamp, datetime)):
-        return value.isoformat()
-
-    if isinstance(value, (np.integer,)):
-        return int(value)
-    if isinstance(value, (np.floating,)):
-        value = float(value)
-    if isinstance(value, float):
-        return value if np.isfinite(value) else None
-    if isinstance(value, (np.bool_,)):
-        return bool(value)
-    return value
-
-
-def dataframe_to_json_records(df):
-    """Serialize a dataframe as clean records for the saved analysis snapshot."""
-    if df is None or df.empty:
-        return []
-
-    clean = df.copy()
-    clean = clean.replace([np.inf, -np.inf], np.nan)
-    records = clean.to_dict(orient="records")
-    return [
-        {str(key): _json_safe_value(value) for key, value in row.items()}
-        for row in records
-    ]
-
-
-def save_latest_analysis(payload):
-    """Persist one latest-analysis snapshot shared by every app session."""
-    analyzed_at = str(payload.get("analyzed_at") or datetime.now().isoformat(timespec="seconds"))
-    payload_json = json.dumps(payload, ensure_ascii=False, allow_nan=False)
-
-    with get_db_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO latest_analysis (singleton_id, analyzed_at, payload_json)
-            VALUES (1, ?, ?)
-            ON CONFLICT(singleton_id) DO UPDATE SET
-                analyzed_at = excluded.analyzed_at,
-                payload_json = excluded.payload_json
-            """,
-            (analyzed_at, payload_json),
-        )
-        conn.commit()
-
-
-def load_latest_analysis():
-    """Load the most recently completed analysis, if one has been saved."""
-    with get_db_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT analyzed_at, payload_json
-            FROM latest_analysis
-            WHERE singleton_id = 1
-            """
-        ).fetchone()
-
-    if row is None:
-        return None
-
-    try:
-        payload = json.loads(row["payload_json"])
-    except (TypeError, json.JSONDecodeError):
-        return None
-
-    payload.setdefault("analyzed_at", row["analyzed_at"])
-    return payload
-
-
-def _format_saved_metric(metric_name, value):
-    if value is None:
-        return "N/A"
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-
-    if metric_name == "Sharpe Ratio":
-        return f"{numeric:.2f}"
-    return f"{numeric:.2%}"
-
-
-def render_latest_analysis(placeholder):
-    """Show the saved analysis immediately below the live database banner."""
-    payload = load_latest_analysis()
-
-    with placeholder.container():
-        if not payload:
-            return None
-
-        analyzed_at_raw = payload.get("analyzed_at", "")
-        try:
-            analyzed_at = pd.to_datetime(analyzed_at_raw).strftime("%d %b %Y, %I:%M:%S %p")
-        except Exception:
-            analyzed_at = str(analyzed_at_raw)
-
-        holdings_count = int(payload.get("holdings_count") or 0)
-        total_invested = float(payload.get("total_invested") or 0.0)
-        rebalancing_records = payload.get("rebalancing_plan") or []
-
-        st.markdown(
-            f"""
-            <div style="
-                border: 1px solid rgba(59, 130, 246, 0.65);
-                border-radius: 14px;
-                padding: 14px 18px;
-                margin: 0 0 12px 0;
-                background: rgba(59, 130, 246, 0.09);
-            ">
-                <div style="font-size: 0.83rem; font-weight: 750; letter-spacing: 0.07em; color: #3b82f6;">
-                    ● LAST SAVED ANALYSIS
-                </div>
-                <div style="font-size: 1.05rem; font-weight: 750; margin-top: 3px;">
-                    Completed: {analyzed_at}
-                </div>
-                <div style="font-size: 0.88rem; opacity: 0.82; margin-top: 2px;">
-                    This result was loaded from the shared analysis database.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        summary_col1, summary_col2, summary_col3 = st.columns(3)
-        summary_col1.metric("Holdings analyzed", holdings_count)
-        summary_col2.metric("Total invested", f"₹{total_invested:,.2f}")
-        summary_col3.metric("Executable trades", len(rebalancing_records))
-
-        with st.expander("View last saved analysis details", expanded=True):
-            history = payload.get("history") or {}
-            settings = payload.get("settings") or {}
-
-            detail_col1, detail_col2, detail_col3 = st.columns(3)
-            detail_col1.metric(
-                "History start",
-                history.get("valid_start") or "N/A",
-            )
-            detail_col2.metric(
-                "History end",
-                history.get("valid_end") or "N/A",
-            )
-            detail_col3.metric(
-                "Log-return shape",
-                f"{history.get('rows', 0)} × {history.get('columns', 0)}",
-            )
-
-            st.caption(
-                "Saved settings — "
-                f"Days to flip: {settings.get('days_to_flip', 'N/A')} | "
-                f"Max drawdown input: {settings.get('max_dd_pct', 'N/A')}% | "
-                f"Drop-bottom fraction: {settings.get('drop_bottom_pct', 'N/A')} | "
-                f"Target volatility: {settings.get('target_volatility') if settings.get('target_volatility') is not None else 'Disabled'}"
-            )
-
-            current_stats = payload.get("current_stats") or {}
-            optimal_stats = payload.get("optimal_stats") or {}
-            if current_stats or optimal_stats:
-                stats_col1, stats_col2 = st.columns(2)
-                with stats_col1:
-                    st.markdown("**Current portfolio**")
-                    current_saved_df = pd.DataFrame(
-                        {
-                            "Metric": list(current_stats.keys()),
-                            "Value": [
-                                _format_saved_metric(metric, current_stats[metric])
-                                for metric in current_stats
-                            ],
-                        }
-                    )
-                    st.dataframe(current_saved_df, use_container_width=True, hide_index=True)
-
-                with stats_col2:
-                    st.markdown("**Optimized portfolio**")
-                    optimal_saved_df = pd.DataFrame(
-                        {
-                            "Metric": list(optimal_stats.keys()),
-                            "Value": [
-                                _format_saved_metric(metric, optimal_stats[metric])
-                                for metric in optimal_stats
-                            ],
-                        }
-                    )
-                    st.dataframe(optimal_saved_df, use_container_width=True, hide_index=True)
-
-            if rebalancing_records:
-                st.markdown("**Saved rebalancing plan**")
-                saved_rebalancing_df = pd.DataFrame(rebalancing_records)
-                st.dataframe(
-                    style_rebalance_df(saved_rebalancing_df),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.success("The saved analysis had no executable trades.")
-
-            top_correlations = payload.get("top_correlations") or []
-            if top_correlations:
-                st.markdown("**Saved top correlated pairs**")
-                st.dataframe(
-                    pd.DataFrame(top_correlations),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            warnings = []
-            if payload.get("unresolved_symbols"):
-                warnings.append("Unresolved symbols: " + ", ".join(payload["unresolved_symbols"]))
-            if payload.get("missing_prices"):
-                warnings.append("Missing prices: " + ", ".join(payload["missing_prices"]))
-            if payload.get("missing_alloc"):
-                warnings.append("Missing allocation rows: " + ", ".join(payload["missing_alloc"]))
-            for warning in warnings:
-                st.warning(warning)
-
-    return payload
 
 
 def add_symbols_to_master(symbols):
@@ -650,7 +572,6 @@ def remove_symbols_from_master(symbols):
 
 
 def save_holding_values(edited_df):
-    """Persist edited quantity and average price values without resetting them."""
     required = ["Symbol", "Quantity", "Average Price"]
     missing_columns = [c for c in required if c not in edited_df.columns]
     if missing_columns:
@@ -669,37 +590,22 @@ def save_holding_values(edited_df):
         raise ValueError("Average Price must be greater than zero for every holding.")
 
     now = datetime.now().isoformat(timespec="seconds")
-    updated_rows = 0
-
     with get_db_connection() as conn:
-        try:
-            conn.execute("BEGIN")
-            for _, row in cleaned.iterrows():
-                cursor = conn.execute(
-                    """
-                    UPDATE master_holdings
-                    SET quantity = ?, average_price = ?, updated_at = ?
-                    WHERE symbol = ?
-                    """,
-                    (
-                        float(row["Quantity"]),
-                        float(row["Average Price"]),
-                        now,
-                        row["Symbol"],
-                    ),
-                )
-                updated_rows += cursor.rowcount
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
-    if updated_rows != len(cleaned):
-        raise ValueError(
-            f"Saved {updated_rows} of {len(cleaned)} holdings. Reload and try again."
-        )
-
-    return updated_rows
+        for _, row in cleaned.iterrows():
+            conn.execute(
+                """
+                UPDATE master_holdings
+                SET quantity = ?, average_price = ?, updated_at = ?
+                WHERE symbol = ?
+                """,
+                (
+                    float(row["Quantity"]),
+                    float(row["Average Price"]),
+                    now,
+                    row["Symbol"],
+                ),
+            )
+        conn.commit()
 
 
 def build_current_allocation_from_db():
@@ -754,21 +660,14 @@ def build_current_allocation_from_db():
     if usable.empty:
         return pd.DataFrame(), invalid_rows
 
-    usable["Current (Invested)"] = usable["Quantity"] * usable["Average Price"]
-    total = usable["Current (Invested)"].sum()
+    usable["Invested"] = usable["Quantity"] * usable["Average Price"]
+    total = usable["Invested"].sum()
     if total <= 0:
         raise ValueError("The master holdings table has no positive portfolio value.")
 
-    usable["Weight"] = usable["Current (Invested)"] / total
+    usable["Weight"] = usable["Invested"] / total
     portfolio_df = usable[
-        [
-            "Symbol",
-            "Stock Name",
-            "Quantity",
-            "Average Price",
-            "Current (Invested)",
-            "Weight",
-        ]
+        ["Symbol", "Stock Name", "Quantity", "Average Price", "Weight"]
     ].sort_values("Weight", ascending=False).reset_index(drop=True)
 
     return portfolio_df, invalid_rows
@@ -1106,21 +1005,11 @@ init_holdings_db()
 st.title("📊 Portfolio Rebalancer")
 st.caption("Holdings are stored in a local SQLite master table instead of being uploaded from Excel.")
 
-if "holdings_editor_version" not in st.session_state:
-    st.session_state["holdings_editor_version"] = 0
-
-for flash_type, flash_message in st.session_state.pop("portfolio_flash_messages", []):
-    if flash_type == "success":
-        st.success(flash_message)
-    elif flash_type == "warning":
-        st.warning(flash_message)
-    else:
-        st.error(flash_message)
-
 # Filled after every add/remove operation using a fresh SQLite query.
 live_count_banner_placeholder = st.empty()
-# The latest completed analysis is rendered here, immediately below the live banner.
-latest_analysis_placeholder = st.empty()
+
+# The latest saved/restored analysis is rendered here, directly below the banner.
+saved_analysis_placeholder = st.empty()
 
 update_messages = []
 update_warnings = []
@@ -1144,32 +1033,33 @@ with st.sidebar:
     update_holdings_btn = st.button("Update master holdings", use_container_width=True)
 
     st.divider()
-    st.subheader("Backup and restore")
-    backup_bytes = export_master_holdings_csv()
-    st.download_button(
-        "Download holdings backup CSV",
-        data=backup_bytes,
-        file_name=f"master_holdings_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv",
-        use_container_width=True,
-        disabled=get_unique_holdings_count() == 0,
-    )
+    st.header("Analysis results backup")
 
-    uploaded_backup = st.file_uploader(
-        "Upload holdings backup CSV",
-        type=["csv"],
-        key="holdings_backup_uploader",
-        help="Restore Quantity and Average Price exactly as saved in the backup.",
+    existing_analysis_backup = latest_analysis_backup_bytes()
+    if existing_analysis_backup is not None:
+        latest_saved_payload = load_latest_analysis() or {}
+        latest_saved_date = str(latest_saved_payload.get("saved_at", ""))[:10] or "latest"
+        st.download_button(
+            "Download latest analysis JSON",
+            data=existing_analysis_backup,
+            file_name=f"portfolio_analysis_backup_{latest_saved_date}.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_saved_analysis_sidebar",
+        )
+    else:
+        st.caption("Run analysis once before downloading a result backup.")
+
+    analysis_backup_upload = st.file_uploader(
+        "Upload analysis backup JSON",
+        type=["json"],
+        key="analysis_backup_upload",
+        help="Restores a previously downloaded complete analysis result.",
     )
-    restore_mode = st.radio(
-        "Restore mode",
-        ["Replace current holdings", "Merge/update current holdings"],
-        index=0,
-    )
-    restore_backup_btn = st.button(
-        "Restore uploaded backup",
+    restore_analysis_btn = st.button(
+        "Restore uploaded analysis",
         use_container_width=True,
-        disabled=uploaded_backup is None,
+        key="restore_analysis_btn",
     )
 
     st.divider()
@@ -1205,19 +1095,15 @@ with st.sidebar:
     )
     run_btn = st.button("Run analysis", use_container_width=True, type="primary")
 
-if restore_backup_btn:
+if restore_analysis_btn:
     try:
-        restored_count = import_master_holdings_csv(
-            uploaded_backup,
-            replace_existing=restore_mode == "Replace current holdings",
+        restored_payload = restore_latest_analysis_backup(analysis_backup_upload)
+        update_messages.append(
+            "Analysis backup restored successfully. Saved at: "
+            + str(restored_payload.get("saved_at", "Unknown"))
         )
-        st.session_state["holdings_editor_version"] += 1
-        st.session_state["portfolio_flash_messages"] = [
-            ("success", f"Restored {restored_count} holdings from the uploaded backup.")
-        ]
-        st.rerun()
     except Exception as exc:
-        update_errors.append(f"Could not restore backup: {exc}")
+        update_errors.append(f"Could not restore analysis backup: {exc}")
 
 if update_holdings_btn:
     buy_symbols = parse_symbol_input(buy_input)
@@ -1260,7 +1146,9 @@ for message in update_errors:
 # Fresh, uncached database count on every Streamlit rerun.
 live_unique_count = render_live_holdings_banner(live_count_banner_placeholder)
 sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
-render_latest_analysis(latest_analysis_placeholder)
+
+# Always visible on page load and refreshed after an import or successful analysis.
+render_saved_analysis(saved_analysis_placeholder)
 
 st.subheader("Master Holdings")
 master_df = load_master_holdings()
@@ -1268,88 +1156,33 @@ master_df = load_master_holdings()
 if master_df.empty:
     st.info("The master holdings table is empty. Add NSE symbols from the sidebar.")
 else:
-    st.dataframe(
-        master_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Quantity": st.column_config.NumberColumn("Quantity", format="%.6f"),
-            "Average Price": st.column_config.NumberColumn("Average Price", format="₹%.2f"),
-            "Current (Invested)": st.column_config.NumberColumn(
-                "Current (Invested)",
-                help="Quantity × Average Price",
-                format="₹%.2f",
-            ),
-        },
-    )
+    st.dataframe(master_df, use_container_width=True, hide_index=True)
 
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
-            "After saving, your edited values are reloaded directly from SQLite and remain unchanged."
+            "Update these values here when you need real portfolio weights and executable quantities."
         )
-        editable_df = master_df[
-            ["Symbol", "Stock Name", "Quantity", "Average Price", "Current (Invested)"]
-        ].copy()
-
-        # Show the largest portfolio positions first in the edit table.
-        total_invested_for_editor = pd.to_numeric(
-            editable_df["Current (Invested)"], errors="coerce"
-        ).fillna(0).sum()
-        editable_df["Current Weight"] = (
-            pd.to_numeric(editable_df["Current (Invested)"], errors="coerce").fillna(0)
-            / total_invested_for_editor
-            * 100
-            if total_invested_for_editor > 0
-            else 0.0
+        editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+        edited_df = st.data_editor(
+            editable_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Symbol", "Stock Name"],
+            column_config={
+                "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.000001),
+                "Average Price": st.column_config.NumberColumn(
+                    "Average Price", min_value=0.01, format="₹%.2f"
+                ),
+            },
+            key="holdings_editor",
         )
-        editable_df = editable_df.sort_values(
-            by=["Current Weight", "Current (Invested)", "Symbol"],
-            ascending=[False, False, True],
-        ).reset_index(drop=True)
 
-        st.caption("Edit table is sorted by Current Weight, highest to lowest.")
-
-        with st.form("holdings_editor_form", clear_on_submit=False):
-            edited_df = st.data_editor(
-                editable_df,
-                use_container_width=True,
-                hide_index=True,
-                disabled=["Symbol", "Stock Name", "Current (Invested)", "Current Weight"],
-                column_config={
-                    "Quantity": st.column_config.NumberColumn(
-                        "Quantity", min_value=0.000001, format="%.6f"
-                    ),
-                    "Average Price": st.column_config.NumberColumn(
-                        "Average Price", min_value=0.01, format="₹%.2f"
-                    ),
-                    "Current (Invested)": st.column_config.NumberColumn(
-                        "Current (Invested)",
-                        help="Read-only: Quantity × Average Price. It refreshes after saving.",
-                        format="₹%.2f",
-                    ),
-                    "Current Weight": st.column_config.NumberColumn(
-                        "Current Weight",
-                        help="Read-only portfolio weight based on Current (Invested).",
-                        format="%.2f%%",
-                    ),
-                },
-                key=f"holdings_editor_{st.session_state['holdings_editor_version']}",
-            )
-            save_holdings_btn = st.form_submit_button(
-                "Save quantity and price changes",
-                use_container_width=True,
-                type="primary",
-            )
-
-        if save_holdings_btn:
+        if st.button("Save quantity and price changes", use_container_width=True):
             try:
-                updated_rows = save_holding_values(edited_df)
-                st.session_state["holdings_editor_version"] += 1
-                st.session_state["portfolio_flash_messages"] = [
-                    ("success", f"Saved Quantity and Average Price for {updated_rows} holdings.")
-                ]
-                st.rerun()
+                save_holding_values(edited_df)
+                st.success("Master holdings values saved.")
+                master_df = load_master_holdings()
             except Exception as exc:
                 st.error(f"Could not save holdings: {exc}")
 
@@ -1382,14 +1215,13 @@ if run_btn:
                 portfolio_df.style.format({
                     "Quantity": "{:,.4f}",
                     "Average Price": "₹{:,.2f}",
-                    "Current (Invested)": "₹{:,.2f}",
                     "Weight": "{:.2%}",
                 }),
                 use_container_width=True,
             )
 
         with col2:
-            total_invested = float(portfolio_df["Current (Invested)"].sum())
+            total_invested = float((portfolio_df["Quantity"] * portfolio_df["Average Price"]).sum())
             st.metric("Stocks in database", len(portfolio_df))
             st.metric("Total invested", f"₹{total_invested:,.2f}")
 
@@ -1449,7 +1281,9 @@ if run_btn:
 
         st.subheader("Top Correlated Pairs")
 
-        saved_top_correlations = pd.DataFrame()
+        top_corrs = pd.DataFrame(
+            columns=["Ticker 1", "Ticker 2", "Abs Correlation"]
+        )
         corr_matrix = log_returns.corr()
 
         if corr_matrix.shape[1] < 2:
@@ -1467,8 +1301,7 @@ if run_btn:
                     columns=["Ticker 1", "Ticker 2", "Abs Correlation"],
                 ).sort_values("Abs Correlation", ascending=False)
 
-                saved_top_correlations = top_corrs.head(5).copy()
-                st.dataframe(saved_top_correlations, use_container_width=True)
+                st.dataframe(top_corrs.head(5), use_container_width=True)
 
         with st.spinner("Fetching latest prices..."):
             latest_prices = log_returns.columns.tolist()
@@ -1503,46 +1336,62 @@ if run_btn:
                 use_container_width=True,
             )
 
-        analyzed_at = datetime.now().isoformat(timespec="seconds")
         analysis_payload = {
-            "analyzed_at": analyzed_at,
-            "holdings_count": int(len(portfolio_df)),
-            "unique_holdings_count": int(get_unique_holdings_count()),
+            "backup_format": "portfolio_rebalancer_analysis_v1",
+            "saved_at": datetime.now().isoformat(timespec="microseconds"),
+            "holdings_analyzed": int(len(portfolio_df)),
             "total_invested": float(total_invested),
+            "executable_trade_count": int(len(rebal_df)),
             "settings": {
                 "days_to_flip": int(days_to_flip),
-                "max_dd_pct": float(max_dd_pct),
+                "max_drawdown_input_pct": float(max_dd_pct),
                 "internal_max_dd": float(max_dd),
-                "drop_bottom_pct": float(drop_bottom_pct),
+                "drop_bottom_fraction": float(drop_bottom_pct),
+                "use_target_volatility": bool(use_target_vol),
                 "target_volatility": (
-                    float(target_volatility) if target_volatility is not None else None
+                    float(target_volatility)
+                    if target_volatility is not None
+                    else None
                 ),
             },
             "history": {
-                "valid_start": str(meta["valid_start"].date()),
-                "valid_end": str(meta["valid_end"].date()),
-                "rows": int(log_returns.shape[0]),
-                "columns": int(log_returns.shape[1]),
+                "valid_start": str(meta["valid_start"]),
+                "valid_end": str(meta["valid_end"]),
+                "log_return_rows": int(log_returns.shape[0]),
+                "log_return_columns": int(log_returns.shape[1]),
+                "minimum_history": (
+                    meta["min_len_df"].to_dict(orient="records")
+                    if not meta["min_len_df"].empty
+                    else []
+                ),
+                "dropped_tickers": (
+                    meta["dropped_df"].to_dict(orient="records")
+                    if not meta["dropped_df"].empty
+                    else []
+                ),
             },
-            "current_stats": {
-                str(key): _json_safe_value(value)
-                for key, value in (current_stats or {}).items()
+            "current_stats": current_stats or {},
+            "optimal_stats": optimal_stats or {},
+            "top_correlations": (
+                top_corrs.head(5).to_dict(orient="records")
+                if not top_corrs.empty
+                else []
+            ),
+            "current_allocation": portfolio_df.to_dict(orient="records"),
+            "rebalancing_plan": rebal_df.to_dict(orient="records"),
+            "warnings": {
+                "invalid_holding_rows": invalid_holding_rows,
+                "unresolved_yahoo_tickers": unresolved,
+                "missing_latest_prices": missing_prices,
+                "missing_allocation": missing_alloc,
             },
-            "optimal_stats": {
-                str(key): _json_safe_value(value)
-                for key, value in (optimal_stats or {}).items()
-            },
-            "top_correlations": dataframe_to_json_records(saved_top_correlations),
-            "rebalancing_plan": dataframe_to_json_records(rebal_df),
-            "dropped_tickers": dataframe_to_json_records(meta.get("dropped_df")),
-            "unresolved_symbols": list(unresolved),
-            "missing_prices": list(missing_prices),
-            "missing_alloc": list(missing_alloc),
         }
+
         save_latest_analysis(analysis_payload)
-        render_latest_analysis(latest_analysis_placeholder)
+        render_saved_analysis(saved_analysis_placeholder)
         st.success(
-            "Analysis saved. It will load below the live database banner on future visits."
+            "Analysis completed and saved. You can now download the complete "
+            "analysis backup as JSON."
         )
 
     except Exception as e:
