@@ -1207,7 +1207,7 @@ else:
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
             "Update these values here when you need real portfolio weights and executable quantities."
         )
-            editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+    editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
 
     editable_df["Invested"] = (
         pd.to_numeric(editable_df["Quantity"], errors="coerce")
