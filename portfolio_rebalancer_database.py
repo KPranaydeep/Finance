@@ -266,28 +266,29 @@ def render_saved_analysis(placeholder):
         st.subheader("💾 Last Saved Analysis")
         st.caption(f"Saved at: {payload.get('saved_at', 'Unknown')}")
 
-        summary_col1, summary_col2, summary_col3 = st.columns(3)
-        summary_col1.metric(
-            "Holdings analysed",
-            int(payload.get("holdings_analyzed") or 0),
-        )
-        summary_col2.metric(
-            "Total invested",
-            f"₹{float(payload.get('total_invested') or 0):,.2f}",
-        )
-        summary_col3.metric(
-            "Executable trades",
-            int(payload.get("executable_trade_count") or 0),
+rebalancing_plan = payload.get("rebalancing_plan") or []
+
+if rebalancing_plan:
+    saved_df = pd.DataFrame(rebalancing_plan)
+
+    if "Symbol" in saved_df.columns and "Optimal Weight" in saved_df.columns:
+        saved_df = (
+            saved_df[["Symbol", "Optimal Weight"]]
+            .sort_values("Optimal Weight", ascending=False)
+            .reset_index(drop=True)
         )
 
-        backup_json = json.dumps(
-            make_json_safe(payload),
-            ensure_ascii=False,
-            indent=2,
-            allow_nan=False,
-        ).encode("utf-8")
-        backup_date = str(payload.get("saved_at", ""))[:10] or "latest"
+        saved_df["Optimal Weight"] = (
+            saved_df["Optimal Weight"] * 100
+        ).round(2)
 
+        st.dataframe(
+            saved_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+else:
+    st.info("No saved rebalancing plan available.")
         st.download_button(
             "Download complete analysis backup JSON",
             data=backup_json,
