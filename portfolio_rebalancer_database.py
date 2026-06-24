@@ -177,31 +177,19 @@ def save_latest_analysis(payload):
 
 
 def load_latest_analysis():
-    """Load the latest saved analysis without crashing on an older database."""
-    try:
-        with get_db_connection() as conn:
-            ensure_latest_analysis_table(conn)
-            row = conn.execute(
-                "SELECT payload_json FROM latest_analysis WHERE id = 1"
-            ).fetchone()
-    except sqlite3.OperationalError as exc:
-        # A concurrent first deployment may open an older DB before migration.
-        # Retry once after explicitly creating the table.
-        if "no such table" not in str(exc).lower():
-            raise
-        ensure_latest_analysis_table()
-        with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT payload_json FROM latest_analysis WHERE id = 1"
-            ).fetchone()
+    with get_db_connection() as conn:
+        ensure_latest_analysis_table(conn)
+
+        row = conn.execute(
+            "SELECT payload_json FROM latest_analysis WHERE id = 1"
+        ).fetchone()
 
     if row is None:
         return None
 
     try:
         payload = json.loads(row["payload_json"])
-    except (TypeError, json.JSONDecodeError):
-        # A bad/partial saved row should not prevent the whole app from opening.
+    except Exception:
         return None
 
     return payload if isinstance(payload, dict) else None
