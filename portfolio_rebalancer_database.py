@@ -177,18 +177,24 @@ def save_latest_analysis(payload):
 
 
 def load_latest_analysis():
-    with get_db_connection() as conn:
-        ensure_latest_analysis_table(conn)
+    try:
+        with get_db_connection() as conn:
+            ensure_latest_analysis_table(conn)
 
-        row = conn.execute(
-            "SELECT payload_json FROM latest_analysis WHERE id = 1"
-        ).fetchone()
+            row = conn.execute(
+                "SELECT payload_json FROM latest_analysis WHERE id = 1"
+            ).fetchone()
 
-    if row is None:
+            if row is None:
+                return None
+
+            payload_json = row["payload_json"]
+
+    except sqlite3.DatabaseError:
         return None
 
     try:
-        payload = json.loads(row["payload_json"])
+        payload = json.loads(payload_json)
     except Exception:
         return None
 
