@@ -1207,31 +1207,37 @@ else:
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
             "Update these values here when you need real portfolio weights and executable quantities."
         )
-        editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+            editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
 
-editable_df["Invested"] = (
-    pd.to_numeric(editable_df["Quantity"], errors="coerce")
-    * pd.to_numeric(editable_df["Average Price"], errors="coerce")
-)
+    editable_df["Invested"] = (
+        pd.to_numeric(editable_df["Quantity"], errors="coerce")
+        * pd.to_numeric(editable_df["Average Price"], errors="coerce")
+    )
 
-editable_df = editable_df.sort_values(
-    "Invested",
-    ascending=False
-).drop(columns=["Invested"])
-        edited_df = st.data_editor(
-            editable_df,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["Symbol", "Stock Name"],
-            column_config={
-                "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.000001),
-                "Average Price": st.column_config.NumberColumn(
-                    "Average Price", min_value=0.01, format="₹%.2f"
-                ),
-            },
-            key="holdings_editor",
-        )
+    editable_df = (
+        editable_df
+        .sort_values("Invested", ascending=False)
+        .drop(columns=["Invested"])
+    )
 
+    edited_df = st.data_editor(
+        editable_df,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Symbol", "Stock Name"],
+        column_config={
+            "Quantity": st.column_config.NumberColumn(
+                "Quantity",
+                min_value=0.000001
+            ),
+            "Average Price": st.column_config.NumberColumn(
+                "Average Price",
+                min_value=0.01,
+                format="₹%.2f"
+            ),
+        },
+        key="holdings_editor",
+    )
         if st.button("Save quantity and price changes", use_container_width=True):
             try:
                 save_holding_values(edited_df)
