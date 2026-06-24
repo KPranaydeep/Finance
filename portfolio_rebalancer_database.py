@@ -104,16 +104,17 @@ def ensure_latest_analysis_table(conn):
 
 def init_holdings_db():
     with get_db_connection() as conn:
-    conn.execute("DROP TABLE IF EXISTS latest_analysis")
+        conn.execute("DROP TABLE IF EXISTS latest_analysis")
 
-    conn.execute("""
-        CREATE TABLE latest_analysis (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            saved_at TEXT NOT NULL,
-            payload_json TEXT NOT NULL
-        )
-    """)
-    conn.commit()
+        conn.execute("""
+            CREATE TABLE latest_analysis (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                saved_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            )
+        """)
+
+        conn.commit()
     
 
 
