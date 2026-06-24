@@ -126,6 +126,46 @@ def load_master_holdings():
     return df
 
 
+def get_unique_holdings_count():
+    """Return the current distinct NSE-symbol count directly from SQLite."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT UPPER(TRIM(symbol))) AS unique_count
+            FROM master_holdings
+            WHERE symbol IS NOT NULL
+              AND TRIM(symbol) <> ''
+            """
+        ).fetchone()
+    return int(row["unique_count"] or 0)
+
+
+def render_live_holdings_banner(placeholder):
+    """Render an always-visible live holdings-count banner."""
+    unique_count = get_unique_holdings_count()
+    placeholder.markdown(
+        f"""
+        <div style="
+            border: 2px solid #22c55e;
+            border-radius: 14px;
+            padding: 16px 20px;
+            margin: 10px 0 18px 0;
+            background: rgba(34, 197, 94, 0.12);
+            text-align: center;
+        ">
+            <div style="font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; color: #16a34a;">
+                ● LIVE DATABASE STATUS
+            </div>
+            <div style="font-size: 1.45rem; font-weight: 800; margin-top: 4px;">
+                Current unique holdings count: {unique_count}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return unique_count
+
+
 def add_symbols_to_master(symbols):
     if not symbols:
         return [], [], [], []
@@ -651,12 +691,16 @@ init_holdings_db()
 st.title("📊 Portfolio Rebalancer")
 st.caption("Holdings are stored in a local SQLite master table instead of being uploaded from Excel.")
 
+# Filled after every add/remove operation using a fresh SQLite query.
+live_count_banner_placeholder = st.empty()
+
 update_messages = []
 update_warnings = []
 update_errors = []
 
 with st.sidebar:
     st.header("Holdings database")
+    sidebar_count_placeholder = st.empty()
 
     buy_input = st.text_area(
         "Buy / add NSE symbols",
@@ -741,6 +785,10 @@ for message in update_warnings:
     st.warning(message)
 for message in update_errors:
     st.error(message)
+
+# Fresh, uncached database count on every Streamlit rerun.
+live_unique_count = render_live_holdings_banner(live_count_banner_placeholder)
+sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
 
 st.subheader("Master Holdings")
 master_df = load_master_holdings()
