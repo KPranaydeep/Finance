@@ -73,21 +73,33 @@ CREATE TABLE IF NOT EXISTS latest_analysis (
 """
 
 
-def ensure_latest_analysis_table(conn=None):
-    """Create/migrate the saved-analysis table whenever it is needed.
+def ensure_latest_analysis_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS latest_analysis (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            saved_at TEXT NOT NULL,
+            payload_json TEXT NOT NULL
+        )
+    """)
 
-    This intentionally runs from both app initialization and every analysis
-    backup read/write path. It keeps older SQLite files compatible after a
-    deployment that introduces the latest_analysis feature.
-    """
-    owns_connection = conn is None
-    db = conn if conn is not None else get_db_connection()
-    try:
-        db.execute(LATEST_ANALYSIS_TABLE_SQL)
-        db.commit()
-    finally:
-        if owns_connection:
-            db.close()
+    cols = {
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(latest_analysis)"
+        ).fetchall()
+    }
+
+    if "saved_at" not in cols:
+        conn.execute(
+            "ALTER TABLE latest_analysis ADD COLUMN saved_at TEXT"
+        )
+
+    if "payload_json" not in cols:
+        conn.execute(
+            "ALTER TABLE latest_analysis ADD COLUMN payload_json TEXT"
+        )
+
+    conn.commit()
 
 
 def init_holdings_db():
