@@ -60,7 +60,34 @@ def get_db_connection():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
+
+
+LATEST_ANALYSIS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS latest_analysis (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    saved_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+)
+"""
+
+
+def ensure_latest_analysis_table(conn=None):
+    """Create/migrate the saved-analysis table whenever it is needed.
+
+    This intentionally runs from both app initialization and every analysis
+    backup read/write path. It keeps older SQLite files compatible after a
+    deployment that introduces the latest_analysis feature.
+    """
+    owns_connection = conn is None
+    db = conn if conn is not None else get_db_connection()
+    try:
+        db.execute(LATEST_ANALYSIS_TABLE_SQL)
+        db.commit()
+    finally:
+        if owns_connection:
+            db.close()
 
 
 def init_holdings_db():
@@ -77,15 +104,7 @@ def init_holdings_db():
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS latest_analysis (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                saved_at TEXT NOT NULL,
-                payload_json TEXT NOT NULL
-            )
-            """
-        )
+        ensure_latest_analysis_table(conn)
         conn.commit()
 
 
@@ -129,6 +148,7 @@ def save_latest_analysis(payload):
     )
 
     with get_db_connection() as conn:
+        ensure_latest_analysis_table(conn)
         conn.execute(
             """
             INSERT INTO latest_analysis (id, saved_at, payload_json)
@@ -145,24 +165,44 @@ def save_latest_analysis(payload):
 
 
 def load_latest_analysis():
-    """Load the latest saved analysis, returning None when no result exists."""
-    with get_db_connection() as conn:
-        row = conn.execute(
-            "SELECT payload_json FROM latest_analysis WHERE id = 1"
-        ).fetchone()
+    """Load the latest saved analysis without crashing on an older database."""
+    try:
+        with get_db_connection() as conn:
+            ensure_latest_analysis_table(conn)
+            row = conn.execute(
+                "SELECT payload_json FROM latest_analysis WHERE id = 1"
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        # A concurrent first deployment may open an older DB before migration.
+        # Retry once after explicitly creating the table.
+        if "no such table" not in str(exc).lower():
+            raise
+        ensure_latest_analysis_table()
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM latest_analysis WHERE id = 1"
+            ).fetchone()
 
     if row is None:
         return None
 
-    payload = json.loads(row["payload_json"])
-    if not isinstance(payload, dict):
-        raise ValueError("The saved analysis record is not a valid JSON object.")
-    return payload
+    try:
+        payload = json.loads(row["payload_json"])
+    except (TypeError, json.JSONDecodeError):
+        # A bad/partial saved row should not prevent the whole app from opening.
+        return None
+
+    return payload if isinstance(payload, dict) else None
 
 
 def latest_analysis_backup_bytes():
-    """Return the latest saved analysis as a downloadable UTF-8 JSON file."""
-    payload = load_latest_analysis()
+    """Return a JSON backup, or None when no valid saved analysis exists."""
+    try:
+        payload = load_latest_analysis()
+    except sqlite3.DatabaseError:
+        # Never let the optional backup control crash the complete Streamlit UI.
+        return None
+
     if payload is None:
         return None
 
