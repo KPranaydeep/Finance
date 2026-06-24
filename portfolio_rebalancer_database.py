@@ -1208,6 +1208,16 @@ else:
             "Update these values here when you need real portfolio weights and executable quantities."
         )
         editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+
+editable_df["Invested"] = (
+    pd.to_numeric(editable_df["Quantity"], errors="coerce")
+    * pd.to_numeric(editable_df["Average Price"], errors="coerce")
+)
+
+editable_df = editable_df.sort_values(
+    "Invested",
+    ascending=False
+).drop(columns=["Invested"])
         edited_df = st.data_editor(
             editable_df,
             use_container_width=True,
