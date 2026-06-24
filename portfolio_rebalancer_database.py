@@ -309,16 +309,13 @@ def render_live_holdings_banner(placeholder):
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
 def format_ist_time(value):
     dt = datetime.fromisoformat(value)
 
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt = dt.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
 
-    dt_ist = dt.astimezone(ZoneInfo("Asia/Kolkata"))
-
-    return dt_ist.strftime("%d %b %Y, %I:%M %p IST")
+    return dt.strftime("%d %b %Y, %I:%M %p IST")
 
 
 def _json_safe_value(value):
