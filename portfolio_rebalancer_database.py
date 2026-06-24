@@ -357,14 +357,7 @@ else:
         settings = payload.get("settings") or {}
         history = payload.get("history") or {}
         if settings or history:
-            with st.expander("Saved analysis settings and coverage", expanded=False):
-                if settings:
-                    st.json(settings)
-                if history:
-                    st.json(history)
-
-        top_correlations = payload.get("top_correlations") or []
-        if top_correlations:
+            
             with st.expander("Saved top correlated pairs", expanded=False):
                 st.dataframe(
                     pd.DataFrame(top_correlations),
