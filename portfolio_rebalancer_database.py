@@ -266,98 +266,114 @@ def render_saved_analysis(placeholder):
         st.subheader("💾 Last Saved Analysis")
         st.caption(f"Saved at: {payload.get('saved_at', 'Unknown')}")
 
-rebalancing_plan = payload.get("rebalancing_plan") or []
+        backup_json = json.dumps(
+            make_json_safe(payload),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
 
-if rebalancing_plan:
-    saved_df = pd.DataFrame(rebalancing_plan)
+        backup_date = str(payload.get("saved_at", ""))[:10] or "latest"
 
-    if "Symbol" in saved_df.columns and "Optimal Weight" in saved_df.columns:
-        saved_df = (
-            saved_df[["Symbol", "Optimal Weight"]]
-            .sort_values("Optimal Weight", ascending=False)
-            .reset_index(drop=True)
-        )
-
-        saved_df["Optimal Weight"] = (
-            saved_df["Optimal Weight"] * 100
-        ).round(2)
-
-        st.dataframe(
-            saved_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-else:
-    st.info("No saved rebalancing plan available.")
         st.download_button(
             "Download complete analysis backup JSON",
             data=backup_json,
             file_name=f"portfolio_analysis_backup_{backup_date}.json",
             mime="application/json",
             use_container_width=True,
-            key=(
-                "download_saved_analysis_main_"
-                + str(payload.get("saved_at", "none"))
-            ),
+            key=f"download_saved_analysis_main_{payload.get('saved_at','none')}",
         )
+
+        rebalancing_plan = payload.get("rebalancing_plan") or []
+
+        if rebalancing_plan:
+            saved_df = pd.DataFrame(rebalancing_plan)
+
+            if (
+                "Symbol" in saved_df.columns
+                and "Optimal Weight" in saved_df.columns
+            ):
+                display_df = (
+                    saved_df[["Symbol", "Optimal Weight"]]
+                    .sort_values("Optimal Weight", ascending=False)
+                    .reset_index(drop=True)
+                )
+
+                display_df["Optimal Weight"] = (
+                    display_df["Optimal Weight"] * 100
+                ).round(2)
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        else:
+            st.info("No saved rebalancing plan available.")
 
         current_stats = payload.get("current_stats") or {}
         optimal_stats = payload.get("optimal_stats") or {}
 
         if current_stats or optimal_stats:
-            with st.expander("Saved portfolio statistics", expanded=True):
-                stats_col1, stats_col2 = st.columns(2)
+            with st.expander("Saved portfolio statistics", expanded=False):
 
-                with stats_col1:
+                col1, col2 = st.columns(2)
+
+                with col1:
                     st.markdown("**Current Portfolio**")
+
                     if current_stats:
-                        current_saved_df = pd.DataFrame(
+                        df = pd.DataFrame(
                             {
-                                "Metric": list(current_stats.keys()),
-                                "Value": list(current_stats.values()),
+                                "Metric": current_stats.keys(),
+                                "Value": current_stats.values(),
                             }
                         )
-                        current_saved_df["Value"] = current_saved_df.apply(
-                            lambda row: (
-                                f"{float(row['Value']):.2f}"
-                                if row["Metric"] == "Sharpe Ratio"
-                                else f"{float(row['Value']):.2%}"
+
+                        df["Value"] = df.apply(
+                            lambda r: (
+                                f"{float(r['Value']):.2f}"
+                                if r["Metric"] == "Sharpe Ratio"
+                                else f"{float(r['Value']):.2%}"
                             ),
                             axis=1,
                         )
+
                         st.dataframe(
-                            current_saved_df,
+                            df,
                             use_container_width=True,
                             hide_index=True,
                         )
 
-                with stats_col2:
+                with col2:
                     st.markdown("**Optimized Portfolio**")
+
                     if optimal_stats:
-                        optimal_saved_df = pd.DataFrame(
+                        df = pd.DataFrame(
                             {
-                                "Metric": list(optimal_stats.keys()),
-                                "Value": list(optimal_stats.values()),
+                                "Metric": optimal_stats.keys(),
+                                "Value": optimal_stats.values(),
                             }
                         )
-                        optimal_saved_df["Value"] = optimal_saved_df.apply(
-                            lambda row: (
-                                f"{float(row['Value']):.2f}"
-                                if row["Metric"] == "Sharpe Ratio"
-                                else f"{float(row['Value']):.2%}"
+
+                        df["Value"] = df.apply(
+                            lambda r: (
+                                f"{float(r['Value']):.2f}"
+                                if r["Metric"] == "Sharpe Ratio"
+                                else f"{float(r['Value']):.2%}"
                             ),
                             axis=1,
                         )
+
                         st.dataframe(
-                            optimal_saved_df,
+                            df,
                             use_container_width=True,
                             hide_index=True,
                         )
 
-        settings = payload.get("settings") or {}
-        history = payload.get("history") or {}
-        if settings or history:
-            
+        top_correlations = payload.get("top_correlations") or []
+
+        if top_correlations:
             with st.expander("Saved top correlated pairs", expanded=False):
                 st.dataframe(
                     pd.DataFrame(top_correlations),
@@ -365,32 +381,34 @@ else:
                     hide_index=True,
                 )
 
-        rebalancing_plan = payload.get("rebalancing_plan") or []
-        with st.expander("Saved rebalancing plan", expanded=False):
-            if rebalancing_plan:
+        if rebalancing_plan:
+            with st.expander("Saved rebalancing plan", expanded=False):
                 saved_rebal_df = pd.DataFrame(rebalancing_plan)
                 st.dataframe(
                     style_rebalance_df(saved_rebal_df),
                     use_container_width=True,
                     hide_index=True,
                 )
-            else:
-                st.success("The saved analysis had no executable trades.")
 
         warnings_payload = payload.get("warnings") or {}
+
         warning_lines = []
-        for warning_name, warning_values in warnings_payload.items():
-            if warning_values:
-                if isinstance(warning_values, list):
-                    warning_text = ", ".join(map(str, warning_values))
+
+        for name, values in warnings_payload.items():
+            if values:
+                if isinstance(values, list):
+                    warning_lines.append(
+                        f"{name}: {', '.join(map(str, values))}"
+                    )
                 else:
-                    warning_text = str(warning_values)
-                warning_lines.append(f"{warning_name}: {warning_text}")
+                    warning_lines.append(
+                        f"{name}: {values}"
+                    )
 
         if warning_lines:
             with st.expander("Saved warnings", expanded=False):
-                for warning_line in warning_lines:
-                    st.warning(warning_line)
+                for line in warning_lines:
+                    st.warning(line)
 
 
 def normalize_nse_symbol(value):
