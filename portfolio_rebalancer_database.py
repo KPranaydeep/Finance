@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import re
 import sqlite3
@@ -74,6 +75,15 @@ def init_holdings_db():
                 average_price REAL,
                 added_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS latest_analysis (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                analyzed_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
             )
             """
         )
@@ -296,6 +306,228 @@ def render_live_holdings_banner(placeholder):
         unsafe_allow_html=True,
     )
     return unique_count
+
+
+
+def _json_safe_value(value):
+    """Convert pandas/numpy values into JSON-safe Python values."""
+    if value is None:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        value = float(value)
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    return value
+
+
+def dataframe_to_json_records(df):
+    """Serialize a dataframe as clean records for the saved analysis snapshot."""
+    if df is None or df.empty:
+        return []
+
+    clean = df.copy()
+    clean = clean.replace([np.inf, -np.inf], np.nan)
+    records = clean.to_dict(orient="records")
+    return [
+        {str(key): _json_safe_value(value) for key, value in row.items()}
+        for row in records
+    ]
+
+
+def save_latest_analysis(payload):
+    """Persist one latest-analysis snapshot shared by every app session."""
+    analyzed_at = str(payload.get("analyzed_at") or datetime.now().isoformat(timespec="seconds"))
+    payload_json = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO latest_analysis (singleton_id, analyzed_at, payload_json)
+            VALUES (1, ?, ?)
+            ON CONFLICT(singleton_id) DO UPDATE SET
+                analyzed_at = excluded.analyzed_at,
+                payload_json = excluded.payload_json
+            """,
+            (analyzed_at, payload_json),
+        )
+        conn.commit()
+
+
+def load_latest_analysis():
+    """Load the most recently completed analysis, if one has been saved."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT analyzed_at, payload_json
+            FROM latest_analysis
+            WHERE singleton_id = 1
+            """
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    try:
+        payload = json.loads(row["payload_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    payload.setdefault("analyzed_at", row["analyzed_at"])
+    return payload
+
+
+def _format_saved_metric(metric_name, value):
+    if value is None:
+        return "N/A"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if metric_name == "Sharpe Ratio":
+        return f"{numeric:.2f}"
+    return f"{numeric:.2%}"
+
+
+def render_latest_analysis(placeholder):
+    """Show the saved analysis immediately below the live database banner."""
+    payload = load_latest_analysis()
+
+    with placeholder.container():
+        if not payload:
+            return None
+
+        analyzed_at_raw = payload.get("analyzed_at", "")
+        try:
+            analyzed_at = pd.to_datetime(analyzed_at_raw).strftime("%d %b %Y, %I:%M:%S %p")
+        except Exception:
+            analyzed_at = str(analyzed_at_raw)
+
+        holdings_count = int(payload.get("holdings_count") or 0)
+        total_invested = float(payload.get("total_invested") or 0.0)
+        rebalancing_records = payload.get("rebalancing_plan") or []
+
+        st.markdown(
+            f"""
+            <div style="
+                border: 1px solid rgba(59, 130, 246, 0.65);
+                border-radius: 14px;
+                padding: 14px 18px;
+                margin: 0 0 12px 0;
+                background: rgba(59, 130, 246, 0.09);
+            ">
+                <div style="font-size: 0.83rem; font-weight: 750; letter-spacing: 0.07em; color: #3b82f6;">
+                    ● LAST SAVED ANALYSIS
+                </div>
+                <div style="font-size: 1.05rem; font-weight: 750; margin-top: 3px;">
+                    Completed: {analyzed_at}
+                </div>
+                <div style="font-size: 0.88rem; opacity: 0.82; margin-top: 2px;">
+                    This result was loaded from the shared analysis database.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        summary_col1.metric("Holdings analyzed", holdings_count)
+        summary_col2.metric("Total invested", f"₹{total_invested:,.2f}")
+        summary_col3.metric("Executable trades", len(rebalancing_records))
+
+        with st.expander("View last saved analysis details", expanded=True):
+            history = payload.get("history") or {}
+            settings = payload.get("settings") or {}
+
+            detail_col1, detail_col2, detail_col3 = st.columns(3)
+            detail_col1.metric(
+                "History start",
+                history.get("valid_start") or "N/A",
+            )
+            detail_col2.metric(
+                "History end",
+                history.get("valid_end") or "N/A",
+            )
+            detail_col3.metric(
+                "Log-return shape",
+                f"{history.get('rows', 0)} × {history.get('columns', 0)}",
+            )
+
+            st.caption(
+                "Saved settings — "
+                f"Days to flip: {settings.get('days_to_flip', 'N/A')} | "
+                f"Max drawdown input: {settings.get('max_dd_pct', 'N/A')}% | "
+                f"Drop-bottom fraction: {settings.get('drop_bottom_pct', 'N/A')} | "
+                f"Target volatility: {settings.get('target_volatility') if settings.get('target_volatility') is not None else 'Disabled'}"
+            )
+
+            current_stats = payload.get("current_stats") or {}
+            optimal_stats = payload.get("optimal_stats") or {}
+            if current_stats or optimal_stats:
+                stats_col1, stats_col2 = st.columns(2)
+                with stats_col1:
+                    st.markdown("**Current portfolio**")
+                    current_saved_df = pd.DataFrame(
+                        {
+                            "Metric": list(current_stats.keys()),
+                            "Value": [
+                                _format_saved_metric(metric, current_stats[metric])
+                                for metric in current_stats
+                            ],
+                        }
+                    )
+                    st.dataframe(current_saved_df, use_container_width=True, hide_index=True)
+
+                with stats_col2:
+                    st.markdown("**Optimized portfolio**")
+                    optimal_saved_df = pd.DataFrame(
+                        {
+                            "Metric": list(optimal_stats.keys()),
+                            "Value": [
+                                _format_saved_metric(metric, optimal_stats[metric])
+                                for metric in optimal_stats
+                            ],
+                        }
+                    )
+                    st.dataframe(optimal_saved_df, use_container_width=True, hide_index=True)
+
+            if rebalancing_records:
+                st.markdown("**Saved rebalancing plan**")
+                saved_rebalancing_df = pd.DataFrame(rebalancing_records)
+                st.dataframe(
+                    style_rebalance_df(saved_rebalancing_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.success("The saved analysis had no executable trades.")
+
+            top_correlations = payload.get("top_correlations") or []
+            if top_correlations:
+                st.markdown("**Saved top correlated pairs**")
+                st.dataframe(
+                    pd.DataFrame(top_correlations),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            warnings = []
+            if payload.get("unresolved_symbols"):
+                warnings.append("Unresolved symbols: " + ", ".join(payload["unresolved_symbols"]))
+            if payload.get("missing_prices"):
+                warnings.append("Missing prices: " + ", ".join(payload["missing_prices"]))
+            if payload.get("missing_alloc"):
+                warnings.append("Missing allocation rows: " + ", ".join(payload["missing_alloc"]))
+            for warning in warnings:
+                st.warning(warning)
+
+    return payload
 
 
 def add_symbols_to_master(symbols):
@@ -876,6 +1108,8 @@ for flash_type, flash_message in st.session_state.pop("portfolio_flash_messages"
 
 # Filled after every add/remove operation using a fresh SQLite query.
 live_count_banner_placeholder = st.empty()
+# The latest completed analysis is rendered here, immediately below the live banner.
+latest_analysis_placeholder = st.empty()
 
 update_messages = []
 update_warnings = []
@@ -1015,6 +1249,7 @@ for message in update_errors:
 # Fresh, uncached database count on every Streamlit rerun.
 live_unique_count = render_live_holdings_banner(live_count_banner_placeholder)
 sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
+render_latest_analysis(latest_analysis_placeholder)
 
 st.subheader("Master Holdings")
 master_df = load_master_holdings()
@@ -1203,6 +1438,7 @@ if run_btn:
 
         st.subheader("Top Correlated Pairs")
 
+        saved_top_correlations = pd.DataFrame()
         corr_matrix = log_returns.corr()
 
         if corr_matrix.shape[1] < 2:
@@ -1220,7 +1456,8 @@ if run_btn:
                     columns=["Ticker 1", "Ticker 2", "Abs Correlation"],
                 ).sort_values("Abs Correlation", ascending=False)
 
-                st.dataframe(top_corrs.head(5), use_container_width=True)
+                saved_top_correlations = top_corrs.head(5).copy()
+                st.dataframe(saved_top_correlations, use_container_width=True)
 
         with st.spinner("Fetching latest prices..."):
             latest_prices = log_returns.columns.tolist()
@@ -1254,6 +1491,48 @@ if run_btn:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+        analyzed_at = datetime.now().isoformat(timespec="seconds")
+        analysis_payload = {
+            "analyzed_at": analyzed_at,
+            "holdings_count": int(len(portfolio_df)),
+            "unique_holdings_count": int(get_unique_holdings_count()),
+            "total_invested": float(total_invested),
+            "settings": {
+                "days_to_flip": int(days_to_flip),
+                "max_dd_pct": float(max_dd_pct),
+                "internal_max_dd": float(max_dd),
+                "drop_bottom_pct": float(drop_bottom_pct),
+                "target_volatility": (
+                    float(target_volatility) if target_volatility is not None else None
+                ),
+            },
+            "history": {
+                "valid_start": str(meta["valid_start"].date()),
+                "valid_end": str(meta["valid_end"].date()),
+                "rows": int(log_returns.shape[0]),
+                "columns": int(log_returns.shape[1]),
+            },
+            "current_stats": {
+                str(key): _json_safe_value(value)
+                for key, value in (current_stats or {}).items()
+            },
+            "optimal_stats": {
+                str(key): _json_safe_value(value)
+                for key, value in (optimal_stats or {}).items()
+            },
+            "top_correlations": dataframe_to_json_records(saved_top_correlations),
+            "rebalancing_plan": dataframe_to_json_records(rebal_df),
+            "dropped_tickers": dataframe_to_json_records(meta.get("dropped_df")),
+            "unresolved_symbols": list(unresolved),
+            "missing_prices": list(missing_prices),
+            "missing_alloc": list(missing_alloc),
+        }
+        save_latest_analysis(analysis_payload)
+        render_latest_analysis(latest_analysis_placeholder)
+        st.success(
+            "Analysis saved. It will load below the live database banner on future visits."
+        )
 
     except Exception as e:
         st.error(f"Error: {e}")
