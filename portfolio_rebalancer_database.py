@@ -299,7 +299,7 @@ def render_live_holdings_banner(placeholder):
                 ● LIVE DATABASE STATUS
             </div>
             <div style="font-size: 1.45rem; font-weight: 800; margin-top: 4px;">
-                Current unique holdings count: {unique_count}
+                Current holdings: {unique_count}
             </div>
         </div>
         """,
@@ -307,14 +307,23 @@ def render_live_holdings_banner(placeholder):
     )
     return unique_count
 
+from datetime import datetime
+import pandas as pd
+
+
+def format_time(value: str) -> str:
+    """Convert ISO datetime string to hh:mm am/pm format."""
+    return datetime.fromisoformat(value).strftime("%I:%M %p").lower()
 
 
 def _json_safe_value(value):
     """Convert pandas/numpy values into JSON-safe Python values."""
     if value is None:
         return None
+
     if isinstance(value, (pd.Timestamp, datetime)):
         return value.isoformat()
+
     if isinstance(value, (np.integer,)):
         return int(value)
     if isinstance(value, (np.floating,)):
