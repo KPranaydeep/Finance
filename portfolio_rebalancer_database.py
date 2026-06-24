@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import sqlite3
@@ -145,6 +146,101 @@ def load_master_holdings():
             conn,
         )
     return df
+
+
+def export_master_holdings_csv():
+    """Export the complete master holdings table as a portable CSV backup."""
+    df = load_master_holdings()
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
+def import_master_holdings_csv(uploaded_file, replace_existing=True):
+    """Restore holdings from a CSV backup.
+
+    When ``replace_existing`` is True, the current master table is replaced.
+    Otherwise, uploaded rows are merged and existing symbols are updated.
+    """
+    if uploaded_file is None:
+        raise ValueError("Choose a holdings backup CSV file first.")
+
+    file_bytes = uploaded_file.getvalue()
+    if not file_bytes:
+        raise ValueError("The uploaded backup file is empty.")
+
+    restored = pd.read_csv(io.BytesIO(file_bytes))
+    restored.columns = [str(c).strip() for c in restored.columns]
+
+    required = ["Symbol", "Stock Name", "Quantity", "Average Price"]
+    missing = [c for c in required if c not in restored.columns]
+    if missing:
+        raise ValueError(f"Backup is missing required columns: {missing}")
+
+    restored = restored.copy()
+    restored["Symbol"] = restored["Symbol"].map(normalize_nse_symbol)
+    restored["Stock Name"] = restored["Stock Name"].fillna("").astype(str).str.strip()
+    restored["Quantity"] = pd.to_numeric(restored["Quantity"], errors="coerce")
+    restored["Average Price"] = pd.to_numeric(restored["Average Price"], errors="coerce")
+
+    restored = restored[restored["Symbol"] != ""].copy()
+    restored = restored.drop_duplicates(subset=["Symbol"], keep="last")
+
+    if restored.empty:
+        raise ValueError("The backup does not contain any valid symbols.")
+    if restored["Quantity"].isna().any() or (restored["Quantity"] <= 0).any():
+        raise ValueError("Every restored holding must have Quantity greater than zero.")
+
+    invalid_prices = restored["Average Price"].notna() & (restored["Average Price"] <= 0)
+    if invalid_prices.any():
+        raise ValueError("Average Price must be greater than zero when provided.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    if "Added At" not in restored.columns:
+        restored["Added At"] = now
+    if "Updated At" not in restored.columns:
+        restored["Updated At"] = now
+
+    restored["Added At"] = restored["Added At"].fillna(now).astype(str)
+    restored["Updated At"] = restored["Updated At"].fillna(now).astype(str)
+    restored["Stock Name"] = restored.apply(
+        lambda row: row["Stock Name"] if row["Stock Name"] else row["Symbol"], axis=1
+    )
+
+    with get_db_connection() as conn:
+        try:
+            conn.execute("BEGIN")
+            if replace_existing:
+                conn.execute("DELETE FROM master_holdings")
+
+            for _, row in restored.iterrows():
+                average_price = (
+                    None if pd.isna(row["Average Price"]) else float(row["Average Price"])
+                )
+                conn.execute(
+                    """
+                    INSERT INTO master_holdings
+                        (symbol, stock_name, quantity, average_price, added_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        stock_name = excluded.stock_name,
+                        quantity = excluded.quantity,
+                        average_price = excluded.average_price,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        row["Symbol"],
+                        row["Stock Name"],
+                        float(row["Quantity"]),
+                        average_price,
+                        row["Added At"],
+                        row["Updated At"],
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return len(restored)
 
 
 def get_unique_holdings_count():
@@ -296,6 +392,7 @@ def remove_symbols_from_master(symbols):
 
 
 def save_holding_values(edited_df):
+    """Persist edited quantity and average price values without resetting them."""
     required = ["Symbol", "Quantity", "Average Price"]
     missing_columns = [c for c in required if c not in edited_df.columns]
     if missing_columns:
@@ -314,22 +411,37 @@ def save_holding_values(edited_df):
         raise ValueError("Average Price must be greater than zero for every holding.")
 
     now = datetime.now().isoformat(timespec="seconds")
+    updated_rows = 0
+
     with get_db_connection() as conn:
-        for _, row in cleaned.iterrows():
-            conn.execute(
-                """
-                UPDATE master_holdings
-                SET quantity = ?, average_price = ?, updated_at = ?
-                WHERE symbol = ?
-                """,
-                (
-                    float(row["Quantity"]),
-                    float(row["Average Price"]),
-                    now,
-                    row["Symbol"],
-                ),
-            )
-        conn.commit()
+        try:
+            conn.execute("BEGIN")
+            for _, row in cleaned.iterrows():
+                cursor = conn.execute(
+                    """
+                    UPDATE master_holdings
+                    SET quantity = ?, average_price = ?, updated_at = ?
+                    WHERE symbol = ?
+                    """,
+                    (
+                        float(row["Quantity"]),
+                        float(row["Average Price"]),
+                        now,
+                        row["Symbol"],
+                    ),
+                )
+                updated_rows += cursor.rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    if updated_rows != len(cleaned):
+        raise ValueError(
+            f"Saved {updated_rows} of {len(cleaned)} holdings. Reload and try again."
+        )
+
+    return updated_rows
 
 
 def build_current_allocation_from_db():
@@ -729,6 +841,17 @@ init_holdings_db()
 st.title("📊 Portfolio Rebalancer")
 st.caption("Holdings are stored in a local SQLite master table instead of being uploaded from Excel.")
 
+if "holdings_editor_version" not in st.session_state:
+    st.session_state["holdings_editor_version"] = 0
+
+for flash_type, flash_message in st.session_state.pop("portfolio_flash_messages", []):
+    if flash_type == "success":
+        st.success(flash_message)
+    elif flash_type == "warning":
+        st.warning(flash_message)
+    else:
+        st.error(flash_message)
+
 # Filled after every add/remove operation using a fresh SQLite query.
 live_count_banner_placeholder = st.empty()
 
@@ -752,6 +875,35 @@ with st.sidebar:
     )
 
     update_holdings_btn = st.button("Update master holdings", use_container_width=True)
+
+    st.divider()
+    st.subheader("Backup and restore")
+    backup_bytes = export_master_holdings_csv()
+    st.download_button(
+        "Download holdings backup CSV",
+        data=backup_bytes,
+        file_name=f"master_holdings_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        disabled=get_unique_holdings_count() == 0,
+    )
+
+    uploaded_backup = st.file_uploader(
+        "Upload holdings backup CSV",
+        type=["csv"],
+        key="holdings_backup_uploader",
+        help="Restore Quantity and Average Price exactly as saved in the backup.",
+    )
+    restore_mode = st.radio(
+        "Restore mode",
+        ["Replace current holdings", "Merge/update current holdings"],
+        index=0,
+    )
+    restore_backup_btn = st.button(
+        "Restore uploaded backup",
+        use_container_width=True,
+        disabled=uploaded_backup is None,
+    )
 
     st.divider()
     st.header("Analysis inputs")
@@ -785,6 +937,20 @@ with st.sidebar:
         else None
     )
     run_btn = st.button("Run analysis", use_container_width=True, type="primary")
+
+if restore_backup_btn:
+    try:
+        restored_count = import_master_holdings_csv(
+            uploaded_backup,
+            replace_existing=restore_mode == "Replace current holdings",
+        )
+        st.session_state["holdings_editor_version"] += 1
+        st.session_state["portfolio_flash_messages"] = [
+            ("success", f"Restored {restored_count} holdings from the uploaded backup.")
+        ]
+        st.rerun()
+    except Exception as exc:
+        update_errors.append(f"Could not restore backup: {exc}")
 
 if update_holdings_btn:
     buy_symbols = parse_symbol_input(buy_input)
@@ -839,28 +1005,40 @@ else:
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
-            "Update these values here when you need real portfolio weights and executable quantities."
+            "After saving, your edited values are reloaded directly from SQLite and remain unchanged."
         )
         editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
-        edited_df = st.data_editor(
-            editable_df,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["Symbol", "Stock Name"],
-            column_config={
-                "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.000001),
-                "Average Price": st.column_config.NumberColumn(
-                    "Average Price", min_value=0.01, format="₹%.2f"
-                ),
-            },
-            key="holdings_editor",
-        )
 
-        if st.button("Save quantity and price changes", use_container_width=True):
+        with st.form("holdings_editor_form", clear_on_submit=False):
+            edited_df = st.data_editor(
+                editable_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["Symbol", "Stock Name"],
+                column_config={
+                    "Quantity": st.column_config.NumberColumn(
+                        "Quantity", min_value=0.000001, format="%.6f"
+                    ),
+                    "Average Price": st.column_config.NumberColumn(
+                        "Average Price", min_value=0.01, format="₹%.2f"
+                    ),
+                },
+                key=f"holdings_editor_{st.session_state['holdings_editor_version']}",
+            )
+            save_holdings_btn = st.form_submit_button(
+                "Save quantity and price changes",
+                use_container_width=True,
+                type="primary",
+            )
+
+        if save_holdings_btn:
             try:
-                save_holding_values(edited_df)
-                st.success("Master holdings values saved.")
-                master_df = load_master_holdings()
+                updated_rows = save_holding_values(edited_df)
+                st.session_state["holdings_editor_version"] += 1
+                st.session_state["portfolio_flash_messages"] = [
+                    ("success", f"Saved Quantity and Average Price for {updated_rows} holdings.")
+                ]
+                st.rerun()
             except Exception as exc:
                 st.error(f"Could not save holdings: {exc}")
 
