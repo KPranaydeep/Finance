@@ -145,7 +145,22 @@ def load_master_holdings():
             """,
             conn,
         )
-    return df
+    # Derived display/export column. This is calculated from the saved
+    # Quantity and Average Price; it is not independently stored in SQLite.
+    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
+    df["Average Price"] = pd.to_numeric(df["Average Price"], errors="coerce")
+    df["Current (Invested)"] = df["Quantity"] * df["Average Price"]
+
+    ordered_columns = [
+        "Symbol",
+        "Stock Name",
+        "Quantity",
+        "Average Price",
+        "Current (Invested)",
+        "Added At",
+        "Updated At",
+    ]
+    return df[ordered_columns]
 
 
 def export_master_holdings_csv():
@@ -496,14 +511,21 @@ def build_current_allocation_from_db():
     if usable.empty:
         return pd.DataFrame(), invalid_rows
 
-    usable["Invested"] = usable["Quantity"] * usable["Average Price"]
-    total = usable["Invested"].sum()
+    usable["Current (Invested)"] = usable["Quantity"] * usable["Average Price"]
+    total = usable["Current (Invested)"].sum()
     if total <= 0:
         raise ValueError("The master holdings table has no positive portfolio value.")
 
     usable["Weight"] = usable["Invested"] / total
     portfolio_df = usable[
-        ["Symbol", "Stock Name", "Quantity", "Average Price", "Weight"]
+        [
+            "Symbol",
+            "Stock Name",
+            "Quantity",
+            "Average Price",
+            "Current (Invested)",
+            "Weight",
+        ]
     ].sort_values("Weight", ascending=False).reset_index(drop=True)
 
     return portfolio_df, invalid_rows
@@ -1000,27 +1022,70 @@ master_df = load_master_holdings()
 if master_df.empty:
     st.info("The master holdings table is empty. Add NSE symbols from the sidebar.")
 else:
-    st.dataframe(master_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        master_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Quantity": st.column_config.NumberColumn("Quantity", format="%.6f"),
+            "Average Price": st.column_config.NumberColumn("Average Price", format="₹%.2f"),
+            "Current (Invested)": st.column_config.NumberColumn(
+                "Current (Invested)",
+                help="Quantity × Average Price",
+                format="₹%.2f",
+            ),
+        },
+    )
 
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
             "After saving, your edited values are reloaded directly from SQLite and remain unchanged."
         )
-        editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+        editable_df = master_df[
+            ["Symbol", "Stock Name", "Quantity", "Average Price", "Current (Invested)"]
+        ].copy()
+
+        # Show the largest portfolio positions first in the edit table.
+        total_invested_for_editor = pd.to_numeric(
+            editable_df["Current (Invested)"], errors="coerce"
+        ).fillna(0).sum()
+        editable_df["Current Weight"] = (
+            pd.to_numeric(editable_df["Current (Invested)"], errors="coerce").fillna(0)
+            / total_invested_for_editor
+            * 100
+            if total_invested_for_editor > 0
+            else 0.0
+        )
+        editable_df = editable_df.sort_values(
+            by=["Current Weight", "Current (Invested)", "Symbol"],
+            ascending=[False, False, True],
+        ).reset_index(drop=True)
+
+        st.caption("Edit table is sorted by Current Weight, highest to lowest.")
 
         with st.form("holdings_editor_form", clear_on_submit=False):
             edited_df = st.data_editor(
                 editable_df,
                 use_container_width=True,
                 hide_index=True,
-                disabled=["Symbol", "Stock Name"],
+                disabled=["Symbol", "Stock Name", "Current (Invested)", "Current Weight"],
                 column_config={
                     "Quantity": st.column_config.NumberColumn(
                         "Quantity", min_value=0.000001, format="%.6f"
                     ),
                     "Average Price": st.column_config.NumberColumn(
                         "Average Price", min_value=0.01, format="₹%.2f"
+                    ),
+                    "Current (Invested)": st.column_config.NumberColumn(
+                        "Current (Invested)",
+                        help="Read-only: Quantity × Average Price. It refreshes after saving.",
+                        format="₹%.2f",
+                    ),
+                    "Current Weight": st.column_config.NumberColumn(
+                        "Current Weight",
+                        help="Read-only portfolio weight based on Current (Invested).",
+                        format="%.2f%%",
                     ),
                 },
                 key=f"holdings_editor_{st.session_state['holdings_editor_version']}",
@@ -1071,13 +1136,14 @@ if run_btn:
                 portfolio_df.style.format({
                     "Quantity": "{:,.4f}",
                     "Average Price": "₹{:,.2f}",
+                    "Current (Invested)": "₹{:,.2f}",
                     "Weight": "{:.2%}",
                 }),
                 use_container_width=True,
             )
 
         with col2:
-            total_invested = float((portfolio_df["Quantity"] * portfolio_df["Average Price"]).sum())
+            total_invested = float(portfolio_df["Current (Invested)"].sum())
             st.metric("Stocks in database", len(portfolio_df))
             st.metric("Total invested", f"₹{total_invested:,.2f}")
 
