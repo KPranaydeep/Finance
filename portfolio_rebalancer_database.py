@@ -516,7 +516,7 @@ def build_current_allocation_from_db():
     if total <= 0:
         raise ValueError("The master holdings table has no positive portfolio value.")
 
-    usable["Weight"] = usable["Invested"] / total
+    usable["Weight"] = usable["Current (Invested)"] / total
     portfolio_df = usable[
         [
             "Symbol",
