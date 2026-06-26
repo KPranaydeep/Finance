@@ -720,7 +720,7 @@ def render_saved_analysis(placeholder):
                     else:
                         st.caption("No optimized-portfolio statistics were saved.")
 
-        with st.expander("Saved rebalancing plan", expanded=False):
+        with st.expander("Saved rebalancing plan", expanded=True):
             if rebalancing_plan:
                 saved_rebal_df = pd.DataFrame(rebalancing_plan)
                 required_style_columns = {
