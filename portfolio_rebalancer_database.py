@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import sqlite3
@@ -52,363 +51,121 @@ def resolve_yahoo_tickers(symbols_base):
 # DATABASE / HOLDINGS INPUT
 # =========================================================
 
-DEFAULT_DB_PATH = Path(__file__).resolve().with_name("portfolio_holdings.db")
-DB_PATH = Path(os.getenv("PORTFOLIO_DB_PATH", str(DEFAULT_DB_PATH)))
+SCRIPT_DB_PATH = Path(__file__).resolve().with_name("portfolio_holdings.db")
+USER_DB_PATH = Path.home() / ".portfolio_rebalancer" / "portfolio_holdings.db"
+
+# Honour an explicit deployment setting first. Otherwise reuse a legacy database
+# beside the script when it exists; for new installations use a writable user-data
+# directory instead of assuming that the deployed source folder is writable.
+DEFAULT_DB_PATH = SCRIPT_DB_PATH if SCRIPT_DB_PATH.exists() else USER_DB_PATH
+DB_PATH = Path(os.getenv("PORTFOLIO_DB_PATH", str(DEFAULT_DB_PATH))).expanduser()
+
+MASTER_HOLDINGS_DDL = """
+CREATE TABLE IF NOT EXISTS master_holdings (
+    symbol TEXT PRIMARY KEY,
+    stock_name TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 1,
+    average_price REAL,
+    added_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
 
 
-def get_db_connection():
+def _connect_sqlite():
+    """Open SQLite with settings suitable for Streamlit reruns/concurrent sessions."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite3.connect(
+        str(DB_PATH),
+        timeout=30,
+        check_same_thread=False,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
-LATEST_ANALYSIS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS latest_analysis (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    saved_at TEXT NOT NULL,
-    payload_json TEXT NOT NULL
-)
-"""
+def _ensure_master_holdings_schema(conn):
+    """Create the table and repair older compatible schemas in place."""
+    conn.execute(MASTER_HOLDINGS_DDL)
 
+    table_info = conn.execute("PRAGMA table_info(master_holdings)").fetchall()
+    columns = {str(row["name"]).lower() for row in table_info}
 
-def ensure_latest_analysis_table(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS latest_analysis (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            saved_at TEXT NOT NULL,
-            payload_json TEXT NOT NULL
-        )
-    """)
+    # A table with this name but no symbol column belongs to an incompatible old
+    # schema. Preserve it rather than deleting user data, then create a clean table.
+    if "symbol" not in columns:
+        legacy_name = "master_holdings_legacy_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        conn.execute(f'ALTER TABLE master_holdings RENAME TO "{legacy_name}"')
+        conn.execute(MASTER_HOLDINGS_DDL)
+        columns = {
+            str(row["name"]).lower()
+            for row in conn.execute("PRAGMA table_info(master_holdings)").fetchall()
+        }
 
-    cols = {
-        row[1]
-        for row in conn.execute(
-            "PRAGMA table_info(latest_analysis)"
-        ).fetchall()
+    # IF NOT EXISTS does not add columns to a table created by an older app version.
+    migrations = {
+        "stock_name": "ALTER TABLE master_holdings ADD COLUMN stock_name TEXT",
+        "quantity": "ALTER TABLE master_holdings ADD COLUMN quantity REAL DEFAULT 1",
+        "average_price": "ALTER TABLE master_holdings ADD COLUMN average_price REAL",
+        "added_at": "ALTER TABLE master_holdings ADD COLUMN added_at TEXT",
+        "updated_at": "ALTER TABLE master_holdings ADD COLUMN updated_at TEXT",
     }
+    for column, sql in migrations.items():
+        if column not in columns:
+            conn.execute(sql)
 
-    if "saved_at" not in cols:
-        conn.execute(
-            "ALTER TABLE latest_analysis ADD COLUMN saved_at TEXT"
-        )
-
-    if "payload_json" not in cols:
-        conn.execute(
-            "ALTER TABLE latest_analysis ADD COLUMN payload_json TEXT"
-        )
-
+    now = datetime.now().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        UPDATE master_holdings
+        SET stock_name = COALESCE(NULLIF(TRIM(stock_name), ''), symbol),
+            quantity = CASE WHEN quantity IS NULL OR quantity <= 0 THEN 1 ELSE quantity END,
+            added_at = COALESCE(NULLIF(TRIM(added_at), ''), ?),
+            updated_at = COALESCE(NULLIF(TRIM(updated_at), ''), ?)
+        """,
+        (now, now),
+    )
     conn.commit()
 
 
-def init_holdings_db():
-    with get_db_connection() as conn:
-        conn.execute("DROP TABLE IF EXISTS latest_analysis")
-
-        conn.execute("""
-            CREATE TABLE latest_analysis (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                saved_at TEXT NOT NULL,
-                payload_json TEXT NOT NULL
-            )
-        """)
-
-        conn.commit()
-    
-
-
-
-def make_json_safe(value):
-    """Convert pandas/numpy/datetime values into portable JSON values."""
-    if isinstance(value, dict):
-        return {str(key): make_json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [make_json_safe(item) for item in value]
-    if isinstance(value, (np.integer,)):
-        return int(value)
-    if isinstance(value, (np.floating, float)):
-        numeric = float(value)
-        return numeric if np.isfinite(numeric) else None
-    if isinstance(value, (np.bool_,)):
-        return bool(value)
-    if isinstance(value, (datetime, pd.Timestamp)):
-        return value.isoformat()
-    if value is pd.NA:
-        return None
-    return value
-
-
-def save_latest_analysis(payload):
-    """Persist the latest successful analysis as a singleton SQLite record."""
-    if not isinstance(payload, dict):
-        raise ValueError("Analysis payload must be a dictionary.")
-
-    safe_payload = make_json_safe(payload)
-    saved_at = str(
-        safe_payload.get("saved_at")
-        or datetime.now().isoformat(timespec="seconds")
-    )
-    safe_payload["saved_at"] = saved_at
-    payload_json = json.dumps(
-        safe_payload,
-        ensure_ascii=False,
-        indent=2,
-        allow_nan=False,
-    )
-
-    with get_db_connection() as conn:
-        ensure_latest_analysis_table(conn)
-        conn.execute(
-            """
-            INSERT INTO latest_analysis (id, saved_at, payload_json)
-            VALUES (1, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                saved_at = excluded.saved_at,
-                payload_json = excluded.payload_json
-            """,
-            (saved_at, payload_json),
-        )
-        conn.commit()
-
-    return safe_payload
-
-
-def load_latest_analysis():
+def get_db_connection():
+    """Return a connection only after the required holdings schema is available."""
+    conn = _connect_sqlite()
     try:
-        with get_db_connection() as conn:
-            ensure_latest_analysis_table(conn)
-
-            row = conn.execute(
-                "SELECT payload_json FROM latest_analysis WHERE id = 1"
-            ).fetchone()
-
-            if row is None:
-                return None
-
-            payload_json = row["payload_json"]
-
-    except sqlite3.DatabaseError:
-        return None
-
-    try:
-        payload = json.loads(payload_json)
+        _ensure_master_holdings_schema(conn)
+        return conn
     except Exception:
-        return None
+        conn.close()
+        raise
 
-    return payload if isinstance(payload, dict) else None
 
+def init_holdings_db():
+    """Initialize SQLite and recover safely from a corrupt/non-SQLite DB file.
 
-def latest_analysis_backup_bytes():
-    """Return a JSON backup, or None when no valid saved analysis exists."""
+    Returns the path of a quarantined file when recovery was required, otherwise
+    returns None.
+    """
     try:
-        payload = load_latest_analysis()
-    except sqlite3.DatabaseError:
-        # Never let the optional backup control crash the complete Streamlit UI.
-        return None
-
-    if payload is None:
-        return None
-
-    return json.dumps(
-        make_json_safe(payload),
-        ensure_ascii=False,
-        indent=2,
-        allow_nan=False,
-    ).encode("utf-8")
-
-
-def restore_latest_analysis_backup(uploaded_file):
-    """Validate and restore an analysis-result JSON backup."""
-    if uploaded_file is None:
-        raise ValueError("Choose an analysis backup JSON file first.")
-
-    raw_bytes = uploaded_file.getvalue()
-    try:
-        payload = json.loads(raw_bytes.decode("utf-8-sig"))
-    except Exception as exc:
-        raise ValueError(f"Could not read the JSON backup: {exc}") from exc
-
-    if not isinstance(payload, dict):
-        raise ValueError("The analysis backup must contain one JSON object.")
-
-    required_keys = {
-        "saved_at",
-        "holdings_analyzed",
-        "total_invested",
-        "current_stats",
-        "optimal_stats",
-        "rebalancing_plan",
-    }
-    missing = sorted(required_keys - set(payload))
-    if missing:
-        raise ValueError(
-            "This is not a complete analysis backup. Missing: "
-            + ", ".join(missing)
+        with get_db_connection():
+            return None
+    except sqlite3.DatabaseError as exc:
+        message = str(exc).lower()
+        corrupt_markers = (
+            "file is not a database",
+            "database disk image is malformed",
+            "file is encrypted",
         )
+        if not DB_PATH.exists() or not any(marker in message for marker in corrupt_markers):
+            raise
 
-    return save_latest_analysis(payload)
-
-
-def render_saved_analysis(placeholder):
-    """Display the latest saved analysis immediately below the live banner."""
-    placeholder.empty()
-
-    with placeholder.container():
-        payload = load_latest_analysis()
-
-        if payload is None:
-            st.info(
-                "No saved analysis yet. Run analysis once or upload an analysis backup."
-            )
-            return
-
-        st.subheader("💾 Last Saved Analysis")
-        st.caption(f"Saved at: {payload.get('saved_at', 'Unknown')}")
-
-        backup_json = json.dumps(
-            make_json_safe(payload),
-            ensure_ascii=False,
-            indent=2,
-            allow_nan=False,
-        ).encode("utf-8")
-
-        backup_date = str(payload.get("saved_at", ""))[:10] or "latest"
-
-        st.download_button(
-            "Download complete analysis backup JSON",
-            data=backup_json,
-            file_name=f"portfolio_analysis_backup_{backup_date}.json",
-            mime="application/json",
-            use_container_width=True,
-            key=f"download_saved_analysis_main_{payload.get('saved_at','none')}",
+        quarantine_path = DB_PATH.with_name(
+            f"{DB_PATH.stem}.corrupt-{datetime.now():%Y%m%d-%H%M%S}{DB_PATH.suffix}"
         )
-
-        rebalancing_plan = payload.get("rebalancing_plan") or []
-
-        if rebalancing_plan:
-            saved_df = pd.DataFrame(rebalancing_plan)
-
-            if (
-                "Symbol" in saved_df.columns
-                and "Optimal Weight" in saved_df.columns
-            ):
-                display_df = (
-                    saved_df[["Symbol", "Optimal Weight"]]
-                    .sort_values("Optimal Weight", ascending=False)
-                    .reset_index(drop=True)
-                )
-
-                display_df["Optimal Weight"] = (
-                    display_df["Optimal Weight"] * 100
-                ).round(2)
-
-                st.dataframe(
-                    display_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-        else:
-            st.info("No saved rebalancing plan available.")
-
-        current_stats = payload.get("current_stats") or {}
-        optimal_stats = payload.get("optimal_stats") or {}
-
-        if current_stats or optimal_stats:
-            with st.expander("Saved portfolio statistics", expanded=False):
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.markdown("**Current Portfolio**")
-
-                    if current_stats:
-                        df = pd.DataFrame(
-                            {
-                                "Metric": current_stats.keys(),
-                                "Value": current_stats.values(),
-                            }
-                        )
-
-                        df["Value"] = df.apply(
-                            lambda r: (
-                                f"{float(r['Value']):.2f}"
-                                if r["Metric"] == "Sharpe Ratio"
-                                else f"{float(r['Value']):.2%}"
-                            ),
-                            axis=1,
-                        )
-
-                        st.dataframe(
-                            df,
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-
-                with col2:
-                    st.markdown("**Optimized Portfolio**")
-
-                    if optimal_stats:
-                        df = pd.DataFrame(
-                            {
-                                "Metric": optimal_stats.keys(),
-                                "Value": optimal_stats.values(),
-                            }
-                        )
-
-                        df["Value"] = df.apply(
-                            lambda r: (
-                                f"{float(r['Value']):.2f}"
-                                if r["Metric"] == "Sharpe Ratio"
-                                else f"{float(r['Value']):.2%}"
-                            ),
-                            axis=1,
-                        )
-
-                        st.dataframe(
-                            df,
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-
-        top_correlations = payload.get("top_correlations") or []
-
-        if top_correlations:
-            with st.expander("Saved top correlated pairs", expanded=False):
-                st.dataframe(
-                    pd.DataFrame(top_correlations),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        if rebalancing_plan:
-            with st.expander("Saved rebalancing plan", expanded=False):
-                saved_rebal_df = pd.DataFrame(rebalancing_plan)
-                st.dataframe(
-                    style_rebalance_df(saved_rebal_df),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        warnings_payload = payload.get("warnings") or {}
-
-        warning_lines = []
-
-        for name, values in warnings_payload.items():
-            if values:
-                if isinstance(values, list):
-                    warning_lines.append(
-                        f"{name}: {', '.join(map(str, values))}"
-                    )
-                else:
-                    warning_lines.append(
-                        f"{name}: {values}"
-                    )
-
-        if warning_lines:
-            with st.expander("Saved warnings", expanded=False):
-                for line in warning_lines:
-                    st.warning(line)
+        DB_PATH.replace(quarantine_path)
+        with get_db_connection():
+            pass
+        return quarantine_path
 
 
 def normalize_nse_symbol(value):
@@ -494,8 +251,16 @@ def get_unique_holdings_count():
 
 
 def render_live_holdings_banner(placeholder):
-    """Render an always-visible live holdings-count banner."""
-    unique_count = get_unique_holdings_count()
+    """Render the live count without taking down the whole app on a DB error."""
+    try:
+        unique_count = get_unique_holdings_count()
+    except sqlite3.Error as exc:
+        placeholder.error(
+            "Holdings database is unavailable. "
+            f"SQLite reported: {exc}. Active database path: {DB_PATH}"
+        )
+        return 0
+
     placeholder.markdown(
         f"""
         <div style="
@@ -1056,16 +821,27 @@ def metrics_df(stats_dict):
 # UI
 # =========================================================
 
-init_holdings_db()
+try:
+    recovered_db_path = init_holdings_db()
+except sqlite3.Error as exc:
+    st.error(
+        "Could not initialize the holdings database. "
+        f"SQLite reported: {exc}. Active database path: {DB_PATH}"
+    )
+    st.stop()
 
 st.title("📊 Portfolio Rebalancer")
 st.caption("Holdings are stored in a local SQLite master table instead of being uploaded from Excel.")
+st.caption(f"Active SQLite file: `{DB_PATH}`")
+
+if recovered_db_path is not None:
+    st.warning(
+        "The previous database file was not a valid SQLite database and was preserved as "
+        f"`{recovered_db_path.name}`. A new holdings database was created."
+    )
 
 # Filled after every add/remove operation using a fresh SQLite query.
 live_count_banner_placeholder = st.empty()
-
-# The latest saved/restored analysis is rendered here, directly below the banner.
-saved_analysis_placeholder = st.empty()
 
 update_messages = []
 update_warnings = []
@@ -1087,36 +863,6 @@ with st.sidebar:
     )
 
     update_holdings_btn = st.button("Update master holdings", use_container_width=True)
-
-    st.divider()
-    st.header("Analysis results backup")
-
-    existing_analysis_backup = latest_analysis_backup_bytes()
-    if existing_analysis_backup is not None:
-        latest_saved_payload = load_latest_analysis() or {}
-        latest_saved_date = str(latest_saved_payload.get("saved_at", ""))[:10] or "latest"
-        st.download_button(
-            "Download latest analysis JSON",
-            data=existing_analysis_backup,
-            file_name=f"portfolio_analysis_backup_{latest_saved_date}.json",
-            mime="application/json",
-            use_container_width=True,
-            key="download_saved_analysis_sidebar",
-        )
-    else:
-        st.caption("Run analysis once before downloading a result backup.")
-
-    analysis_backup_upload = st.file_uploader(
-        "Upload analysis backup JSON",
-        type=["json"],
-        key="analysis_backup_upload",
-        help="Restores a previously downloaded complete analysis result.",
-    )
-    restore_analysis_btn = st.button(
-        "Restore uploaded analysis",
-        use_container_width=True,
-        key="restore_analysis_btn",
-    )
 
     st.divider()
     st.header("Analysis inputs")
@@ -1150,16 +896,6 @@ with st.sidebar:
         else None
     )
     run_btn = st.button("Run analysis", use_container_width=True, type="primary")
-
-if restore_analysis_btn:
-    try:
-        restored_payload = restore_latest_analysis_backup(analysis_backup_upload)
-        update_messages.append(
-            "Analysis backup restored successfully. Saved at: "
-            + str(restored_payload.get("saved_at", "Unknown"))
-        )
-    except Exception as exc:
-        update_errors.append(f"Could not restore analysis backup: {exc}")
 
 if update_holdings_btn:
     buy_symbols = parse_symbol_input(buy_input)
@@ -1203,9 +939,6 @@ for message in update_errors:
 live_unique_count = render_live_holdings_banner(live_count_banner_placeholder)
 sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
 
-# Always visible on page load and refreshed after an import or successful analysis.
-render_saved_analysis(saved_analysis_placeholder)
-
 st.subheader("Master Holdings")
 master_df = load_master_holdings()
 
@@ -1219,44 +952,28 @@ else:
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
             "Update these values here when you need real portfolio weights and executable quantities."
         )
-    editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+        editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
+        edited_df = st.data_editor(
+            editable_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Symbol", "Stock Name"],
+            column_config={
+                "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.000001),
+                "Average Price": st.column_config.NumberColumn(
+                    "Average Price", min_value=0.01, format="₹%.2f"
+                ),
+            },
+            key="holdings_editor",
+        )
 
-    editable_df["Invested"] = (
-        pd.to_numeric(editable_df["Quantity"], errors="coerce")
-        * pd.to_numeric(editable_df["Average Price"], errors="coerce")
-    )
-
-    editable_df = (
-        editable_df
-        .sort_values("Invested", ascending=False)
-        .drop(columns=["Invested"])
-    )
-    edited_df = st.data_editor(
-        editable_df,
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Symbol", "Stock Name"],
-        column_config={
-            "Quantity": st.column_config.NumberColumn(
-                "Quantity",
-                min_value=0.000001
-            ),
-            "Average Price": st.column_config.NumberColumn(
-                "Average Price",
-                min_value=0.01,
-                format="₹%.2f"
-            ),
-        },
-        key="holdings_editor",
-    )
-
-    if st.button("Save quantity and price changes", use_container_width=True):
-        try:
-            save_holding_values(edited_df)
-            st.success("Master holdings values saved.")
-            master_df = load_master_holdings()
-        except Exception as exc:
-            st.error(f"Could not save holdings: {exc}")
+        if st.button("Save quantity and price changes", use_container_width=True):
+            try:
+                save_holding_values(edited_df)
+                st.success("Master holdings values saved.")
+                master_df = load_master_holdings()
+            except Exception as exc:
+                st.error(f"Could not save holdings: {exc}")
 
 if run_btn:
     try:
@@ -1353,9 +1070,6 @@ if run_btn:
 
         st.subheader("Top Correlated Pairs")
 
-        top_corrs = pd.DataFrame(
-            columns=["Ticker 1", "Ticker 2", "Abs Correlation"]
-        )
         corr_matrix = log_returns.corr()
 
         if corr_matrix.shape[1] < 2:
@@ -1407,64 +1121,6 @@ if run_btn:
                 mime="text/csv",
                 use_container_width=True,
             )
-
-        analysis_payload = {
-            "backup_format": "portfolio_rebalancer_analysis_v1",
-            "saved_at": datetime.now().isoformat(timespec="microseconds"),
-            "holdings_analyzed": int(len(portfolio_df)),
-            "total_invested": float(total_invested),
-            "executable_trade_count": int(len(rebal_df)),
-            "settings": {
-                "days_to_flip": int(days_to_flip),
-                "max_drawdown_input_pct": float(max_dd_pct),
-                "internal_max_dd": float(max_dd),
-                "drop_bottom_fraction": float(drop_bottom_pct),
-                "use_target_volatility": bool(use_target_vol),
-                "target_volatility": (
-                    float(target_volatility)
-                    if target_volatility is not None
-                    else None
-                ),
-            },
-            "history": {
-                "valid_start": str(meta["valid_start"]),
-                "valid_end": str(meta["valid_end"]),
-                "log_return_rows": int(log_returns.shape[0]),
-                "log_return_columns": int(log_returns.shape[1]),
-                "minimum_history": (
-                    meta["min_len_df"].to_dict(orient="records")
-                    if not meta["min_len_df"].empty
-                    else []
-                ),
-                "dropped_tickers": (
-                    meta["dropped_df"].to_dict(orient="records")
-                    if not meta["dropped_df"].empty
-                    else []
-                ),
-            },
-            "current_stats": current_stats or {},
-            "optimal_stats": optimal_stats or {},
-            "top_correlations": (
-                top_corrs.head(5).to_dict(orient="records")
-                if not top_corrs.empty
-                else []
-            ),
-            "current_allocation": portfolio_df.to_dict(orient="records"),
-            "rebalancing_plan": rebal_df.to_dict(orient="records"),
-            "warnings": {
-                "invalid_holding_rows": invalid_holding_rows,
-                "unresolved_yahoo_tickers": unresolved,
-                "missing_latest_prices": missing_prices,
-                "missing_allocation": missing_alloc,
-            },
-        }
-
-        save_latest_analysis(analysis_payload)
-        render_saved_analysis(saved_analysis_placeholder)
-        st.success(
-            "Analysis completed and saved. You can now download the complete "
-            "analysis backup as JSON."
-        )
 
     except Exception as e:
         st.error(f"Error: {e}")
