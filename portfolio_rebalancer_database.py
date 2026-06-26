@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sqlite3
@@ -71,6 +72,14 @@ CREATE TABLE IF NOT EXISTS master_holdings (
 )
 """
 
+LATEST_ANALYSIS_DDL = """
+CREATE TABLE IF NOT EXISTS latest_analysis (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    saved_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+)
+"""
+
 
 def _connect_sqlite():
     """Open SQLite with settings suitable for Streamlit reruns/concurrent sessions."""
@@ -88,6 +97,49 @@ def _connect_sqlite():
 def _ensure_master_holdings_schema(conn):
     """Create the table and repair older compatible schemas in place."""
     conn.execute(MASTER_HOLDINGS_DDL)
+    conn.execute(LATEST_ANALYSIS_DDL)
+
+    latest_columns = {
+        str(row["name"]).lower()
+        for row in conn.execute("PRAGMA table_info(latest_analysis)").fetchall()
+    }
+    required_latest_columns = {"id", "saved_at", "payload_json"}
+    if not required_latest_columns.issubset(latest_columns):
+        legacy_latest_name = (
+            "latest_analysis_legacy_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        )
+        conn.execute(
+            f'ALTER TABLE latest_analysis RENAME TO "{legacy_latest_name}"'
+        )
+        conn.execute(LATEST_ANALYSIS_DDL)
+
+        legacy_columns = {
+            str(row["name"]).lower()
+            for row in conn.execute(
+                f'PRAGMA table_info("{legacy_latest_name}")'
+            ).fetchall()
+        }
+        if "payload_json" in legacy_columns:
+            time_column = (
+                "saved_at"
+                if "saved_at" in legacy_columns
+                else "analyzed_at"
+                if "analyzed_at" in legacy_columns
+                else None
+            )
+            if time_column is not None:
+                legacy_row = conn.execute(
+                    f'SELECT "{time_column}", payload_json '
+                    f'FROM "{legacy_latest_name}" LIMIT 1'
+                ).fetchone()
+                if legacy_row is not None:
+                    conn.execute(
+                        """
+                        INSERT INTO latest_analysis (id, saved_at, payload_json)
+                        VALUES (1, ?, ?)
+                        """,
+                        (str(legacy_row[0]), legacy_row[1]),
+                    )
 
     table_info = conn.execute("PRAGMA table_info(master_holdings)").fetchall()
     columns = {str(row["name"]).lower() for row in table_info}
@@ -282,6 +334,315 @@ def render_live_holdings_banner(placeholder):
         unsafe_allow_html=True,
     )
     return unique_count
+
+
+
+def make_json_safe(value):
+    """Recursively convert pandas, NumPy, and datetime values to JSON-safe values."""
+    if isinstance(value, dict):
+        return {str(key): make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_safe(item) for item in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        numeric = float(value)
+        return numeric if np.isfinite(numeric) else None
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return value.isoformat()
+    if value is pd.NA:
+        return None
+    return value
+
+
+def save_latest_analysis(payload):
+    """Persist the latest successful analysis as one singleton SQLite record."""
+    if not isinstance(payload, dict):
+        raise ValueError("Analysis payload must be a dictionary.")
+
+    safe_payload = make_json_safe(payload)
+    saved_at = str(
+        safe_payload.get("saved_at")
+        or datetime.now().isoformat(timespec="seconds")
+    )
+    safe_payload["saved_at"] = saved_at
+    payload_json = json.dumps(
+        safe_payload,
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    )
+
+    with get_db_connection() as conn:
+        conn.execute(LATEST_ANALYSIS_DDL)
+        conn.execute(
+            """
+            INSERT INTO latest_analysis (id, saved_at, payload_json)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                saved_at = excluded.saved_at,
+                payload_json = excluded.payload_json
+            """,
+            (saved_at, payload_json),
+        )
+        conn.commit()
+
+    return safe_payload
+
+
+def load_latest_analysis():
+    """Load the latest saved analysis without preventing the app from opening."""
+    try:
+        with get_db_connection() as conn:
+            conn.execute(LATEST_ANALYSIS_DDL)
+            row = conn.execute(
+                "SELECT payload_json FROM latest_analysis WHERE id = 1"
+            ).fetchone()
+    except sqlite3.DatabaseError:
+        return None
+
+    if row is None:
+        return None
+
+    try:
+        payload = json.loads(row["payload_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def latest_analysis_backup_bytes():
+    """Return the latest saved analysis as UTF-8 JSON bytes, when available."""
+    payload = load_latest_analysis()
+    if payload is None:
+        return None
+
+    return json.dumps(
+        make_json_safe(payload),
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def restore_latest_analysis_backup(uploaded_file):
+    """Validate and restore a previously exported analysis-result JSON backup."""
+    if uploaded_file is None:
+        raise ValueError("Choose an analysis backup JSON file first.")
+
+    raw_bytes = uploaded_file.getvalue()
+    if not raw_bytes:
+        raise ValueError("The selected analysis backup is empty.")
+
+    try:
+        payload = json.loads(raw_bytes.decode("utf-8-sig"))
+    except Exception as exc:
+        raise ValueError(f"Could not read the JSON backup: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("The analysis backup must contain one JSON object.")
+
+    required_keys = {
+        "saved_at",
+        "holdings_analyzed",
+        "total_invested",
+        "current_stats",
+        "optimal_stats",
+        "rebalancing_plan",
+    }
+    missing = sorted(required_keys - set(payload))
+    if missing:
+        raise ValueError(
+            "This is not a complete analysis backup. Missing: "
+            + ", ".join(missing)
+        )
+
+    return save_latest_analysis(payload)
+
+
+def _format_saved_metric(metric_name, value):
+    """Format a saved statistic without failing on missing or malformed values."""
+    if value is None:
+        return "N/A"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if metric_name == "Sharpe Ratio":
+        return f"{numeric:.2f}"
+    return f"{numeric:.2%}"
+
+
+def render_saved_analysis(placeholder):
+    """Display the latest saved analysis immediately below the live banner."""
+    placeholder.empty()
+
+    with placeholder.container():
+        payload = load_latest_analysis()
+
+        if payload is None:
+            st.info(
+                "No saved analysis yet. Run analysis once or upload an analysis backup."
+            )
+            return
+
+        saved_at = str(payload.get("saved_at") or "Unknown")
+        holdings_analyzed = int(payload.get("holdings_analyzed") or 0)
+        total_invested = float(payload.get("total_invested") or 0.0)
+        rebalancing_plan = payload.get("rebalancing_plan") or []
+        executable_trade_count = int(
+            payload.get("executable_trade_count")
+            if payload.get("executable_trade_count") is not None
+            else len(rebalancing_plan)
+        )
+
+        st.subheader("💾 Last Saved Analysis")
+        st.caption(f"Saved at: {saved_at}")
+
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        summary_col1.metric("Holdings analysed", holdings_analyzed)
+        summary_col2.metric("Total invested", f"₹{total_invested:,.2f}")
+        summary_col3.metric("Executable trades", executable_trade_count)
+
+        backup_json = json.dumps(
+            make_json_safe(payload),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
+        backup_date = saved_at[:10] if saved_at and saved_at != "Unknown" else "latest"
+
+        st.download_button(
+            "Download complete analysis backup JSON",
+            data=backup_json,
+            file_name=f"portfolio_analysis_backup_{backup_date}.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_saved_analysis_main_" + saved_at,
+        )
+
+        current_stats = payload.get("current_stats") or {}
+        optimal_stats = payload.get("optimal_stats") or {}
+
+        if current_stats or optimal_stats:
+            with st.expander("Saved portfolio statistics", expanded=True):
+                stats_col1, stats_col2 = st.columns(2)
+
+                with stats_col1:
+                    st.markdown("**Current Portfolio**")
+                    if current_stats:
+                        current_saved_df = pd.DataFrame(
+                            {
+                                "Metric": list(current_stats.keys()),
+                                "Value": [
+                                    _format_saved_metric(metric, current_stats[metric])
+                                    for metric in current_stats
+                                ],
+                            }
+                        )
+                        st.dataframe(
+                            current_saved_df,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.caption("No current-portfolio statistics were saved.")
+
+                with stats_col2:
+                    st.markdown("**Optimized Portfolio**")
+                    if optimal_stats:
+                        optimal_saved_df = pd.DataFrame(
+                            {
+                                "Metric": list(optimal_stats.keys()),
+                                "Value": [
+                                    _format_saved_metric(metric, optimal_stats[metric])
+                                    for metric in optimal_stats
+                                ],
+                            }
+                        )
+                        st.dataframe(
+                            optimal_saved_df,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.caption("No optimized-portfolio statistics were saved.")
+
+        settings = payload.get("settings") or {}
+        history = payload.get("history") or {}
+        if settings or history:
+            with st.expander("Saved analysis settings and coverage", expanded=False):
+                if settings:
+                    st.markdown("**Settings**")
+                    st.json(settings)
+                if history:
+                    st.markdown("**History coverage**")
+                    st.json(history)
+
+        current_allocation = payload.get("current_allocation") or []
+        if current_allocation:
+            with st.expander("Saved current allocation", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(current_allocation),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        top_correlations = payload.get("top_correlations") or []
+        if top_correlations:
+            with st.expander("Saved top correlated pairs", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(top_correlations),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with st.expander("Saved rebalancing plan", expanded=False):
+            if rebalancing_plan:
+                saved_rebal_df = pd.DataFrame(rebalancing_plan)
+                required_style_columns = {
+                    "Current Weight",
+                    "Optimal Weight",
+                    "Action",
+                    "Change",
+                    "Quantity",
+                    "Executable Quantity",
+                    "Executable Value",
+                }
+                if required_style_columns.issubset(saved_rebal_df.columns):
+                    st.dataframe(
+                        style_rebalance_df(saved_rebal_df),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.dataframe(
+                        saved_rebal_df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            else:
+                st.success("The saved analysis had no executable trades.")
+
+        warnings_payload = payload.get("warnings") or {}
+        warning_lines = []
+        if isinstance(warnings_payload, dict):
+            for warning_name, warning_values in warnings_payload.items():
+                if warning_values:
+                    if isinstance(warning_values, list):
+                        warning_text = ", ".join(map(str, warning_values))
+                    else:
+                        warning_text = str(warning_values)
+                    warning_lines.append(f"{warning_name}: {warning_text}")
+
+        if warning_lines:
+            with st.expander("Saved warnings", expanded=False):
+                for warning_line in warning_lines:
+                    st.warning(warning_line)
 
 
 def add_symbols_to_master(symbols):
@@ -843,6 +1204,9 @@ if recovered_db_path is not None:
 # Filled after every add/remove operation using a fresh SQLite query.
 live_count_banner_placeholder = st.empty()
 
+# Latest saved/restored analysis is rendered directly below the live banner.
+saved_analysis_placeholder = st.empty()
+
 update_messages = []
 update_warnings = []
 update_errors = []
@@ -863,6 +1227,39 @@ with st.sidebar:
     )
 
     update_holdings_btn = st.button("Update master holdings", use_container_width=True)
+
+    st.divider()
+    st.header("Analysis results backup")
+
+    existing_analysis_backup = latest_analysis_backup_bytes()
+    if existing_analysis_backup is not None:
+        latest_saved_payload = load_latest_analysis() or {}
+        latest_saved_date = (
+            str(latest_saved_payload.get("saved_at", ""))[:10] or "latest"
+        )
+        st.download_button(
+            "Download latest analysis JSON",
+            data=existing_analysis_backup,
+            file_name=f"portfolio_analysis_backup_{latest_saved_date}.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_saved_analysis_sidebar",
+        )
+    else:
+        st.caption("Run analysis once before downloading a result backup.")
+
+    analysis_backup_upload = st.file_uploader(
+        "Upload analysis backup JSON",
+        type=["json"],
+        key="analysis_backup_upload",
+        help="Restores a previously downloaded complete analysis result.",
+    )
+    restore_analysis_btn = st.button(
+        "Restore uploaded analysis",
+        use_container_width=True,
+        key="restore_analysis_btn",
+        disabled=analysis_backup_upload is None,
+    )
 
     st.divider()
     st.header("Analysis inputs")
@@ -896,6 +1293,16 @@ with st.sidebar:
         else None
     )
     run_btn = st.button("Run analysis", use_container_width=True, type="primary")
+
+if restore_analysis_btn:
+    try:
+        restored_payload = restore_latest_analysis_backup(analysis_backup_upload)
+        update_messages.append(
+            "Analysis backup restored successfully. Saved at: "
+            + str(restored_payload.get("saved_at", "Unknown"))
+        )
+    except Exception as exc:
+        update_errors.append(f"Could not restore analysis backup: {exc}")
 
 if update_holdings_btn:
     buy_symbols = parse_symbol_input(buy_input)
@@ -938,6 +1345,7 @@ for message in update_errors:
 # Fresh, uncached database count on every Streamlit rerun.
 live_unique_count = render_live_holdings_banner(live_count_banner_placeholder)
 sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
+render_saved_analysis(saved_analysis_placeholder)
 
 st.subheader("Master Holdings")
 master_df = load_master_holdings()
@@ -1037,6 +1445,10 @@ if run_btn:
                 drop_bottom_pct=drop_bottom_pct,
             )
 
+        if optimal_weights is None:
+            st.error("Portfolio optimization did not return a usable allocation.")
+            st.stop()
+
         if not meta["dropped_df"].empty:
             st.subheader("Dropped Tickers")
             st.dataframe(meta["dropped_df"], use_container_width=True)
@@ -1070,6 +1482,9 @@ if run_btn:
 
         st.subheader("Top Correlated Pairs")
 
+        top_corrs = pd.DataFrame(
+            columns=["Ticker 1", "Ticker 2", "Abs Correlation"]
+        )
         corr_matrix = log_returns.corr()
 
         if corr_matrix.shape[1] < 2:
@@ -1121,6 +1536,63 @@ if run_btn:
                 mime="text/csv",
                 use_container_width=True,
             )
+
+        analysis_payload = {
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "holdings_analyzed": int(len(portfolio_df)),
+            "total_invested": float(total_invested),
+            "executable_trade_count": int(len(rebal_df)),
+            "settings": {
+                "days_to_flip": int(days_to_flip),
+                "max_drawdown_input_pct": float(max_dd_pct),
+                "internal_max_dd": float(max_dd),
+                "drop_bottom_fraction": float(drop_bottom_pct),
+                "use_target_volatility": bool(use_target_vol),
+                "target_volatility": (
+                    float(target_volatility)
+                    if target_volatility is not None
+                    else None
+                ),
+            },
+            "history": {
+                "valid_start": str(meta["valid_start"]),
+                "valid_end": str(meta["valid_end"]),
+                "log_return_rows": int(log_returns.shape[0]),
+                "log_return_columns": int(log_returns.shape[1]),
+                "minimum_history": (
+                    meta["min_len_df"].to_dict(orient="records")
+                    if not meta["min_len_df"].empty
+                    else []
+                ),
+                "dropped_tickers": (
+                    meta["dropped_df"].to_dict(orient="records")
+                    if not meta["dropped_df"].empty
+                    else []
+                ),
+            },
+            "current_stats": current_stats or {},
+            "optimal_stats": optimal_stats or {},
+            "top_correlations": (
+                top_corrs.head(5).to_dict(orient="records")
+                if not top_corrs.empty
+                else []
+            ),
+            "current_allocation": portfolio_df.to_dict(orient="records"),
+            "rebalancing_plan": rebal_df.to_dict(orient="records"),
+            "warnings": {
+                "invalid_holding_rows": invalid_holding_rows,
+                "unresolved_yahoo_tickers": unresolved,
+                "missing_latest_prices": missing_prices,
+                "missing_allocation": missing_alloc,
+            },
+        }
+
+        save_latest_analysis(analysis_payload)
+        render_saved_analysis(saved_analysis_placeholder)
+        st.success(
+            "Analysis completed and saved. You can now download the complete "
+            "analysis backup as JSON."
+        )
 
     except Exception as e:
         st.error(f"Error: {e}")
