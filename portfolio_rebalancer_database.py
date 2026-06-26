@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-26-saved-plan-optimal-weight-v4"
+APP_BUILD = "2026-06-26-analysis-coverage-v5"
 
 # =========================================================
 # HELPERS
@@ -650,6 +650,41 @@ def render_saved_analysis(placeholder):
 
         st.subheader("💾 Last Saved Analysis")
         st.caption(f"Saved at: {saved_at}")
+
+        # Compact information-only summary of the market data used for the
+        # saved analysis. This does not expose or restore analysis settings.
+        history = payload.get("history") or {}
+        valid_start_raw = history.get("valid_start")
+        valid_end_raw = history.get("valid_end")
+        trading_days = history.get("log_return_rows")
+        assets_in_analysis = history.get("log_return_columns")
+
+        valid_start = pd.to_datetime(valid_start_raw, errors="coerce")
+        valid_end = pd.to_datetime(valid_end_raw, errors="coerce")
+
+        if pd.notna(valid_start) and pd.notna(valid_end):
+            period_text = (
+                f"{valid_start.strftime('%d %b %Y')} → "
+                f"{valid_end.strftime('%d %b %Y')}"
+            )
+            calendar_days = int((valid_end.normalize() - valid_start.normalize()).days) + 1
+
+            analysis_parts = [f"**Analysis period:** {period_text}"]
+            if trading_days is not None:
+                analysis_parts.append(f"**Trading days analysed:** {int(trading_days):,}")
+            else:
+                analysis_parts.append(f"**Calendar days covered:** {calendar_days:,}")
+            if assets_in_analysis is not None:
+                analysis_parts.append(f"**Assets in return matrix:** {int(assets_in_analysis):,}")
+
+            st.info("  |  ".join(analysis_parts))
+        elif trading_days is not None or assets_in_analysis is not None:
+            analysis_parts = []
+            if trading_days is not None:
+                analysis_parts.append(f"**Trading days analysed:** {int(trading_days):,}")
+            if assets_in_analysis is not None:
+                analysis_parts.append(f"**Assets in return matrix:** {int(assets_in_analysis):,}")
+            st.info("  |  ".join(analysis_parts))
 
         summary_col1, summary_col2, summary_col3 = st.columns(3)
         summary_col1.metric("Holdings analysed", holdings_analyzed)
