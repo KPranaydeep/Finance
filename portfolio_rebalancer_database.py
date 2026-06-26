@@ -677,7 +677,7 @@ def render_saved_analysis(placeholder):
         optimal_stats = payload.get("optimal_stats") or {}
 
         if current_stats or optimal_stats:
-            with st.expander("Saved portfolio statistics", expanded=True):
+            with st.expander("Saved portfolio statistics", expanded=False):
                 stats_col1, stats_col2 = st.columns(2)
 
                 with stats_col1:
@@ -720,7 +720,7 @@ def render_saved_analysis(placeholder):
                     else:
                         st.caption("No optimized-portfolio statistics were saved.")
 
-        with st.expander("Saved rebalancing plan", expanded=False):
+        with st.expander("Saved rebalancing plan", expanded=True):
             if rebalancing_plan:
                 saved_rebal_df = pd.DataFrame(rebalancing_plan)
 
