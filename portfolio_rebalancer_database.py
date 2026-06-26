@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-26-clean-saved-analysis-v3"
+APP_BUILD = "2026-06-26-saved-plan-optimal-weight-v4"
 
 # =========================================================
 # HELPERS
@@ -720,9 +720,42 @@ def render_saved_analysis(placeholder):
                     else:
                         st.caption("No optimized-portfolio statistics were saved.")
 
-        with st.expander("Saved rebalancing plan", expanded=True):
+        with st.expander("Saved rebalancing plan", expanded=False):
             if rebalancing_plan:
                 saved_rebal_df = pd.DataFrame(rebalancing_plan)
+
+                # Sort only the saved rebalancing-plan display by Optimal Weight
+                # in descending order. The temporary sort key is removed before
+                # rendering, so no additional column is shown to the user.
+                if "Optimal Weight" in saved_rebal_df.columns:
+                    optimal_weight_text = (
+                        saved_rebal_df["Optimal Weight"]
+                        .astype(str)
+                        .str.strip()
+                    )
+                    optimal_weight_is_percent = optimal_weight_text.str.endswith("%")
+                    optimal_weight_sort = pd.to_numeric(
+                        optimal_weight_text.str.rstrip("%"),
+                        errors="coerce",
+                    )
+                    optimal_weight_sort = optimal_weight_sort.where(
+                        ~optimal_weight_is_percent,
+                        optimal_weight_sort / 100.0,
+                    )
+                    saved_rebal_df = (
+                        saved_rebal_df.assign(
+                            _optimal_weight_sort=optimal_weight_sort
+                        )
+                        .sort_values(
+                            "_optimal_weight_sort",
+                            ascending=False,
+                            na_position="last",
+                            kind="stable",
+                        )
+                        .drop(columns="_optimal_weight_sort")
+                        .reset_index(drop=True)
+                    )
+
                 required_style_columns = {
                     "Current Weight",
                     "Optimal Weight",
