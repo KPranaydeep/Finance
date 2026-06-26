@@ -18,6 +18,8 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
+APP_BUILD = "2026-06-26-clean-saved-analysis-v3"
+
 # =========================================================
 # HELPERS
 # =========================================================
@@ -718,35 +720,6 @@ def render_saved_analysis(placeholder):
                     else:
                         st.caption("No optimized-portfolio statistics were saved.")
 
-        settings = payload.get("settings") or {}
-        history = payload.get("history") or {}
-        if settings or history:
-            with st.expander("Saved analysis settings and coverage", expanded=False):
-                if settings:
-                    st.markdown("**Settings**")
-                    st.json(settings)
-                if history:
-                    st.markdown("**History coverage**")
-                    st.json(history)
-
-        current_allocation = payload.get("current_allocation") or []
-        if current_allocation:
-            with st.expander("Saved current allocation", expanded=False):
-                st.dataframe(
-                    pd.DataFrame(current_allocation),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        top_correlations = payload.get("top_correlations") or []
-        if top_correlations:
-            with st.expander("Saved top correlated pairs", expanded=False):
-                st.dataframe(
-                    pd.DataFrame(top_correlations),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
         with st.expander("Saved rebalancing plan", expanded=False):
             if rebalancing_plan:
                 saved_rebal_df = pd.DataFrame(rebalancing_plan)
@@ -773,22 +746,6 @@ def render_saved_analysis(placeholder):
                     )
             else:
                 st.success("The saved analysis had no executable trades.")
-
-        warnings_payload = payload.get("warnings") or {}
-        warning_lines = []
-        if isinstance(warnings_payload, dict):
-            for warning_name, warning_values in warnings_payload.items():
-                if warning_values:
-                    if isinstance(warning_values, list):
-                        warning_text = ", ".join(map(str, warning_values))
-                    else:
-                        warning_text = str(warning_values)
-                    warning_lines.append(f"{warning_name}: {warning_text}")
-
-        if warning_lines:
-            with st.expander("Saved warnings", expanded=False):
-                for warning_line in warning_lines:
-                    st.warning(warning_line)
 
 
 def add_symbols_to_master(symbols):
@@ -1380,6 +1337,7 @@ except sqlite3.Error as exc:
 st.title("📊 Portfolio Rebalancer")
 st.caption("Holdings are stored in a local SQLite master table instead of being uploaded from Excel.")
 st.caption(f"Active SQLite file: `{DB_PATH}`")
+st.caption(f"App build: `{APP_BUILD}`")
 
 if recovered_db_path is not None:
     st.warning(
@@ -1624,6 +1582,24 @@ else:
         editable_df = master_df[
             ["Symbol", "Stock Name", "Quantity", "Average Price"]
         ].copy()
+
+        # Sort only the editable table by invested value (Quantity × Average Price).
+        # The temporary sort column is removed before rendering, so no new column
+        # is displayed to the user.
+        editable_df["_sort_value"] = (
+            pd.to_numeric(editable_df["Quantity"], errors="coerce").fillna(0)
+            * pd.to_numeric(editable_df["Average Price"], errors="coerce").fillna(0)
+        )
+        editable_df = (
+            editable_df.sort_values(
+                "_sort_value",
+                ascending=False,
+                kind="stable",
+            )
+            .drop(columns="_sort_value")
+            .reset_index(drop=True)
+        )
+
         editor_version = st.session_state["holdings_editor_version"]
 
         with st.form(
@@ -1881,4 +1857,3 @@ if run_btn:
 
     except Exception as e:
         st.error(f"Error: {e}")
-
