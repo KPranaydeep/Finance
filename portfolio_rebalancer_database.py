@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import re
@@ -286,6 +287,151 @@ def load_master_holdings():
             conn,
         )
     return df
+
+
+
+def holdings_backup_bytes():
+    """Export the complete holdings master table as a UTF-8 CSV backup."""
+    holdings = load_master_holdings()
+    return holdings.to_csv(index=False).encode("utf-8-sig")
+
+
+def _read_holdings_backup(uploaded_file):
+    """Read and validate a holdings CSV uploaded through Streamlit."""
+    if uploaded_file is None:
+        raise ValueError("Choose a holdings backup CSV file first.")
+
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("The selected holdings backup is empty.")
+
+    try:
+        backup_df = pd.read_csv(io.BytesIO(raw))
+    except Exception as exc:
+        raise ValueError(f"Could not read the holdings CSV backup: {exc}") from exc
+
+    # Allow either the exported display headings or direct SQLite column names.
+    aliases = {
+        "symbol": "Symbol",
+        "stock name": "Stock Name",
+        "stock_name": "Stock Name",
+        "quantity": "Quantity",
+        "average price": "Average Price",
+        "average_price": "Average Price",
+        "added at": "Added At",
+        "added_at": "Added At",
+        "updated at": "Updated At",
+        "updated_at": "Updated At",
+    }
+    renamed = {}
+    for column in backup_df.columns:
+        normalized = str(column).strip().lower()
+        if normalized in aliases:
+            renamed[column] = aliases[normalized]
+    backup_df = backup_df.rename(columns=renamed)
+
+    required = ["Symbol", "Quantity", "Average Price"]
+    missing = [column for column in required if column not in backup_df.columns]
+    if missing:
+        raise ValueError(
+            "The holdings backup is missing required columns: " + ", ".join(missing)
+        )
+
+    if "Stock Name" not in backup_df.columns:
+        backup_df["Stock Name"] = backup_df["Symbol"]
+    if "Added At" not in backup_df.columns:
+        backup_df["Added At"] = None
+    if "Updated At" not in backup_df.columns:
+        backup_df["Updated At"] = None
+
+    cleaned = backup_df[
+        ["Symbol", "Stock Name", "Quantity", "Average Price", "Added At", "Updated At"]
+    ].copy()
+    cleaned["Symbol"] = cleaned["Symbol"].map(normalize_nse_symbol)
+    cleaned["Stock Name"] = cleaned["Stock Name"].fillna("").astype(str).str.strip()
+    cleaned["Quantity"] = pd.to_numeric(cleaned["Quantity"], errors="coerce")
+    cleaned["Average Price"] = pd.to_numeric(cleaned["Average Price"], errors="coerce")
+
+    if cleaned.empty:
+        raise ValueError("The holdings backup does not contain any rows.")
+    if (cleaned["Symbol"] == "").any():
+        raise ValueError("Every backup row must contain a valid Symbol.")
+    if cleaned["Symbol"].duplicated().any():
+        duplicates = sorted(
+            cleaned.loc[cleaned["Symbol"].duplicated(keep=False), "Symbol"].unique()
+        )
+        raise ValueError(
+            "The holdings backup contains duplicate symbols: " + ", ".join(duplicates)
+        )
+    if cleaned["Quantity"].isna().any() or (cleaned["Quantity"] <= 0).any():
+        raise ValueError("Quantity must be greater than zero for every restored holding.")
+    invalid_prices = cleaned["Average Price"].notna() & (cleaned["Average Price"] <= 0)
+    if invalid_prices.any():
+        raise ValueError(
+            "Average Price must be blank or greater than zero for every restored holding."
+        )
+
+    cleaned["Stock Name"] = cleaned.apply(
+        lambda row: row["Stock Name"] or row["Symbol"], axis=1
+    )
+    return cleaned
+
+
+def restore_holdings_backup(uploaded_file, mode="merge"):
+    """Restore holdings from CSV using replace or merge/update semantics."""
+    cleaned = _read_holdings_backup(uploaded_file)
+    normalized_mode = str(mode or "merge").strip().lower()
+    if normalized_mode not in {"replace", "merge"}:
+        raise ValueError("Restore mode must be either 'replace' or 'merge'.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    records = []
+    for _, row in cleaned.iterrows():
+        added_at = str(row["Added At"]).strip() if pd.notna(row["Added At"]) else now
+        updated_at = (
+            str(row["Updated At"]).strip() if pd.notna(row["Updated At"]) else now
+        )
+        records.append(
+            (
+                row["Symbol"],
+                row["Stock Name"],
+                float(row["Quantity"]),
+                (
+                    float(row["Average Price"])
+                    if pd.notna(row["Average Price"])
+                    else None
+                ),
+                added_at or now,
+                updated_at or now,
+            )
+        )
+
+    with get_db_connection() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            if normalized_mode == "replace":
+                conn.execute("DELETE FROM master_holdings")
+
+            conn.executemany(
+                """
+                INSERT INTO master_holdings
+                    (symbol, stock_name, quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    stock_name = excluded.stock_name,
+                    quantity = excluded.quantity,
+                    average_price = excluded.average_price,
+                    added_at = excluded.added_at,
+                    updated_at = excluded.updated_at
+                """,
+                records,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return len(records)
 
 
 def get_unique_holdings_count():
@@ -754,6 +900,7 @@ def remove_symbols_from_master(symbols):
 
 
 def save_holding_values(edited_df):
+    """Persist every editable holding atomically and verify that each row exists."""
     required = ["Symbol", "Quantity", "Average Price"]
     missing_columns = [c for c in required if c not in edited_df.columns]
     if missing_columns:
@@ -764,6 +911,10 @@ def save_holding_values(edited_df):
     cleaned["Quantity"] = pd.to_numeric(cleaned["Quantity"], errors="coerce")
     cleaned["Average Price"] = pd.to_numeric(cleaned["Average Price"], errors="coerce")
 
+    if cleaned.empty:
+        raise ValueError("There are no holdings to save.")
+    if (cleaned["Symbol"] == "").any():
+        raise ValueError("Every holding must have a valid symbol.")
     if cleaned["Symbol"].duplicated().any():
         raise ValueError("Duplicate symbols are not allowed in the master holdings table.")
     if cleaned["Quantity"].isna().any() or (cleaned["Quantity"] <= 0).any():
@@ -771,23 +922,58 @@ def save_holding_values(edited_df):
     if cleaned["Average Price"].isna().any() or (cleaned["Average Price"] <= 0).any():
         raise ValueError("Average Price must be greater than zero for every holding.")
 
+    symbols = cleaned["Symbol"].tolist()
+    placeholders = ",".join("?" for _ in symbols)
     now = datetime.now().isoformat(timespec="seconds")
+
     with get_db_connection() as conn:
-        for _, row in cleaned.iterrows():
-            conn.execute(
-                """
-                UPDATE master_holdings
-                SET quantity = ?, average_price = ?, updated_at = ?
-                WHERE symbol = ?
-                """,
-                (
-                    float(row["Quantity"]),
-                    float(row["Average Price"]),
-                    now,
-                    row["Symbol"],
-                ),
-            )
-        conn.commit()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = {
+                row["symbol"]
+                for row in conn.execute(
+                    f"SELECT symbol FROM master_holdings WHERE symbol IN ({placeholders})",
+                    symbols,
+                ).fetchall()
+            }
+            missing_symbols = sorted(set(symbols) - existing)
+            if missing_symbols:
+                raise ValueError(
+                    "These holdings no longer exist in SQLite: "
+                    + ", ".join(missing_symbols)
+                )
+
+            updated_count = 0
+            for _, row in cleaned.iterrows():
+                cursor = conn.execute(
+                    """
+                    UPDATE master_holdings
+                    SET quantity = ?, average_price = ?, updated_at = ?
+                    WHERE symbol = ?
+                    """,
+                    (
+                        float(row["Quantity"]),
+                        float(row["Average Price"]),
+                        now,
+                        row["Symbol"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError(
+                        f"SQLite did not update holding {row['Symbol']} exactly once."
+                    )
+                updated_count += cursor.rowcount
+
+            if updated_count != len(cleaned):
+                raise RuntimeError(
+                    f"Expected to update {len(cleaned)} rows, but updated {updated_count}."
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return updated_count
 
 
 def build_current_allocation_from_db():
@@ -1211,6 +1397,18 @@ update_messages = []
 update_warnings = []
 update_errors = []
 
+if "holdings_editor_version" not in st.session_state:
+    st.session_state["holdings_editor_version"] = 0
+
+for flash_key, target in (
+    ("holdings_flash_success", update_messages),
+    ("holdings_flash_warning", update_warnings),
+    ("holdings_flash_error", update_errors),
+):
+    flash_message = st.session_state.pop(flash_key, None)
+    if flash_message:
+        target.append(flash_message)
+
 with st.sidebar:
     st.header("Holdings database")
     sidebar_count_placeholder = st.empty()
@@ -1227,6 +1425,45 @@ with st.sidebar:
     )
 
     update_holdings_btn = st.button("Update master holdings", use_container_width=True)
+
+    st.divider()
+    st.header("Holdings backup and restore")
+
+    holdings_csv = holdings_backup_bytes()
+    holdings_backup_date = datetime.now().strftime("%Y-%m-%d")
+    st.download_button(
+        "Download holdings backup CSV",
+        data=holdings_csv,
+        file_name=f"portfolio_holdings_backup_{holdings_backup_date}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="download_holdings_backup_sidebar",
+        disabled=get_unique_holdings_count() == 0,
+        help="Download this before a Streamlit Cloud restart or redeployment.",
+    )
+
+    holdings_backup_upload = st.file_uploader(
+        "Upload holdings backup CSV",
+        type=["csv"],
+        key="holdings_backup_upload",
+        help="Restore Symbol, Stock Name, Quantity, Average Price and timestamps.",
+    )
+    holdings_restore_choice = st.radio(
+        "Restore behaviour",
+        options=["Merge/update current holdings", "Replace current holdings"],
+        index=0,
+        key="holdings_restore_choice",
+        help=(
+            "Merge updates matching symbols and keeps other rows. Replace deletes the "
+            "current holdings first."
+        ),
+    )
+    restore_holdings_btn = st.button(
+        "Restore uploaded holdings",
+        use_container_width=True,
+        key="restore_holdings_btn",
+        disabled=holdings_backup_upload is None,
+    )
 
     st.divider()
     st.header("Analysis results backup")
@@ -1294,6 +1531,26 @@ with st.sidebar:
     )
     run_btn = st.button("Run analysis", use_container_width=True, type="primary")
 
+if restore_holdings_btn:
+    try:
+        restore_mode = (
+            "replace"
+            if holdings_restore_choice == "Replace current holdings"
+            else "merge"
+        )
+        restored_count = restore_holdings_backup(
+            holdings_backup_upload,
+            mode=restore_mode,
+        )
+        st.session_state["holdings_editor_version"] += 1
+        st.session_state["holdings_flash_success"] = (
+            f"Restored {restored_count} holdings from the CSV backup using "
+            f"{restore_mode} mode."
+        )
+        st.rerun()
+    except Exception as exc:
+        update_errors.append(f"Could not restore holdings backup: {exc}")
+
 if restore_analysis_btn:
     try:
         restored_payload = restore_latest_analysis_backup(analysis_backup_upload)
@@ -1335,6 +1592,10 @@ if update_holdings_btn:
                 + ", ".join(missing_initial_price)
             )
 
+        if added or removed:
+            # The holdings row set changed, so use a fresh editor widget key.
+            st.session_state["holdings_editor_version"] += 1
+
 for message in update_messages:
     st.success(message)
 for message in update_warnings:
@@ -1358,30 +1619,54 @@ else:
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
             "A newly added symbol starts with quantity 1 and the latest available NSE price. "
-            "Update these values here when you need real portfolio weights and executable quantities."
+            "After you save an edit, Quantity and Average Price are reloaded from SQLite."
         )
-        editable_df = master_df[["Symbol", "Stock Name", "Quantity", "Average Price"]].copy()
-        edited_df = st.data_editor(
-            editable_df,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["Symbol", "Stock Name"],
-            column_config={
-                "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.000001),
-                "Average Price": st.column_config.NumberColumn(
-                    "Average Price", min_value=0.01, format="₹%.2f"
-                ),
-            },
-            key="holdings_editor",
-        )
+        editable_df = master_df[
+            ["Symbol", "Stock Name", "Quantity", "Average Price"]
+        ].copy()
+        editor_version = st.session_state["holdings_editor_version"]
 
-        if st.button("Save quantity and price changes", use_container_width=True):
+        with st.form(
+            key=f"holdings_edit_form_{editor_version}",
+            clear_on_submit=False,
+        ):
+            edited_df = st.data_editor(
+                editable_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["Symbol", "Stock Name"],
+                column_config={
+                    "Quantity": st.column_config.NumberColumn(
+                        "Quantity",
+                        min_value=0.000001,
+                        format="%.6f",
+                    ),
+                    "Average Price": st.column_config.NumberColumn(
+                        "Average Price",
+                        min_value=0.01,
+                        format="₹%.2f",
+                    ),
+                },
+                key=f"holdings_editor_{editor_version}",
+            )
+            save_holdings_btn = st.form_submit_button(
+                "Save quantity and price changes",
+                use_container_width=True,
+                type="primary",
+            )
+
+        if save_holdings_btn:
             try:
-                save_holding_values(edited_df)
-                st.success("Master holdings values saved.")
-                master_df = load_master_holdings()
+                updated_count = save_holding_values(edited_df)
+                # A new key forces Streamlit to discard the old editor snapshot.
+                st.session_state["holdings_editor_version"] += 1
+                st.session_state["holdings_flash_success"] = (
+                    f"Saved Quantity and Average Price for {updated_count} holdings."
+                )
+                st.rerun()
             except Exception as exc:
                 st.error(f"Could not save holdings: {exc}")
+
 
 if run_btn:
     try:
