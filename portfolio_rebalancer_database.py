@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-26-analysis-coverage-v5"
+APP_BUILD = "2026-06-29-auto-252-trading-days-v1"
 
 # =========================================================
 # HELPERS
@@ -1070,7 +1070,18 @@ def build_current_allocation_from_db():
 # =========================================================
 
 @st.cache_data(show_spinner=False)
-def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7, drop_bottom_pct=0.1):
+def get_daily_log_returns(
+    symbols,
+    start_date=None,
+    end_date=None,
+    buffer_days=7,
+    drop_bottom_pct=None,
+    target_trading_days=252,
+):
+    """
+    Automatically select the drop-bottom fraction that gives the number of
+    trading days nearest to target_trading_days from the 252+ side.
+    """
     if end_date is None:
         end_date = datetime.today()
     else:
@@ -1081,7 +1092,14 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
 
     effective_end = (end_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
 
-    df = yf.download(symbols, start=start_date, end=effective_end, progress=False, auto_adjust=True)["Close"]
+    df = yf.download(
+        symbols,
+        start=start_date,
+        end=effective_end,
+        progress=False,
+        auto_adjust=True,
+    )["Close"]
+
     if isinstance(df, pd.Series):
         df = df.to_frame()
 
@@ -1091,52 +1109,169 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
         raise ValueError("No data available for the given tickers.")
 
     lengths = df.count().sort_values(ascending=False)
-    num_to_drop = int(np.floor(drop_bottom_pct * len(lengths)))
+    total_tickers = len(lengths)
 
-    dropped_df = pd.DataFrame()
-    if num_to_drop > 0:
-        dropped = lengths.tail(num_to_drop)
-        kept = lengths.head(len(lengths) - num_to_drop)
-        df = df[kept.index]
+    if total_tickers == 0:
+        raise ValueError("No usable ticker history was downloaded.")
 
-        dropped_df = pd.DataFrame({
-            "Ticker": dropped.index,
-            "Valid Days of Data": dropped.values
-        }).reset_index(drop=True)
+    ordered_df = df[lengths.index]
+    first_valid = ordered_df.apply(lambda column: column.first_valid_index())
+    last_valid = ordered_df.apply(lambda column: column.last_valid_index())
+
+    minimum_assets_to_keep = 2 if total_tickers >= 2 else 1
+    max_auto_drop = min(
+        int(np.floor(0.95 * total_tickers)),
+        total_tickers - minimum_assets_to_keep,
+    )
+
+    candidates = []
+
+    if drop_bottom_pct is None:
+        drop_counts = range(max_auto_drop + 1)
     else:
-        kept = lengths
+        manual_drop_count = int(
+            np.floor(float(drop_bottom_pct) * total_tickers)
+        )
+        manual_drop_count = max(0, min(manual_drop_count, max_auto_drop))
+        drop_counts = [manual_drop_count]
 
-    valid_start = df[kept.index].apply(lambda x: x.first_valid_index()).max()
-    valid_end = df[kept.index].apply(lambda x: x.last_valid_index()).min()
+    date_index = ordered_df.index
 
-    if valid_start is None or valid_end is None or valid_start >= valid_end:
-        raise ValueError("No overlapping date range found across tickers after filtering.")
+    for num_to_drop in drop_counts:
+        kept_count = total_tickers - num_to_drop
+        kept_columns = list(lengths.index[:kept_count])
 
-    df_aligned = df.loc[valid_start:valid_end].dropna(axis=1, how="any")
-    log_returns = np.log(df_aligned / df_aligned.shift(1)).dropna()
+        candidate_start = first_valid.loc[kept_columns].max()
+        candidate_end = last_valid.loc[kept_columns].min()
 
-    lengths = df[kept.index].count()
-    min_len_ticker = lengths.idxmin()
+        if (
+            candidate_start is None
+            or candidate_end is None
+            or pd.isna(candidate_start)
+            or pd.isna(candidate_end)
+            or candidate_start >= candidate_end
+        ):
+            continue
+
+        rows_in_overlap = int(
+            ((date_index >= candidate_start) & (date_index <= candidate_end)).sum()
+        )
+        estimated_trading_days = max(rows_in_overlap - 1, 0)
+
+        if estimated_trading_days <= 0:
+            continue
+
+        candidates.append({
+            "num_to_drop": int(num_to_drop),
+            "kept_columns": kept_columns,
+            "valid_start": candidate_start,
+            "valid_end": candidate_end,
+            "estimated_trading_days": int(estimated_trading_days),
+        })
+
+    if not candidates:
+        raise ValueError(
+            "No overlapping date range found across tickers after filtering."
+        )
+
+    candidates_at_or_above_target = [
+        candidate
+        for candidate in candidates
+        if candidate["estimated_trading_days"] >= target_trading_days
+    ]
+
+    if candidates_at_or_above_target:
+        selected = min(
+            candidates_at_or_above_target,
+            key=lambda candidate: (
+                candidate["estimated_trading_days"] - target_trading_days,
+                candidate["num_to_drop"],
+            ),
+        )
+        target_reached = True
+    else:
+        selected = max(
+            candidates,
+            key=lambda candidate: (
+                candidate["estimated_trading_days"],
+                -candidate["num_to_drop"],
+            ),
+        )
+        target_reached = False
+
+    valid_start = selected["valid_start"]
+    valid_end = selected["valid_end"]
+    selected_columns = selected["kept_columns"]
+
+    aligned_prices = (
+        ordered_df[selected_columns]
+        .loc[valid_start:valid_end]
+        .dropna(axis=1, how="any")
+    )
+
+    if aligned_prices.empty or aligned_prices.shape[1] == 0:
+        raise ValueError(
+            "No complete ticker histories remained inside the selected overlap."
+        )
+
+    log_returns = (
+        np.log(aligned_prices / aligned_prices.shift(1))
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
+
+    if log_returns.empty:
+        raise ValueError(
+            "The selected overlap did not produce usable daily log returns."
+        )
+
+    kept_columns = list(log_returns.columns)
+    dropped_tickers = [
+        ticker for ticker in lengths.index if ticker not in kept_columns
+    ]
+
+    dropped_df = pd.DataFrame({
+        "Ticker": dropped_tickers,
+        "Valid Days of Data": [
+            int(lengths[ticker]) for ticker in dropped_tickers
+        ],
+    }).reset_index(drop=True)
+
+    kept_lengths = lengths.loc[kept_columns]
+    min_len_ticker = kept_lengths.idxmin()
 
     try:
-        start_price = df[min_len_ticker].dropna().iloc[0]
-        end_price = df[min_len_ticker].dropna().iloc[-1]
+        ticker_prices = df[min_len_ticker].dropna()
+        start_price = ticker_prices.iloc[0]
+        end_price = ticker_prices.iloc[-1]
         simulated_pnl = ((end_price - start_price) / start_price) * 100
     except Exception:
         simulated_pnl = np.nan
 
     min_len_df = pd.DataFrame({
         "Ticker": [min_len_ticker],
-        "History Length (days)": [lengths[min_len_ticker]],
-        "P&L (simulated)": [f"{simulated_pnl:.2f}%" if not np.isnan(simulated_pnl) else "N/A"]
+        "History Length (days)": [int(kept_lengths[min_len_ticker])],
+        "P&L (simulated)": [
+            f"{simulated_pnl:.2f}%" if not np.isnan(simulated_pnl) else "N/A"
+        ],
     })
+
+    selected_drop_bottom_pct = len(dropped_tickers) / total_tickers
 
     meta = {
         "valid_start": valid_start,
         "valid_end": valid_end,
         "dropped_df": dropped_df,
-        "min_len_df": min_len_df
+        "min_len_df": min_len_df,
+        "selected_drop_bottom_pct": float(selected_drop_bottom_pct),
+        "target_trading_days": int(target_trading_days),
+        "trading_days": int(log_returns.shape[0]),
+        "target_reached": bool(log_returns.shape[0] >= target_trading_days),
+        "total_tickers": int(total_tickers),
+        "kept_tickers": int(log_returns.shape[1]),
+        "dropped_tickers_count": int(len(dropped_tickers)),
     }
+
     return log_returns, meta
 
 
@@ -1536,12 +1671,10 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
-    drop_bottom_pct = st.number_input(
-        "Drop bottom fraction of tickers by history length",
-        min_value=0.0,
-        max_value=0.95,
-        value=0.20,
-        step=0.01,
+    drop_bottom_pct = None
+    st.caption(
+        "Drop-bottom fraction is selected automatically to produce "
+        "trading days nearest to 252, from the 252+ side."
     )
     use_target_vol = st.checkbox("Use target volatility")
     target_volatility = (
@@ -1778,13 +1911,39 @@ if run_btn:
             st.error("Portfolio optimization did not return a usable allocation.")
             st.stop()
 
+        # Replace the temporary None with the automatically selected value.
+        # The selected value is also saved in the analysis JSON below.
+        drop_bottom_pct = float(meta["selected_drop_bottom_pct"])
+
         if not meta["dropped_df"].empty:
             st.subheader("Dropped Tickers")
             st.dataframe(meta["dropped_df"], use_container_width=True)
 
         st.subheader("History Coverage")
         st.dataframe(meta["min_len_df"], use_container_width=True)
-        st.caption(f"Overlapping date range: {meta['valid_start'].date()} to {meta['valid_end'].date()}")
+
+        target_message = (
+            f"Target reached: nearest result at or above "
+            f"{meta['target_trading_days']} trading days."
+            if meta["target_reached"]
+            else (
+                f"Target of {meta['target_trading_days']} trading days could not "
+                "be reached; maximum available overlap was used."
+            )
+        )
+
+        st.info(
+            f"**Automatically selected drop_bottom_pct:** "
+            f"`{drop_bottom_pct:.6f}` ({drop_bottom_pct:.2%})  |  "
+            f"**Trading days analysed:** {meta['trading_days']:,}  |  "
+            f"**Tickers kept:** {meta['kept_tickers']:,}  |  "
+            f"**Tickers dropped:** {meta['dropped_tickers_count']:,}"
+        )
+        st.caption(target_message)
+        st.caption(
+            f"Overlapping date range: {meta['valid_start'].date()} "
+            f"to {meta['valid_end'].date()}"
+        )
         st.caption(f"Log return shape: {log_returns.shape}")
 
         if current_stats and optimal_stats:
