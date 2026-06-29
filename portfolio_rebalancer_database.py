@@ -1536,12 +1536,12 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
-    drop_bottom_pct = st.slider(
+    drop_bottom_pct = st.number_input(
         "Drop bottom fraction of tickers by history length",
         min_value=0.0,
         max_value=0.95,
-        value=0.0,
-        step=0.05,
+        value=0.20,
+        step=0.01,
     )
     use_target_vol = st.checkbox("Use target volatility")
     target_volatility = (
