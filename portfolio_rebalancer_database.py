@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-29-manual-coverage-preview-v8-yoy"
+APP_BUILD = "2026-06-29-manual-coverage-preview-v8-ema252"
 
 # =========================================================
 # HELPERS
@@ -1508,14 +1508,19 @@ def get_latest_price_map(latest_prices):
 
 
 @st.cache_data(show_spinner=False)
-def get_yoy_change_map(tickers):
-    """Return adjusted-price change over the latest available one-year period."""
+def get_ema252_change_map(tickers):
+    """Return each ticker's percentage distance from its latest 252-day EMA.
+
+    Formula: (latest adjusted close / latest EMA-252) - 1.
+    Positive values are above the EMA; negative values are below it.
+    """
     if not tickers:
         return {}
 
+    # Two years provides enough observations for a meaningful 252-session EMA.
     history = yf.download(
         list(tickers),
-        period="1y",
+        period="2y",
         progress=False,
         auto_adjust=True,
     )["Close"]
@@ -1524,24 +1529,29 @@ def get_yoy_change_map(tickers):
         history = history.to_frame()
 
     history = history.sort_index().ffill()
-    yoy_map = {}
+    ema252_change_map = {}
 
     for ticker in history.columns:
         prices = pd.to_numeric(history[ticker], errors="coerce").dropna()
-        if len(prices) < 2:
+
+        # Require at least 252 valid sessions before reporting the indicator.
+        if len(prices) < 252:
             continue
 
-        start_price = float(prices.iloc[0])
-        end_price = float(prices.iloc[-1])
-        if not np.isfinite(start_price) or start_price <= 0:
+        latest_price = float(prices.iloc[-1])
+        ema252 = float(
+            prices.ewm(span=252, adjust=False, min_periods=252).mean().iloc[-1]
+        )
+
+        if not np.isfinite(latest_price) or latest_price <= 0:
             continue
-        if not np.isfinite(end_price):
+        if not np.isfinite(ema252) or ema252 <= 0:
             continue
 
         base_symbol = str(ticker).replace(".NS", "").replace(".BO", "")
-        yoy_map[base_symbol] = (end_price / start_price) - 1.0
+        ema252_change_map[base_symbol] = (latest_price / ema252) - 1.0
 
-    return yoy_map
+    return ema252_change_map
 
 
 def style_rebalance_df(df):
@@ -1558,8 +1568,8 @@ def style_rebalance_df(df):
         "Executable Quantity": "{:.0f}",
         "Executable Value": "₹{:,.0f}",
     }
-    if "YoY % Change" in df.columns:
-        formatters["YoY % Change"] = "{:.2%}"
+    if "Change from 252 EMA" in df.columns:
+        formatters["Change from 252 EMA"] = "{:.2%}"
 
     return (
         df.style
@@ -2175,10 +2185,10 @@ if run_btn:
 
                 st.dataframe(top_corrs.head(5), use_container_width=True)
 
-        with st.spinner("Fetching latest prices and one-year changes..."):
+        with st.spinner("Fetching latest prices and 252 EMA changes..."):
             latest_prices = log_returns.columns.tolist()
             price_map = get_latest_price_map(latest_prices)
-            yoy_change_map = get_yoy_change_map(tuple(latest_prices))
+            ema252_change_map = get_ema252_change_map(tuple(latest_prices))
 
         rebal_df, missing_prices, missing_alloc = rebalance_plan_multi(
             portfolio_df[portfolio_df["Symbol"].isin(price_map.keys())].copy(),
@@ -2189,8 +2199,8 @@ if run_btn:
         )
 
         if not rebal_df.empty:
-            yoy_values = rebal_df["Symbol"].map(yoy_change_map)
-            rebal_df.insert(5, "YoY % Change", yoy_values)
+            ema252_values = rebal_df["Symbol"].map(ema252_change_map)
+            rebal_df.insert(5, "Change from 252 EMA", ema252_values)
 
         if missing_prices:
             st.warning(f"Skipped symbols with missing latest price: {', '.join(missing_prices)}")
