@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-29-manual-drop-control-v6"
+APP_BUILD = "2026-06-29-manual-drop-control-v7"
 
 # =========================================================
 # HELPERS
@@ -1941,9 +1941,11 @@ else:
 
 if run_btn:
     try:
-        # Run analysis with exactly the value currently entered in the manual
-        # drop_bottom_pct number input. The recommendation never overrides it.
-        drop_bottom_pct = float(st.session_state["drop_bottom_pct"])
+        # Use exactly the value rendered by the manual number input above.
+        # The recommendation is informational and never overrides this value.
+        drop_bottom_pct = float(
+            st.session_state.get("manual_drop_bottom_pct_v6", drop_bottom_pct)
+        )
 
         if master_df.empty:
             st.error("Add at least one NSE symbol before running the analysis.")
