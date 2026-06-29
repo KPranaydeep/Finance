@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-29-manual-coverage-preview-v8"
+APP_BUILD = "2026-06-29-rebalancing-yoy-v9"
 
 # =========================================================
 # HELPERS
@@ -1507,23 +1507,88 @@ def get_latest_price_map(latest_prices):
     return price_map
 
 
+@st.cache_data(show_spinner=False)
+def get_yoy_change_map(tickers):
+    """Return one-year adjusted-price change for each Yahoo ticker.
+
+    YoY change is calculated from the latest available adjusted close against
+    the closest available trading-day close on or before the date one year ago.
+    Symbols without sufficient history are returned as missing values.
+    """
+    if not tickers:
+        return {}
+
+    price_history = yf.download(
+        list(tickers),
+        period="2y",
+        progress=False,
+        auto_adjust=True,
+    )["Close"]
+
+    if isinstance(price_history, pd.Series):
+        price_history = price_history.to_frame()
+
+    if price_history is None or price_history.empty:
+        return {}
+
+    price_history = price_history.sort_index()
+    yoy_map = {}
+
+    for ticker in price_history.columns:
+        series = pd.to_numeric(
+            price_history[ticker],
+            errors="coerce",
+        ).dropna()
+
+        if series.empty:
+            continue
+
+        latest_date = pd.Timestamp(series.index[-1])
+        latest_price = float(series.iloc[-1])
+        comparison_date = latest_date - pd.DateOffset(years=1)
+
+        prior_history = series.loc[:comparison_date]
+        if prior_history.empty:
+            continue
+
+        prior_price = float(prior_history.iloc[-1])
+        if (
+            not np.isfinite(latest_price)
+            or not np.isfinite(prior_price)
+            or prior_price <= 0
+        ):
+            continue
+
+        symbol = str(ticker).replace(".NS", "").replace(".BO", "")
+        yoy_map[symbol] = (latest_price / prior_price) - 1.0
+
+    return yoy_map
+
+
 def style_rebalance_df(df):
     def color_action_row(row):
         if row["Action"] == "Buy":
             return ["background-color: #d4edda; color: #155724;"] * len(row)
         return ["background-color: #f8d7da; color: #721c24;"] * len(row)
 
+    formatters = {
+        "Current Weight": "{:.2%}",
+        "Optimal Weight": "{:.2%}",
+        "Change": "{:.2%}",
+        "Quantity": "{:.0f}",
+        "Executable Quantity": "{:.0f}",
+        "Executable Value": "₹{:,.0f}",
+    }
+
+    # Older saved analyses do not contain this column, so add the formatter only
+    # when it is present.
+    if "YoY % Change" in df.columns:
+        formatters["YoY % Change"] = "{:+.2%}"
+
     return (
         df.style
         .apply(color_action_row, axis=1)
-        .format({
-            "Current Weight": "{:.2%}",
-            "Optimal Weight": "{:.2%}",
-            "Change": "{:.2%}",
-            "Quantity": "{:.0f}",
-            "Executable Quantity": "{:.0f}",
-            "Executable Value": "₹{:,.0f}",
-        })
+        .format(formatters, na_rep="N/A")
     )
 
 
@@ -1534,12 +1599,8 @@ def metrics_df(stats_dict):
     })
 
 
-def calculate_drop_bottom_pct_recommendation():
-    """Calculate a display-only 252-day recommendation.
-
-    The recommendation is stored separately and never changes the manual
-    ``drop_bottom_pct`` number input.
-    """
+def auto_set_drop_bottom_pct_for_analysis():
+    """Set the visible control to the value nearest to 252+ trading days."""
     st.session_state.pop("drop_bottom_auto_result", None)
     st.session_state.pop("drop_bottom_auto_error", None)
 
@@ -1568,55 +1629,13 @@ def calculate_drop_bottom_pct_recommendation():
             target_trading_days=252,
         )
 
-        # Informational only. Never write to the manual widget key
-        # ``manual_drop_bottom_pct_v8``.
+        st.session_state["drop_bottom_pct"] = float(
+            selected["drop_bottom_pct"]
+        )
         st.session_state["drop_bottom_auto_result"] = selected
 
     except Exception as exc:
         st.session_state["drop_bottom_auto_error"] = str(exc)
-
-
-def clear_drop_bottom_coverage_preview():
-    """Discard a coverage preview when the manual percentage changes."""
-    st.session_state.pop("drop_bottom_coverage_preview", None)
-    st.session_state.pop("drop_bottom_coverage_error", None)
-
-
-def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
-    """Calculate history coverage only; do not run portfolio optimization."""
-    portfolio_df, invalid_rows = build_current_allocation_from_db()
-
-    if portfolio_df.empty:
-        raise ValueError("No usable holdings are available.")
-
-    symbols = (
-        portfolio_df["Symbol"]
-        .dropna()
-        .astype(str)
-        .str.upper()
-        .tolist()
-    )
-
-    resolved_map = resolve_yahoo_tickers(symbols)
-    yahoo_tickers = tuple(resolved_map.values())
-
-    if not yahoo_tickers:
-        raise ValueError("No Yahoo Finance tickers could be resolved.")
-
-    log_returns, meta = get_daily_log_returns(
-        yahoo_tickers,
-        drop_bottom_pct=float(drop_bottom_pct),
-    )
-
-    return {
-        "drop_bottom_pct": float(drop_bottom_pct),
-        "trading_days": int(log_returns.shape[0]),
-        "assets": int(log_returns.shape[1]),
-        "valid_start": str(meta["valid_start"]),
-        "valid_end": str(meta["valid_end"]),
-        "resolved_tickers": int(len(yahoo_tickers)),
-        "invalid_holding_rows": int(len(invalid_rows)),
-    }
 
 
 # =========================================================
@@ -1655,6 +1674,9 @@ update_errors = []
 
 if "holdings_editor_version" not in st.session_state:
     st.session_state["holdings_editor_version"] = 0
+
+if "drop_bottom_pct" not in st.session_state:
+    st.session_state["drop_bottom_pct"] = 0.20
 
 for flash_key, target in (
     ("holdings_flash_success", update_messages),
@@ -1766,83 +1788,20 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
-    drop_bottom_pct = float(
-        st.number_input(
-            "Drop bottom fraction of tickers by history length",
-            min_value=0.0,
-            max_value=0.95,
-            value=0.20,
-            step=0.01,
-            format="%.2f",
-            key="manual_drop_bottom_pct_v8",
-            on_change=clear_drop_bottom_coverage_preview,
-            help=(
-                "This is a fully manual analysis input. Use Preview history coverage "
-                "to see the resulting trading days and assets before optimization."
-            ),
-        )
+    st.number_input(
+        "Drop bottom fraction of tickers by history length",
+        min_value=0.0,
+        max_value=0.95,
+        step=0.01,
+        format="%.2f",
+        key="drop_bottom_pct",
+        help=(
+            "When Run analysis is clicked, this control is automatically set "
+            "to the 0.01 value producing trading days nearest to 252 from "
+            "the 252+ side. You can still edit the displayed value manually."
+        ),
     )
-
-    preview_coverage_btn = st.button(
-        "Preview history coverage",
-        use_container_width=True,
-        help="Calculates history coverage for the current percentage without running optimization.",
-    )
-
-    if preview_coverage_btn:
-        st.session_state.pop("drop_bottom_coverage_preview", None)
-        st.session_state.pop("drop_bottom_coverage_error", None)
-        try:
-            with st.spinner("Calculating history coverage only..."):
-                st.session_state["drop_bottom_coverage_preview"] = (
-                    calculate_drop_bottom_coverage_preview(drop_bottom_pct)
-                )
-        except Exception as exc:
-            st.session_state["drop_bottom_coverage_error"] = str(exc)
-
-    coverage_preview = st.session_state.get("drop_bottom_coverage_preview")
-    if coverage_preview:
-        st.info(
-            f"**drop_bottom_pct used:** `{coverage_preview['drop_bottom_pct']:.2f}`  |  "
-            f"**Trading days analysed:** {coverage_preview['trading_days']:,}  |  "
-            f"**Assets in return matrix:** {coverage_preview['assets']:,}"
-        )
-        st.caption(
-            "Coverage preview only — portfolio optimization has not been run. "
-            "Adjust the percentage and preview again until satisfied."
-        )
-
-    coverage_error = st.session_state.get("drop_bottom_coverage_error")
-    if coverage_error:
-        st.error(f"Could not calculate history coverage: {coverage_error}")
-
-    st.button(
-        "Calculate 252-day recommendation",
-        use_container_width=True,
-        on_click=calculate_drop_bottom_pct_recommendation,
-    )
-
-    auto_drop_result = st.session_state.get("drop_bottom_auto_result")
-    if auto_drop_result:
-        if auto_drop_result["target_reached"]:
-            st.info(
-                f"Auto value: {auto_drop_result['drop_bottom_pct']:.2f} — "
-                f"{auto_drop_result['trading_days']:,} trading days."
-            )
-        else:
-            st.warning(
-                f"252 trading days could not be reached. Auto value: "
-                f"{auto_drop_result['drop_bottom_pct']:.2f} — "
-                f"{auto_drop_result['trading_days']:,} trading days."
-            )
-
-    auto_drop_error = st.session_state.get("drop_bottom_auto_error")
-    if auto_drop_error:
-        st.error(
-            "Could not calculate the informational recommendation: "
-            f"{auto_drop_error}"
-        )
-
+    drop_bottom_pct = float(st.session_state["drop_bottom_pct"])
     use_target_vol = st.checkbox("Use target volatility")
     target_volatility = (
         st.number_input(
@@ -1856,10 +1815,32 @@ with st.sidebar:
         else None
     )
     run_btn = st.button(
-        "Run optimization",
+        "Run analysis",
         use_container_width=True,
         type="primary",
+        on_click=auto_set_drop_bottom_pct_for_analysis,
     )
+
+    auto_drop_result = st.session_state.get("drop_bottom_auto_result")
+    if auto_drop_result:
+        if auto_drop_result["target_reached"]:
+            st.success(
+                f"Auto value: {auto_drop_result['drop_bottom_pct']:.2f} — "
+                f"{auto_drop_result['trading_days']:,} trading days."
+            )
+        else:
+            st.warning(
+                f"252 trading days could not be reached. Using "
+                f"{auto_drop_result['drop_bottom_pct']:.2f}, which provides "
+                f"the maximum available {auto_drop_result['trading_days']:,} days."
+            )
+
+    auto_drop_error = st.session_state.get("drop_bottom_auto_error")
+    if auto_drop_error:
+        st.error(
+            "Could not automatically calculate drop_bottom_pct: "
+            f"{auto_drop_error}"
+        )
 
 if restore_holdings_btn:
     try:
@@ -2018,11 +1999,13 @@ else:
 
 if run_btn:
     try:
-        # Use exactly the value rendered by the manual number input above.
-        # The recommendation is informational and never overrides this value.
-        drop_bottom_pct = float(
-            st.session_state.get("manual_drop_bottom_pct_v8", drop_bottom_pct)
-        )
+        auto_drop_error = st.session_state.get("drop_bottom_auto_error")
+        if auto_drop_error:
+            st.error(
+                "Analysis was not started because drop_bottom_pct could not be "
+                f"calculated automatically: {auto_drop_error}"
+            )
+            st.stop()
 
         if master_df.empty:
             st.error("Add at least one NSE symbol before running the analysis.")
@@ -2148,9 +2131,10 @@ if run_btn:
 
                 st.dataframe(top_corrs.head(5), use_container_width=True)
 
-        with st.spinner("Fetching latest prices..."):
+        with st.spinner("Fetching latest prices and YoY changes..."):
             latest_prices = log_returns.columns.tolist()
             price_map = get_latest_price_map(latest_prices)
+            yoy_change_map = get_yoy_change_map(tuple(latest_prices))
 
         rebal_df, missing_prices, missing_alloc = rebalance_plan_multi(
             portfolio_df[portfolio_df["Symbol"].isin(price_map.keys())].copy(),
@@ -2159,6 +2143,15 @@ if run_btn:
             price_map,
             days_to_flip,
         )
+
+        # Add one-year adjusted-price performance to the rebalancing plan.
+        # The value is informational and does not affect portfolio optimization.
+        if not rebal_df.empty:
+            rebal_df.insert(
+                1,
+                "YoY % Change",
+                rebal_df["Symbol"].map(yoy_change_map),
+            )
 
         if missing_prices:
             st.warning(f"Skipped symbols with missing latest price: {', '.join(missing_prices)}")
