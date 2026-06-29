@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-29-manual-drop-control-v7"
+APP_BUILD = "2026-06-29-manual-coverage-preview-v8"
 
 # =========================================================
 # HELPERS
@@ -1569,11 +1569,54 @@ def calculate_drop_bottom_pct_recommendation():
         )
 
         # Informational only. Never write to the manual widget key
-        # ``manual_drop_bottom_pct_v6``.
+        # ``manual_drop_bottom_pct_v8``.
         st.session_state["drop_bottom_auto_result"] = selected
 
     except Exception as exc:
         st.session_state["drop_bottom_auto_error"] = str(exc)
+
+
+def clear_drop_bottom_coverage_preview():
+    """Discard a coverage preview when the manual percentage changes."""
+    st.session_state.pop("drop_bottom_coverage_preview", None)
+    st.session_state.pop("drop_bottom_coverage_error", None)
+
+
+def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
+    """Calculate history coverage only; do not run portfolio optimization."""
+    portfolio_df, invalid_rows = build_current_allocation_from_db()
+
+    if portfolio_df.empty:
+        raise ValueError("No usable holdings are available.")
+
+    symbols = (
+        portfolio_df["Symbol"]
+        .dropna()
+        .astype(str)
+        .str.upper()
+        .tolist()
+    )
+
+    resolved_map = resolve_yahoo_tickers(symbols)
+    yahoo_tickers = tuple(resolved_map.values())
+
+    if not yahoo_tickers:
+        raise ValueError("No Yahoo Finance tickers could be resolved.")
+
+    log_returns, meta = get_daily_log_returns(
+        yahoo_tickers,
+        drop_bottom_pct=float(drop_bottom_pct),
+    )
+
+    return {
+        "drop_bottom_pct": float(drop_bottom_pct),
+        "trading_days": int(log_returns.shape[0]),
+        "assets": int(log_returns.shape[1]),
+        "valid_start": str(meta["valid_start"]),
+        "valid_end": str(meta["valid_end"]),
+        "resolved_tickers": int(len(yahoo_tickers)),
+        "invalid_holding_rows": int(len(invalid_rows)),
+    }
 
 
 # =========================================================
@@ -1731,13 +1774,47 @@ with st.sidebar:
             value=0.20,
             step=0.01,
             format="%.2f",
-            key="manual_drop_bottom_pct_v6",
+            key="manual_drop_bottom_pct_v8",
+            on_change=clear_drop_bottom_coverage_preview,
             help=(
-                "This is a fully manual analysis input. The 252-day recommendation "
-                "shown below is informational only and never changes this value."
+                "This is a fully manual analysis input. Use Preview history coverage "
+                "to see the resulting trading days and assets before optimization."
             ),
         )
     )
+
+    preview_coverage_btn = st.button(
+        "Preview history coverage",
+        use_container_width=True,
+        help="Calculates history coverage for the current percentage without running optimization.",
+    )
+
+    if preview_coverage_btn:
+        st.session_state.pop("drop_bottom_coverage_preview", None)
+        st.session_state.pop("drop_bottom_coverage_error", None)
+        try:
+            with st.spinner("Calculating history coverage only..."):
+                st.session_state["drop_bottom_coverage_preview"] = (
+                    calculate_drop_bottom_coverage_preview(drop_bottom_pct)
+                )
+        except Exception as exc:
+            st.session_state["drop_bottom_coverage_error"] = str(exc)
+
+    coverage_preview = st.session_state.get("drop_bottom_coverage_preview")
+    if coverage_preview:
+        st.info(
+            f"**drop_bottom_pct used:** `{coverage_preview['drop_bottom_pct']:.2f}`  |  "
+            f"**Trading days analysed:** {coverage_preview['trading_days']:,}  |  "
+            f"**Assets in return matrix:** {coverage_preview['assets']:,}"
+        )
+        st.caption(
+            "Coverage preview only — portfolio optimization has not been run. "
+            "Adjust the percentage and preview again until satisfied."
+        )
+
+    coverage_error = st.session_state.get("drop_bottom_coverage_error")
+    if coverage_error:
+        st.error(f"Could not calculate history coverage: {coverage_error}")
 
     st.button(
         "Calculate 252-day recommendation",
@@ -1779,7 +1856,7 @@ with st.sidebar:
         else None
     )
     run_btn = st.button(
-        "Run analysis",
+        "Run optimization",
         use_container_width=True,
         type="primary",
     )
@@ -1944,7 +2021,7 @@ if run_btn:
         # Use exactly the value rendered by the manual number input above.
         # The recommendation is informational and never overrides this value.
         drop_bottom_pct = float(
-            st.session_state.get("manual_drop_bottom_pct_v6", drop_bottom_pct)
+            st.session_state.get("manual_drop_bottom_pct_v8", drop_bottom_pct)
         )
 
         if master_df.empty:
