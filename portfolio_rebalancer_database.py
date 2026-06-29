@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-29-auto-252-control-v1"
+APP_BUILD = "2026-06-29-manual-drop-control-v6"
 
 # =========================================================
 # HELPERS
@@ -1534,8 +1534,12 @@ def metrics_df(stats_dict):
     })
 
 
-def auto_set_drop_bottom_pct_for_analysis():
-    """Set the visible control to the value nearest to 252+ trading days."""
+def calculate_drop_bottom_pct_recommendation():
+    """Calculate a display-only 252-day recommendation.
+
+    The recommendation is stored separately and never changes the manual
+    ``drop_bottom_pct`` number input.
+    """
     st.session_state.pop("drop_bottom_auto_result", None)
     st.session_state.pop("drop_bottom_auto_error", None)
 
@@ -1564,9 +1568,8 @@ def auto_set_drop_bottom_pct_for_analysis():
             target_trading_days=252,
         )
 
-        st.session_state["drop_bottom_pct"] = float(
-            selected["drop_bottom_pct"]
-        )
+        # Informational only. Never write to the manual widget key
+        # ``manual_drop_bottom_pct_v6``.
         st.session_state["drop_bottom_auto_result"] = selected
 
     except Exception as exc:
@@ -1609,9 +1612,6 @@ update_errors = []
 
 if "holdings_editor_version" not in st.session_state:
     st.session_state["holdings_editor_version"] = 0
-
-if "drop_bottom_pct" not in st.session_state:
-    st.session_state["drop_bottom_pct"] = 0.20
 
 for flash_key, target in (
     ("holdings_flash_success", update_messages),
@@ -1723,20 +1723,49 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100) * 4
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
-    st.number_input(
-        "Drop bottom fraction of tickers by history length",
-        min_value=0.0,
-        max_value=0.95,
-        step=0.01,
-        format="%.2f",
-        key="drop_bottom_pct",
-        help=(
-            "When Run analysis is clicked, this control is automatically set "
-            "to the 0.01 value producing trading days nearest to 252 from "
-            "the 252+ side. You can still edit the displayed value manually."
-        ),
+    drop_bottom_pct = float(
+        st.number_input(
+            "Drop bottom fraction of tickers by history length",
+            min_value=0.0,
+            max_value=0.95,
+            value=0.20,
+            step=0.01,
+            format="%.2f",
+            key="manual_drop_bottom_pct_v6",
+            help=(
+                "This is a fully manual analysis input. The 252-day recommendation "
+                "shown below is informational only and never changes this value."
+            ),
+        )
     )
-    drop_bottom_pct = float(st.session_state["drop_bottom_pct"])
+
+    st.button(
+        "Calculate 252-day recommendation",
+        use_container_width=True,
+        on_click=calculate_drop_bottom_pct_recommendation,
+    )
+
+    auto_drop_result = st.session_state.get("drop_bottom_auto_result")
+    if auto_drop_result:
+        if auto_drop_result["target_reached"]:
+            st.info(
+                f"Auto value: {auto_drop_result['drop_bottom_pct']:.2f} — "
+                f"{auto_drop_result['trading_days']:,} trading days."
+            )
+        else:
+            st.warning(
+                f"252 trading days could not be reached. Auto value: "
+                f"{auto_drop_result['drop_bottom_pct']:.2f} — "
+                f"{auto_drop_result['trading_days']:,} trading days."
+            )
+
+    auto_drop_error = st.session_state.get("drop_bottom_auto_error")
+    if auto_drop_error:
+        st.error(
+            "Could not calculate the informational recommendation: "
+            f"{auto_drop_error}"
+        )
+
     use_target_vol = st.checkbox("Use target volatility")
     target_volatility = (
         st.number_input(
@@ -1753,29 +1782,7 @@ with st.sidebar:
         "Run analysis",
         use_container_width=True,
         type="primary",
-        on_click=auto_set_drop_bottom_pct_for_analysis,
     )
-
-    auto_drop_result = st.session_state.get("drop_bottom_auto_result")
-    if auto_drop_result:
-        if auto_drop_result["target_reached"]:
-            st.success(
-                f"Auto value: {auto_drop_result['drop_bottom_pct']:.2f} — "
-                f"{auto_drop_result['trading_days']:,} trading days."
-            )
-        else:
-            st.warning(
-                f"252 trading days could not be reached. Using "
-                f"{auto_drop_result['drop_bottom_pct']:.2f}, which provides "
-                f"the maximum available {auto_drop_result['trading_days']:,} days."
-            )
-
-    auto_drop_error = st.session_state.get("drop_bottom_auto_error")
-    if auto_drop_error:
-        st.error(
-            "Could not automatically calculate drop_bottom_pct: "
-            f"{auto_drop_error}"
-        )
 
 if restore_holdings_btn:
     try:
@@ -1934,13 +1941,9 @@ else:
 
 if run_btn:
     try:
-        auto_drop_error = st.session_state.get("drop_bottom_auto_error")
-        if auto_drop_error:
-            st.error(
-                "Analysis was not started because drop_bottom_pct could not be "
-                f"calculated automatically: {auto_drop_error}"
-            )
-            st.stop()
+        # Run analysis with exactly the value currently entered in the manual
+        # drop_bottom_pct number input. The recommendation never overrides it.
+        drop_bottom_pct = float(st.session_state["drop_bottom_pct"])
 
         if master_df.empty:
             st.error("Add at least one NSE symbol before running the analysis.")
