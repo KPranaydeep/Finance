@@ -1809,7 +1809,7 @@ with st.sidebar:
     max_dd_pct = st.number_input(
         "Max drawdown input (%)",
         min_value=0.00,
-        value=7.60,
+        value=23.00,
         step=0.01,
         format="%.2f",
     )
