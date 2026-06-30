@@ -1889,10 +1889,10 @@ with st.sidebar:
     target_volatility = (
         st.number_input(
             "Target volatility",
-            min_value=0.001,
-            value=0.10,
-            step=0.01,
-            format="%.3f",
+            min_value=0.00696,
+            value=0.01455,
+            step=0.0001,
+            format="%.4f",
         )
         if use_target_vol
         else None
