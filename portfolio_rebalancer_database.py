@@ -1892,7 +1892,7 @@ with st.sidebar:
             min_value=0.00696,
             value=0.01455,
             step=0.0001,
-            format="%.4f",
+            format="%.5f",
         )
         if use_target_vol
         else None
