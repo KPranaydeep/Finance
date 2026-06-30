@@ -1813,7 +1813,7 @@ with st.sidebar:
         step=0.01,
         format="%.2f",
     )
-    max_dd = (max_dd_pct / 100) * 4
+    max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
     drop_bottom_pct = float(
         st.number_input(
