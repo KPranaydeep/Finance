@@ -472,6 +472,184 @@ def run_dry_powder_backtest(
     return result, summary, events_df
 
 
+def _elapsed_years(start: pd.Timestamp, end: pd.Timestamp) -> float:
+    """Return elapsed calendar time in years for transparent history reporting."""
+    start = pd.Timestamp(start)
+    end = pd.Timestamp(end)
+    if end <= start:
+        return 0.0
+    return float((end - start).days / 365.25)
+
+
+def build_all_index_comparison(
+    price_frame: pd.DataFrame,
+    index_catalog: dict,
+    selected_year: tuple[pd.Timestamp, pd.Timestamp],
+    initial_capital: float,
+    lookback_years: int,
+    tolerance_drawdown: float,
+    policy_floor: float,
+    stress_method: str,
+    custom_stress: float | None,
+    thresholds: list[float],
+    weights: list[float],
+    annual_cash_yield: float,
+    minimum_year_observations: int = 180,
+    minimum_history_observations: int = 100,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compare all configured indices with index-specific, look-ahead-safe reserves.
+
+    Every index uses only history available before the selected calendar year.
+    If less than the requested lookback exists, all available pre-year history is
+    used and the actual number of years is reported. The simulated asset is the
+    index itself, so beta is fixed at 1.00 for this cross-index comparison.
+    """
+    year_start, year_end = map(pd.Timestamp, selected_year)
+    history_cutoff = year_start - pd.Timedelta(days=1)
+    rows: list[dict] = []
+    skipped: list[dict] = []
+
+    for benchmark_name, metadata in index_catalog.items():
+        symbol = str(metadata["symbol"])
+        if symbol not in price_frame.columns:
+            skipped.append({
+                "Benchmark": benchmark_name,
+                "Symbol": symbol,
+                "Reason": "No usable Yahoo history returned",
+            })
+            continue
+
+        series = pd.to_numeric(price_frame[symbol], errors="coerce").dropna().sort_index()
+        series.index = pd.to_datetime(series.index).tz_localize(None)
+        if len(series) < minimum_history_observations:
+            skipped.append({
+                "Benchmark": benchmark_name,
+                "Symbol": symbol,
+                "Reason": f"Only {len(series)} valid observations available",
+            })
+            continue
+
+        year_prices = series.loc[(series.index >= year_start) & (series.index <= year_end)]
+        covers_start = (not year_prices.empty) and year_prices.index.min() <= pd.Timestamp(
+            year=year_start.year, month=3, day=31
+        )
+        covers_end = (not year_prices.empty) and year_prices.index.max() >= pd.Timestamp(
+            year=year_start.year, month=10, day=1
+        )
+        if len(year_prices) < minimum_year_observations or not covers_start or not covers_end:
+            skipped.append({
+                "Benchmark": benchmark_name,
+                "Symbol": symbol,
+                "Reason": f"Incomplete {year_start.year} data ({len(year_prices)} observations)",
+            })
+            continue
+
+        pre_year_all = series.loc[series.index <= history_cutoff]
+        if len(pre_year_all) < minimum_history_observations:
+            skipped.append({
+                "Benchmark": benchmark_name,
+                "Symbol": symbol,
+                "Reason": f"Insufficient pre-{year_start.year} history ({len(pre_year_all)} observations)",
+            })
+            continue
+
+        requested_start = history_cutoff - pd.DateOffset(years=int(lookback_years))
+        pre_year_lookback = pre_year_all.loc[pre_year_all.index >= requested_start]
+        # Use all available pre-year data when the requested window itself is too short.
+        if len(pre_year_lookback) < minimum_history_observations:
+            pre_year_lookback = pre_year_all
+
+        lookback_mdd = max_drawdown(pre_year_lookback)
+        all_history_mdd = max_drawdown(pre_year_all)
+        if stress_method == "Selected-lookback maximum":
+            stress = lookback_mdd
+            reserve_history = pre_year_lookback
+            stress_basis_label = "Available up to selected lookback"
+        elif stress_method == "Downloaded-history maximum":
+            stress = all_history_mdd
+            reserve_history = pre_year_all
+            stress_basis_label = "All available pre-year history"
+        else:
+            if custom_stress is None:
+                skipped.append({
+                    "Benchmark": benchmark_name,
+                    "Symbol": symbol,
+                    "Reason": "Custom stress assumption was not supplied",
+                })
+                continue
+            stress = float(custom_stress)
+            reserve_history = pre_year_lookback
+            stress_basis_label = "Custom stress; history shown for context"
+
+        recommendation = recommend_dry_powder(
+            prices=pre_year_lookback,
+            all_prices=pre_year_all,
+            tolerance_drawdown=tolerance_drawdown,
+            policy_floor=policy_floor,
+            stress_drawdown=stress,
+            portfolio_beta=1.0,
+        )
+
+        try:
+            _, summary, _ = run_dry_powder_backtest(
+                prices=series,
+                start_date=year_start,
+                end_date=year_end,
+                initial_capital=initial_capital,
+                dry_powder_weight=recommendation.recommended_weight,
+                thresholds=thresholds,
+                weights=weights,
+                annual_cash_yield=annual_cash_yield,
+            )
+        except Exception as exc:
+            skipped.append({
+                "Benchmark": benchmark_name,
+                "Symbol": symbol,
+                "Reason": f"Backtest failed: {exc}",
+            })
+            continue
+
+        rows.append({
+            "Benchmark": benchmark_name,
+            "Symbol": symbol,
+            "Series type": str(metadata.get("kind", "Index")),
+            "Data from": pd.Timestamp(series.index.min()),
+            "Data to": pd.Timestamp(series.index.max()),
+            "Total history available years": _elapsed_years(series.index.min(), series.index.max()),
+            "Reserve history from": pd.Timestamp(reserve_history.index.min()),
+            "Reserve history to": pd.Timestamp(reserve_history.index.max()),
+            "Reserve history used years": _elapsed_years(
+                reserve_history.index.min(), reserve_history.index.max()
+            ),
+            "Reserve history observations": int(len(reserve_history)),
+            "Stress basis used": stress_basis_label,
+            "Stress drawdown used": float(stress),
+            "Planning reserve weight": float(recommendation.recommended_weight),
+            "Planning reserve amount": float(initial_capital) * recommendation.recommended_weight,
+            "Fully invested end": float(summary.fully_invested_end),
+            "Strategy end": float(summary.strategy_end),
+            "Strategy minus fully invested": float(summary.opportunity_cost_or_gain),
+            "Fully invested return": float(summary.fully_invested_return),
+            "Strategy return": float(summary.strategy_return),
+            "Max drawdown reduction pp": float(
+                (summary.fully_invested_max_drawdown - summary.strategy_max_drawdown) * 100
+            ),
+            "Cash deployed": float(summary.cash_deployed),
+            "Triggers hit": int(summary.triggers_hit),
+        })
+
+    comparison = pd.DataFrame(rows)
+    if not comparison.empty:
+        comparison = comparison.sort_values(
+            ["Strategy minus fully invested", "Strategy end"],
+            ascending=[False, False],
+        ).reset_index(drop=True)
+        comparison.insert(0, "Rank", range(1, len(comparison) + 1))
+
+    skipped_df = pd.DataFrame(skipped)
+    return comparison, skipped_df
+
+
 def weighted_portfolio_returns(price_frame: pd.DataFrame, holdings: pd.DataFrame) -> tuple[pd.Series, list[str]]:
     available = [t for t in holdings["ticker"] if t in price_frame.columns and price_frame[t].notna().sum() >= 40]
     missing = [t for t in holdings["ticker"] if t not in available]
@@ -734,6 +912,52 @@ def download_many(symbols: Iterable[str], start: date | str, end: date | str) ->
     return pd.DataFrame(output).sort_index()
 
 
+def download_many_period(symbols: Iterable[str], period: str = "max") -> pd.DataFrame:
+    """Download the longest Yahoo history available for many symbols.
+
+    A bulk request keeps the all-index comparison practical on Streamlit Cloud.
+    Missing symbols are retried individually so one unsupported index does not
+    remove otherwise valid comparison rows.
+    """
+    symbols = list(dict.fromkeys(symbols))
+    if not symbols:
+        return pd.DataFrame()
+
+    output: dict[str, pd.Series] = {}
+    try:
+        raw = yf.download(
+            tickers=symbols,
+            period=period,
+            auto_adjust=True,
+            progress=False,
+            group_by="column",
+            threads=True,
+            timeout=45,
+        )
+        if raw is not None and not raw.empty:
+            for symbol in symbols:
+                try:
+                    series = _extract_symbol_from_multi(raw, symbol, len(symbols))
+                    if not series.empty:
+                        output[symbol] = series
+                except (KeyError, IndexError, TypeError, ValueError):
+                    continue
+    except Exception:
+        pass
+
+    for symbol in symbols:
+        if symbol in output:
+            continue
+        try:
+            series = download_close(symbol, period=period)
+            if not series.empty:
+                output[symbol] = series
+        except Exception:
+            continue
+
+    return pd.DataFrame(output).sort_index() if output else pd.DataFrame()
+
+
 def _extract_symbol_from_multi(raw: pd.DataFrame, symbol: str, symbol_count: int) -> pd.Series:
     if symbol_count == 1:
         return _extract_close(raw, symbol)
@@ -847,6 +1071,11 @@ def cached_benchmark(nse_name: str, symbol: str, start: date, end: date, provide
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def cached_many(symbols: tuple[str, ...], start: date, end: date) -> pd.DataFrame:
     return download_many(symbols=symbols, start=start, end=end)
+
+
+@st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
+def cached_all_index_histories(symbols: tuple[str, ...]) -> pd.DataFrame:
+    return download_many_period(symbols=symbols, period="max")
 
 
 def _compact_indian_decimal(value: float, max_decimals: int = 2) -> str:
@@ -1770,7 +1999,132 @@ st.download_button(
     mime="text/csv",
 )
 
-st.header("5. Interpretation")
+st.header("5. All-index planning-reserve and annual outcome comparison")
+st.write(
+    f"For every configured index or ETF proxy, the app uses only history available before {selected_year[0].year}, "
+    "calculates an index-specific planning reserve, and then compares a fully invested portfolio with the "
+    "dry-powder strategy during the selected calendar year. If an index has less than the requested lookback, "
+    "all usable pre-year history is used and the exact years are shown."
+)
+st.caption(
+    "The comparison uses Yahoo adjusted history for scalability. Each row uses beta 1.00 because that row simulates "
+    "the index itself. Price indices may omit dividends, while ETF proxies may include distribution adjustments. "
+    "A high cash-yield assumption can favour high-reserve strategies."
+)
+
+run_all_indices = st.checkbox(
+    "Load and compare all configured indices/proxies",
+    value=True,
+    key="run_all_index_comparison_v1",
+    help="The first run may take longer. Results are cached for six hours.",
+)
+
+if run_all_indices:
+    all_symbols = tuple(dict.fromkeys(item["symbol"] for item in INDEX_CATALOG.values()))
+    try:
+        with st.spinner("Downloading available history and calculating index-specific reserves…"):
+            all_index_prices = cached_all_index_histories(all_symbols)
+            all_index_comparison, skipped_indices = build_all_index_comparison(
+                price_frame=all_index_prices,
+                index_catalog=INDEX_CATALOG,
+                selected_year=selected_year,
+                initial_capital=portfolio_value,
+                lookback_years=lookback_years,
+                tolerance_drawdown=tolerance,
+                policy_floor=POLICY_FLOORS[policy_name],
+                stress_method=stress_method,
+                custom_stress=custom_stress,
+                thresholds=thresholds,
+                weights=ladder_weights,
+                annual_cash_yield=cash_yield,
+            )
+
+        if all_index_comparison.empty:
+            st.warning(
+                f"No configured benchmark had sufficient history for a complete {selected_year[0].year} comparison."
+            )
+        else:
+            display_comparison = all_index_comparison.copy()
+            display_comparison.insert(2, "Selected benchmark", display_comparison["Benchmark"].eq(selected_name).map({True: "Yes", False: ""}))
+            for column in ("Data from", "Data to", "Reserve history from", "Reserve history to"):
+                display_comparison[column] = pd.to_datetime(display_comparison[column]).dt.strftime("%d %b %Y")
+            for column in ("Total history available years", "Reserve history used years"):
+                display_comparison[column] = display_comparison[column].map(lambda value: f"{value:.1f}")
+            display_comparison["Stress drawdown used"] = display_comparison["Stress drawdown used"].map(pct)
+            display_comparison["Planning reserve estimate"] = display_comparison.pop("Planning reserve weight").map(pct)
+            for column in (
+                "Planning reserve amount",
+                "Fully invested end",
+                "Strategy end",
+                "Strategy minus fully invested",
+                "Cash deployed",
+            ):
+                display_comparison[column] = display_comparison[column].map(money)
+            display_comparison["Fully invested return"] = display_comparison["Fully invested return"].map(pct)
+            display_comparison["Strategy return"] = display_comparison["Strategy return"].map(pct)
+            display_comparison["Max drawdown reduction"] = display_comparison.pop("Max drawdown reduction pp").map(
+                lambda value: f"{value:.1f} pp"
+            )
+
+            display_columns = [
+                "Rank",
+                "Benchmark",
+                "Selected benchmark",
+                "Series type",
+                "Data from",
+                "Data to",
+                "Total history available years",
+                "Reserve history from",
+                "Reserve history to",
+                "Reserve history used years",
+                "Reserve history observations",
+                "Stress basis used",
+                "Stress drawdown used",
+                "Planning reserve estimate",
+                "Planning reserve amount",
+                "Fully invested end",
+                "Strategy end",
+                "Strategy minus fully invested",
+                "Fully invested return",
+                "Strategy return",
+                "Max drawdown reduction",
+                "Cash deployed",
+                "Triggers hit",
+            ]
+            st.dataframe(
+                display_comparison[display_columns],
+                use_container_width=True,
+                hide_index=True,
+                height=min(650, 80 + 35 * len(display_comparison)),
+            )
+
+            best_row = all_index_comparison.iloc[0]
+            st.info(
+                f"Highest strategy advantage in {selected_year[0].year}: **{best_row['Benchmark']}**, where the strategy "
+                f"ended **{money(best_row['Strategy minus fully invested'])}** above the fully invested comparison. "
+                "This is a historical outcome, not a recommendation to use that index for your portfolio."
+            )
+
+            comparison_export = all_index_comparison.copy()
+            comparison_export.insert(1, "Selected benchmark", comparison_export["Benchmark"].eq(selected_name))
+            st.download_button(
+                "Download all-index comparison CSV",
+                data=comparison_export.to_csv(index=False).encode("utf-8"),
+                file_name=f"all_index_dry_powder_comparison_{selected_year[0].year}.csv",
+                mime="text/csv",
+                key="download_all_index_comparison_v1",
+            )
+
+        if not skipped_indices.empty:
+            with st.expander(f"Skipped or unavailable benchmarks ({len(skipped_indices)})"):
+                st.dataframe(skipped_indices, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.error(f"All-index comparison could not be completed: {exc}")
+        st.caption(
+            "The selected-index analysis above remains available. Retry later if Yahoo temporarily limits bulk downloads."
+        )
+
+st.header("6. Interpretation")
 st.write(
     "Net worth, bonds/debt, savings and dry powder are separate buckets. The planning reserve estimate controls a hypothetical drawdown; the funded cycle reserve controls the deployment ladder. "
     "They are deliberately separate. The final recommendation can only be positive when emergency liquidity is adequate, "
