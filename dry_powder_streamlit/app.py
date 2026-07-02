@@ -114,7 +114,7 @@ POLICY_FLOORS = {
     "Formula only — no policy floor": 0.00,
 }
 
-DEFAULT_THRESHOLDS = [0.05, 0.10, 0.15, 0.20]
+DEFAULT_THRESHOLDS = [0.025, 0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20]
 
 # -----------------------------------------------------------------------------
 # Portfolio analytics
@@ -875,7 +875,7 @@ def render_matcher(start: date, end: date) -> str | None:
 st.title("🛡️ Dry Powder Planner for Indian Equity Portfolios")
 st.write(
     "Choose or statistically match an NSE benchmark, estimate a transparent minimum cash reserve, "
-    "get a live rule-based deployment amount, and test the reserve during a completed calendar year."
+    "track net worth and current liquidity, get an instant rule-based deployment amount, and test the reserve during a completed calendar year."
 )
 st.info(
     "Dry powder is investable liquidity—not your emergency fund. This app does not model taxes, brokerage, "
@@ -883,18 +883,103 @@ st.info(
 )
 
 with st.sidebar:
-    st.header("Portfolio assumptions")
-    portfolio_value = st.number_input("Current portfolio value (₹)", 100_000, 1_000_000_000, 2_000_000, 50_000)
-    lookback_years = st.slider("Risk lookback", 3, 15, 5)
-    tolerance = st.slider("Maximum drawdown you can tolerate", 5, 50, 25, 1) / 100
-    policy_name = st.selectbox("Reserve policy", list(POLICY_FLOORS), index=1)
+    st.header("1. Net worth and liquidity")
+    portfolio_value = st.number_input(
+        "Total investable portfolio — equity + dry powder (₹)",
+        min_value=100_000,
+        max_value=1_000_000_000,
+        value=2_000_000,
+        step=50_000,
+        help="This is the capital covered by the dry-powder plan. Do not add the current dry powder again outside this amount.",
+    )
+    current_dry_powder = st.number_input(
+        "Current deployable dry powder (₹)",
+        min_value=0.0,
+        max_value=1_000_000_000.0,
+        value=0.0,
+        step=5_000.0,
+        help="Liquid capital available to invest now. Exclude the emergency fund.",
+        key="sidebar_current_dry_powder_v2",
+    )
+    already_deployed = st.number_input(
+        "Already deployed in the current drawdown cycle (₹)",
+        min_value=0.0,
+        max_value=1_000_000_000.0,
+        value=0.0,
+        step=5_000.0,
+        help="Capital already invested after declines from the selected live reference peak.",
+        key="sidebar_already_deployed_v2",
+    )
+    emergency_fund = st.number_input(
+        "Emergency fund — never deploy (₹)",
+        min_value=0.0,
+        max_value=1_000_000_000.0,
+        value=0.0,
+        step=10_000.0,
+    )
+    other_assets = st.number_input(
+        "Other net-worth assets (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=50_000.0,
+        help="Examples: EPF, PPF, property equity, gold or other assets not included in the investable portfolio.",
+    )
+    liabilities = st.number_input(
+        "Outstanding liabilities (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=50_000.0,
+    )
+
+    st.divider()
+    st.header("2. Strategy assumptions")
+    lookback_years = st.slider("Risk lookback", 3, 15, 15)
+    tolerance = st.slider("Maximum drawdown you can tolerate", 5, 50, 23, 1) / 100
+    policy_options = list(POLICY_FLOORS)
+    policy_name = st.selectbox(
+        "Reserve policy",
+        policy_options,
+        index=policy_options.index("Formula only — no policy floor"),
+    )
     stress_method = st.radio("Stress basis", ["Historical maximum drawdown", "Custom crash assumption"])
     custom_stress = None
     if stress_method == "Custom crash assumption":
         custom_stress = st.slider("Assumed benchmark crash", 10, 70, 35, 1) / 100
-    cash_yield = st.number_input("Annual yield on dry powder (%)", 0.0, 15.0, 6.5, 0.25) / 100
-    trigger_text = st.text_input("Deploy at drawdowns (%)", "5, 10, 15, 20")
+    cash_yield = st.number_input("Annual yield on dry powder (%)", 0.0, 20.0, 11.0, 0.25) / 100
+    trigger_text = st.text_input(
+        "Deploy at drawdowns (%)",
+        "2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20",
+    )
     custom_symbol = st.text_input("Optional custom Yahoo Finance symbol", placeholder="Example: ^NSEI or an ETF ticker")
+
+if current_dry_powder > portfolio_value:
+    st.error("Current deployable dry powder cannot exceed the total investable portfolio.")
+    st.stop()
+if already_deployed > portfolio_value:
+    st.error("Already deployed capital cannot exceed the total investable portfolio.")
+    st.stop()
+
+current_equity_value = max(float(portfolio_value) - float(current_dry_powder), 0.0)
+calculated_net_worth = float(portfolio_value) + float(emergency_fund) + float(other_assets) - float(liabilities)
+
+st.header("1. Net worth snapshot")
+networth_cols = st.columns(6)
+networth_cols[0].metric("Calculated net worth", money(calculated_net_worth))
+networth_cols[1].metric("Investable portfolio", money(portfolio_value))
+networth_cols[2].metric("Currently invested", money(current_equity_value))
+networth_cols[3].metric(
+    "Current dry powder",
+    money(current_dry_powder),
+    pct(current_dry_powder / portfolio_value) if portfolio_value else "0.0%",
+)
+networth_cols[4].metric("Emergency fund", money(emergency_fund), "Excluded")
+networth_cols[5].metric("Liabilities", money(liabilities))
+st.caption(
+    "Calculated net worth = investable portfolio + emergency fund + other assets − liabilities. "
+    "Only current deployable dry powder is used by the live deployment engine."
+)
 
 end_download = date.today() + timedelta(days=1)
 start_download = date.today() - timedelta(days=365 * lookback_years + 120)
@@ -974,13 +1059,30 @@ recommendation = recommend_dry_powder(
 )
 recommended_amount = portfolio_value * recommendation.recommended_weight
 
-st.header("1. Dry-powder requirement")
-cols = st.columns(5)
+st.header("2. Required dry-powder reserve")
+reserve_gap = float(current_dry_powder) - float(recommended_amount)
+reserve_coverage = (float(current_dry_powder) / float(recommended_amount)) if recommended_amount > 0 else 1.0
+reserve_status = "Surplus" if reserve_gap >= 0 else "Shortfall"
+
+cols = st.columns(7)
 cols[0].metric("Recommended reserve", pct(recommendation.recommended_weight), money(recommended_amount))
-cols[1].metric("Historical max drawdown", pct(recommendation.historical_max_drawdown))
-cols[2].metric("Stress drawdown used", pct(recommendation.stress_drawdown))
-cols[3].metric("Your tolerance", pct(recommendation.tolerance_drawdown))
-cols[4].metric("Estimated stressed portfolio DD", pct(recommendation.estimated_stress_drawdown))
+cols[1].metric("Current dry powder", money(current_dry_powder), pct(current_dry_powder / portfolio_value))
+cols[2].metric(f"Reserve {reserve_status.lower()}", money(abs(reserve_gap)), reserve_status)
+cols[3].metric("Reserve coverage", pct(reserve_coverage))
+cols[4].metric("Historical max drawdown", pct(recommendation.historical_max_drawdown))
+cols[5].metric("Your tolerance", pct(recommendation.tolerance_drawdown))
+cols[6].metric("Estimated stressed DD", pct(recommendation.estimated_stress_drawdown))
+
+if reserve_gap < 0:
+    st.warning(
+        f"Your current dry powder is **{money(abs(reserve_gap))} below** the calculated starting reserve. "
+        "Build this gap from future contributions or planned rebalancing rather than selling impulsively."
+    )
+else:
+    st.success(
+        f"Your current dry powder is **{money(reserve_gap)} above** the calculated starting reserve. "
+        "The live engine will still deploy only the tranche amount justified by crossed triggers."
+    )
 
 st.write(
     f"The formula-only minimum is **{pct(recommendation.formula_minimum_weight)}**. "
@@ -1000,7 +1102,7 @@ fig_risk.add_trace(go.Scatter(x=chart_df.index, y=chart_df["Benchmark"], name="G
 fig_risk.update_layout(title=f"{selected_name}: normalized history used for risk estimate", yaxis_title="Index level (start = 100)")
 st.plotly_chart(fig_risk, use_container_width=True)
 
-st.header("2. Live deployment recommendation")
+st.header("3. Current live dry-powder decision")
 st.write(
     "This is a rules-based signal from the latest available closing price. It does not predict the market bottom. "
     "Each crossed drawdown trigger unlocks one equal tranche of the recommended reserve."
@@ -1021,24 +1123,9 @@ else:
     reference_start = risk_window_start
 reference_prices = benchmark.loc[(benchmark.index >= reference_start) & (benchmark.index <= latest_date)]
 
-input_cols = st.columns(2)
-current_dry_powder = input_cols[0].number_input(
-    "Dry powder currently available (₹)",
-    min_value=0.0,
-    max_value=float(portfolio_value),
-    value=float(min(recommended_amount, portfolio_value)),
-    step=5_000.0,
-    help="Enter only investable reserve available today, excluding your emergency fund.",
-    key="current_dry_powder_available_v1",
-)
-already_deployed = input_cols[1].number_input(
-    "Already deployed in this drawdown cycle (₹)",
-    min_value=0.0,
-    max_value=float(portfolio_value),
-    value=0.0,
-    step=5_000.0,
-    help="Amount already invested after declines from the selected reference peak.",
-    key="already_deployed_current_cycle_v1",
+st.caption(
+    f"Live inputs: **{money(current_dry_powder)} available now** and **{money(already_deployed)} already deployed** "
+    "in the current decline. Edit both instantly from the sidebar."
 )
 
 live = recommend_live_deployment(
@@ -1051,13 +1138,16 @@ live = recommend_live_deployment(
 
 staleness_days = max((pd.Timestamp.today().normalize() - live.latest_date.normalize()).days, 0)
 next_trigger_text = pct(live.next_trigger) if live.next_trigger is not None else "All crossed"
-live_metrics = st.columns(6)
+post_deployment_equity = current_equity_value + live.deploy_now
+live_metrics = st.columns(8)
 live_metrics[0].metric("Current drawdown", pct(live.current_drawdown))
 live_metrics[1].metric("Triggers crossed", f"{len(live.triggers_crossed)} / {len(thresholds)}")
 live_metrics[2].metric("Deploy now", money(live.deploy_now))
-live_metrics[3].metric("Keep as dry powder", money(live.keep_as_dry_powder))
-live_metrics[4].metric("Next trigger", next_trigger_text)
-live_metrics[5].metric("Latest data", f"{live.latest_date:%d %b %Y}")
+live_metrics[3].metric("Keep liquid", money(live.keep_as_dry_powder))
+live_metrics[4].metric("Equity after deployment", money(post_deployment_equity))
+live_metrics[5].metric("Target deployed", money(live.target_cumulative_deployment))
+live_metrics[6].metric("Next trigger", next_trigger_text)
+live_metrics[7].metric("Latest data", f"{live.latest_date:%d %b %Y}")
 
 if staleness_days > 7:
     st.error(
@@ -1108,7 +1198,7 @@ live_drawdowns = drawdown_series(reference_prices) * 100
 fig_live = go.Figure()
 fig_live.add_trace(go.Scatter(x=live_drawdowns.index, y=live_drawdowns, name="Drawdown from running peak"))
 for trigger in thresholds:
-    fig_live.add_hline(y=-trigger * 100, line_dash="dot", annotation_text=f"{trigger * 100:.0f}% trigger")
+    fig_live.add_hline(y=-trigger * 100, line_dash="dot", annotation_text=f"{trigger * 100:g}% trigger")
 fig_live.update_layout(
     title=f"{selected_name}: drawdown path for {reference_mode.lower()}",
     yaxis_title="Drawdown (%)",
@@ -1120,7 +1210,7 @@ st.caption(
     "still represents your holdings, and do not deploy emergency cash."
 )
 
-st.header("3. Completed-year dry-powder test")
+st.header("4. Completed-year dry-powder test")
 years = available_completed_years(benchmark, count=15)
 if not years:
     st.error(
@@ -1190,7 +1280,7 @@ st.download_button(
     mime="text/csv",
 )
 
-st.header("4. Interpretation")
+st.header("5. Interpretation")
 st.write(
     "A reserve is useful when it either prevents forced selling, reduces a drawdown to a level you can actually tolerate, "
     "or gives you capital to buy after preset declines. It is not automatically return-enhancing: in steadily rising years, "
