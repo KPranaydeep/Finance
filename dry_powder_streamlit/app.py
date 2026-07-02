@@ -104,6 +104,21 @@ INDEX_CATALOG = {
         "nse_name": "NIFTY INFRASTRUCTURE",
         "kind": "Index",
         "description": "For portfolios concentrated in infrastructure-related companies.",
+        "supports_nse_index_api": True,
+    },
+    "Gold (GoldBeES ETF proxy)": {
+        "symbol": "GOLDBEES.NS",
+        "nse_name": "GOLDBEES",
+        "kind": "Commodity ETF proxy",
+        "description": "Indian exchange-traded gold proxy. Uses adjusted ETF prices and may differ from spot gold because of expenses and tracking error.",
+        "supports_nse_index_api": False,
+    },
+    "Silver (SilverBeES ETF proxy)": {
+        "symbol": "SILVERBEES.NS",
+        "nse_name": "SILVERBEES",
+        "kind": "Commodity ETF proxy",
+        "description": "Indian exchange-traded silver proxy. Uses adjusted ETF prices and may differ from spot silver because of expenses and tracking error.",
+        "supports_nse_index_api": False,
     },
 }
 
@@ -497,12 +512,12 @@ def build_all_index_comparison(
     minimum_year_observations: int = 180,
     minimum_history_observations: int = 100,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Compare all configured indices with index-specific, look-ahead-safe reserves.
+    """Compare all configured benchmark and commodity series with look-ahead-safe reserves.
 
-    Every index uses only history available before the selected calendar year.
+    Every series uses only history available before the selected calendar year.
     If less than the requested lookback exists, all available pre-year history is
     used and the actual number of years is reported. The simulated asset is the
-    index itself, so beta is fixed at 1.00 for this cross-index comparison.
+    series itself, so beta is fixed at 1.00 for this cross-asset comparison.
     """
     year_start, year_end = map(pd.Timestamp, selected_year)
     history_cutoff = year_start - pd.Timedelta(days=1)
@@ -1551,7 +1566,7 @@ index_names = list(INDEX_CATALOG)
 matched_name = match_result.get("name") if match_result else None
 default_index = matched_name or "NIFTY 50"
 selected_name = st.selectbox(
-    "Benchmark for risk and backtest",
+    "Benchmark or asset for risk and backtest",
     index_names,
     index=index_names.index(default_index),
 )
@@ -1568,7 +1583,7 @@ statistically_validated = bool(
     and not custom_symbol.strip()
 )
 manual_benchmark_confirmation = st.checkbox(
-    "I confirm this benchmark is a reasonable proxy for my actual holdings",
+    "I confirm this benchmark or asset is a reasonable proxy for my actual holdings",
     value=False,
     help="Required when the holdings match failed, was weak, or the benchmark was selected manually.",
 )
@@ -1579,10 +1594,10 @@ if statistically_validated:
 else:
     effective_beta = float(portfolio_beta_input)
     if benchmark_validated:
-        st.success(f"Benchmark validation gate: PASS by explicit confirmation. Beta assumption: **{effective_beta:.2f}**.")
+        st.success(f"Benchmark/asset validation gate: PASS by explicit confirmation. Beta assumption: **{effective_beta:.2f}**.")
     else:
         st.error(
-            "Benchmark validation gate: FAIL. The app will calculate drawdown statistics, "
+            "Benchmark/asset validation gate: FAIL. The app will calculate drawdown statistics, "
             "but the final deployment recommendation will remain ₹0."
         )
 
@@ -1609,8 +1624,18 @@ try:
                 "NSE official": "NSE official",
                 "Yahoo/yfinance": "Yahoo/yfinance",
             }[source_mode]
+            supports_nse_index_api = bool(selected.get("supports_nse_index_api", True))
             if custom_symbol.strip() and provider == "Automatic":
                 provider = "Yahoo/yfinance"
+            elif not supports_nse_index_api and provider == "Automatic":
+                provider = "Yahoo/yfinance"
+                st.caption("This commodity ETF proxy uses Yahoo adjusted-price history; the NSE index-history endpoint does not apply to ETF securities.")
+            elif not supports_nse_index_api and provider == "NSE official":
+                st.error(
+                    "The NSE official source in this app is an index-history endpoint and cannot load ETF securities. "
+                    "Choose Yahoo/yfinance or upload a verified Date/Close CSV."
+                )
+                st.stop()
             benchmark, data_source_label = cached_benchmark(
                 selected["nse_name"], selected_symbol, start_download, end_download, provider
             )
@@ -1999,21 +2024,21 @@ st.download_button(
     mime="text/csv",
 )
 
-st.header("5. All-index planning-reserve and annual outcome comparison")
+st.header("5. All-benchmark and commodity planning-reserve comparison")
 st.write(
-    f"For every configured index or ETF proxy, the app uses only history available before {selected_year[0].year}, "
-    "calculates an index-specific planning reserve, and then compares a fully invested portfolio with the "
+    f"For every configured equity index, equity ETF proxy, gold proxy and silver proxy, the app uses only history available before {selected_year[0].year}, "
+    "calculates an asset-specific planning reserve, and then compares a fully invested portfolio with the "
     "dry-powder strategy during the selected calendar year. If an index has less than the requested lookback, "
     "all usable pre-year history is used and the exact years are shown."
 )
 st.caption(
     "The comparison uses Yahoo adjusted history for scalability. Each row uses beta 1.00 because that row simulates "
-    "the index itself. Price indices may omit dividends, while ETF proxies may include distribution adjustments. "
+    "the selected series itself. Price indices may omit dividends; equity and commodity ETF proxies may include distribution adjustments, expenses and tracking error. "
     "A high cash-yield assumption can favour high-reserve strategies."
 )
 
 run_all_indices = st.checkbox(
-    "Load and compare all configured indices/proxies",
+    "Load and compare all configured benchmarks and commodity proxies",
     value=True,
     key="run_all_index_comparison_v1",
     help="The first run may take longer. Results are cached for six hours.",
@@ -2022,7 +2047,7 @@ run_all_indices = st.checkbox(
 if run_all_indices:
     all_symbols = tuple(dict.fromkeys(item["symbol"] for item in INDEX_CATALOG.values()))
     try:
-        with st.spinner("Downloading available history and calculating index-specific reserves…"):
+        with st.spinner("Downloading available history and calculating asset-specific reserves…"):
             all_index_prices = cached_all_index_histories(all_symbols)
             all_index_comparison, skipped_indices = build_all_index_comparison(
                 price_frame=all_index_prices,
@@ -2041,11 +2066,11 @@ if run_all_indices:
 
         if all_index_comparison.empty:
             st.warning(
-                f"No configured benchmark had sufficient history for a complete {selected_year[0].year} comparison."
+                f"No configured benchmark or commodity proxy had sufficient history for a complete {selected_year[0].year} comparison."
             )
         else:
             display_comparison = all_index_comparison.copy()
-            display_comparison.insert(2, "Selected benchmark", display_comparison["Benchmark"].eq(selected_name).map({True: "Yes", False: ""}))
+            display_comparison.insert(2, "Selected series", display_comparison["Benchmark"].eq(selected_name).map({True: "Yes", False: ""}))
             for column in ("Data from", "Data to", "Reserve history from", "Reserve history to"):
                 display_comparison[column] = pd.to_datetime(display_comparison[column]).dt.strftime("%d %b %Y")
             for column in ("Total history available years", "Reserve history used years"):
@@ -2069,7 +2094,7 @@ if run_all_indices:
             display_columns = [
                 "Rank",
                 "Benchmark",
-                "Selected benchmark",
+                "Selected series",
                 "Series type",
                 "Data from",
                 "Data to",
@@ -2100,28 +2125,28 @@ if run_all_indices:
 
             best_row = all_index_comparison.iloc[0]
             st.info(
-                f"Highest strategy advantage in {selected_year[0].year}: **{best_row['Benchmark']}**, where the strategy "
+                f"Highest historical strategy advantage in {selected_year[0].year}: **{best_row['Benchmark']}**, where the strategy "
                 f"ended **{money(best_row['Strategy minus fully invested'])}** above the fully invested comparison. "
                 "This is a historical outcome, not a recommendation to use that index for your portfolio."
             )
 
             comparison_export = all_index_comparison.copy()
-            comparison_export.insert(1, "Selected benchmark", comparison_export["Benchmark"].eq(selected_name))
+            comparison_export.insert(1, "Selected series", comparison_export["Benchmark"].eq(selected_name))
             st.download_button(
-                "Download all-index comparison CSV",
+                "Download all-benchmark comparison CSV",
                 data=comparison_export.to_csv(index=False).encode("utf-8"),
-                file_name=f"all_index_dry_powder_comparison_{selected_year[0].year}.csv",
+                file_name=f"all_benchmark_dry_powder_comparison_{selected_year[0].year}.csv",
                 mime="text/csv",
                 key="download_all_index_comparison_v1",
             )
 
         if not skipped_indices.empty:
-            with st.expander(f"Skipped or unavailable benchmarks ({len(skipped_indices)})"):
+            with st.expander(f"Skipped or unavailable benchmarks/assets ({len(skipped_indices)})"):
                 st.dataframe(skipped_indices, use_container_width=True, hide_index=True)
     except Exception as exc:
-        st.error(f"All-index comparison could not be completed: {exc}")
+        st.error(f"All-benchmark comparison could not be completed: {exc}")
         st.caption(
-            "The selected-index analysis above remains available. Retry later if Yahoo temporarily limits bulk downloads."
+            "The selected-series analysis above remains available. Retry later if Yahoo temporarily limits bulk downloads."
         )
 
 st.header("6. Interpretation")
@@ -2133,5 +2158,6 @@ st.write(
 )
 st.caption(
     "Educational tool only. Review taxes, credit risk, exit loads, liquidity, dividends, portfolio concentration, "
-    "fundamentals and valuation before acting."
+    "fundamentals and valuation before acting. Gold and silver ETF proxies are comparison assets, not equity benchmarks, "
+    "and should not be selected merely because a historical backtest ranks them highly."
 )
