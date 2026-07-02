@@ -116,6 +116,7 @@ POLICY_FLOORS = {
 
 DEFAULT_THRESHOLDS = [0.025, 0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20]
 
+
 # -----------------------------------------------------------------------------
 # Portfolio analytics
 # -----------------------------------------------------------------------------
@@ -131,8 +132,11 @@ TRADING_DAYS = 252
 
 @dataclass(frozen=True)
 class DryPowderRecommendation:
-    historical_max_drawdown: float
-    stress_drawdown: float
+    lookback_max_drawdown: float
+    all_history_max_drawdown: float
+    index_stress_drawdown: float
+    portfolio_beta: float
+    portfolio_stress_drawdown: float
     tolerance_drawdown: float
     formula_minimum_weight: float
     policy_floor_weight: float
@@ -145,6 +149,7 @@ class BacktestSummary:
     start_date: pd.Timestamp
     end_date: pd.Timestamp
     start_value: float
+    reserve_start: float
     fully_invested_end: float
     strategy_end: float
     idle_cash_end: float
@@ -156,6 +161,8 @@ class BacktestSummary:
     triggers_hit: int
     deployment_value_add: float
     opportunity_cost_or_gain: float
+    initial_equity_gain: float
+    cash_interest_earned: float
 
 
 @dataclass(frozen=True)
@@ -167,10 +174,10 @@ class LiveDeploymentRecommendation:
     current_drawdown: float
     triggers_crossed: tuple[float, ...]
     target_cumulative_deployment: float
-    deploy_now: float
-    keep_as_dry_powder: float
+    mechanical_deploy_now: float
+    keep_as_dry_powder_after_mechanical: float
     next_trigger: float | None
-    tranche_amount: float
+    overdeployment_amount: float
     status: str
 
 
@@ -186,87 +193,133 @@ def max_drawdown(values: pd.Series) -> float:
     return float(-dd.min()) if not dd.empty else 0.0
 
 
-def annualized_volatility(prices: pd.Series) -> float:
-    returns = prices.pct_change().dropna()
-    return float(returns.std(ddof=1) * np.sqrt(TRADING_DAYS)) if len(returns) > 1 else 0.0
+def required_reserve_weight(
+    stress_drawdown: float,
+    tolerance_drawdown: float,
+    portfolio_beta: float = 1.0,
+    cap: float = 0.95,
+) -> float:
+    """Estimate the cash weight needed to constrain a specified portfolio shock.
+
+    This is a drawdown-control identity, not an optimisation model:
+    portfolio drawdown ~= equity weight * benchmark stress * beta.
+    """
+    stress = max(float(stress_drawdown), 0.0)
+    beta = max(float(portfolio_beta), 0.0)
+    portfolio_stress = min(stress * beta, 0.99)
+    tolerance = max(float(tolerance_drawdown), 0.0)
+    if portfolio_stress <= 0:
+        return 0.0
+    return min(max(0.0, 1.0 - tolerance / portfolio_stress), cap)
 
 
 def recommend_dry_powder(
     prices: pd.Series,
+    all_prices: pd.Series,
     tolerance_drawdown: float,
     policy_floor: float,
-    custom_stress_drawdown: float | None = None,
-    recommendation_cap: float = 0.50,
+    stress_drawdown: float,
+    portfolio_beta: float = 1.0,
+    recommendation_cap: float = 0.80,
 ) -> DryPowderRecommendation:
-    historical_mdd = max_drawdown(prices)
-    stress = custom_stress_drawdown if custom_stress_drawdown is not None else historical_mdd
-    stress = max(float(stress), 0.01)
-    tolerance = max(float(tolerance_drawdown), 0.0)
-
-    # Approximation: if cash is stable during the shock, portfolio DD ~= equity_weight * index DD.
-    formula_min = max(0.0, 1.0 - tolerance / stress)
-    recommended = min(max(formula_min, policy_floor), recommendation_cap)
-    # Round up to a usable 2.5 percentage-point allocation.
-    recommended = min(math.ceil(recommended / 0.025) * 0.025, recommendation_cap)
-    estimated = (1.0 - recommended) * stress
+    lookback_mdd = max_drawdown(prices)
+    all_history_mdd = max_drawdown(all_prices)
+    stress = max(float(stress_drawdown), 0.01)
+    beta = max(float(portfolio_beta), 0.0)
+    portfolio_stress = min(stress * beta, 0.99)
+    formula_min = required_reserve_weight(
+        stress_drawdown=stress,
+        tolerance_drawdown=tolerance_drawdown,
+        portfolio_beta=beta,
+        cap=recommendation_cap,
+    )
+    recommended = min(max(formula_min, float(policy_floor)), recommendation_cap)
+    estimated = (1.0 - recommended) * portfolio_stress
 
     return DryPowderRecommendation(
-        historical_max_drawdown=historical_mdd,
-        stress_drawdown=stress,
-        tolerance_drawdown=tolerance,
+        lookback_max_drawdown=lookback_mdd,
+        all_history_max_drawdown=all_history_mdd,
+        index_stress_drawdown=stress,
+        portfolio_beta=beta,
+        portfolio_stress_drawdown=portfolio_stress,
+        tolerance_drawdown=float(tolerance_drawdown),
         formula_minimum_weight=formula_min,
-        policy_floor_weight=policy_floor,
+        policy_floor_weight=float(policy_floor),
         recommended_weight=recommended,
         estimated_stress_drawdown=estimated,
     )
 
 
+def normalize_ladder(
+    thresholds: list[float],
+    weights: list[float],
+) -> tuple[list[float], list[float]]:
+    clean_thresholds = [float(x) for x in thresholds if 0 < float(x) < 1]
+    clean_weights = [float(x) for x in weights if float(x) >= 0]
+    if not clean_thresholds:
+        raise ValueError("At least one deployment trigger is required.")
+    if len(clean_thresholds) != len(clean_weights):
+        raise ValueError("The number of deployment weights must equal the number of drawdown triggers.")
+    pairs = sorted(zip(clean_thresholds, clean_weights), key=lambda item: item[0])
+    deduped: dict[float, float] = {}
+    for threshold, weight in pairs:
+        deduped[threshold] = weight
+    thresholds_out = list(deduped)
+    weights_out = [deduped[t] for t in thresholds_out]
+    total = sum(weights_out)
+    if total <= 0:
+        raise ValueError("Deployment weights must add to more than zero.")
+    weights_out = [w / total for w in weights_out]
+    return thresholds_out, weights_out
+
+
 def recommend_live_deployment(
     prices: pd.Series,
-    target_reserve: float,
+    cycle_start_reserve: float,
     current_dry_powder: float,
     already_deployed: float,
     thresholds: list[float],
+    weights: list[float],
 ) -> LiveDeploymentRecommendation:
-    """Return an auditable tranche recommendation from the latest closing drawdown.
+    """Calculate mechanical permission from the actual funded cycle reserve.
 
-    Each threshold receives an equal share of the target reserve. The recommendation
-    is cumulative: at a 10% drawdown with triggers 5%, 10%, 15%, 20%, half of the
-    target reserve should have been deployed. Any amount the user says was already
-    deployed is subtracted, preventing duplicate deployment.
+    The aspirational drawdown-control reserve is deliberately not used here.
+    This prevents the app from recommending deployment of money that was never
+    funded at the start of the current drawdown cycle.
     """
     series = prices.dropna().astype(float).sort_index()
     if len(series) < 2:
-        raise ValueError("At least two valid prices are required for a live deployment signal.")
+        raise ValueError("At least two valid prices are required for a closing-price signal.")
 
-    cleaned_thresholds = sorted(set(float(x) for x in thresholds if 0 < float(x) < 1))
-    if not cleaned_thresholds:
-        raise ValueError("At least one deployment trigger is required.")
-
+    thresholds, weights = normalize_ladder(thresholds, weights)
     latest_date = pd.Timestamp(series.index[-1])
     latest_price = float(series.iloc[-1])
     peak_price = float(series.max())
-    peak_candidates = series[series == peak_price]
-    peak_date = pd.Timestamp(peak_candidates.index[-1])
+    peak_date = pd.Timestamp(series[series == peak_price].index[-1])
     current_drawdown = max(0.0, 1.0 - latest_price / peak_price)
 
-    target_reserve = max(float(target_reserve), 0.0)
-    current_dry_powder = max(float(current_dry_powder), 0.0)
-    already_deployed = max(float(already_deployed), 0.0)
-    tranche_amount = target_reserve / len(cleaned_thresholds)
-    crossed = tuple(t for t in cleaned_thresholds if current_drawdown >= t)
-    target_cumulative = min(target_reserve, tranche_amount * len(crossed))
-    required_now = max(0.0, target_cumulative - already_deployed)
-    deploy_now = min(current_dry_powder, required_now)
-    keep = max(0.0, current_dry_powder - deploy_now)
-    next_trigger = next((t for t in cleaned_thresholds if t > current_drawdown), None)
+    cycle_start = max(float(cycle_start_reserve), 0.0)
+    current_cash = max(float(current_dry_powder), 0.0)
+    deployed = max(float(already_deployed), 0.0)
 
-    if deploy_now > 0:
-        status = "DEPLOY A TRANCHE"
-    elif crossed and already_deployed >= target_cumulative:
+    crossed_indices = [i for i, trigger in enumerate(thresholds) if current_drawdown >= trigger]
+    crossed = tuple(thresholds[i] for i in crossed_indices)
+    cumulative_weight = sum(weights[i] for i in crossed_indices)
+    target_cumulative = cycle_start * cumulative_weight
+    required_now = max(0.0, target_cumulative - deployed)
+    mechanical = min(current_cash, required_now)
+    overdeployment = max(0.0, deployed - target_cumulative)
+    keep = max(0.0, current_cash - mechanical)
+    next_trigger = next((t for t in thresholds if t > current_drawdown), None)
+
+    if mechanical > 0:
+        status = "MECHANICAL DEPLOYMENT PERMITTED"
+    elif overdeployment > 0:
+        status = "HOLD — ALREADY AHEAD OF LADDER"
+    elif crossed:
         status = "HOLD — CROSSED TRIGGERS ALREADY FUNDED"
     else:
-        status = "HOLD DRY POWDER"
+        status = "HOLD — FIRST TRIGGER NOT REACHED"
 
     return LiveDeploymentRecommendation(
         latest_date=latest_date,
@@ -276,10 +329,10 @@ def recommend_live_deployment(
         current_drawdown=current_drawdown,
         triggers_crossed=crossed,
         target_cumulative_deployment=target_cumulative,
-        deploy_now=deploy_now,
-        keep_as_dry_powder=keep,
+        mechanical_deploy_now=mechanical,
+        keep_as_dry_powder_after_mechanical=keep,
         next_trigger=next_trigger,
-        tranche_amount=tranche_amount,
+        overdeployment_amount=overdeployment,
         status=status,
     )
 
@@ -289,12 +342,6 @@ def available_completed_years(
     count: int = 15,
     minimum_observations: int = 180,
 ) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
-    """Return completed calendar years with enough data for a meaningful test.
-
-    The current calendar year is excluded. A year must contain enough trading
-    observations and data in both the first and final quarters, which prevents
-    a partially uploaded year from being treated as complete.
-    """
     prices = prices.dropna()
     if prices.empty:
         return []
@@ -309,14 +356,12 @@ def available_completed_years(
         yearly_prices = prices.loc[(prices.index >= start) & (prices.index <= end)]
         if yearly_prices.empty:
             continue
-
         covers_start = yearly_prices.index.min() <= pd.Timestamp(year=year, month=3, day=31)
         covers_end = yearly_prices.index.max() >= pd.Timestamp(year=year, month=10, day=1)
         if len(yearly_prices) >= minimum_observations and covers_start and covers_end:
             years.append((start, end))
         if len(years) >= count:
             break
-
     return years
 
 
@@ -327,34 +372,38 @@ def run_dry_powder_backtest(
     initial_capital: float,
     dry_powder_weight: float,
     thresholds: list[float],
+    weights: list[float],
     annual_cash_yield: float = 0.0,
 ) -> tuple[pd.DataFrame, BacktestSummary, pd.DataFrame]:
     q = prices.loc[(prices.index >= start_date) & (prices.index <= end_date)].dropna().astype(float)
     if len(q) < 2:
         raise ValueError("Not enough benchmark observations in the selected year.")
 
-    thresholds = sorted(set(float(x) for x in thresholds if 0 < float(x) < 1))
+    thresholds, weights = normalize_ladder(thresholds, weights)
     dry_powder_weight = min(max(float(dry_powder_weight), 0.0), 1.0)
     initial_capital = float(initial_capital)
 
     first_price = float(q.iloc[0])
+    initial_equity_capital = initial_capital * (1.0 - dry_powder_weight)
     fully_units = initial_capital / first_price
-    strategy_units = initial_capital * (1.0 - dry_powder_weight) / first_price
+    strategy_units = initial_equity_capital / first_price
     idle_units = strategy_units
     cash = initial_capital * dry_powder_weight
     idle_cash = cash
     original_cash = cash
-    tranche = original_cash / len(thresholds) if thresholds else 0.0
+    tranche_amounts = [original_cash * weight for weight in weights]
     next_trigger = 0
     running_peak = first_price
     previous_date = q.index[0]
-    rows = []
-    events = []
+    rows: list[dict] = []
+    events: list[dict] = []
+    interest_earned = 0.0
 
     for dt, price in q.items():
         days = max((dt - previous_date).days, 0)
         if days:
             growth = (1.0 + annual_cash_yield) ** (days / 365.0)
+            interest_earned += cash * (growth - 1.0)
             cash *= growth
             idle_cash *= growth
         previous_date = dt
@@ -362,7 +411,7 @@ def run_dry_powder_backtest(
         current_dd = 1.0 - float(price) / running_peak
 
         while next_trigger < len(thresholds) and current_dd >= thresholds[next_trigger] and cash > 0:
-            spend = min(tranche, cash)
+            spend = min(tranche_amounts[next_trigger], cash)
             units_bought = spend / float(price)
             strategy_units += units_bought
             cash -= spend
@@ -370,6 +419,7 @@ def run_dry_powder_backtest(
                 {
                     "Date": dt,
                     "Trigger": thresholds[next_trigger],
+                    "Ladder weight": weights[next_trigger],
                     "Index price": float(price),
                     "Invested": spend,
                     "Units bought": units_bought,
@@ -391,14 +441,16 @@ def run_dry_powder_backtest(
 
     result = pd.DataFrame(rows).set_index("Date")
     events_df = pd.DataFrame(events)
-    deployed = original_cash - cash
+    deployed = sum(float(event["Invested"]) for event in events)
     fully_dd = max_drawdown(result["Fully invested"])
     strategy_dd = max_drawdown(result["Dry powder deployed"])
+    initial_equity_end = idle_units * float(q.iloc[-1])
 
     summary = BacktestSummary(
         start_date=result.index[0],
         end_date=result.index[-1],
         start_value=initial_capital,
+        reserve_start=original_cash,
         fully_invested_end=float(result["Fully invested"].iloc[-1]),
         strategy_end=float(result["Dry powder deployed"].iloc[-1]),
         idle_cash_end=float(result["Dry powder kept idle"].iloc[-1]),
@@ -406,7 +458,7 @@ def run_dry_powder_backtest(
         strategy_return=float(result["Dry powder deployed"].iloc[-1] / initial_capital - 1),
         fully_invested_max_drawdown=fully_dd,
         strategy_max_drawdown=strategy_dd,
-        cash_deployed=float(deployed),
+        cash_deployed=deployed,
         triggers_hit=len(events),
         deployment_value_add=float(
             result["Dry powder deployed"].iloc[-1] - result["Dry powder kept idle"].iloc[-1]
@@ -414,6 +466,8 @@ def run_dry_powder_backtest(
         opportunity_cost_or_gain=float(
             result["Dry powder deployed"].iloc[-1] - result["Fully invested"].iloc[-1]
         ),
+        initial_equity_gain=float(initial_equity_end - initial_equity_capital),
+        cash_interest_earned=float(interest_earned),
     )
     return result, summary, events_df
 
@@ -425,14 +479,12 @@ def weighted_portfolio_returns(price_frame: pd.DataFrame, holdings: pd.DataFrame
         attempted = ", ".join(holdings["ticker"].astype(str).tolist()[:8])
         raise ValueError(
             "None of the uploaded holding tickers returned enough Yahoo price history. "
-            f"Tried: {attempted}. Bond, ISIN-style, delisted or unsupported BSE symbols may not be available; "
-            "select the closest benchmark manually or use supported NSE equity tickers."
+            f"Tried: {attempted}. Bond, ISIN-style, delisted or unsupported BSE symbols may not be available."
         )
 
     weights = holdings.set_index("ticker").loc[available, "weight"]
     weights = weights / weights.sum()
     returns = price_frame[available].pct_change(fill_method=None)
-    # Renormalize weights across holdings available on each date.
     valid = returns.notna().astype(float)
     weighted = returns.fillna(0).mul(weights, axis=1).sum(axis=1)
     denominator = valid.mul(weights, axis=1).sum(axis=1)
@@ -467,8 +519,11 @@ def score_benchmarks(portfolio_returns: pd.Series, benchmark_prices: pd.DataFram
                 "overlap_days": len(aligned),
             }
         )
+    if not rows:
+        return pd.DataFrame(
+            columns=["symbol", "match_score", "correlation", "beta", "tracking_error", "overlap_days"]
+        )
     return pd.DataFrame(rows).sort_values("match_score", ascending=False).reset_index(drop=True)
-
 # -----------------------------------------------------------------------------
 # Market data and CSV parsing
 # -----------------------------------------------------------------------------
@@ -764,10 +819,12 @@ def _normalize_indian_ticker(ticker: str) -> str:
         return ticker
     return f"{ticker}.NS"
 
+
 # -----------------------------------------------------------------------------
 # Streamlit user interface
 # -----------------------------------------------------------------------------
 from datetime import date, timedelta
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -778,7 +835,13 @@ st.set_page_config(page_title="Dry Powder Planner — India", page_icon="🛡️
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def cached_benchmark(nse_name: str, symbol: str, start: date, end: date, provider: str):
-    return download_benchmark_close(nse_name=nse_name, yahoo_symbol=symbol, start=start, end=end, provider=provider)
+    return download_benchmark_close(
+        nse_name=nse_name,
+        yahoo_symbol=symbol,
+        start=start,
+        end=end,
+        provider=provider,
+    )
 
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
@@ -787,26 +850,27 @@ def cached_many(symbols: tuple[str, ...], start: date, end: date) -> pd.DataFram
 
 
 def money(value: float) -> str:
-    return f"₹{value:,.0f}"
+    sign = "-" if value < 0 else ""
+    return f"{sign}₹{abs(value):,.0f}"
 
 
 def pct(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
-def parse_threshold_text(text: str) -> list[float]:
-    values = []
+def parse_percentage_list(text: str, label: str) -> list[float]:
+    values: list[float] = []
     for token in text.split(","):
         token = token.strip().replace("%", "")
         if not token:
             continue
         value = float(token) / 100.0
-        if not 0 < value < 1:
-            raise ValueError("Each deployment trigger must be between 0% and 100%.")
+        if value < 0 or value >= 1:
+            raise ValueError(f"Each {label.lower()} must be between 0% and 100%.")
         values.append(value)
     if not values:
-        raise ValueError("Enter at least one deployment trigger.")
-    return sorted(set(values))
+        raise ValueError(f"Enter at least one {label.lower()}.")
+    return values
 
 
 def year_label(item: tuple[pd.Timestamp, pd.Timestamp]) -> str:
@@ -814,15 +878,18 @@ def year_label(item: tuple[pd.Timestamp, pd.Timestamp]) -> str:
     return f"{start.year} — {start:%d %b} to {end:%d %b}"
 
 
-def render_matcher(start: date, end: date) -> str | None:
-    st.subheader("Find the benchmark that actually resembles your holdings")
+def render_matcher(start: date, end: date) -> dict | None:
+    st.subheader("Find the benchmark that resembles your holdings")
     uploaded = st.file_uploader(
         "Upload holdings CSV",
         type=["csv"],
         help="Required: ticker/symbol plus value/amount or weight/allocation. NSE tickers may be entered without .NS.",
     )
     if uploaded is None:
-        st.caption("Use the included sample_holdings.csv as a template. Until a file is uploaded, select the index manually below.")
+        st.caption(
+            "Upload holdings to validate the benchmark statistically. Without a successful match, "
+            "the closing-price deployment signal requires manual benchmark confirmation."
+        )
         return None
 
     try:
@@ -846,12 +913,16 @@ def render_matcher(start: date, end: date) -> str | None:
             prices = cached_many(symbols, start, end)
             portfolio_returns, missing = weighted_portfolio_returns(prices, holdings)
             candidate_symbols = [INDEX_CATALOG[n]["symbol"] for n in candidate_names]
-            scores = score_benchmarks(portfolio_returns, prices[[s for s in candidate_symbols if s in prices.columns]])
+            available_candidates = [s for s in candidate_symbols if s in prices.columns]
+            scores = score_benchmarks(portfolio_returns, prices[available_candidates])
 
         if missing:
             st.warning(f"Skipped {len(missing)} ticker(s) with insufficient data: {', '.join(missing[:8])}")
         if scores.empty:
-            st.error("No candidate had enough overlapping data. Select different candidates or use manual selection.")
+            st.error(
+                "Benchmark validation failed because no candidate had enough overlapping data. "
+                "The deployment recommendation will remain disabled until you explicitly confirm a manual proxy."
+            )
             return None
 
         reverse_names = {v["symbol"]: k for k, v in INDEX_CATALOG.items()}
@@ -863,137 +934,229 @@ def render_matcher(start: date, end: date) -> str | None:
         display["Beta"] = display["Beta"].round(2)
         display["Tracking error"] = (100 * display["Tracking error"]).round(1).astype(str) + "%"
         st.dataframe(display, use_container_width=True, hide_index=True)
-        best_symbol = str(scores.iloc[0]["symbol"])
+
+        best = scores.iloc[0]
+        best_symbol = str(best["symbol"])
         best_name = reverse_names.get(best_symbol, best_symbol)
-        st.success(f"Best statistical match in the tested set: **{best_name}**. You can still override it.")
-        return best_name if best_name in INDEX_CATALOG else None
+        strong_enough = float(best["correlation"]) >= 0.70 and float(best["overlap_days"]) >= 120
+        if strong_enough:
+            st.success(
+                f"Validated statistical proxy: **{best_name}** "
+                f"(correlation {float(best['correlation']):.2f}, beta {float(best['beta']):.2f})."
+            )
+        else:
+            st.warning(
+                f"Best available match is **{best_name}**, but the evidence is weak "
+                f"(correlation {float(best['correlation']):.2f}). Manual confirmation is still required."
+            )
+        return {
+            "name": best_name if best_name in INDEX_CATALOG else None,
+            "beta": max(float(best["beta"]), 0.0),
+            "validated": strong_enough,
+        }
     except Exception as exc:
-        st.error(f"Could not analyse holdings: {exc}")
+        st.error(
+            f"Could not validate the holdings benchmark: {exc} "
+            "The app will not silently treat NIFTY 50 as validated."
+        )
         return None
 
 
 st.title("🛡️ Dry Powder Planner for Indian Equity Portfolios")
 st.write(
-    "Choose or statistically match an NSE benchmark, estimate a transparent minimum cash reserve, "
-    "track net worth and current liquidity, get an instant rule-based deployment amount, and test the reserve during a completed calendar year."
+    "Separate net worth, emergency liquidity, target drawdown control and the actual funded drawdown-cycle reserve. "
+    "The app first calculates mechanical permission, then applies benchmark, liquidity and valuation gates."
 )
 st.info(
-    "Dry powder is investable liquidity—not your emergency fund. This app does not model taxes, brokerage, "
-    "slippage, debt-fund taxation, or option hedges. Market data may be delayed or revised."
+    "Dry powder is investable liquidity—not your emergency fund. The closing-price signal is an auditable rule, "
+    "not a market-bottom prediction or personalised investment advice."
 )
 
 with st.sidebar:
     st.header("1. Net worth and liquidity")
     portfolio_value = st.number_input(
-        "Total investable portfolio — equity + dry powder (₹)",
-        min_value=100_000,
-        max_value=1_000_000_000,
-        value=2_000_000,
-        step=50_000,
-        help="This is the capital covered by the dry-powder plan. Do not add the current dry powder again outside this amount.",
+        "Total investable portfolio — equity + current dry powder (₹)",
+        min_value=100_000.0,
+        max_value=1_000_000_000.0,
+        value=2_000_000.0,
+        step=50_000.0,
     )
     current_dry_powder = st.number_input(
         "Current deployable dry powder (₹)",
         min_value=0.0,
         max_value=1_000_000_000.0,
-        value=0.0,
+        value=110_000.0,
         step=5_000.0,
-        help="Liquid capital available to invest now. Exclude the emergency fund.",
-        key="sidebar_current_dry_powder_v2",
     )
     already_deployed = st.number_input(
-        "Already deployed in the current drawdown cycle (₹)",
+        "Already deployed in current drawdown cycle (₹)",
         min_value=0.0,
+        max_value=1_000_000_000.0,
+        value=211_000.0,
+        step=5_000.0,
+    )
+    use_identifiable_cycle_reserve = st.checkbox(
+        "Use identifiable cycle reserve = current cash + already deployed",
+        value=True,
+        help="Recommended. It prevents an aspirational target reserve from becoming fictional deployable money.",
+    )
+    identifiable_cycle_reserve = float(current_dry_powder) + float(already_deployed)
+    if use_identifiable_cycle_reserve:
+        cycle_start_reserve = identifiable_cycle_reserve
+    else:
+        cycle_start_reserve = st.number_input(
+            "Actual funded reserve at cycle start (₹)",
+            min_value=0.0,
+            max_value=1_000_000_000.0,
+            value=float(identifiable_cycle_reserve),
+            step=5_000.0,
+        )
+    net_cycle_flows = st.number_input(
+        "Net reserve additions (+) or withdrawals (−) since peak (₹)",
+        min_value=-1_000_000_000.0,
         max_value=1_000_000_000.0,
         value=0.0,
         step=5_000.0,
-        help="Capital already invested after declines from the selected live reference peak.",
-        key="sidebar_already_deployed_v2",
+        help="Exclude deployments. Add contributions to dry powder as positive; unrelated withdrawals as negative.",
     )
+
     emergency_fund = st.number_input(
         "Emergency fund — never deploy (₹)",
         min_value=0.0,
         max_value=1_000_000_000.0,
-        value=0.0,
+        value=12_000.0,
         step=10_000.0,
     )
-    other_assets = st.number_input(
-        "Other net-worth assets (₹)",
+    monthly_essential_expenses = st.number_input(
+        "Monthly essential expenses (₹)",
         min_value=0.0,
-        max_value=10_000_000_000.0,
-        value=0.0,
-        step=50_000.0,
-        help="Examples: EPF, PPF, property equity, gold or other assets not included in the investable portfolio.",
+        max_value=10_000_000.0,
+        value=30_000.0,
+        step=5_000.0,
     )
-    liabilities = st.number_input(
-        "Outstanding liabilities (₹)",
+    emergency_months = st.slider("Required emergency coverage (months)", 0, 24, 6)
+    near_term_obligations = st.number_input(
+        "Near-term obligations outside monthly expenses (₹)",
         min_value=0.0,
-        max_value=10_000_000_000.0,
+        max_value=1_000_000_000.0,
         value=0.0,
-        step=50_000.0,
+        step=10_000.0,
+        help="Examples: insurance premiums, tuition, medical costs or loan payments due soon.",
     )
+    other_assets = st.number_input("Other net-worth assets (₹)", 0.0, 10_000_000_000.0, 0.0, 50_000.0)
+    liabilities = st.number_input("Outstanding liabilities (₹)", 0.0, 10_000_000_000.0, 0.0, 50_000.0)
 
     st.divider()
     st.header("2. Strategy assumptions")
-    lookback_years = st.slider("Risk lookback", 3, 15, 15)
-    tolerance = st.slider("Maximum drawdown you can tolerate", 5, 50, 23, 1) / 100
+    lookback_years = st.slider("Risk lookback", 3, 20, 15)
+    tolerance = st.slider("Maximum portfolio drawdown you can tolerate", 5, 50, 23, 1) / 100
+    portfolio_beta_input = st.number_input(
+        "Portfolio beta to selected benchmark",
+        min_value=0.25,
+        max_value=3.00,
+        value=1.00,
+        step=0.05,
+        help="Use the matched beta when available. A concentrated portfolio may have beta above 1.",
+    )
     policy_options = list(POLICY_FLOORS)
     policy_name = st.selectbox(
         "Reserve policy",
         policy_options,
         index=policy_options.index("Formula only — no policy floor"),
     )
-    stress_method = st.radio("Stress basis", ["Historical maximum drawdown", "Custom crash assumption"])
+    stress_method = st.radio(
+        "Stress basis",
+        ["Selected-lookback maximum", "Downloaded-history maximum", "Custom crash assumption"],
+    )
     custom_stress = None
     if stress_method == "Custom crash assumption":
-        custom_stress = st.slider("Assumed benchmark crash", 10, 70, 35, 1) / 100
+        custom_stress = st.slider("Assumed benchmark crash", 10, 80, 40, 1) / 100
+
     cash_yield = st.number_input("Annual yield on dry powder (%)", 0.0, 20.0, 11.0, 0.25) / 100
-    trigger_text = st.text_input(
-        "Deploy at drawdowns (%)",
-        "2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20",
+    reserve_is_liquid = st.checkbox(
+        "Reserve instrument is capital-stable and redeemable within one business day",
+        value=False,
+        help="A high-yielding credit or locked instrument is not equivalent to instant dry powder.",
     )
-    custom_symbol = st.text_input("Optional custom Yahoo Finance symbol", placeholder="Example: ^NSEI or an ETF ticker")
+    trigger_text = st.text_input("Drawdown triggers (%)", "5, 10, 15, 20, 25, 30, 35, 40")
+    weight_text = st.text_input(
+        "Reserve deployed at each trigger (%)",
+        "5, 10, 15, 20, 20, 15, 10, 5",
+        help="Weights are normalised to 100%. Later declines receive more capital than ordinary market noise.",
+    )
+    custom_symbol = st.text_input(
+        "Optional custom Yahoo Finance symbol",
+        placeholder="Example: ^NSEI or an ETF ticker",
+    )
 
 if current_dry_powder > portfolio_value:
-    st.error("Current deployable dry powder cannot exceed the total investable portfolio.")
+    st.error("Current dry powder cannot exceed the total investable portfolio.")
     st.stop()
 if already_deployed > portfolio_value:
     st.error("Already deployed capital cannot exceed the total investable portfolio.")
     st.stop()
 
+try:
+    thresholds_raw = parse_percentage_list(trigger_text, "drawdown trigger")
+    weights_raw = parse_percentage_list(weight_text, "deployment weight")
+    thresholds, ladder_weights = normalize_ladder(thresholds_raw, weights_raw)
+except ValueError as exc:
+    st.error(str(exc))
+    st.stop()
+
 current_equity_value = max(float(portfolio_value) - float(current_dry_powder), 0.0)
+required_emergency_fund = float(monthly_essential_expenses) * emergency_months + float(near_term_obligations)
+emergency_gap = float(emergency_fund) - required_emergency_fund
+emergency_adequate = emergency_gap >= 0
 calculated_net_worth = float(portfolio_value) + float(emergency_fund) + float(other_assets) - float(liabilities)
 
-st.header("1. Net worth snapshot")
-networth_cols = st.columns(6)
-networth_cols[0].metric("Calculated net worth", money(calculated_net_worth))
-networth_cols[1].metric("Investable portfolio", money(portfolio_value))
-networth_cols[2].metric("Currently invested", money(current_equity_value))
-networth_cols[3].metric(
-    "Current dry powder",
-    money(current_dry_powder),
-    pct(current_dry_powder / portfolio_value) if portfolio_value else "0.0%",
-)
-networth_cols[4].metric("Emergency fund", money(emergency_fund), "Excluded")
-networth_cols[5].metric("Liabilities", money(liabilities))
-st.caption(
-    "Calculated net worth = investable portfolio + emergency fund + other assets − liabilities. "
-    "Only current deployable dry powder is used by the live deployment engine."
-)
+expected_current_cash = float(cycle_start_reserve) + float(net_cycle_flows) - float(already_deployed)
+reconciliation_gap = float(current_dry_powder) - expected_current_cash
+reconciliation_tolerance = max(1_000.0, 0.01 * max(float(cycle_start_reserve), 1.0))
+cycle_reconciled = abs(reconciliation_gap) <= reconciliation_tolerance
+
+st.header("1. Net worth, emergency liquidity and cycle funding")
+nw = st.columns(7)
+nw[0].metric("Calculated net worth", money(calculated_net_worth))
+nw[1].metric("Investable portfolio", money(portfolio_value))
+nw[2].metric("Currently invested", money(current_equity_value))
+nw[3].metric("Current dry powder", money(current_dry_powder))
+nw[4].metric("Funded cycle reserve", money(cycle_start_reserve))
+nw[5].metric("Emergency fund", money(emergency_fund))
+nw[6].metric("Required emergency fund", money(required_emergency_fund))
+
+if emergency_adequate:
+    st.success(f"Emergency liquidity gate: PASS. Buffer above requirement: **{money(emergency_gap)}**.")
+else:
+    st.error(
+        f"Emergency liquidity gate: FAIL. Emergency cash is **{money(abs(emergency_gap))} below** the requirement. "
+        "The final deployment recommendation will be ₹0."
+    )
+
+if cycle_reconciled:
+    st.success("Cycle-reserve reconciliation: PASS. Current cash, deployments and net cycle flows reconcile.")
+else:
+    st.error(
+        f"Cycle-reserve reconciliation: FAIL by **{money(abs(reconciliation_gap))}**. "
+        "Correct the funded cycle reserve or net additions/withdrawals before relying on a deployment amount."
+    )
 
 end_download = date.today() + timedelta(days=1)
-start_download = date.today() - timedelta(days=365 * lookback_years + 120)
+matcher_start = date.today() - timedelta(days=365 * 5 + 30)
+# Download at least 20 years for the benchmark so the downloaded-history stress can include 2008 when available.
+start_download = date.today() - timedelta(days=365 * max(lookback_years, 20) + 180)
 
 mode = st.radio(
     "Benchmark selection mode",
     ["Choose manually", "Match using holdings CSV"],
     horizontal=True,
 )
-matched_name = None
+match_result = None
 if mode == "Match using holdings CSV":
-    matched_name = render_matcher(start_download, end_download)
+    match_result = render_matcher(matcher_start, end_download)
 
 index_names = list(INDEX_CATALOG)
+matched_name = match_result.get("name") if match_result else None
 default_index = matched_name or "NIFTY 50"
 selected_name = st.selectbox(
     "Benchmark for risk and backtest",
@@ -1002,7 +1165,34 @@ selected_name = st.selectbox(
 )
 selected = INDEX_CATALOG[selected_name]
 selected_symbol = custom_symbol.strip() or selected["symbol"]
-st.caption(f"**{selected_name}** · {selected['kind']} · {selected['description']} · Data symbol: `{selected_symbol}`")
+st.caption(
+    f"**{selected_name}** · {selected['kind']} · {selected['description']} · Data symbol: `{selected_symbol}`"
+)
+
+statistically_validated = bool(
+    match_result
+    and match_result.get("validated")
+    and match_result.get("name") == selected_name
+    and not custom_symbol.strip()
+)
+manual_benchmark_confirmation = st.checkbox(
+    "I confirm this benchmark is a reasonable proxy for my actual holdings",
+    value=False,
+    help="Required when the holdings match failed, was weak, or the benchmark was selected manually.",
+)
+benchmark_validated = statistically_validated or manual_benchmark_confirmation
+if statistically_validated:
+    effective_beta = float(match_result["beta"])
+    st.success(f"Benchmark validation gate: PASS. Matched portfolio beta: **{effective_beta:.2f}**.")
+else:
+    effective_beta = float(portfolio_beta_input)
+    if benchmark_validated:
+        st.success(f"Benchmark validation gate: PASS by explicit confirmation. Beta assumption: **{effective_beta:.2f}**.")
+    else:
+        st.error(
+            "Benchmark validation gate: FAIL. The app will calculate drawdown statistics, "
+            "but the final deployment recommendation will remain ₹0."
+        )
 
 source_mode = st.radio(
     "Price-data source",
@@ -1012,12 +1202,6 @@ source_mode = st.radio(
 benchmark_csv = None
 if source_mode == "Upload benchmark CSV":
     benchmark_csv = st.file_uploader("Upload Date/Close benchmark CSV", type=["csv"], key="benchmark_csv")
-
-try:
-    thresholds = parse_threshold_text(trigger_text)
-except ValueError as exc:
-    st.error(str(exc))
-    st.stop()
 
 try:
     with st.spinner("Loading benchmark history…"):
@@ -1040,79 +1224,110 @@ try:
             )
 except Exception as exc:
     st.error(f"Benchmark data could not be loaded: {exc}")
-    st.info("Use the CSV option with Date and Close columns when a cloud host blocks NSE or Yahoo requests.")
+    st.info("Use the CSV option with Date and Close columns if a cloud host blocks NSE or Yahoo.")
     st.stop()
 
-st.caption(f"Loaded {len(benchmark):,} observations from **{data_source_label}**; latest date: **{benchmark.index.max():%d %b %Y}**.")
+latest_benchmark_date = pd.Timestamp(benchmark.index.max())
+st.caption(
+    f"Loaded {len(benchmark):,} observations from **{data_source_label}**; "
+    f"latest closing date: **{latest_benchmark_date:%d %b %Y}**."
+)
 
-risk_window_start = pd.Timestamp.today().normalize() - pd.DateOffset(years=lookback_years)
+risk_window_start = latest_benchmark_date - pd.DateOffset(years=lookback_years)
 risk_prices = benchmark.loc[benchmark.index >= risk_window_start]
 if len(risk_prices) < 100:
-    st.error("The selected benchmark has too little history for the chosen lookback. Reduce the lookback or choose another benchmark.")
+    st.error("The selected benchmark has too little history for the chosen lookback.")
     st.stop()
+
+lookback_mdd = max_drawdown(risk_prices)
+all_history_mdd = max_drawdown(benchmark)
+if stress_method == "Selected-lookback maximum":
+    chosen_stress = lookback_mdd
+elif stress_method == "Downloaded-history maximum":
+    chosen_stress = all_history_mdd
+else:
+    chosen_stress = float(custom_stress)
 
 recommendation = recommend_dry_powder(
     prices=risk_prices,
+    all_prices=benchmark,
     tolerance_drawdown=tolerance,
     policy_floor=POLICY_FLOORS[policy_name],
-    custom_stress_drawdown=custom_stress,
+    stress_drawdown=chosen_stress,
+    portfolio_beta=effective_beta,
 )
-recommended_amount = portfolio_value * recommendation.recommended_weight
+planning_reserve_amount = float(portfolio_value) * recommendation.recommended_weight
+planning_gap = float(current_dry_powder) - planning_reserve_amount
 
-st.header("2. Required dry-powder reserve")
-reserve_gap = float(current_dry_powder) - float(recommended_amount)
-reserve_coverage = (float(current_dry_powder) / float(recommended_amount)) if recommended_amount > 0 else 1.0
-reserve_status = "Surplus" if reserve_gap >= 0 else "Shortfall"
+st.header("2. Drawdown-control reserve estimate — planning target, not deployable cash")
+reserve_cols = st.columns(7)
+reserve_cols[0].metric("Planning reserve estimate", pct(recommendation.recommended_weight), money(planning_reserve_amount))
+reserve_cols[1].metric("Actual funded cycle reserve", money(cycle_start_reserve))
+reserve_cols[2].metric("Current dry powder", money(current_dry_powder))
+reserve_cols[3].metric("Planning gap", money(planning_gap))
+reserve_cols[4].metric("Lookback max DD", pct(recommendation.lookback_max_drawdown))
+reserve_cols[5].metric("Downloaded-history max DD", pct(recommendation.all_history_max_drawdown))
+reserve_cols[6].metric("Portfolio stress used", pct(recommendation.portfolio_stress_drawdown))
 
-cols = st.columns(7)
-cols[0].metric("Recommended reserve", pct(recommendation.recommended_weight), money(recommended_amount))
-cols[1].metric("Current dry powder", money(current_dry_powder), pct(current_dry_powder / portfolio_value))
-cols[2].metric(f"Reserve {reserve_status.lower()}", money(abs(reserve_gap)), reserve_status)
-cols[3].metric("Reserve coverage", pct(reserve_coverage))
-cols[4].metric("Historical max drawdown", pct(recommendation.historical_max_drawdown))
-cols[5].metric("Your tolerance", pct(recommendation.tolerance_drawdown))
-cols[6].metric("Estimated stressed DD", pct(recommendation.estimated_stress_drawdown))
-
-if reserve_gap < 0:
-    st.warning(
-        f"Your current dry powder is **{money(abs(reserve_gap))} below** the calculated starting reserve. "
-        "Build this gap from future contributions or planned rebalancing rather than selling impulsively."
-    )
-else:
-    st.success(
-        f"Your current dry powder is **{money(reserve_gap)} above** the calculated starting reserve. "
-        "The live engine will still deploy only the tranche amount justified by crossed triggers."
-    )
-
+st.warning(
+    "This reserve figure answers a narrow drawdown-control question. It is not an optimal allocation, "
+    "a mandatory cash balance or the source used for today's deployment ladder."
+)
 st.write(
-    f"The formula-only minimum is **{pct(recommendation.formula_minimum_weight)}**. "
-    f"After applying your **{policy_name.split('—')[0].strip().lower()}** reserve floor and rounding upward, "
-    f"the app suggests maintaining **{money(recommended_amount)}** as investable dry powder."
+    f"Using a **{pct(recommendation.index_stress_drawdown)} benchmark shock**, beta **{effective_beta:.2f}**, "
+    f"and a **{pct(tolerance)} portfolio drawdown tolerance**, the formula estimates "
+    f"**{pct(recommendation.formula_minimum_weight)}** outside equity."
 )
-with st.expander("How the recommendation is calculated"):
-    st.latex(r"\text{Minimum cash weight} = \max\left(0, 1 - \frac{\text{tolerable drawdown}}{\text{stress drawdown}}\right)")
-    st.write(
-        "This assumes the selected benchmark falls by the stress amount while cash remains broadly stable. "
-        "It is an allocation estimate, not a guarantee. A concentrated portfolio may fall more than its benchmark."
-    )
 
-chart_df = pd.DataFrame({"Benchmark": risk_prices / risk_prices.iloc[0] * 100, "Drawdown": drawdown_series(risk_prices) * 100})
+scenario_values = sorted(set([0.30, 0.35, lookback_mdd, all_history_mdd, 0.45, 0.50]))
+scenario_rows = []
+for stress in scenario_values:
+    scenario_rows.append(
+        {
+            "Benchmark stress": pct(stress),
+            "Beta-adjusted portfolio stress": pct(min(stress * effective_beta, 0.99)),
+            "Reserve estimate": pct(required_reserve_weight(stress, tolerance, effective_beta, cap=0.95)),
+            "Reserve amount": money(
+                portfolio_value * required_reserve_weight(stress, tolerance, effective_beta, cap=0.95)
+            ),
+        }
+    )
+st.subheader("Stress-scenario range")
+st.dataframe(pd.DataFrame(scenario_rows), use_container_width=True, hide_index=True)
+st.caption(
+    f"Selected lookback window: {risk_prices.index.min():%d %b %Y} to {risk_prices.index.max():%d %b %Y}. "
+    "A 15-year window does not include 2008; the all-history and custom scenarios help expose that limitation."
+)
+
+if cash_yield > 0.08 and not reserve_is_liquid:
+    st.error(
+        f"The assumed dry-powder yield is {pct(cash_yield)} but the reserve instrument has not been confirmed as "
+        "capital-stable and immediately liquid. The final deployment recommendation will be blocked."
+    )
+elif reserve_is_liquid:
+    st.success("Reserve-instrument liquidity gate: PASS.")
+else:
+    st.warning("Confirm that the reserve instrument is capital-stable and immediately liquid before deployment.")
+
+chart_df = pd.DataFrame({"Benchmark": risk_prices / risk_prices.iloc[0] * 100})
 fig_risk = go.Figure()
 fig_risk.add_trace(go.Scatter(x=chart_df.index, y=chart_df["Benchmark"], name="Growth of 100"))
-fig_risk.update_layout(title=f"{selected_name}: normalized history used for risk estimate", yaxis_title="Index level (start = 100)")
+fig_risk.update_layout(
+    title=f"{selected_name}: history used for the current risk estimate",
+    yaxis_title="Index level (start = 100)",
+)
 st.plotly_chart(fig_risk, use_container_width=True)
 
-st.header("3. Current live dry-powder decision")
+st.header("3. Latest closing-price deployment decision")
 st.write(
-    "This is a rules-based signal from the latest available closing price. It does not predict the market bottom. "
-    "Each crossed drawdown trigger unlocks one equal tranche of the recommended reserve."
+    "The app now separates three questions: **liquidity status**, **mechanical drawdown permission**, "
+    "and **valuation confirmation**. A crossed threshold alone is not a buy decision."
 )
 
 reference_mode = st.selectbox(
     "Drawdown reference peak",
     ["52-week peak", "Current calendar-year peak", "Risk-lookback peak"],
-    index=0,
-    help="The current drawdown is measured from the highest close in this reference window.",
+    index=1,
 )
 latest_date = pd.Timestamp(benchmark.index.max())
 if reference_mode == "52-week peak":
@@ -1123,148 +1338,252 @@ else:
     reference_start = risk_window_start
 reference_prices = benchmark.loc[(benchmark.index >= reference_start) & (benchmark.index <= latest_date)]
 
-st.caption(
-    f"Live inputs: **{money(current_dry_powder)} available now** and **{money(already_deployed)} already deployed** "
-    "in the current decline. Edit both instantly from the sidebar."
+valuation_status = st.selectbox(
+    "Valuation and business-quality review",
+    [
+        "Not reviewed",
+        "Reasonable or undervalued — margin of safety exists",
+        "Approximately fair value — deploy only half of mechanical permission",
+        "Expensive — no margin of safety",
+        "Fundamentals impaired or investment thesis broken",
+    ],
+    help="A drawdown is not automatically undervaluation. Review earnings, balance sheet, valuation and the investment thesis.",
 )
+if valuation_status.startswith("Reasonable"):
+    valuation_multiplier = 1.0
+elif valuation_status.startswith("Approximately"):
+    valuation_multiplier = 0.5
+else:
+    valuation_multiplier = 0.0
 
 live = recommend_live_deployment(
     prices=reference_prices,
-    target_reserve=recommended_amount,
+    cycle_start_reserve=cycle_start_reserve,
     current_dry_powder=current_dry_powder,
     already_deployed=already_deployed,
     thresholds=thresholds,
+    weights=ladder_weights,
 )
 
 staleness_days = max((pd.Timestamp.today().normalize() - live.latest_date.normalize()).days, 0)
-next_trigger_text = pct(live.next_trigger) if live.next_trigger is not None else "All crossed"
-post_deployment_equity = current_equity_value + live.deploy_now
-live_metrics = st.columns(8)
-live_metrics[0].metric("Current drawdown", pct(live.current_drawdown))
-live_metrics[1].metric("Triggers crossed", f"{len(live.triggers_crossed)} / {len(thresholds)}")
-live_metrics[2].metric("Deploy now", money(live.deploy_now))
-live_metrics[3].metric("Keep liquid", money(live.keep_as_dry_powder))
-live_metrics[4].metric("Equity after deployment", money(post_deployment_equity))
-live_metrics[5].metric("Target deployed", money(live.target_cumulative_deployment))
-live_metrics[6].metric("Next trigger", next_trigger_text)
-live_metrics[7].metric("Latest data", f"{live.latest_date:%d %b %Y}")
+data_fresh = staleness_days <= 7
+liquidity_gate = emergency_adequate and cycle_reconciled and reserve_is_liquid
+all_hard_gates = liquidity_gate and benchmark_validated and data_fresh
+valuation_adjusted_permission = live.mechanical_deploy_now * valuation_multiplier
+final_deploy_now = valuation_adjusted_permission if all_hard_gates else 0.0
+final_keep_liquid = max(float(current_dry_powder) - final_deploy_now, 0.0)
+post_deployment_equity = current_equity_value + final_deploy_now
 
-if staleness_days > 7:
-    st.error(
-        f"The latest price is {staleness_days} days old. Treat the amount below as indicative only and refresh the data "
-        "before deploying capital."
+status_cols = st.columns(3)
+status_cols[0].metric(
+    "Liquidity status",
+    "PASS" if liquidity_gate else "BLOCKED",
+    "Emergency + reconciliation + liquidity",
+)
+status_cols[1].metric(
+    "Mechanical permission",
+    money(live.mechanical_deploy_now),
+    live.status,
+)
+status_cols[2].metric(
+    "Final deploy recommendation",
+    money(final_deploy_now),
+    valuation_status,
+)
+
+live_cols = st.columns(8)
+live_cols[0].metric("Current drawdown", pct(live.current_drawdown))
+live_cols[1].metric("Crossed triggers", f"{len(live.triggers_crossed)} / {len(thresholds)}")
+live_cols[2].metric("Funded cycle reserve", money(cycle_start_reserve))
+live_cols[3].metric("Ladder target deployed", money(live.target_cumulative_deployment))
+live_cols[4].metric("Already deployed", money(already_deployed))
+live_cols[5].metric("Keep liquid", money(final_keep_liquid))
+live_cols[6].metric("Equity after action", money(post_deployment_equity))
+live_cols[7].metric("Latest data", f"{live.latest_date:%d %b %Y}")
+
+if live.overdeployment_amount > 0:
+    st.info(
+        f"You are already **{money(live.overdeployment_amount)} ahead of the funded-reserve ladder**. "
+        f"Mechanical deployment is ₹0; retain the remaining **{money(current_dry_powder)}**."
     )
 
-if live.deploy_now > 0:
-    st.warning(
-        f"**Rule signal: {live.status}.** The selected benchmark is {pct(live.current_drawdown)} below its "
-        f"{reference_mode.lower()} of {live.peak_price:,.2f} on {live.peak_date:%d %b %Y}. "
-        f"Your crossed triggers call for cumulative deployment of {money(live.target_cumulative_deployment)}. "
-        f"After subtracting {money(already_deployed)} already deployed, invest **{money(live.deploy_now)} now** and "
-        f"retain **{money(live.keep_as_dry_powder)}**."
+gate_failures = []
+if not emergency_adequate:
+    gate_failures.append("emergency fund is below requirement")
+if not cycle_reconciled:
+    gate_failures.append("cycle reserve does not reconcile")
+if not reserve_is_liquid:
+    gate_failures.append("reserve instrument liquidity is unconfirmed")
+if not benchmark_validated:
+    gate_failures.append("benchmark is not validated")
+if not data_fresh:
+    gate_failures.append(f"latest closing data is {staleness_days} days old")
+if valuation_multiplier == 0:
+    gate_failures.append("valuation/business-quality review does not permit deployment")
+
+if final_deploy_now > 0:
+    st.success(
+        f"**Final recommendation: deploy {money(final_deploy_now)} and retain {money(final_keep_liquid)}.** "
+        f"The benchmark is {pct(live.current_drawdown)} below its {reference_mode.lower()} "
+        f"of {live.peak_price:,.2f} on {live.peak_date:%d %b %Y}. "
+        f"The funded-reserve ladder permits {money(live.mechanical_deploy_now)}; "
+        f"the valuation gate applies a {valuation_multiplier:.0%} multiplier."
     )
 else:
-    reason = (
-        "the first trigger has not been reached"
-        if not live.triggers_crossed
-        else "the cumulative amount required by crossed triggers has already been deployed"
-    )
-    st.info(
-        f"**Rule signal: {live.status}. Deploy ₹0 now** because {reason}. "
-        f"Keep **{money(live.keep_as_dry_powder)}** available. "
-        + (f"The next trigger is {pct(live.next_trigger)}." if live.next_trigger is not None else "All configured triggers are crossed.")
+    reason_text = "; ".join(gate_failures) if gate_failures else live.status.lower()
+    st.warning(
+        f"**Final recommendation: deploy ₹0 and retain {money(current_dry_powder)}.** "
+        f"Reason: {reason_text}."
     )
 
-trigger_rows = []
-for position, trigger in enumerate(thresholds, start=1):
-    cumulative_target = recommended_amount * position / len(thresholds)
+next_trigger_text = pct(live.next_trigger) if live.next_trigger is not None else "All configured triggers crossed"
+st.caption(f"Next trigger: **{next_trigger_text}**. Closing-price signal only; not an intraday quote.")
+
+ladder_rows = []
+cumulative_weight = 0.0
+for trigger, weight in zip(thresholds, ladder_weights):
+    cumulative_weight += weight
+    cumulative_target = cycle_start_reserve * cumulative_weight
     if live.current_drawdown >= trigger:
         state = "Crossed"
     elif trigger == live.next_trigger:
         state = "Next"
     else:
         state = "Waiting"
-    trigger_rows.append(
+    ladder_rows.append(
         {
             "Drawdown trigger": pct(trigger),
-            "Tranche": money(live.tranche_amount),
-            "Cumulative target deployed": money(cumulative_target),
+            "Reserve share at trigger": pct(weight),
+            "Tranche from funded reserve": money(cycle_start_reserve * weight),
+            "Cumulative funded-reserve target": money(cumulative_target),
             "Status": state,
         }
     )
-st.dataframe(pd.DataFrame(trigger_rows), use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(ladder_rows), use_container_width=True, hide_index=True)
 
 live_drawdowns = drawdown_series(reference_prices) * 100
 fig_live = go.Figure()
 fig_live.add_trace(go.Scatter(x=live_drawdowns.index, y=live_drawdowns, name="Drawdown from running peak"))
 for trigger in thresholds:
-    fig_live.add_hline(y=-trigger * 100, line_dash="dot", annotation_text=f"{trigger * 100:g}% trigger")
+    fig_live.add_hline(y=-trigger * 100, line_dash="dot", annotation_text=f"{trigger * 100:g}%")
 fig_live.update_layout(
-    title=f"{selected_name}: drawdown path for {reference_mode.lower()}",
+    title=f"{selected_name}: closing-price drawdown path",
     yaxis_title="Drawdown (%)",
 )
 st.plotly_chart(fig_live, use_container_width=True)
 
-st.caption(
-    "The amount is a mechanical allocation rule, not personalised investment advice. Use closing data, verify the benchmark "
-    "still represents your holdings, and do not deploy emergency cash."
-)
-
-st.header("4. Completed-year dry-powder test")
+st.header("4. Look-ahead-safe completed-year test")
 years = available_completed_years(benchmark, count=15)
 if not years:
+    st.error("No complete calendar year is available in the loaded data.")
+    st.stop()
+selected_year = st.selectbox(
+    "Calendar year",
+    years,
+    index=0,
+    format_func=year_label,
+    key="calendar_year_selector_buffett_v1",
+)
+
+history_cutoff = selected_year[0] - pd.Timedelta(days=1)
+historical_start = history_cutoff - pd.DateOffset(years=lookback_years)
+pre_year_lookback = benchmark.loc[
+    (benchmark.index >= historical_start) & (benchmark.index <= history_cutoff)
+]
+pre_year_all = benchmark.loc[benchmark.index <= history_cutoff]
+if len(pre_year_lookback) < 100:
     st.error(
-        "No complete calendar year is available in the loaded data. "
-        "Increase the risk lookback or upload a longer benchmark history."
+        f"Insufficient pre-{selected_year[0].year} history to calculate a look-ahead-safe reserve. "
+        "Select a more recent year or upload longer history."
     )
     st.stop()
-selected_year = st.selectbox("Calendar year", years, index=0, format_func=year_label, key="calendar_year_selector_v2")
+
+pre_lookback_mdd = max_drawdown(pre_year_lookback)
+pre_all_mdd = max_drawdown(pre_year_all)
+if stress_method == "Selected-lookback maximum":
+    backtest_stress = pre_lookback_mdd
+elif stress_method == "Downloaded-history maximum":
+    backtest_stress = pre_all_mdd
+else:
+    backtest_stress = float(custom_stress)
+
+backtest_rec = recommend_dry_powder(
+    prices=pre_year_lookback,
+    all_prices=pre_year_all,
+    tolerance_drawdown=tolerance,
+    policy_floor=POLICY_FLOORS[policy_name],
+    stress_drawdown=backtest_stress,
+    portfolio_beta=1.0,
+)
 
 result, summary, events = run_dry_powder_backtest(
     prices=benchmark,
     start_date=selected_year[0],
     end_date=selected_year[1],
     initial_capital=portfolio_value,
-    dry_powder_weight=recommendation.recommended_weight,
+    dry_powder_weight=backtest_rec.recommended_weight,
     thresholds=thresholds,
+    weights=ladder_weights,
     annual_cash_yield=cash_yield,
 )
+_, zero_yield_summary, _ = run_dry_powder_backtest(
+    prices=benchmark,
+    start_date=selected_year[0],
+    end_date=selected_year[1],
+    initial_capital=portfolio_value,
+    dry_powder_weight=backtest_rec.recommended_weight,
+    thresholds=thresholds,
+    weights=ladder_weights,
+    annual_cash_yield=0.0,
+)
+cash_yield_value_add = summary.strategy_end - zero_yield_summary.strategy_end
 
-m = st.columns(5)
-m[0].metric("Fully invested end value", money(summary.fully_invested_end), pct(summary.fully_invested_return))
-m[1].metric("Dry-powder strategy end", money(summary.strategy_end), pct(summary.strategy_return))
-m[2].metric("Strategy vs fully invested", money(summary.opportunity_cost_or_gain))
-m[3].metric("Max-DD reduction", f"{(summary.fully_invested_max_drawdown - summary.strategy_max_drawdown) * 100:.1f} pp")
-m[4].metric("Cash deployed", money(summary.cash_deployed), f"{summary.triggers_hit} trigger(s)")
+st.success(
+    f"No look-ahead: the {selected_year[0].year} starting reserve was calculated only from data available through "
+    f"**{history_cutoff:%d %b %Y}**. Because the simulated equity asset is the benchmark itself, the historical test uses beta 1.00. Frozen starting reserve: "
+    f"**{pct(backtest_rec.recommended_weight)} ({money(summary.reserve_start)})**."
+)
+
+if selected["kind"] == "Index":
+    st.warning(
+        "The selected series is an index and may exclude dividends, while the reserve earns interest. "
+        "This can structurally favour the dry-powder strategy. Prefer an adjusted ETF/total-return proxy or upload TRI data."
+    )
+
+bt = st.columns(6)
+bt[0].metric("Fully invested end", money(summary.fully_invested_end), pct(summary.fully_invested_return))
+bt[1].metric("Strategy end", money(summary.strategy_end), pct(summary.strategy_return))
+bt[2].metric("Vs fully invested", money(summary.opportunity_cost_or_gain))
+bt[3].metric(
+    "Max-DD reduction",
+    f"{(summary.fully_invested_max_drawdown - summary.strategy_max_drawdown) * 100:.1f} pp",
+)
+bt[4].metric("Cash deployed", money(summary.cash_deployed), f"{summary.triggers_hit} trigger(s)")
+bt[5].metric("Cash-yield value added", money(cash_yield_value_add), f"Assumption: {pct(cash_yield)}")
+
+st.subheader("Performance attribution")
+attr = st.columns(3)
+attr[0].metric("Initial-equity gain/loss", money(summary.initial_equity_gain))
+attr[1].metric("Cash interest accrued", money(summary.cash_interest_earned))
+attr[2].metric("Deployment vs leaving reserve idle", money(summary.deployment_value_add))
 
 normalized = result[["Fully invested", "Dry powder deployed", "Dry powder kept idle"]] / portfolio_value * 100
 fig = go.Figure()
 for column in normalized.columns:
     fig.add_trace(go.Scatter(x=normalized.index, y=normalized[column], name=column))
-fig.update_layout(title=f"Portfolio paths during {year_label(selected_year)}", yaxis_title="Portfolio value (start = 100)")
+fig.update_layout(
+    title=f"Portfolio paths during {year_label(selected_year)}",
+    yaxis_title="Portfolio value (start = 100)",
+)
 st.plotly_chart(fig, use_container_width=True)
-
-if summary.triggers_hit == 0:
-    st.warning(
-        f"No deployment trigger was reached. The reserve reduced the strategy's maximum drawdown from "
-        f"{pct(summary.fully_invested_max_drawdown)} to {pct(summary.strategy_max_drawdown)}, but keeping capital out "
-        f"of equities changed the ending value by {money(summary.opportunity_cost_or_gain)} versus being fully invested."
-    )
-else:
-    direction = "more" if summary.opportunity_cost_or_gain >= 0 else "less"
-    st.success(
-        f"The strategy deployed {money(summary.cash_deployed)} across {summary.triggers_hit} trigger(s). "
-        f"Deployment added {money(summary.deployment_value_add)} versus leaving the reserve idle. "
-        f"It ended with {money(abs(summary.opportunity_cost_or_gain))} {direction} than the fully invested portfolio, "
-        f"while maximum drawdown changed from {pct(summary.fully_invested_max_drawdown)} to {pct(summary.strategy_max_drawdown)}."
-    )
 
 st.subheader("Deployment events")
 if events.empty:
-    st.caption("No event occurred in the selected year.")
+    st.caption("No deployment event occurred in the selected year.")
 else:
     event_display = events.copy()
     event_display["Trigger"] = (event_display["Trigger"] * 100).round(1).astype(str) + "%"
+    event_display["Ladder weight"] = (event_display["Ladder weight"] * 100).round(1).astype(str) + "%"
     event_display["Invested"] = event_display["Invested"].map(money)
     event_display["Index price"] = event_display["Index price"].round(2)
     event_display["Units bought"] = event_display["Units bought"].round(4)
@@ -1273,6 +1592,7 @@ else:
 export = result.reset_index().copy()
 export.insert(1, "Benchmark", selected_name)
 export.insert(2, "Symbol", selected_symbol)
+export.insert(3, "Lookahead safe reserve weight", backtest_rec.recommended_weight)
 st.download_button(
     "Download annual simulation CSV",
     data=export.to_csv(index=False).encode("utf-8"),
@@ -1282,12 +1602,12 @@ st.download_button(
 
 st.header("5. Interpretation")
 st.write(
-    "A reserve is useful when it either prevents forced selling, reduces a drawdown to a level you can actually tolerate, "
-    "or gives you capital to buy after preset declines. It is not automatically return-enhancing: in steadily rising years, "
-    "cash usually creates an opportunity cost. The live recommendation should be followed as a pre-committed tranche rule, "
-    "not as a prediction that the market has reached its bottom. Judge the policy across both difficult and strong years."
+    "The planning reserve estimate controls a hypothetical drawdown; the funded cycle reserve controls the deployment ladder. "
+    "They are deliberately separate. The final recommendation can only be positive when emergency liquidity is adequate, "
+    "the cycle reserve reconciles, the reserve is genuinely liquid, the benchmark is validated, closing data is fresh, "
+    "and valuation/business quality provides a margin of safety."
 )
 st.caption(
-    "Educational tool only. Before acting, verify the selected benchmark, your portfolio's actual beta and concentration, "
-    "the safety/liquidity of the reserve instrument, taxes, exit loads and transaction costs."
+    "Educational tool only. Review taxes, credit risk, exit loads, liquidity, dividends, portfolio concentration, "
+    "fundamentals and valuation before acting."
 )
