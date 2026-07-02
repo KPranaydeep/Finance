@@ -1003,8 +1003,8 @@ def render_matcher(start: date, end: date) -> dict | None:
 
 st.title("🛡️ Dry Powder Planner for Indian Equity Portfolios")
 st.write(
-    "Separate net worth, emergency liquidity, target drawdown control and the actual funded drawdown-cycle reserve. "
-    "The app first calculates mechanical permission, then applies benchmark, liquidity and valuation gates."
+    "Enter equity, bonds/debt and savings separately so net worth is calculated without double counting. "
+    "The app protects emergency liquidity first, then calculates deployable dry powder and applies benchmark, liquidity and valuation gates."
 )
 st.info(
     "Dry powder is investable liquidity—not your emergency fund. The closing-price signal is an auditable rule, "
@@ -1012,32 +1012,136 @@ st.info(
 )
 
 with st.sidebar:
-    st.header("1. Net worth and liquidity")
-    portfolio_value = st.number_input(
-        "Total investable portfolio — equity + current dry powder (₹)",
-        min_value=100_000.0,
-        max_value=1_000_000_000.0,
-        value=2_000_000.0,
+    st.header("1. Net worth")
+    equity_value = st.number_input(
+        "Equity shares and equity mutual funds (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=2_010_000.0,
         step=50_000.0,
+        key="equity_assets_v3",
+        help="Current market value of direct equities and equity mutual funds. Exclude debt funds and cash.",
     )
-    current_dry_powder = st.number_input(
-        "Current deployable dry powder (₹)",
+    other_assets = st.number_input(
+        "Other net-worth assets (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=50_000.0,
+        key="other_assets_v3",
+        help="Examples: EPF, PPF, gold, property equity or assets outside this market-deployment plan.",
+    )
+    liabilities = st.number_input(
+        "Outstanding liabilities (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=50_000.0,
+        key="liabilities_v3",
+    )
+
+    st.divider()
+    st.header("2. Savings account and emergency liquidity")
+    savings_account_balance = st.number_input(
+        "Savings account balance (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=290_000.0,
+        step=10_000.0,
+        key="savings_balance_v3",
+        help="Enter the complete savings-account balance once. The app automatically protects the emergency requirement before treating any surplus as dry powder.",
+    )
+    other_liquid_cash = st.number_input(
+        "Other liquid cash / overnight funds (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=10_000.0,
+        key="other_liquid_cash_v3",
+        help="Cash outside the savings account that is capital-stable and available within one business day.",
+    )
+    monthly_essential_expenses = st.number_input(
+        "Monthly essential expenses (₹)",
+        min_value=0.0,
+        max_value=10_000_000.0,
+        value=100_000.0,
+        step=5_000.0,
+        key="monthly_essentials_v3",
+    )
+    emergency_months = st.slider(
+        "Required emergency coverage (months)",
+        0,
+        24,
+        12,
+        key="emergency_months_v3",
+    )
+    near_term_obligations = st.number_input(
+        "Near-term obligations outside monthly expenses (₹)",
         min_value=0.0,
         max_value=1_000_000_000.0,
-        value=110_000.0,
-        step=5_000.0,
+        value=0.0,
+        step=10_000.0,
+        key="near_term_obligations_v3",
+        help="Examples: insurance premiums, tuition, medical costs or loan payments due soon.",
     )
+
+    st.divider()
+    st.header("3. Bonds and debt")
+    bonds_value = st.number_input(
+        "Total bonds and debt investments (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=25_000.0,
+        key="bonds_total_v3",
+        help="Include bonds, T-bills, debt funds and fixed-income investments at current value.",
+    )
+    defensive_bonds_value = st.number_input(
+        "Of total bonds: capital-stable defensive portion (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=25_000.0,
+        key="bonds_defensive_v3",
+        help="Only the portion you reasonably expect to remain stable during an equity sell-off should count toward drawdown control.",
+    )
+    liquid_bonds_value = st.number_input(
+        "Of defensive bonds: redeemable within one business day (₹)",
+        min_value=0.0,
+        max_value=10_000_000_000.0,
+        value=0.0,
+        step=25_000.0,
+        key="bonds_liquid_v3",
+        help="This portion may support emergency liquidity and, only after the emergency requirement is met, become deployable dry powder.",
+    )
+
+    required_emergency_fund = float(monthly_essential_expenses) * emergency_months + float(near_term_obligations)
+    cash_pool = float(savings_account_balance) + float(other_liquid_cash)
+    emergency_from_cash = min(cash_pool, required_emergency_fund)
+    emergency_gap_after_cash = max(required_emergency_fund - cash_pool, 0.0)
+    emergency_from_liquid_bonds = min(float(liquid_bonds_value), emergency_gap_after_cash)
+    protected_emergency_liquidity = emergency_from_cash + emergency_from_liquid_bonds
+    emergency_shortfall = max(required_emergency_fund - protected_emergency_liquidity, 0.0)
+    cash_dry_powder = max(cash_pool - required_emergency_fund, 0.0)
+    bond_dry_powder = max(float(liquid_bonds_value) - emergency_gap_after_cash, 0.0)
+    current_dry_powder = cash_dry_powder + bond_dry_powder
+    st.metric("Automatically calculated deployable dry powder", money(current_dry_powder))
+
+    st.divider()
+    st.header("4. Current drawdown cycle")
     already_deployed = st.number_input(
         "Already deployed in current drawdown cycle (₹)",
         min_value=0.0,
         max_value=1_000_000_000.0,
-        value=211_000.0,
+        value=0.0,
         step=5_000.0,
+        key="already_deployed_v3",
     )
     use_identifiable_cycle_reserve = st.checkbox(
-        "Use identifiable cycle reserve = current cash + already deployed",
+        "Use identifiable cycle reserve = current dry powder + already deployed",
         value=True,
-        help="Recommended. It prevents an aspirational target reserve from becoming fictional deployable money.",
+        key="identifiable_cycle_v3",
+        help="Recommended. It prevents an aspirational reserve target from becoming fictional deployable money.",
     )
     identifiable_cycle_reserve = float(current_dry_powder) + float(already_deployed)
     if use_identifiable_cycle_reserve:
@@ -1049,6 +1153,7 @@ with st.sidebar:
             max_value=1_000_000_000.0,
             value=float(identifiable_cycle_reserve),
             step=5_000.0,
+            key="cycle_start_reserve_v3",
         )
     net_cycle_flows = st.number_input(
         "Net reserve additions (+) or withdrawals (−) since peak (₹)",
@@ -1056,37 +1161,12 @@ with st.sidebar:
         max_value=1_000_000_000.0,
         value=0.0,
         step=5_000.0,
+        key="net_cycle_flows_v3",
         help="Exclude deployments. Add contributions to dry powder as positive; unrelated withdrawals as negative.",
     )
 
-    emergency_fund = st.number_input(
-        "Emergency fund — never deploy (₹)",
-        min_value=0.0,
-        max_value=1_000_000_000.0,
-        value=12_000.0,
-        step=10_000.0,
-    )
-    monthly_essential_expenses = st.number_input(
-        "Monthly essential expenses (₹)",
-        min_value=0.0,
-        max_value=10_000_000.0,
-        value=30_000.0,
-        step=5_000.0,
-    )
-    emergency_months = st.slider("Required emergency coverage (months)", 0, 24, 6)
-    near_term_obligations = st.number_input(
-        "Near-term obligations outside monthly expenses (₹)",
-        min_value=0.0,
-        max_value=1_000_000_000.0,
-        value=0.0,
-        step=10_000.0,
-        help="Examples: insurance premiums, tuition, medical costs or loan payments due soon.",
-    )
-    other_assets = st.number_input("Other net-worth assets (₹)", 0.0, 10_000_000_000.0, 0.0, 50_000.0)
-    liabilities = st.number_input("Outstanding liabilities (₹)", 0.0, 10_000_000_000.0, 0.0, 50_000.0)
-
     st.divider()
-    st.header("2. Strategy assumptions")
+    st.header("5. Strategy assumptions")
     lookback_years = st.slider("Risk lookback", 3, 20, 15)
     tolerance = st.slider("Maximum portfolio drawdown you can tolerate", 5, 50, 23, 1) / 100
     portfolio_beta_input = st.number_input(
@@ -1128,11 +1208,11 @@ with st.sidebar:
         placeholder="Example: ^NSEI or an ETF ticker",
     )
 
-if current_dry_powder > portfolio_value:
-    st.error("Current dry powder cannot exceed the total investable portfolio.")
+if defensive_bonds_value > bonds_value:
+    st.error("The capital-stable defensive bond portion cannot exceed total bonds and debt investments.")
     st.stop()
-if already_deployed > portfolio_value:
-    st.error("Already deployed capital cannot exceed the total investable portfolio.")
+if liquid_bonds_value > defensive_bonds_value:
+    st.error("The one-business-day liquid bond portion cannot exceed the defensive bond portion.")
     st.stop()
 
 try:
@@ -1143,37 +1223,81 @@ except ValueError as exc:
     st.error(str(exc))
     st.stop()
 
-current_equity_value = max(float(portfolio_value) - float(current_dry_powder), 0.0)
-required_emergency_fund = float(monthly_essential_expenses) * emergency_months + float(near_term_obligations)
-emergency_gap = float(emergency_fund) - required_emergency_fund
+current_equity_value = float(equity_value)
+emergency_eligible_liquidity = cash_pool + float(liquid_bonds_value)
+emergency_gap = emergency_eligible_liquidity - required_emergency_fund
 emergency_adequate = emergency_gap >= 0
-calculated_net_worth = float(portfolio_value) + float(emergency_fund) + float(other_assets) - float(liabilities)
+calculated_net_worth = (
+    float(equity_value)
+    + float(bonds_value)
+    + float(savings_account_balance)
+    + float(other_liquid_cash)
+    + float(other_assets)
+    - float(liabilities)
+)
+
+bonds_reserved_for_emergency = emergency_from_liquid_bonds
+investable_defensive_bonds = max(float(defensive_bonds_value) - bonds_reserved_for_emergency, 0.0)
+current_defensive_assets = investable_defensive_bonds + cash_dry_powder
+risk_control_portfolio_value = current_equity_value + current_defensive_assets
+portfolio_value = current_equity_value + float(current_dry_powder)
+if portfolio_value <= 0:
+    st.error("Enter equity or deployable dry powder before running the strategy analysis.")
+    st.stop()
+if already_deployed > max(calculated_net_worth, portfolio_value):
+    st.error("Already deployed capital cannot exceed the calculated net worth.")
+    st.stop()
 
 expected_current_cash = float(cycle_start_reserve) + float(net_cycle_flows) - float(already_deployed)
 reconciliation_gap = float(current_dry_powder) - expected_current_cash
 reconciliation_tolerance = max(1_000.0, 0.01 * max(float(cycle_start_reserve), 1.0))
 cycle_reconciled = abs(reconciliation_gap) <= reconciliation_tolerance
 
-st.header("1. Net worth, emergency liquidity and cycle funding")
-nw = st.columns(7)
+st.header("1. Net worth, savings, bonds and deployable liquidity")
+nw = st.columns(8)
 nw[0].metric("Calculated net worth", money(calculated_net_worth))
-nw[1].metric("Investable portfolio", money(portfolio_value))
-nw[2].metric("Currently invested", money(current_equity_value))
-nw[3].metric("Current dry powder", money(current_dry_powder))
-nw[4].metric("Funded cycle reserve", money(cycle_start_reserve))
-nw[5].metric("Emergency fund", money(emergency_fund))
-nw[6].metric("Required emergency fund", money(required_emergency_fund))
+nw[1].metric("Equity & equity MFs", money(current_equity_value))
+nw[2].metric("Bonds & debt", money(bonds_value))
+nw[3].metric("Savings account", money(savings_account_balance))
+nw[4].metric("Protected emergency liquidity", money(protected_emergency_liquidity))
+nw[5].metric("Emergency requirement", money(required_emergency_fund))
+nw[6].metric("Deployable dry powder", money(current_dry_powder))
+nw[7].metric("Dry-powder strategy capital", money(portfolio_value))
+
+asset_rows = [
+    {"Asset bucket": "Equity shares and equity mutual funds", "Amount": money(equity_value), "Treatment": "Growth asset"},
+    {"Asset bucket": "Bonds and debt investments", "Amount": money(bonds_value), "Treatment": "Separate fixed-income bucket"},
+    {"Asset bucket": "Savings account", "Amount": money(savings_account_balance), "Treatment": "Emergency requirement funded first"},
+    {"Asset bucket": "Other liquid cash / overnight funds", "Amount": money(other_liquid_cash), "Treatment": "Emergency requirement funded first"},
+    {"Asset bucket": "Other assets", "Amount": money(other_assets), "Treatment": "Net worth only"},
+    {"Asset bucket": "Liabilities", "Amount": money(-liabilities), "Treatment": "Deducted from net worth"},
+]
+st.dataframe(pd.DataFrame(asset_rows), use_container_width=True, hide_index=True)
+
+liquidity_rows = [
+    {"Liquidity classification": "Emergency protected from savings/cash", "Amount": money(emergency_from_cash)},
+    {"Liquidity classification": "Emergency protected from liquid bonds", "Amount": money(emergency_from_liquid_bonds)},
+    {"Liquidity classification": "Emergency shortfall", "Amount": money(emergency_shortfall)},
+    {"Liquidity classification": "Cash surplus eligible as dry powder", "Amount": money(cash_dry_powder)},
+    {"Liquidity classification": "Liquid-bond surplus eligible as dry powder", "Amount": money(bond_dry_powder)},
+    {"Liquidity classification": "Total deployable dry powder", "Amount": money(current_dry_powder)},
+]
+st.dataframe(pd.DataFrame(liquidity_rows), use_container_width=True, hide_index=True)
+st.caption(
+    "Net worth is calculated once from equity + bonds/debt + savings + other liquid cash + other assets − liabilities. "
+    "Savings and one-day liquid defensive bonds cover the emergency requirement first; only the surplus becomes dry powder."
+)
 
 if emergency_adequate:
-    st.success(f"Emergency liquidity gate: PASS. Buffer above requirement: **{money(emergency_gap)}**.")
+    st.success(f"Emergency liquidity gate: PASS. Surplus after the protected requirement: **{money(emergency_gap)}**.")
 else:
     st.error(
-        f"Emergency liquidity gate: FAIL. Emergency cash is **{money(abs(emergency_gap))} below** the requirement. "
+        f"Emergency liquidity gate: FAIL. Eligible liquidity is **{money(abs(emergency_gap))} below** the requirement. "
         "The final deployment recommendation will be ₹0."
     )
 
 if cycle_reconciled:
-    st.success("Cycle-reserve reconciliation: PASS. Current cash, deployments and net cycle flows reconcile.")
+    st.success("Cycle-reserve reconciliation: PASS. Current dry powder, deployments and net cycle flows reconcile.")
 else:
     st.error(
         f"Cycle-reserve reconciliation: FAIL by **{money(abs(reconciliation_gap))}**. "
@@ -1295,15 +1419,15 @@ recommendation = recommend_dry_powder(
     stress_drawdown=chosen_stress,
     portfolio_beta=effective_beta,
 )
-planning_reserve_amount = float(portfolio_value) * recommendation.recommended_weight
-planning_gap = float(current_dry_powder) - planning_reserve_amount
+planning_reserve_amount = float(risk_control_portfolio_value) * recommendation.recommended_weight
+planning_gap = float(current_defensive_assets) - planning_reserve_amount
 
 st.header("2. Drawdown-control reserve estimate — planning target, not deployable cash")
 reserve_cols = st.columns(7)
 reserve_cols[0].metric("Planning reserve estimate", pct(recommendation.recommended_weight), money(planning_reserve_amount))
-reserve_cols[1].metric("Actual funded cycle reserve", money(cycle_start_reserve))
-reserve_cols[2].metric("Current dry powder", money(current_dry_powder))
-reserve_cols[3].metric("Planning gap", money(planning_gap))
+reserve_cols[1].metric("Current defensive assets", money(current_defensive_assets))
+reserve_cols[2].metric("Deployable dry powder", money(current_dry_powder))
+reserve_cols[3].metric("Planning surplus / shortfall", money(planning_gap))
 reserve_cols[4].metric("Lookback max DD", pct(recommendation.lookback_max_drawdown))
 reserve_cols[5].metric("Downloaded-history max DD", pct(recommendation.all_history_max_drawdown))
 reserve_cols[6].metric("Portfolio stress used", pct(recommendation.portfolio_stress_drawdown))
@@ -1327,15 +1451,22 @@ for stress in scenario_values:
             "Beta-adjusted portfolio stress": pct(min(stress * effective_beta, 0.99)),
             "Reserve estimate": pct(required_reserve_weight(stress, tolerance, effective_beta, cap=0.95)),
             "Reserve amount": money(
-                portfolio_value * required_reserve_weight(stress, tolerance, effective_beta, cap=0.95)
+                risk_control_portfolio_value * required_reserve_weight(stress, tolerance, effective_beta, cap=0.95)
             ),
         }
     )
 st.subheader("Stress-scenario range")
 st.dataframe(pd.DataFrame(scenario_rows), use_container_width=True, hide_index=True)
+includes_2008 = risk_prices.index.min() <= pd.Timestamp("2008-12-31") and risk_prices.index.max() >= pd.Timestamp("2008-01-01")
+lookback_context = (
+    f"The selected {lookback_years}-year window includes the 2008 crisis. "
+    if includes_2008
+    else f"The selected {lookback_years}-year window excludes the 2008 crisis. "
+)
 st.caption(
     f"Selected lookback window: {risk_prices.index.min():%d %b %Y} to {risk_prices.index.max():%d %b %Y}. "
-    "A 15-year window does not include 2008; the all-history and custom scenarios help expose that limitation."
+    + lookback_context
+    + "Historical maximum drawdown is a scenario input, not a forecast."
 )
 
 if cash_yield > 0.08 and not reserve_is_liquid:
@@ -1641,7 +1772,7 @@ st.download_button(
 
 st.header("5. Interpretation")
 st.write(
-    "The planning reserve estimate controls a hypothetical drawdown; the funded cycle reserve controls the deployment ladder. "
+    "Net worth, bonds/debt, savings and dry powder are separate buckets. The planning reserve estimate controls a hypothetical drawdown; the funded cycle reserve controls the deployment ladder. "
     "They are deliberately separate. The final recommendation can only be positive when emergency liquidity is adequate, "
     "the cycle reserve reconciles, the reserve is genuinely liquid, the benchmark is validated, closing data is fresh, "
     "and valuation/business quality provides a margin of safety."
