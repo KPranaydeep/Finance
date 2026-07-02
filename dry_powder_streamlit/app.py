@@ -8,8 +8,6 @@ from __future__ import annotations
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-"""Application configuration and benchmark catalogue."""
-
 INDEX_CATALOG = {
     "NIFTY 50": {
         "symbol": "^NSEI",
@@ -121,8 +119,6 @@ DEFAULT_THRESHOLDS = [0.05, 0.10, 0.15, 0.20]
 # -----------------------------------------------------------------------------
 # Portfolio analytics
 # -----------------------------------------------------------------------------
-"""Portfolio analytics, benchmark matching and dry-powder backtesting."""
-
 from dataclasses import dataclass
 from datetime import date
 import math
@@ -160,6 +156,22 @@ class BacktestSummary:
     triggers_hit: int
     deployment_value_add: float
     opportunity_cost_or_gain: float
+
+
+@dataclass(frozen=True)
+class LiveDeploymentRecommendation:
+    latest_date: pd.Timestamp
+    latest_price: float
+    peak_date: pd.Timestamp
+    peak_price: float
+    current_drawdown: float
+    triggers_crossed: tuple[float, ...]
+    target_cumulative_deployment: float
+    deploy_now: float
+    keep_as_dry_powder: float
+    next_trigger: float | None
+    tranche_amount: float
+    status: str
 
 
 def drawdown_series(values: pd.Series) -> pd.Series:
@@ -206,6 +218,69 @@ def recommend_dry_powder(
         policy_floor_weight=policy_floor,
         recommended_weight=recommended,
         estimated_stress_drawdown=estimated,
+    )
+
+
+def recommend_live_deployment(
+    prices: pd.Series,
+    target_reserve: float,
+    current_dry_powder: float,
+    already_deployed: float,
+    thresholds: list[float],
+) -> LiveDeploymentRecommendation:
+    """Return an auditable tranche recommendation from the latest closing drawdown.
+
+    Each threshold receives an equal share of the target reserve. The recommendation
+    is cumulative: at a 10% drawdown with triggers 5%, 10%, 15%, 20%, half of the
+    target reserve should have been deployed. Any amount the user says was already
+    deployed is subtracted, preventing duplicate deployment.
+    """
+    series = prices.dropna().astype(float).sort_index()
+    if len(series) < 2:
+        raise ValueError("At least two valid prices are required for a live deployment signal.")
+
+    cleaned_thresholds = sorted(set(float(x) for x in thresholds if 0 < float(x) < 1))
+    if not cleaned_thresholds:
+        raise ValueError("At least one deployment trigger is required.")
+
+    latest_date = pd.Timestamp(series.index[-1])
+    latest_price = float(series.iloc[-1])
+    peak_price = float(series.max())
+    peak_candidates = series[series == peak_price]
+    peak_date = pd.Timestamp(peak_candidates.index[-1])
+    current_drawdown = max(0.0, 1.0 - latest_price / peak_price)
+
+    target_reserve = max(float(target_reserve), 0.0)
+    current_dry_powder = max(float(current_dry_powder), 0.0)
+    already_deployed = max(float(already_deployed), 0.0)
+    tranche_amount = target_reserve / len(cleaned_thresholds)
+    crossed = tuple(t for t in cleaned_thresholds if current_drawdown >= t)
+    target_cumulative = min(target_reserve, tranche_amount * len(crossed))
+    required_now = max(0.0, target_cumulative - already_deployed)
+    deploy_now = min(current_dry_powder, required_now)
+    keep = max(0.0, current_dry_powder - deploy_now)
+    next_trigger = next((t for t in cleaned_thresholds if t > current_drawdown), None)
+
+    if deploy_now > 0:
+        status = "DEPLOY A TRANCHE"
+    elif crossed and already_deployed >= target_cumulative:
+        status = "HOLD — CROSSED TRIGGERS ALREADY FUNDED"
+    else:
+        status = "HOLD DRY POWDER"
+
+    return LiveDeploymentRecommendation(
+        latest_date=latest_date,
+        latest_price=latest_price,
+        peak_date=peak_date,
+        peak_price=peak_price,
+        current_drawdown=current_drawdown,
+        triggers_crossed=crossed,
+        target_cumulative_deployment=target_cumulative,
+        deploy_now=deploy_now,
+        keep_as_dry_powder=keep,
+        next_trigger=next_trigger,
+        tranche_amount=tranche_amount,
+        status=status,
     )
 
 
@@ -347,7 +422,12 @@ def weighted_portfolio_returns(price_frame: pd.DataFrame, holdings: pd.DataFrame
     available = [t for t in holdings["ticker"] if t in price_frame.columns and price_frame[t].notna().sum() >= 40]
     missing = [t for t in holdings["ticker"] if t not in available]
     if not available:
-        raise ValueError("None of the uploaded holding tickers returned enough price history.")
+        attempted = ", ".join(holdings["ticker"].astype(str).tolist()[:8])
+        raise ValueError(
+            "None of the uploaded holding tickers returned enough Yahoo price history. "
+            f"Tried: {attempted}. Bond, ISIN-style, delisted or unsupported BSE symbols may not be available; "
+            "select the closest benchmark manually or use supported NSE equity tickers."
+        )
 
     weights = holdings.set_index("ticker").loc[available, "weight"]
     weights = weights / weights.sum()
@@ -392,8 +472,6 @@ def score_benchmarks(portfolio_returns: pd.Series, benchmark_prices: pd.DataFram
 # -----------------------------------------------------------------------------
 # Market data and CSV parsing
 # -----------------------------------------------------------------------------
-"""Market data access and uploaded-data parsing."""
-
 from datetime import date, timedelta
 from typing import Iterable
 from urllib.parse import quote
@@ -797,7 +875,7 @@ def render_matcher(start: date, end: date) -> str | None:
 st.title("🛡️ Dry Powder Planner for Indian Equity Portfolios")
 st.write(
     "Choose or statistically match an NSE benchmark, estimate a transparent minimum cash reserve, "
-    "and test how that reserve would have behaved during a completed calendar year."
+    "get a live rule-based deployment amount, and test the reserve during a completed calendar year."
 )
 st.info(
     "Dry powder is investable liquidity—not your emergency fund. This app does not model taxes, brokerage, "
@@ -922,7 +1000,127 @@ fig_risk.add_trace(go.Scatter(x=chart_df.index, y=chart_df["Benchmark"], name="G
 fig_risk.update_layout(title=f"{selected_name}: normalized history used for risk estimate", yaxis_title="Index level (start = 100)")
 st.plotly_chart(fig_risk, use_container_width=True)
 
-st.header("2. Completed-year dry-powder test")
+st.header("2. Live deployment recommendation")
+st.write(
+    "This is a rules-based signal from the latest available closing price. It does not predict the market bottom. "
+    "Each crossed drawdown trigger unlocks one equal tranche of the recommended reserve."
+)
+
+reference_mode = st.selectbox(
+    "Drawdown reference peak",
+    ["52-week peak", "Current calendar-year peak", "Risk-lookback peak"],
+    index=0,
+    help="The current drawdown is measured from the highest close in this reference window.",
+)
+latest_date = pd.Timestamp(benchmark.index.max())
+if reference_mode == "52-week peak":
+    reference_start = latest_date - pd.Timedelta(days=365)
+elif reference_mode == "Current calendar-year peak":
+    reference_start = pd.Timestamp(year=latest_date.year, month=1, day=1)
+else:
+    reference_start = risk_window_start
+reference_prices = benchmark.loc[(benchmark.index >= reference_start) & (benchmark.index <= latest_date)]
+
+input_cols = st.columns(2)
+current_dry_powder = input_cols[0].number_input(
+    "Dry powder currently available (₹)",
+    min_value=0.0,
+    max_value=float(portfolio_value),
+    value=float(min(recommended_amount, portfolio_value)),
+    step=5_000.0,
+    help="Enter only investable reserve available today, excluding your emergency fund.",
+    key="current_dry_powder_available_v1",
+)
+already_deployed = input_cols[1].number_input(
+    "Already deployed in this drawdown cycle (₹)",
+    min_value=0.0,
+    max_value=float(portfolio_value),
+    value=0.0,
+    step=5_000.0,
+    help="Amount already invested after declines from the selected reference peak.",
+    key="already_deployed_current_cycle_v1",
+)
+
+live = recommend_live_deployment(
+    prices=reference_prices,
+    target_reserve=recommended_amount,
+    current_dry_powder=current_dry_powder,
+    already_deployed=already_deployed,
+    thresholds=thresholds,
+)
+
+staleness_days = max((pd.Timestamp.today().normalize() - live.latest_date.normalize()).days, 0)
+next_trigger_text = pct(live.next_trigger) if live.next_trigger is not None else "All crossed"
+live_metrics = st.columns(6)
+live_metrics[0].metric("Current drawdown", pct(live.current_drawdown))
+live_metrics[1].metric("Triggers crossed", f"{len(live.triggers_crossed)} / {len(thresholds)}")
+live_metrics[2].metric("Deploy now", money(live.deploy_now))
+live_metrics[3].metric("Keep as dry powder", money(live.keep_as_dry_powder))
+live_metrics[4].metric("Next trigger", next_trigger_text)
+live_metrics[5].metric("Latest data", f"{live.latest_date:%d %b %Y}")
+
+if staleness_days > 7:
+    st.error(
+        f"The latest price is {staleness_days} days old. Treat the amount below as indicative only and refresh the data "
+        "before deploying capital."
+    )
+
+if live.deploy_now > 0:
+    st.warning(
+        f"**Rule signal: {live.status}.** The selected benchmark is {pct(live.current_drawdown)} below its "
+        f"{reference_mode.lower()} of {live.peak_price:,.2f} on {live.peak_date:%d %b %Y}. "
+        f"Your crossed triggers call for cumulative deployment of {money(live.target_cumulative_deployment)}. "
+        f"After subtracting {money(already_deployed)} already deployed, invest **{money(live.deploy_now)} now** and "
+        f"retain **{money(live.keep_as_dry_powder)}**."
+    )
+else:
+    reason = (
+        "the first trigger has not been reached"
+        if not live.triggers_crossed
+        else "the cumulative amount required by crossed triggers has already been deployed"
+    )
+    st.info(
+        f"**Rule signal: {live.status}. Deploy ₹0 now** because {reason}. "
+        f"Keep **{money(live.keep_as_dry_powder)}** available. "
+        + (f"The next trigger is {pct(live.next_trigger)}." if live.next_trigger is not None else "All configured triggers are crossed.")
+    )
+
+trigger_rows = []
+for position, trigger in enumerate(thresholds, start=1):
+    cumulative_target = recommended_amount * position / len(thresholds)
+    if live.current_drawdown >= trigger:
+        state = "Crossed"
+    elif trigger == live.next_trigger:
+        state = "Next"
+    else:
+        state = "Waiting"
+    trigger_rows.append(
+        {
+            "Drawdown trigger": pct(trigger),
+            "Tranche": money(live.tranche_amount),
+            "Cumulative target deployed": money(cumulative_target),
+            "Status": state,
+        }
+    )
+st.dataframe(pd.DataFrame(trigger_rows), use_container_width=True, hide_index=True)
+
+live_drawdowns = drawdown_series(reference_prices) * 100
+fig_live = go.Figure()
+fig_live.add_trace(go.Scatter(x=live_drawdowns.index, y=live_drawdowns, name="Drawdown from running peak"))
+for trigger in thresholds:
+    fig_live.add_hline(y=-trigger * 100, line_dash="dot", annotation_text=f"{trigger * 100:.0f}% trigger")
+fig_live.update_layout(
+    title=f"{selected_name}: drawdown path for {reference_mode.lower()}",
+    yaxis_title="Drawdown (%)",
+)
+st.plotly_chart(fig_live, use_container_width=True)
+
+st.caption(
+    "The amount is a mechanical allocation rule, not personalised investment advice. Use closing data, verify the benchmark "
+    "still represents your holdings, and do not deploy emergency cash."
+)
+
+st.header("3. Completed-year dry-powder test")
 years = available_completed_years(benchmark, count=15)
 if not years:
     st.error(
@@ -930,7 +1128,7 @@ if not years:
         "Increase the risk lookback or upload a longer benchmark history."
     )
     st.stop()
-selected_year = st.selectbox("Calendar year", years, format_func=year_label)
+selected_year = st.selectbox("Calendar year", years, index=0, format_func=year_label, key="calendar_year_selector_v2")
 
 result, summary, events = run_dry_powder_backtest(
     prices=benchmark,
@@ -992,11 +1190,12 @@ st.download_button(
     mime="text/csv",
 )
 
-st.header("3. Interpretation")
+st.header("4. Interpretation")
 st.write(
     "A reserve is useful when it either prevents forced selling, reduces a drawdown to a level you can actually tolerate, "
     "or gives you capital to buy after preset declines. It is not automatically return-enhancing: in steadily rising years, "
-    "cash usually creates an opportunity cost. Judge it across both difficult and strong years—not from one year alone."
+    "cash usually creates an opportunity cost. The live recommendation should be followed as a pre-committed tranche rule, "
+    "not as a prediction that the market has reached its bottom. Judge the policy across both difficult and strong years."
 )
 st.caption(
     "Educational tool only. Before acting, verify the selected benchmark, your portfolio's actual beta and concentration, "
