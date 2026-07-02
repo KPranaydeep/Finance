@@ -849,9 +849,48 @@ def cached_many(symbols: tuple[str, ...], start: date, end: date) -> pd.DataFram
     return download_many(symbols=symbols, start=start, end=end)
 
 
-def money(value: float) -> str:
+def _compact_indian_decimal(value: float, max_decimals: int = 2) -> str:
+    """Format a unit value without unnecessary trailing zeroes."""
+    text = f"{value:.{max_decimals}f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def indian_number(value: float, decimals: int = 0) -> str:
+    """Format a number with Indian digit grouping, e.g. 1,23,45,678."""
+    value = float(value)
     sign = "-" if value < 0 else ""
-    return f"{sign}₹{abs(value):,.0f}"
+    absolute = abs(value)
+    fixed = f"{absolute:.{decimals}f}"
+    whole, dot, fraction = fixed.partition(".")
+
+    if len(whole) <= 3:
+        grouped = whole
+    else:
+        last_three = whole[-3:]
+        leading = whole[:-3]
+        pairs: list[str] = []
+        while len(leading) > 2:
+            pairs.insert(0, leading[-2:])
+            leading = leading[:-2]
+        if leading:
+            pairs.insert(0, leading)
+        grouped = ",".join(pairs + [last_three])
+
+    suffix = f".{fraction}" if dot and decimals > 0 else ""
+    return f"{sign}{grouped}{suffix}"
+
+
+def money(value: float) -> str:
+    """Display rupees using lakh/crore units rather than Western grouping."""
+    value = float(value)
+    sign = "-" if value < 0 else ""
+    absolute = abs(value)
+
+    if absolute >= 1_00_00_000:
+        return f"{sign}₹{_compact_indian_decimal(absolute / 1_00_00_000)} crore"
+    if absolute >= 1_00_000:
+        return f"{sign}₹{_compact_indian_decimal(absolute / 1_00_000)} lakh"
+    return f"{sign}₹{indian_number(absolute)}"
 
 
 def pct(value: float) -> str:
