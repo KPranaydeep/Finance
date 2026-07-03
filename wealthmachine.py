@@ -1,249 +1,285 @@
-import numpy as np
-import yfinance as yf
-import requests
+"""
+Wealth Machine dashboard — corrected version.
+
+Key corrections:
+- Streamlit page configuration is now the first Streamlit command.
+- MongoDB credentials are read from Streamlit secrets or environment variables.
+- MMI rows are validated, de-duplicated and sorted before modelling.
+- The active MMI streak is treated as right-censored, not as a completed streak.
+- Flip timing uses a conditional Kaplan-Meier residual-life estimate.
+- Trading-session estimates are converted to business dates instead of calendar dates.
+- The dashboard distinguishes sentiment-regime estimates from market-price forecasts.
+- Kite previous-close values are no longer described as real-time prices.
+- Profit-booking targets are calculated from average cost, not current price.
+- Holding-period dates use trading sessions and avoid weekend exit dates.
+
+This dashboard is a decision-support tool, not financial advice.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import math
 import os
 import random
 from io import BytesIO
 from itertools import groupby
-from scipy.stats import weibull_min
-from lifelines import KaplanMeierFitter
+from typing import Any, Iterable, Optional
 
+import numpy as np
+import openpyxl
+import pandas as pd
+import plotly.express as px
+import pytz
+import streamlit as st
+import yfinance as yf
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-import json
+from scipy import stats
 
-# --- CONFIG ---
-GROWTH_RATE = 0.456  # 4% per market day
-import datetime
-import pytz
+# This must be the first Streamlit command in the script.
+st.set_page_config(
+    page_title="Wealth Machine",
+    layout="wide",
+    page_icon="💰",
+)
 
-#---------------
-import streamlit as st
-import plotly.express as px
-import pandas as pd
+# -----------------------------------------------------------------------------
+# CONFIG
+# -----------------------------------------------------------------------------
+IST = pytz.timezone("Asia/Kolkata")
+GROWTH_RATE = 0.04  # 4% per market day. The original value 0.456 meant 45.6%.
+DEFAULT_PROFIT_BOOKING_THRESHOLD = 7.2
+DEFAULT_TARGET_NET_DAILY_PCT = 0.28
+DEFAULT_LAMF_CAP = 0.30  # Fraction of mutual-fund corpus; 0.30 means 30%.
+MMI_NEUTRAL_LEVEL = 50.0
 
-# Data
-data = {
+
+def now_ist() -> datetime.datetime:
+    """Return the current timezone-aware IST datetime."""
+    return datetime.datetime.now(IST)
+
+
+def today_ist() -> datetime.date:
+    """Return the current IST date."""
+    return now_ist().date()
+
+
+def add_business_sessions(
+    from_date: datetime.date,
+    sessions: int,
+) -> datetime.date:
+    """Add weekday business sessions to a date.
+
+    This skips Saturdays and Sundays. Exchange holidays are not inferred, so the
+    result is an approximation unless an exchange calendar is added later.
+    """
+    sessions = max(0, int(sessions))
+    return (pd.Timestamp(from_date) + pd.offsets.BDay(sessions)).date()
+
+
+def get_next_trading_day(from_date: datetime.date) -> datetime.date:
+    """Return the next weekday trading date approximation."""
+    return add_business_sessions(from_date, 1)
+
+
+def get_market_status(now: datetime.datetime) -> str:
+    """Return an approximate NSE market status based on IST time and weekday."""
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+
+    if now.weekday() >= 5:
+        return "market_closed"
+
+    market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+
+    if now < market_open:
+        return "pre_market"
+    if now >= market_close:
+        return "after_market_close"
+    return "market_hours"
+
+
+def is_market_closed() -> bool:
+    """Return whether the NSE is approximately closed based on IST schedule.
+
+    The previous implementation inferred closure from two equal five-minute
+    prices. That can classify a quiet open market as closed and can read stale
+    bars on weekends.
+    """
+    return get_market_status(now_ist()) != "market_hours"
+
+
+# -----------------------------------------------------------------------------
+# OPTIONAL MONGODB CONNECTION
+# -----------------------------------------------------------------------------
+def _get_mongodb_uri() -> Optional[str]:
+    """Read MongoDB URI from Streamlit secrets or environment variables."""
+    try:
+        secret_uri = st.secrets.get("MONGODB_URI")
+        if secret_uri:
+            return str(secret_uri)
+    except Exception:
+        pass
+    return os.getenv("MONGODB_URI")
+
+
+MONGODB_URI = _get_mongodb_uri()
+client: Optional[MongoClient] = None
+db = None
+collection = None
+mmi_collection = None
+allocation_collection = None
+mongo_error: Optional[str] = None
+
+if MONGODB_URI:
+    try:
+        client = MongoClient(
+            MONGODB_URI,
+            server_api=ServerApi("1"),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+        )
+        client.admin.command("ping")
+        db = client["finance_db"]
+        collection = db["sell_plan_params"]
+        mmi_collection = db["mmi_data"]
+        allocation_collection = db["allocation_plans"]
+    except Exception as exc:
+        mongo_error = str(exc)
+else:
+    mongo_error = "MONGODB_URI is not configured. Database features are disabled."
+
+
+# -----------------------------------------------------------------------------
+# PORTFOLIO ALLOCATION VISUALISATION
+# -----------------------------------------------------------------------------
+allocation_data = {
     "Asset": [
         "Gold",
         "Silver",
         "Bitcoin",
         "Bonds, Liquid Fund",
         "Cash, Savings Account",
-        "Indian Equity"
+        "Indian Equity",
     ],
-    "Allocation (%)": [
-        3.74,
-        3.74,
-        3.74,
-        24.5,
-        5.00,
-        59.29
-    ]
+    "Allocation (%)": [3.74, 3.74, 3.74, 24.5, 5.00, 59.29],
 }
+allocation_visual_df = pd.DataFrame(allocation_data)
 
-df = pd.DataFrame(data)
-
-# Custom color scale: green → yellow → magenta
 custom_colorscale = [
     [0.0, "magenta"],
     [0.5, "yellow"],
-    [1.0, "green"]
+    [1.0, "green"],
 ]
 
-# Treemap
-fig = px.treemap(
-    df,
+allocation_fig = px.treemap(
+    allocation_visual_df,
     path=["Asset"],
     values="Allocation (%)",
     color="Allocation (%)",
     color_continuous_scale=custom_colorscale,
-    title="Portfolio Allocation Treemap"
+    title="Portfolio Allocation Treemap",
 )
-
-# Centered labels: Asset name + % with line break
-fig.update_traces(
+allocation_fig.update_traces(
     texttemplate="<b>%{label}</b><br>%{value:.2f}%",
     textposition="middle center",
-    insidetextfont=dict(size=18, color="white")
+    insidetextfont=dict(size=18, color="white"),
 )
 
-with st.expander("📊 Portfolio Allocation Visualization", expanded=False):  
-    st.plotly_chart(fig, use_container_width=True)
+with st.expander("📊 Portfolio Allocation Visualization", expanded=False):
+    st.plotly_chart(allocation_fig, use_container_width=True)
+    total_allocation = allocation_visual_df["Allocation (%)"].sum()
+    if not np.isclose(total_allocation, 100.0, atol=0.05):
+        st.warning(f"Allocation totals {total_allocation:.2f}%, not 100%.")
 
-#---------------
-# --- HELPERS ---
-def get_market_status(now: datetime.datetime) -> str:
-    """Return market status based on IST time and weekday."""
-    weekday = now.weekday() # Monday=0 ... Sunday=6
-    hour, minute = now.hour , now.minute
 
-    if weekday == 5:  # Saturday
-        return "after_market_close"
-    if weekday == 6:  # Sunday
-        return "pre_market"
-
-    if hour < 9 or (hour == 9 and minute < 15):
-        return "pre_market"
-    elif (hour > 15) or (hour == 15 and minute >= 30):
-        return "after_market_close"
-    else:
-        return "market_hours"
-
-# --- MAIN APP ---
-# def main():
-#     st.subheader("📈 Daily Profit Booking Assistant")
-
-#     # --- Input Section ---
-#     with st.expander("💰 Input: Last 30 Days Net P&L", expanded=False):
-#         last_30_days_netpl = st.number_input(
-#             "Enter last 30 days Net P&L (₹)", value=22000.0, step=100.0
-#         )
-
-#     # Baseline = average daily profit of last 30 days
-#     baseline = last_30_days_netpl / 30 if last_30_days_netpl > 0 else 0
-
-#     # Today’s target = baseline × (1 + growth_rate)
-#     today_target = baseline * (1 + GROWTH_RATE) if baseline > 0 else 0
-
-#     # Current IST time
-#     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
-#     status = get_market_status(now)
-
-#     # --- Display Guidance ---
-#     st.write(f"🗓️ {now.strftime('%A, %d %B %Y')}")
-#     st.write(f"⏰ Current Time (IST): {now.strftime('%I:%M %p')}")
-
-#     if status == "pre_market":
-#         if now.weekday() == 6:  # Sunday
-#             st.success(
-#                 "📊 Market is closed today (Sunday).\n\n"
-#                 "Here’s your **profit booking plan for next week** 👇"
-#             )
-
-#             # Generate Monday–Friday targets
-#             targets = []
-#             for i in range(1, 6):
-#                 target = baseline * ((1 + GROWTH_RATE) ** i)
-#                 day_name = (now + datetime.timedelta(days=i)).strftime("%A")
-#                 targets.append({"Day": day_name, "Target (₹)": f"{target:,.0f}"})
-
-#             df = pd.DataFrame(targets)
-#             st.table(df)
-
-#             st.info("✅ Stick to these daily targets and avoid greed. 🌱")
-
-#         else:
-#             st.success(
-#                 f"✅ Book **₹{today_target:,.0f}** profit when market opens.\n\n"
-#             )
-
-#     elif status == "market_hours":
-#         st.warning(
-#             f"🎯 Target for today: **₹{today_target:,.0f}**.\n\n"
-#             f"If you’ve already booked it: Why are you still here? 🚪 "
-#             f"Come back tomorrow. Life is more than money. 🌱"
-#         )
-
-#     elif status == "after_market_close":
-#         if now.weekday() == 5:  # Saturday
-#             st.info(
-#                 f"📉 Market is closed for the weekend. 🌃 \n\n"
-#                 f"Come back on **Monday at 9:15 AM** to book \n"
-#                 f"**₹{today_target:,.0f}** profit."
-#             )
-#         else:
-#             st.info(
-#                 f"📉 Market is closed. 🌃 \n\n Relax and enjoy your evening. \n"
-#                 f"Come back tomorrow at 9:15 AM to book \n"
-#                 f"**₹{today_target:,.0f}** profit."
-#             )
-
-#     else:
-#         st.error("⚠️ Unknown status. Please check system time.")
-
-# if __name__ == "__main__":
-#     main()
-
-from datetime import datetime, timedelta
-def get_max_roi_from_file():
+# -----------------------------------------------------------------------------
+# STORED PARAMETERS
+# -----------------------------------------------------------------------------
+def get_max_roi_from_file() -> float:
+    """Read the configured profit-booking threshold from max_roi.json."""
     try:
-        with open("max_roi.json", "r") as f:
-            data = json.load(f)
-            return data.get("max_roi", 0.0)
-    except FileNotFoundError:
+        with open("max_roi.json", "r", encoding="utf-8") as file:
+            data = json.load(file)
+            value = float(data.get("max_roi", 0.0))
+            return value if np.isfinite(value) and value > 0 else 0.0
+    except (FileNotFoundError, ValueError, TypeError, json.JSONDecodeError):
         return 0.0
 
+
 min_threshold = get_max_roi_from_file()
-# st.caption(f"🧪 Debug: Loaded min_threshold = {min_threshold:.2f}% from max_roi.json")
+active_profit_threshold = (
+    min_threshold if min_threshold > 0 else DEFAULT_PROFIT_BOOKING_THRESHOLD
+)
 
-# Replace <db_password> with your actual MongoDB password
-uri = "mongodb+srv://hwre2224:jXJxkTNTy4GYx164@finance.le7ka8a.mongodb.net/?retryWrites=true&w=majority&appName=Finance"
 
-# Create a new client and connect to the server using Server API v1
-client = MongoClient(uri, server_api=ServerApi('1'))
-
-# Send a ping to confirm a successful connection
-try:
-    client.admin.command('ping')
-    print("✅ Pinged your deployment. You successfully connected to MongoDB!")
-except Exception as e:
-    print("❌ Error connecting to MongoDB:", e)
-
-db = client['finance_db']
-collection = db['sell_plan_params']
-mmi_collection = db['mmi_data']
-
-def is_market_closed():
-    try:
-        nifty = yf.Ticker("^NSEI")
-        df = nifty.history(period="1d", interval="5m")
-        if len(df) < 2:
-            return True  # Not enough data to say it's open
-        last_close = df['Close'].iloc[-1]
-        prev_close = df['Close'].iloc[-2]
-        return abs(last_close - prev_close) < 0.5  # Minimal movement → likely closed
-    except:
-        return False  # Fail-safe: assume market open if error
-
-def get_next_trading_day(from_date):
-    # Skip Saturday/Sunday
-    next_day = from_date + timedelta(days=1)
-    while next_day.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
-        next_day += timedelta(days=1)
-    return next_day
-
-def save_input_params(user_id, net_pl, charges, target_pct):
+def save_input_params(user_id: str, net_pl: float, charges: float, target_pct: float) -> None:
+    """Persist the user's profit-booking inputs when MongoDB is available."""
+    if collection is None:
+        return
     record = {
-        'user_id': user_id,
-        'timestamp': datetime.utcnow(),
-        'net_pl': net_pl,
-        'charges': charges,
-        'target_pct': target_pct
+        "user_id": user_id,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc),
+        "net_pl": float(net_pl),
+        "charges": float(charges),
+        "target_pct": float(target_pct),
     }
     collection.insert_one(record)
 
-def get_latest_input_params(user_id):
-    latest = collection.find_one(
-        {'user_id': user_id},
-        sort=[('timestamp', -1)]
-    )
-    return latest if latest else {'net_pl': 0.0, 'charges': 0.0, 'target_pct': 0.28}
 
-# --- Cached Leverage Decision Function ---
-@st.cache_data
-def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
+def get_latest_input_params(user_id: str) -> dict[str, float]:
+    """Load the user's latest profit-booking inputs."""
+    defaults = {
+        "net_pl": 0.0,
+        "charges": 0.0,
+        "target_pct": DEFAULT_TARGET_NET_DAILY_PCT,
+    }
+    if collection is None:
+        return defaults
     try:
-        data = yf.download(ticker, period="400d", group_by="column", progress=False)
+        latest = collection.find_one(
+            {"user_id": user_id},
+            sort=[("timestamp", -1)],
+        )
+        return latest if latest else defaults
+    except Exception:
+        return defaults
 
-        # 🔹 Handle MultiIndex columns: ('Close', '^NSEI') → 'Close'
+
+# -----------------------------------------------------------------------------
+# LEVERAGE DECISION
+# -----------------------------------------------------------------------------
+@st.cache_data(ttl=900)
+def should_use_leverage(
+    ticker: str = "^NSEI",
+    days: int = 200,
+    cap: float = DEFAULT_LAMF_CAP,
+) -> dict[str, Any]:
+    """Assess whether a trend filter permits limited leverage.
+
+    `cap` is a fraction of the mutual-fund corpus, not a multiple. A cap of 0.30
+    means the recommendation cannot exceed 30% of the corpus.
+    """
+    try:
+        data = yf.download(
+            ticker,
+            period="500d",
+            group_by="column",
+            auto_adjust=False,
+            progress=False,
+        )
+
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
 
         if data is None or data.empty:
             raise ValueError(f"No price data downloaded for ticker {ticker}.")
 
-        # Ensure we have a Close column
         if "Close" not in data.columns:
             if "Adj Close" in data.columns:
                 data["Close"] = data["Adj Close"]
@@ -253,1036 +289,1418 @@ def should_use_leverage(ticker="^NSEI", days=200, cap=3.0):
                 )
 
         data.index = pd.to_datetime(data.index, errors="coerce")
-        data = data.sort_index()
-        data = data.dropna(subset=["Close"])
-        if data.empty:
-            raise ValueError("No price data after cleaning non-NaN 'Close' values.")
-
-        close_series = data["Close"]
-        if len(close_series) < days:
+        data = data.sort_index().dropna(subset=["Close"])
+        if len(data) < days:
             raise ValueError(
-                f"Insufficient rows for {days}-day MA (only {len(close_series)})."
+                f"Insufficient rows for {days}-day MA; received {len(data)} rows."
             )
 
+        close_series = pd.to_numeric(data["Close"], errors="coerce").dropna()
         ma_series = close_series.rolling(window=days, min_periods=days).mean()
 
-        df = pd.DataFrame({
-            "Close": close_series,
-            "200_MA": ma_series
-        })
-        df["pct_above_ma"] = (df["Close"] - df["200_MA"]) / df["200_MA"]
-
-        valid = df.dropna(subset=["200_MA"])
+        trend_df = pd.DataFrame({"Close": close_series, "200_MA": ma_series})
+        trend_df["pct_above_ma"] = (
+            trend_df["Close"] - trend_df["200_MA"]
+        ) / trend_df["200_MA"]
+        valid = trend_df.dropna(subset=["200_MA", "pct_above_ma"])
         if valid.empty:
-            raise ValueError("No valid rows to calculate leverage (200-MA is NaN).")
+            raise ValueError("No valid rows remain after calculating the moving average.")
 
         latest = valid.iloc[-1]
         latest_close = float(latest["Close"])
         latest_ma = float(latest["200_MA"])
-        pct = float(latest["pct_above_ma"])
+        pct_above_ma = float(latest["pct_above_ma"])
 
-        pos = valid[valid["pct_above_ma"] > 0]["pct_above_ma"]
-        max_pct = float(pos.max()) if not pos.empty else 0.10
-
-        alpha = cap / max_pct if max_pct > 0 else 0.0
-        flag = latest_close > latest_ma
+        positive_distances = valid.loc[
+            valid["pct_above_ma"] > 0, "pct_above_ma"
+        ]
+        reference_pct = (
+            float(positive_distances.quantile(0.95))
+            if not positive_distances.empty
+            else 0.10
+        )
+        reference_pct = max(reference_pct, 0.01)
 
         return {
-            "should_leverage": flag,
+            "should_leverage": latest_close > latest_ma,
             "latest_close": round(latest_close, 2),
             "ma_value": round(latest_ma, 2),
-            "pct_above_ma": pct,
-            "max_pct_above_ma": max_pct,
-            "alpha": alpha
+            "pct_above_ma": pct_above_ma,
+            # Kept for compatibility with the existing UI/function consumers.
+            "max_pct_above_ma": reference_pct,
+            "reference_pct_above_ma": reference_pct,
+            # Kept under the existing key. It is now a reference band rather
+            # than the original unsafe cap/max slope.
+            "alpha": reference_pct,
+            "cap": float(np.clip(cap, 0.0, 1.0)),
+            "data_date": valid.index[-1].date(),
         }
-
-    except Exception as e:
+    except Exception as exc:
         return {
             "should_leverage": False,
             "latest_close": None,
             "ma_value": None,
             "pct_above_ma": None,
             "max_pct_above_ma": None,
-            "alpha": 0.0,
-            "error": str(e)
+            "reference_pct_above_ma": None,
+            "alpha": 0.10,
+            "cap": float(np.clip(cap, 0.0, 1.0)),
+            "error": str(exc),
         }
 
 
-# --- LAMF Allocation Calculator ---
-def compute_lamf_pct(pct_above_ma, mmi, alpha, cap=3.0):
-    fear_factor = 1 - (mmi / 100)  # MMI=0 → max fear, MMI=100 → max greed
-    lamf_pct = alpha * pct_above_ma * fear_factor
-    return min(max(lamf_pct, 0.0), cap)
+def compute_lamf_pct(
+    pct_above_ma: float,
+    mmi: float,
+    alpha: float,
+    cap: float = DEFAULT_LAMF_CAP,
+) -> float:
+    """Calculate a capped, risk-aware LAMF fraction.
 
-# --- UI Section ---
+    Leverage is zero below the moving average. Above it, the recommendation is
+    scaled by trend strength, reduced as MMI moves into greed, and penalised when
+    price is unusually far above the moving average.
+    """
+    if pct_above_ma is None or not np.isfinite(pct_above_ma) or pct_above_ma <= 0:
+        return 0.0
+
+    mmi = float(np.clip(mmi, 0.0, 100.0))
+    cap = float(np.clip(cap, 0.0, 1.0))
+    reference_band = max(float(alpha), 0.01)
+
+    trend_strength = float(np.clip(pct_above_ma / reference_band, 0.0, 1.0))
+    sentiment_factor = float(np.clip((60.0 - mmi) / 60.0, 0.0, 1.0))
+
+    # Reduce leverage when the index is more than 10% above its 200-DMA.
+    overextension = max(pct_above_ma - 0.10, 0.0)
+    overextension_penalty = float(np.exp(-overextension / 0.05))
+
+    lamf_pct = cap * trend_strength * sentiment_factor * overextension_penalty
+    return float(np.clip(lamf_pct, 0.0, cap))
+
+
 with st.expander("⚖️ Leverage Decision Based on NIFTY 200-Day MA", expanded=False):
-    result = should_use_leverage()
+    leverage_result = should_use_leverage()
 
-    if result.get("error"):
-        st.error(f"⚠️ Error fetching data: {result['error']}")
+    if leverage_result.get("error"):
+        st.error(f"⚠️ Error fetching data: {leverage_result['error']}")
     else:
-        st.metric("📈 NIFTY Close", f"{result['latest_close']}")
-        st.metric("📊 200-Day MA", f"{result['ma_value']}")
-        st.metric("🔺 Max % Above MA", f"{result['max_pct_above_ma'] * 100:.2f}%")
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("📈 NIFTY Close", f"{leverage_result['latest_close']:,.2f}")
+        col_b.metric("📊 200-Day MA", f"{leverage_result['ma_value']:,.2f}")
+        col_c.metric(
+            "📏 95th percentile above MA",
+            f"{leverage_result['reference_pct_above_ma'] * 100:.2f}%",
+        )
 
-        if result["should_leverage"]:
-            st.success("✅ NIFTY is above its 200-day MA → Leverage allowed")
-
-            mmi = st.number_input("📊 Market Mood Index (MMI)", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
-            mf_corpus = st.number_input("💼 Enter Mutual Fund Corpus (₹)", value=18_00_000.0, step=10_000.0)
-
-            lamf_pct = compute_lamf_pct(
-                result["pct_above_ma"],
-                mmi,
-                result["alpha"]
+        if leverage_result["should_leverage"]:
+            st.success("✅ NIFTY is above its 200-day MA; limited leverage may be considered.")
+            leverage_mmi = st.number_input(
+                "📊 Market Mood Index (MMI)",
+                min_value=0.0,
+                max_value=100.0,
+                value=50.0,
+                step=1.0,
+                key="leverage_mmi",
             )
-            lamf_amt = mf_corpus * lamf_pct
-
-            st.metric("📌 LAMF % Recommended", f"{lamf_pct * 100:.2f}%")
-            st.metric("💸 Max LAMF Amount", f"₹{lamf_amt:,.0f}")
-
+            mf_corpus = st.number_input(
+                "💼 Enter Mutual Fund Corpus (₹)",
+                min_value=0.0,
+                value=18_00_000.0,
+                step=10_000.0,
+            )
+            lamf_pct = compute_lamf_pct(
+                leverage_result["pct_above_ma"],
+                leverage_mmi,
+                leverage_result["alpha"],
+                cap=leverage_result["cap"],
+            )
+            lamf_amount = mf_corpus * lamf_pct
+            metric_a, metric_b = st.columns(2)
+            metric_a.metric("📌 LAMF % Recommended", f"{lamf_pct * 100:.2f}%")
+            metric_b.metric("💸 Maximum LAMF Amount", f"₹{lamf_amount:,.0f}")
+            st.caption(
+                "Trend and sentiment are filters, not guarantees. Confirm lender margin, "
+                "interest cost, drawdown tolerance and liquidation risk before borrowing."
+            )
         else:
-            st.warning("🛑 NIFTY is below 200-DMA → Avoid leverage")
-            st.markdown("💼 Stay defensive: shift to cash, T-Bills, or liquid funds.")
+            st.warning("🛑 NIFTY is below its 200-day MA; this model recommends no leverage.")
 
-st.set_page_config(layout="wide", page_icon=":moneybag:")
+
 st.subheader("📊 Stock Holdings Analysis & Market Mood Dashboard")
 
-# ==================== MARKET MOOD ANALYSIS ====================
-from streamlit.runtime.uploaded_file_manager import UploadedFile
 
+# -----------------------------------------------------------------------------
+# MARKET MOOD ANALYSIS
+# -----------------------------------------------------------------------------
 class MarketMoodAnalyzer:
-    def __init__(self, mmi_data):
+    """Analyse binary Fear/Greed MMI streaks and estimate regime duration.
+
+    The model estimates when MMI may cross the binary threshold of 50. It does
+    not forecast NIFTY direction, returns, volatility or a market correction.
+    """
+
+    def __init__(self, mmi_data: Any):
         if isinstance(mmi_data, bytes):
             self.df = self._prepare_mmi_data_from_bytes(mmi_data)
         elif isinstance(mmi_data, pd.DataFrame):
             self.df = self._prepare_mmi_data_from_df(mmi_data)
-        elif hasattr(mmi_data, "read"):  # Handles Streamlit UploadedFile
+        elif hasattr(mmi_data, "read"):
             self.df = self._prepare_mmi_data_from_bytes(mmi_data.read())
         else:
-            raise ValueError(f"Unsupported input type for MMI data: {type(mmi_data)}")
+            raise ValueError(f"Unsupported MMI input type: {type(mmi_data)}")
 
-        self.df = self.df.sort_values('Date').reset_index(drop=True)
-        self.run_lengths = self._identify_mood_streaks()
-        
-        self.mmi_last_date = self.df['Date'].iloc[-1].date()  # Last date in MMI data
-        self.today_date = datetime.today().date()             # Actual today
-        self.current_mmi = self.df['MMI'].iloc[-1]
-        self.current_mood = 'Fear' if self.current_mmi <= 50 else 'Greed'
+        self.df = self.df.sort_values("Date").reset_index(drop=True)
+        if self.df.empty:
+            raise ValueError("MMI dataset contains no valid rows.")
+
+        self.mmi_last_date = self.df["Date"].iloc[-1].date()
+        self.today_date = today_ist()
+        self.current_mmi = float(self.df["MMI"].iloc[-1])
+        self.current_mood = "Fear" if self.current_mmi <= MMI_NEUTRAL_LEVEL else "Greed"
         self.current_streak = self._get_current_streak_length()
+        self.streak_records = self._build_streak_records()
+        self.run_lengths = self._identify_mood_streaks()
 
-    def _prepare_mmi_data_from_bytes(self, mmi_bytes):
+    def _prepare_mmi_data_from_bytes(self, mmi_bytes: bytes) -> pd.DataFrame:
         if not mmi_bytes:
-            raise ValueError("Empty file provided.")
-        df = pd.read_csv(BytesIO(mmi_bytes))
-        return self._process_dataframe(df)
+            raise ValueError("Empty MMI file provided.")
+        dataframe = pd.read_csv(BytesIO(mmi_bytes))
+        return self._process_dataframe(dataframe)
 
-    def _count_trading_days(self, start_date, calendar_days):
-        """Counts trading days (Mon–Fri) starting from given date for next X calendar days"""
-        end_date = start_date + timedelta(days=calendar_days)
-        trading_days = pd.date_range(start=start_date + timedelta(days=1), end=end_date, freq='B')
-        return len(trading_days)
+    def _prepare_mmi_data_from_df(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        return self._process_dataframe(dataframe.copy())
 
-    def _get_days_until_confidence_flip(self, confidence=0.05):
-        """Returns number of calendar days until the current mood is expected to flip"""
-        mood = self.current_mood
-        res = self._analyze_mood(mood)
-        confidence_flip_day = self._get_confidence_flip_date(res['survival_days'], res['survival_prob'], confidence)
-    
-        if confidence_flip_day is not None:
-            return max(1, confidence_flip_day - self.current_streak)
-        else:
-            return None
+    def _process_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        """Normalise, validate, sort and de-duplicate MMI data."""
+        if dataframe is None or dataframe.empty:
+            raise ValueError("MMI dataset is empty.")
 
-    def _prepare_mmi_data_from_df(self, df):
-        return self._process_dataframe(df)
+        dataframe = dataframe.copy()
+        dataframe.columns = [str(column).strip() for column in dataframe.columns]
+        lower_map = {column.lower(): column for column in dataframe.columns}
 
-    def _process_dataframe(self, df):
-        df.columns = ['Date', 'MMI', 'Nifty']
-        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
-        df['Mood'] = df['MMI'].apply(lambda x: 'Fear' if x <= 50 else 'Greed')
-        return df
+        date_column = next(
+            (lower_map[key] for key in lower_map if "date" in key),
+            dataframe.columns[0] if len(dataframe.columns) >= 1 else None,
+        )
+        mmi_column = next(
+            (
+                lower_map[key]
+                for key in lower_map
+                if "market mood" in key or key == "mmi" or key.startswith("mmi ")
+            ),
+            dataframe.columns[1] if len(dataframe.columns) >= 2 else None,
+        )
+        nifty_column = next(
+            (lower_map[key] for key in lower_map if "nifty" in key),
+            dataframe.columns[2] if len(dataframe.columns) >= 3 else None,
+        )
 
-    def _identify_mood_streaks(self):
-        mood_series = self.df['Mood'].values
-        streaks = [(mood, sum(1 for _ in group)) for mood, group in groupby(mood_series)]
-        run_lengths = {'Fear': [], 'Greed': []}
-        for mood, length in streaks:
-            run_lengths[mood].append(length)
+        if date_column is None or mmi_column is None:
+            raise ValueError("Could not identify Date and MMI columns.")
+
+        selected = pd.DataFrame(
+            {
+                "Date": dataframe[date_column],
+                "MMI": dataframe[mmi_column],
+                "Nifty": dataframe[nifty_column] if nifty_column else np.nan,
+            }
+        )
+        selected["Date"] = pd.to_datetime(
+            selected["Date"],
+            dayfirst=True,
+            errors="coerce",
+        )
+        selected["MMI"] = pd.to_numeric(selected["MMI"], errors="coerce")
+        selected["Nifty"] = pd.to_numeric(selected["Nifty"], errors="coerce")
+        selected = selected.dropna(subset=["Date", "MMI"])
+        selected = selected[selected["MMI"].between(0.0, 100.0, inclusive="both")]
+        selected["Date"] = selected["Date"].dt.normalize()
+        selected = selected.sort_values("Date")
+        selected = selected.drop_duplicates(subset=["Date"], keep="last")
+        selected["Mood"] = np.where(
+            selected["MMI"] <= MMI_NEUTRAL_LEVEL,
+            "Fear",
+            "Greed",
+        )
+        selected.reset_index(drop=True, inplace=True)
+
+        if len(selected) < 10:
+            raise ValueError("At least 10 valid MMI observations are required.")
+        return selected
+
+    def _count_trading_days(
+        self,
+        start_date: datetime.date,
+        calendar_days: int,
+    ) -> int:
+        """Count weekday sessions in a calendar interval."""
+        end_date = start_date + datetime.timedelta(days=calendar_days)
+        sessions = pd.date_range(
+            start=start_date + datetime.timedelta(days=1),
+            end=end_date,
+            freq="B",
+        )
+        return len(sessions)
+
+    def _build_streak_records(self) -> list[dict[str, Any]]:
+        """Create completed/censored run records.
+
+        The last run is active and therefore right-censored. Treating it as a
+        completed event biases the survival curve toward shorter durations.
+        """
+        records: list[dict[str, Any]] = []
+        moods = self.df["Mood"].tolist()
+
+        for mood, grouped_indexes in groupby(range(len(moods)), key=lambda i: moods[i]):
+            indexes = list(grouped_indexes)
+            start_index = indexes[0]
+            end_index = indexes[-1]
+            records.append(
+                {
+                    "mood": mood,
+                    "duration": len(indexes),
+                    "start_date": self.df.loc[start_index, "Date"].date(),
+                    "end_date": self.df.loc[end_index, "Date"].date(),
+                    "event_observed": 0 if end_index == len(self.df) - 1 else 1,
+                }
+            )
+        return records
+
+    def _identify_mood_streaks(self) -> dict[str, list[int]]:
+        """Return completed historical run lengths by mood."""
+        run_lengths: dict[str, list[int]] = {"Fear": [], "Greed": []}
+        for record in self.streak_records:
+            if record["event_observed"] == 1:
+                run_lengths[record["mood"]].append(int(record["duration"]))
         return run_lengths
-    def _generate_survival_based_forecast(self, forecast_days=30, confidence=0.05):
-        remaining_days = self._get_forecast_horizon(confidence)
-        forecast = []
-        current_mmi = self.current_mmi
-        mood = self.current_mood
-        flip_triggered = False
-    
-        for day in range(1, forecast_days + 1):
-            forecast_date = self.today_date + timedelta(days=day)
-    
-            if day <= remaining_days:
-                mmi = current_mmi + np.random.uniform(-2, 2)
-            else:
-                if not flip_triggered:
-                    flip_triggered = True
-                    mmi = 49.0 if mood == 'Greed' else 51.0
-                    mood = 'Fear' if mood == 'Greed' else 'Greed'
-                else:
-                    mmi += np.random.uniform(-3, 3)
-    
-            current_mmi = mmi
-            forecast.append((forecast_date, mmi))
-    
-        return pd.DataFrame(forecast, columns=['Date', 'Forecasted_MMI'])
-    def _get_forecast_horizon(self, confidence=0.05):
-        streak_data = self.run_lengths[self.current_mood]
-        if len(streak_data) < 2:
-            return 5  # default small fallback
-    
-        shape, loc, scale = weibull_min.fit(streak_data, floc=0)
-        current = self.current_streak
-        x = current
-        while weibull_min.sf(x, shape, loc, scale) > confidence:
-            x += 1
-            if x > 10 * max(streak_data):
-                break
-        return max(1, x - current)
 
-    def _get_current_streak_length(self):
+    def _get_current_streak_length(self) -> int:
         current_streak = 1
-        for i in range(len(self.df) - 2, -1, -1):
-            if self.df['Mood'].iloc[i] == self.current_mood:
+        for index in range(len(self.df) - 2, -1, -1):
+            if self.df["Mood"].iloc[index] == self.current_mood:
                 current_streak += 1
             else:
                 break
         return current_streak
 
     @staticmethod
-    def _empirical_survival_hazard(data):
-        kmf = KaplanMeierFitter()
-        kmf.fit(data, event_observed=np.ones_like(data))
-        surv = kmf.survival_function_.reset_index()
-        return surv['timeline'].values, surv['KM_estimate'].values
+    def _empirical_survival_hazard(
+        data: Iterable[int],
+        event_observed: Optional[Iterable[int]] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute a Kaplan-Meier survival curve without an external dependency."""
+        durations = np.asarray(list(data), dtype=int)
+        if durations.size == 0:
+            return np.array([0], dtype=int), np.array([1.0], dtype=float)
+        if np.any(durations <= 0):
+            raise ValueError("Streak durations must be positive integers.")
 
-    def _analyze_mood(self, mood):
-        data = np.array(self.run_lengths[mood])
-        days, S = self._empirical_survival_hazard(data)
-        return {'runs': data, 'survival_days': days, 'survival_prob': S}
+        events = (
+            np.ones_like(durations, dtype=int)
+            if event_observed is None
+            else np.asarray(list(event_observed), dtype=int)
+        )
+        if events.shape != durations.shape:
+            raise ValueError("event_observed must match the duration array.")
 
-    def _get_confidence_flip_date(self, survival_days, survival_prob, confidence=0.05):
-        for d, s in zip(survival_days, survival_prob):
-            if s <= confidence:
-                return d
+        timeline = [0]
+        survival_probability = [1.0]
+        survival = 1.0
+
+        for time_value in sorted(np.unique(durations)):
+            at_risk = int(np.sum(durations >= time_value))
+            observed_events = int(
+                np.sum((durations == time_value) & (events == 1))
+            )
+            if at_risk > 0 and observed_events > 0:
+                survival *= 1.0 - (observed_events / at_risk)
+            timeline.append(int(time_value))
+            survival_probability.append(float(survival))
+
+        return np.asarray(timeline), np.asarray(survival_probability)
+
+    @staticmethod
+    def _survival_at(
+        time_value: int,
+        survival_days: np.ndarray,
+        survival_prob: np.ndarray,
+    ) -> float:
+        valid_indexes = np.where(survival_days <= time_value)[0]
+        if len(valid_indexes) == 0:
+            return 1.0
+        return float(survival_prob[valid_indexes[-1]])
+
+    def _analyze_mood(self, mood: str) -> dict[str, Any]:
+        records = [record for record in self.streak_records if record["mood"] == mood]
+        durations = np.asarray([record["duration"] for record in records], dtype=int)
+        events = np.asarray([record["event_observed"] for record in records], dtype=int)
+        days, survival = self._empirical_survival_hazard(durations, events)
+        completed_runs = np.asarray(
+            [record["duration"] for record in records if record["event_observed"] == 1],
+            dtype=int,
+        )
+        return {
+            "runs": completed_runs,
+            "all_durations": durations,
+            "event_observed": events,
+            "survival_days": days,
+            "survival_prob": survival,
+        }
+
+    def _get_confidence_flip_date(
+        self,
+        survival_days: np.ndarray,
+        survival_prob: np.ndarray,
+        confidence: float = 0.05,
+    ) -> Optional[int]:
+        """Return total streak duration at an unconditional survival threshold.
+
+        Kept for backward compatibility. The displayed estimate uses the
+        conditional residual-life method below because the current streak has
+        already survived for `current_streak` sessions.
+        """
+        confidence = float(np.clip(confidence, 0.001, 0.999))
+        for duration, survival in zip(survival_days, survival_prob):
+            if survival <= confidence:
+                return int(duration)
         return None
 
-    def generate_allocation_plan(self, investable_amount):
-        """Generate MMI-aware staggered allocation plan where last day is the confidence flip date"""
-        days_until_flip = self._get_days_until_confidence_flip()
-    
-        if days_until_flip is None:
-            st.warning("⚠️ Could not forecast flip — defaulting to 15 market days.")
-            target_flip_date = self.today_date + timedelta(days=21)
-        else:
-            target_flip_date = self.mmi_last_date + timedelta(days=days_until_flip)
-    
-        # Generate trading days between tomorrow and flip date (inclusive)
-        all_days = pd.date_range(start=self.today_date + timedelta(days=1), end=target_flip_date, freq='B')
-    
-        # If flip is far enough, restrict to Mondays only
-        if days_until_flip is not None and days_until_flip >= 14:
-            all_days = [day for day in all_days if day.weekday() == 0]  # Monday = 0
-    
+    def _conditional_quantile_remaining(
+        self,
+        mood: str,
+        tail_probability: float,
+    ) -> Optional[int]:
+        """Return remaining sessions at a conditional survival threshold."""
+        result = self._analyze_mood(mood)
+        durations = result["all_durations"]
+        if durations.size == 0:
+            return None
+
+        current = self.current_streak if mood == self.current_mood else 0
+        survival_at_current = self._survival_at(
+            current,
+            result["survival_days"],
+            result["survival_prob"],
+        )
+        if survival_at_current <= 0:
+            return 1
+
+        tail_probability = float(np.clip(tail_probability, 0.001, 0.999))
+        maximum_duration = int(np.max(durations))
+        for total_duration in range(current + 1, maximum_duration + 1):
+            conditional_survival = self._survival_at(
+                total_duration,
+                result["survival_days"],
+                result["survival_prob"],
+            ) / survival_at_current
+            if conditional_survival <= tail_probability:
+                return max(1, total_duration - current)
+        return None
+
+    def _expected_remaining_sessions(self, mood: Optional[str] = None) -> Optional[int]:
+        """Estimate conditional restricted mean remaining streak sessions."""
+        mood = mood or self.current_mood
+        result = self._analyze_mood(mood)
+        durations = result["all_durations"]
+        if durations.size == 0:
+            return None
+
+        current = self.current_streak if mood == self.current_mood else 0
+        survival_at_current = self._survival_at(
+            current,
+            result["survival_days"],
+            result["survival_prob"],
+        )
+        if survival_at_current <= 0:
+            return 1
+
+        maximum_duration = int(np.max(durations))
+        residual_mean = 0.0
+        for total_duration in range(current, maximum_duration):
+            residual_mean += self._survival_at(
+                total_duration,
+                result["survival_days"],
+                result["survival_prob"],
+            ) / survival_at_current
+
+        return max(1, int(round(residual_mean)))
+
+    def _get_days_until_confidence_flip(self, confidence: float = 0.05) -> Optional[int]:
+        """Return conditional remaining trading sessions at the requested tail."""
+        return self._conditional_quantile_remaining(self.current_mood, confidence)
+
+    def _get_forecast_horizon(self, confidence: float = 0.50) -> int:
+        """Return a conditional KM horizon, replacing the uncensored Weibull fit."""
+        remaining = self._conditional_quantile_remaining(
+            self.current_mood,
+            confidence,
+        )
+        return remaining if remaining is not None else 5
+
+    def get_flip_estimate(self) -> dict[str, Any]:
+        """Return expected and uncertainty dates for the current mood flip."""
+        expected_remaining = self._expected_remaining_sessions() or 5
+        median_remaining = self._conditional_quantile_remaining(
+            self.current_mood,
+            0.50,
+        ) or expected_remaining
+        upper_90_remaining = self._conditional_quantile_remaining(
+            self.current_mood,
+            0.10,
+        )
+
+        expected_date = add_business_sessions(self.mmi_last_date, expected_remaining)
+        median_date = add_business_sessions(self.mmi_last_date, median_remaining)
+        upper_90_date = (
+            add_business_sessions(self.mmi_last_date, upper_90_remaining)
+            if upper_90_remaining is not None
+            else None
+        )
+        return {
+            "expected_remaining_sessions": expected_remaining,
+            "median_remaining_sessions": median_remaining,
+            "upper_90_remaining_sessions": upper_90_remaining,
+            "expected_date": expected_date,
+            "median_date": median_date,
+            "upper_90_date": upper_90_date,
+        }
+
+    def _generate_survival_based_forecast(
+        self,
+        forecast_days: int = 30,
+        confidence: float = 0.50,
+    ) -> pd.DataFrame:
+        """Generate a reproducible illustrative MMI path.
+
+        This is a scenario visualisation, not a price or MMI forecasting model.
+        """
+        remaining_sessions = self._get_forecast_horizon(confidence)
+        dates = pd.bdate_range(
+            start=pd.Timestamp(self.mmi_last_date) + pd.offsets.BDay(1),
+            periods=max(1, int(forecast_days)),
+        )
+        seed = int(self.mmi_last_date.strftime("%Y%m%d")) + int(round(self.current_mmi * 100))
+        rng = np.random.default_rng(seed)
+
+        forecast = []
+        current_mmi = self.current_mmi
+        original_mood = self.current_mood
+        flip_triggered = False
+
+        for session_number, forecast_date in enumerate(dates, start=1):
+            if session_number <= remaining_sessions:
+                current_mmi += float(rng.uniform(-2.0, 2.0))
+            elif not flip_triggered:
+                flip_triggered = True
+                current_mmi = 49.0 if original_mood == "Greed" else 51.0
+            else:
+                current_mmi += float(rng.uniform(-3.0, 3.0))
+
+            current_mmi = float(np.clip(current_mmi, 0.0, 100.0))
+            forecast.append((forecast_date.date(), current_mmi))
+
+        return pd.DataFrame(forecast, columns=["Date", "Forecasted_MMI"])
+
+    def generate_allocation_plan(
+        self,
+        investable_amount: float,
+    ) -> tuple[pd.DataFrame, datetime.date]:
+        """Generate the existing MMI-aware staggered allocation plan."""
+        investable_amount = float(investable_amount)
+        if investable_amount <= 0:
+            raise ValueError("Investable amount must be greater than zero.")
+
+        expected_remaining = self._expected_remaining_sessions() or 15
+        expected_remaining = int(np.clip(expected_remaining, 5, 60))
+
+        start_anchor = max(self.today_date, self.mmi_last_date)
+        all_days = pd.bdate_range(
+            start=pd.Timestamp(start_anchor) + pd.offsets.BDay(1),
+            periods=expected_remaining,
+        )
+
+        # Preserve the original lower-frequency plan for long horizons.
+        if expected_remaining >= 14:
+            monday_days = [date for date in all_days if date.weekday() == 0]
+            if all_days[-1] not in monday_days:
+                monday_days.append(all_days[-1])
+            all_days = pd.DatetimeIndex(monday_days)
+
         if len(all_days) < 5:
-            st.warning("⚠️ Not enough trading days before flip — using minimum of 5")
-            all_days = pd.date_range(start=self.today_date + timedelta(days=1), periods=5, freq='B')
-    
-        mmi_today = self.current_mmi
-        streak_days = self.current_streak
-        mmi_step = (50 - mmi_today) / max(1, (len(all_days) - 1))
-    
+            all_days = pd.bdate_range(
+                start=pd.Timestamp(start_anchor) + pd.offsets.BDay(1),
+                periods=5,
+            )
+
+        mmi_step = (MMI_NEUTRAL_LEVEL - self.current_mmi) / max(1, len(all_days) - 1)
+        estimated_mmi_values = [
+            self.current_mmi + (mmi_step * index)
+            for index in range(len(all_days))
+        ]
+
+        raw_weights = np.asarray(
+            [max(0.01, MMI_NEUTRAL_LEVEL - value) for value in estimated_mmi_values],
+            dtype=float,
+        )
+        normalised_weights = raw_weights / raw_weights.sum()
+
         allocation_rows = []
-        total_weight = 0
-        mmi = mmi_today
-        temp_rows = []
-    
-        for i, date in enumerate(all_days):
-            gap = max(0, 50 - mmi)
-            weight = gap * (1 / streak_days)
-            temp_rows.append((i + 1, date, mmi, gap, weight))
-            total_weight += weight
-            mmi += mmi_step
-    
-        # Use last date as confidence_date
+        allocations = investable_amount * normalised_weights
+        allocations[-1] += investable_amount - float(allocations.sum())
+
+        for index, (date, estimated_mmi, weight, amount) in enumerate(
+            zip(all_days, estimated_mmi_values, normalised_weights, allocations),
+            start=1,
+        ):
+            gap = max(0.0, MMI_NEUTRAL_LEVEL - estimated_mmi)
+            allocation_rows.append(
+                {
+                    "Day": index,
+                    "Date": date.strftime("%a, %d %b %Y"),
+                    "Est. MMI": round(float(estimated_mmi), 2),
+                    "MMI Gap": round(float(gap), 2),
+                    "Weight": round(float(weight), 6),
+                    "Allocation (%)": f"{weight * 100:.2f}%",
+                    "Allocation (₹)": f"₹{amount:.2f}",
+                }
+            )
+
         confidence_date = all_days[-1].date()
-    
-        allocation_total = 0
-        for i, (day_num, date, mmi, gap, weight) in enumerate(temp_rows):
-            weight_norm = weight / total_weight
-            allocation = investable_amount * weight_norm
-            allocation_total += allocation
-    
-            allocation_rows.append({
-                "Day": day_num,
-                "Date": date.strftime('%a, %d %b %Y'),
-                "Est. MMI": round(mmi, 2),
-                "MMI Gap": round(gap, 2),
-                "Weight": round(weight_norm, 6),
-                "Allocation (%)": f"{round(weight_norm * 100, 2)}%",
-                "Allocation (₹)": f"₹{allocation:.2f}"
-            })
-    
-        total_alloc = sum(float(row['Allocation (₹)'].replace('₹', '')) for row in allocation_rows)
-        diff = investable_amount - total_alloc
-        if abs(diff) > 0.01:
-            allocation_rows[-1]['Allocation (₹)'] = f"₹{(float(allocation_rows[-1]['Allocation (₹)'].replace('₹', '')) + diff):.2f}"
-    
         return pd.DataFrame(allocation_rows), confidence_date
 
-    def display_mood_analysis(self):
-        from scipy import stats  # Only needed here
-    
-        fear_res = self._analyze_mood('Fear')
-        greed_res = self._analyze_mood('Greed')
-        res = fear_res if self.current_mood == 'Fear' else greed_res
-    
-        confidence_flip_day = self._get_confidence_flip_date(
-            res['survival_days'], res['survival_prob']
+    @staticmethod
+    def _mean_confidence_interval(data: np.ndarray) -> tuple[Optional[float], Optional[tuple[float, float]]]:
+        """Return a t-based 95% confidence interval for the historical mean."""
+        if len(data) < 2:
+            return None, None
+        mean = float(np.mean(data))
+        standard_error = float(stats.sem(data))
+        margin = float(stats.t.ppf(0.975, len(data) - 1) * standard_error)
+        return mean, (mean - margin, mean + margin)
+
+    def display_mood_analysis(self) -> None:
+        fear_result = self._analyze_mood("Fear")
+        greed_result = self._analyze_mood("Greed")
+        flip_estimate = self.get_flip_estimate()
+
+        st.subheader("📈 Current Market Mood Analysis")
+        metric_one, metric_two, metric_three = st.columns(3)
+        metric_one.metric("Current MMI", f"{self.current_mmi:.2f}", self.current_mood)
+        metric_two.metric("Current Streak", f"{self.current_streak} trading sessions")
+
+        days_from_today = (flip_estimate["expected_date"] - self.today_date).days
+        status_text = (
+            "today"
+            if days_from_today == 0
+            else f"in {days_from_today} calendar days"
+            if days_from_today > 0
+            else f"data estimate passed by {abs(days_from_today)} days"
         )
-    
-        mood_container = st.container()
-        with mood_container:
-            st.subheader("📈 Current Market Mood Analysis")
-    
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Current MMI", f"{self.current_mmi:.2f}",
-                        "Fear" if self.current_mmi <= 50 else "Greed")
-            col2.metric("Current Streak", f"{self.current_streak} days")
-    
-            if confidence_flip_day is not None:
-                days_until_flip = confidence_flip_day - self.current_streak
-                raw_confidence_date = self.mmi_last_date + timedelta(days=days_until_flip)
-                confidence_date = raw_confidence_date
-                days_left = (confidence_date - self.today_date).days
-    
-                # ✅ Final flip display logic
-                if days_left <= 0:
-                    if is_market_closed() or raw_confidence_date < self.today_date:
-                        confidence_date = get_next_trading_day(self.today_date)
-                        flip_status = f"on {confidence_date.strftime('%A')}"
-                    else:
-                        flip_status = "today"
-                else:
-                    flip_status = f"in {days_left} days"
-    
-                col3.metric("Expected Flip Date",
-                            confidence_date.strftime('%d %b %Y'),
-                            flip_status)
-    
-            with st.expander("📊 Show Historical Streak Patterns", expanded=False):
-                # 🧮 Streak Stats
-                fear_runs = fear_res['runs']
-                greed_runs = greed_res['runs']
-                # 📈 Expected Streak with 95% Confidence Interval
-                def compute_95_ci(data):
-                    n = len(data)
-                    if n < 2:
-                        return None, None  # Not enough data
-                    mean = np.mean(data)
-                    std = np.std(data, ddof=1)
-                    stderr = std / np.sqrt(n)
-                    margin = 1.96 * stderr  # 95% confidence
-                    return mean, (mean - margin, mean + margin)
+        metric_three.metric(
+            "Expected Flip Date",
+            flip_estimate["expected_date"].strftime("%d %b %Y"),
+            status_text,
+        )
 
-                fear_mean_ci, fear_ci_range = compute_95_ci(fear_runs)
-                greed_mean_ci, greed_ci_range = compute_95_ci(greed_runs)
+        if self.mmi_last_date < self.today_date:
+            st.warning(
+                f"Latest MMI observation is {self.mmi_last_date:%d %b %Y}; "
+                "the forecast starts from that observation, not from an assumed value for today."
+            )
 
-                st.markdown("**📐 Expected Streak Duration (95% Confidence Interval)**")
-                ci_df = pd.DataFrame({
+        uncertainty_text = (
+            f"Median estimate: {flip_estimate['median_date']:%d %b %Y}. "
+            f"About 90% of comparable historical streaks ended by "
+            f"{flip_estimate['upper_90_date']:%d %b %Y}."
+            if flip_estimate["upper_90_date"] is not None
+            else f"Median estimate: {flip_estimate['median_date']:%d %b %Y}."
+        )
+        st.caption(
+            "Conditional Kaplan-Meier estimate with the active streak treated as "
+            f"right-censored. {uncertainty_text} Business dates skip weekends but not NSE holidays. "
+            "This estimates an MMI threshold crossing, not a market correction."
+        )
+
+        with st.expander("📊 Show Historical Streak Patterns", expanded=False):
+            fear_runs = fear_result["runs"]
+            greed_runs = greed_result["runs"]
+            fear_mean, fear_ci = self._mean_confidence_interval(fear_runs)
+            greed_mean, greed_ci = self._mean_confidence_interval(greed_runs)
+
+            st.markdown("**📐 95% Confidence Interval for the Historical Mean**")
+            confidence_table = pd.DataFrame(
+                {
                     "Mood": ["Fear", "Greed"],
-                    "Mean Streak (days)": [f"{fear_mean_ci:.1f}", f"{greed_mean_ci:.1f}"],
-                    "95% CI (days)": [
-                        f"{fear_ci_range[0]:.1f} – {fear_ci_range[1]:.1f}" if fear_ci_range else "N/A",
-                        f"{greed_ci_range[0]:.1f} – {greed_ci_range[1]:.1f}" if greed_ci_range else "N/A"
-                    ]
-                })
-                st.table(ci_df)
+                    "Mean Streak (sessions)": [
+                        f"{fear_mean:.1f}" if fear_mean is not None else "N/A",
+                        f"{greed_mean:.1f}" if greed_mean is not None else "N/A",
+                    ],
+                    "95% CI of Mean": [
+                        f"{fear_ci[0]:.1f} – {fear_ci[1]:.1f}" if fear_ci else "N/A",
+                        f"{greed_ci[0]:.1f} – {greed_ci[1]:.1f}" if greed_ci else "N/A",
+                    ],
+                }
+            )
+            st.table(confidence_table)
 
-                fear_min = np.min(fear_runs) if len(fear_runs) else None
-                fear_max = np.max(fear_runs) if len(fear_runs) else None
-                fear_mean = np.mean(fear_runs) if len(fear_runs) else None
-                fear_median = np.median(fear_runs) if len(fear_runs) else None
-                fear_mode = int(stats.mode(fear_runs, keepdims=False).mode) if len(fear_runs) else None
-            
-                greed_min = np.min(greed_runs) if len(greed_runs) else None
-                greed_max = np.max(greed_runs) if len(greed_runs) else None
-                greed_mean = np.mean(greed_runs) if len(greed_runs) else None
-                greed_median = np.median(greed_runs) if len(greed_runs) else None
-                greed_mode = int(stats.mode(greed_runs, keepdims=False).mode) if len(greed_runs) else None
-            
-                # 📘 Table Summary
-                st.markdown("**📘 Historical Streak Statistics (Days)**")
-                st.table(pd.DataFrame({
+            def safe_mode(values: np.ndarray) -> Optional[int]:
+                if len(values) == 0:
+                    return None
+                return int(stats.mode(values, keepdims=False).mode)
+
+            summary_table = pd.DataFrame(
+                {
                     "Mood": ["Fear", "Greed"],
-                    "Min": [fear_min, greed_min],
-                    "Median": [fear_median, greed_median],
-                    "Mean": [round(fear_mean, 1), round(greed_mean, 1)],
-                    "Mode": [fear_mode, greed_mode],
-                    "Max": [fear_max, greed_max]
-                }))
-            
-                hist_col1, hist_col2 = st.columns(2)
-                hist_col1.metric("Fear Streaks",
-                                 f"{len(fear_runs)}",
-                                 f"Avg: {fear_mean:.1f} days")
-                hist_col2.metric("Greed Streaks",
-                                 f"{len(greed_runs)}",
-                                 f"Avg: {greed_mean:.1f} days")
-            # 🔁 Capital Allocation Suggestion Based on MMI
-            st.info("### 💰 Capital Allocation")
+                    "Completed Runs": [len(fear_runs), len(greed_runs)],
+                    "Min": [int(np.min(fear_runs)), int(np.min(greed_runs))],
+                    "Median": [float(np.median(fear_runs)), float(np.median(greed_runs))],
+                    "Mean": [round(float(np.mean(fear_runs)), 1), round(float(np.mean(greed_runs)), 1)],
+                    "Mode": [safe_mode(fear_runs), safe_mode(greed_runs)],
+                    "75th Percentile": [
+                        float(np.quantile(fear_runs, 0.75)),
+                        float(np.quantile(greed_runs, 0.75)),
+                    ],
+                    "Max": [int(np.max(fear_runs)), int(np.max(greed_runs))],
+                }
+            )
+            st.markdown("**📘 Completed Historical Streak Statistics (Trading Sessions)**")
+            st.table(summary_table)
 
-            if self.current_mmi < 50:
-                invest_pct = (50 - self.current_mmi) * 2
-                st.info(f"""
-                😊  **Fear in Market MMI = {self.current_mmi:.2f}**  
-                👉 **Invest `{invest_pct:.1f}%`** of your deployable cash.  
-                🪙 Fear offers value buys, consider accumulating high-quality assets at lower valuations.
-                """)
-            elif self.current_mmi > 50:
-                liquid_hold_pct = (self.current_mmi - 50) * 2
-                st.info(f"""
-                😬  **Greed in Market MMI = {self.current_mmi:.2f}**
-                
-                👉  Hold at least `{liquid_hold_pct:.1f}%` of total capital in liquid, low-risk instruments.  
-                    Ideally, keep this amount not invested and easily liquidable in your account.
-                
-                🧠  Wait for better valuations to re-enter.  
-                    Greed phases often precede corrections.
-                """)
-
-            else:
-                st.info("""
-                ⚖️ **MMI at Neutral (50)**  
-                No strong directional bias — consider balanced allocation between equity and liquid assets.
-                """)
-
-            # 🧠 Dynamic Mood Suggestion
-            if self.current_mood == 'Greed':
-                threshold = (greed_max - self.current_streak) * 0.277
-                active_threshold = min_threshold if min_threshold > 0 else threshold
-            
-                if self.current_streak < greed_ci_range[0]:
-                    st.warning(f"""
-            📉 **Market in Greed** – but still early in the cycle.  
-            This phase is ideal for:
-            
-            - 🏦 **Booking profits** on outperformers  
-            - 🔁 **Rotating into safer assets**  
-            - 💵 **Holding cash** to prepare for possible pullbacks  
-            
-            📊 **Action Tip**  
-            If your portfolio has gained over **{threshold:.0f}%**, it’s wise to secure some gains.  
-            For more active strategies, start rotating once returns cross **{active_threshold:.0f}%** to stay agile and reduce downside risk.
-                    """)
-                else:
-                    st.warning(f"""
-            🛑 **Market in Greed** – Current streak: `{self.current_streak}` days  
-            **Average**: `{greed_mean:.0f}` days
-            
-            📉 Now is an optimal time to **book profits** and shift your gains into:
-            - 💵 Cash or liquid funds  
-            - 🧱 Short-duration bonds  
-            - 🟡 Commodities like **Gold**, **Silver**, or other non-equity hedges  
-            
-            💡 **Why?**
-            - Greed doesn't last forever — **extended streaks often precede market corrections**
-            - Selling pressure typically builds as investors lock in gains
-            - A shift from Greed to Fear may increase volatility and downside risk
-            
-            📊 **Suggested Action**  
-            Book profits if returns exceed **{min_threshold:.0f}%**, and rotate into **capital-preserving strategies**
-                    """)
-            
-            elif self.current_mood == 'Fear':
-                if self.current_streak < fear_ci_range[0]:
-                    st.success("""
-            🟢 **Market in Fear – Early Stage**  
-            Great time to **accumulate quality stocks** with fresh capital.  
-            Sentiment is low — stay calm and think long term.
-                    """)
-                else:
-                    st.success("""
-            📘 **Market in Fear – Mature Phase**  
-            Be cautious. Accumulate **selectively** and avoid panic selling.  
-            
-            ✅ If you find a better opportunity, consider switching  
-            only if current holdings show **+7% or more profit**.  
-            
-            🧘‍♂️ Don’t sell just out of fear.  
-            📉 Reassess fundamentals before averaging down.  
-            ⏳ This phase may stretch — protect capital, stay alert.
-                    """)
-
-# 🧩 Finally — show allocation planner
-allocation_collection = db['allocation_plans']
-
-def save_allocation_plan(user_id, plan_df, total_amount, days, mmi_snapshot):
-    allocation_collection.insert_one({
-        'user_id': user_id,
-        'timestamp': datetime.utcnow(),
-        'investable_amount': total_amount,
-        'total_days': days,
-        'mmi_snapshot': mmi_snapshot,
-        'confidence_date': mmi_snapshot.get('confidence_date'),  # ✅ save it directly
-        'plan': plan_df.to_dict(orient='records')
-    })
-
-def get_latest_allocation_plan(user_id):
-    rec = allocation_collection.find_one({'user_id': user_id}, sort=[('timestamp', -1)])
-    return pd.DataFrame(rec['plan']) if rec else None
-# ==================== STOCK HOLDINGS ANALYSIS ====================
-@st.cache_data
-def load_equity_mapping():
-    url = "https://raw.githubusercontent.com/KPranaydeep/Finance/refs/heads/main/EQUITY_L.csv"
-    df = pd.read_csv(url)
-    df.columns = df.columns.str.strip()
-    return df[['ISIN NUMBER', 'SYMBOL', 'NAME OF COMPANY']].rename(columns={
-        'ISIN NUMBER': 'ISIN',
-        'SYMBOL': 'Symbol',
-        'NAME OF COMPANY': 'Company Name'
-    })
-
-def analyze_holdings(uploaded_holdings):
-    """Analyze stock holdings from Groww or Kite XLSX files"""
-    try:
-        xls = pd.ExcelFile(uploaded_holdings)
-        sheet_names = xls.sheet_names
-
-        if "Equity" in sheet_names:
-            # Kite XLSX format (your uploaded file)
-            df = pd.read_excel(uploaded_holdings, sheet_name="Equity", skiprows=22)
-            df = df.dropna(subset=["Symbol"])
-            df = df.rename(columns={
-                "Quantity Available": "Quantity",
-                "Average Price": "Average Price",
-                "Unrealized P&L": "P&L",
-                "Unrealized P&L Pct.": "P&L (%)",
-                "Previous Closing Price": "Live LTP"
-            })
-            df["Company Name"] = df["Symbol"]
-
+        st.info("### 💰 Capital Allocation")
+        if self.current_mmi < MMI_NEUTRAL_LEVEL:
+            invest_pct = float(np.clip((MMI_NEUTRAL_LEVEL - self.current_mmi) * 2, 0, 100))
+            st.info(
+                f"😊 **Fear regime, MMI = {self.current_mmi:.2f}**  \n"
+                f"Rule-based deployment suggestion: invest up to **{invest_pct:.1f}%** "
+                "of deployable cash gradually, subject to asset quality and personal risk limits."
+            )
+        elif self.current_mmi > MMI_NEUTRAL_LEVEL:
+            liquid_hold_pct = float(np.clip((self.current_mmi - MMI_NEUTRAL_LEVEL) * 2, 0, 100))
+            st.info(
+                f"😬 **Greed regime, MMI = {self.current_mmi:.2f}**  \n"
+                f"Rule-based reserve suggestion: keep at least **{liquid_hold_pct:.1f}%** "
+                "of total capital in liquid or lower-volatility instruments."
+            )
         else:
-            # Assume Groww XLSX format
-            df = pd.read_excel(uploaded_holdings, sheet_name='Sheet1', skiprows=9)
-            if df.iloc[0].astype(str).str.contains("Stock Name", case=False).any():
-                df = df.iloc[1:]
-            df = df.rename(columns={
-                'Unnamed: 0': 'Stock Name',
-                'Unnamed: 1': 'ISIN',
-                'Unnamed: 2': 'Quantity',
-                'Unnamed: 3': 'Average Price',
-                'Unnamed: 4': 'Buy Value',
-                'Unnamed: 5': 'LTP',
-                'Unnamed: 6': 'Current Value',
-                'Unnamed: 7': 'P&L'
-            })
-            df = df.dropna(subset=['Stock Name', 'ISIN'])
+            st.info("⚖️ **MMI is neutral at 50.** Consider a balanced allocation.")
 
-            # Merge with equity mapping
-            equity_mapping = load_equity_mapping()
-            df = df.merge(equity_mapping, on='ISIN', how='left')
-            df.dropna(subset=['Symbol'], inplace=True)
-            df['Company Name'] = df['Company Name'].fillna(df['Stock Name'])
-            df['Live LTP'] = df['LTP']
+        current_completed_runs = (
+            greed_runs if self.current_mood == "Greed" else fear_runs
+        )
+        percentile_rank = (
+            float(np.mean(current_completed_runs <= self.current_streak))
+            if len(current_completed_runs)
+            else 0.5
+        )
 
-        # Ensure numeric types
-        df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce')
-        df['Average Price'] = pd.to_numeric(df['Average Price'], errors='coerce')
-        df['Live LTP'] = pd.to_numeric(df['Live LTP'], errors='coerce')
+        if self.current_mood == "Greed":
+            if percentile_rank < 0.50:
+                st.warning(
+                    f"📉 **Greed regime — historically early-to-middle stage.**  \n"
+                    f"Current duration is around the {percentile_rank * 100:.0f}th percentile "
+                    "of completed Greed streaks. Review concentrated winners and rebalance only "
+                    f"where your plan supports it. A configurable profit-review threshold is "
+                    f"**{active_profit_threshold:.1f}%**."
+                )
+            else:
+                st.warning(
+                    f"🛑 **Greed regime — historically extended.**  \n"
+                    f"Current duration is around the {percentile_rank * 100:.0f}th percentile "
+                    "of completed Greed streaks. This raises sentiment-regime risk but does not "
+                    "prove that a price correction is imminent. Consider partial rebalancing, "
+                    f"liquidity and position limits when net returns exceed **{active_profit_threshold:.1f}%**."
+                )
+        else:
+            if percentile_rank < 0.50:
+                st.success(
+                    "🟢 **Fear regime — historically early-to-middle stage.** Accumulate only "
+                    "high-quality assets gradually and preserve diversification."
+                )
+            else:
+                st.success(
+                    "📘 **Fear regime — historically extended.** Continue selective deployment, "
+                    "but reassess fundamentals before averaging down."
+                )
 
-        # Clean and calculate derived fields
-        df = df.dropna(subset=['Symbol', 'Quantity', 'Average Price', 'Live LTP'])
-        df['Invested Amount'] = df['Quantity'] * df['Average Price']
-        df['Current Value'] = df['Quantity'] * df['Live LTP']
-        df['Profit/Loss'] = df['Current Value'] - df['Invested Amount']
-        df['Profit/Loss (%)'] = (df['Profit/Loss'] / df['Invested Amount']) * 100
 
-        return df[['Symbol', 'Company Name', 'Quantity', 'Average Price', 
-                   'Live LTP', 'Invested Amount', 'Current Value', 
-                   'Profit/Loss', 'Profit/Loss (%)']]
+# -----------------------------------------------------------------------------
+# ALLOCATION PLAN STORAGE
+# -----------------------------------------------------------------------------
+def save_allocation_plan(
+    user_id: str,
+    plan_df: pd.DataFrame,
+    total_amount: float,
+    days: int,
+    mmi_snapshot: dict[str, Any],
+) -> None:
+    if allocation_collection is None:
+        return
+    allocation_collection.insert_one(
+        {
+            "user_id": user_id,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc),
+            "investable_amount": float(total_amount),
+            "total_days": int(days),
+            "mmi_snapshot": mmi_snapshot,
+            "confidence_date": mmi_snapshot.get("confidence_date"),
+            "plan": plan_df.to_dict(orient="records"),
+        }
+    )
 
-    except Exception as e:
-        st.error(f"❌ Could not process XLSX file: {e}")
+
+def get_latest_allocation_plan(user_id: str) -> Optional[pd.DataFrame]:
+    if allocation_collection is None:
+        return None
+    try:
+        record = allocation_collection.find_one(
+            {"user_id": user_id},
+            sort=[("timestamp", -1)],
+        )
+        return pd.DataFrame(record["plan"]) if record else None
+    except Exception:
         return None
 
-# ==================== STREAMLIT UI ====================
 
-# ========== MMI SECTION (Place this AFTER the class definition) ==========
-# ========== Load Analyzer from MongoDB or Uploaded File ==========
-# ========== Define helper to read MMI from MongoDB ==========
-def read_mmi_from_mongodb():
+# -----------------------------------------------------------------------------
+# HOLDINGS ANALYSIS
+# -----------------------------------------------------------------------------
+@st.cache_data(ttl=86400)
+def load_equity_mapping() -> pd.DataFrame:
+    url = "https://raw.githubusercontent.com/KPranaydeep/Finance/refs/heads/main/EQUITY_L.csv"
+    mapping = pd.read_csv(url)
+    mapping.columns = mapping.columns.str.strip()
+    required = ["ISIN NUMBER", "SYMBOL", "NAME OF COMPANY"]
+    missing = [column for column in required if column not in mapping.columns]
+    if missing:
+        raise ValueError(f"Equity mapping is missing columns: {missing}")
+    return mapping[required].rename(
+        columns={
+            "ISIN NUMBER": "ISIN",
+            "SYMBOL": "Symbol",
+            "NAME OF COMPANY": "Company Name",
+        }
+    )
+
+
+def analyze_holdings(uploaded_holdings: Any) -> Optional[pd.DataFrame]:
+    """Analyse stock holdings from Groww or Kite XLSX exports."""
     try:
-        records = list(mmi_collection.find({}, {'_id': 0}))
-        if records:
-            df = pd.DataFrame(records)
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.sort_values('Date', inplace=True)
-            df.reset_index(drop=True, inplace=True)
-            return df
+        uploaded_holdings.seek(0)
+        workbook = pd.ExcelFile(uploaded_holdings)
+        sheet_names = workbook.sheet_names
+        uploaded_holdings.seek(0)
+
+        if "Equity" in sheet_names:
+            holdings = pd.read_excel(uploaded_holdings, sheet_name="Equity", skiprows=22)
+            holdings.columns = holdings.columns.astype(str).str.strip()
+            holdings = holdings.dropna(subset=["Symbol"])
+            holdings = holdings.rename(
+                columns={
+                    "Quantity Available": "Quantity",
+                    "Average Price": "Average Price",
+                    "Unrealized P&L": "P&L",
+                    "Unrealized P&L Pct.": "P&L (%)",
+                    "Previous Closing Price": "Live LTP",
+                }
+            )
+            holdings["Company Name"] = holdings["Symbol"]
+            holdings["Price Source"] = "Previous close from Kite export"
         else:
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"❌ Failed to read from MongoDB: {e}")
+            holdings = pd.read_excel(uploaded_holdings, sheet_name="Sheet1", skiprows=9)
+            if not holdings.empty and holdings.iloc[0].astype(str).str.contains(
+                "Stock Name", case=False
+            ).any():
+                holdings = holdings.iloc[1:]
+            holdings = holdings.rename(
+                columns={
+                    "Unnamed: 0": "Stock Name",
+                    "Unnamed: 1": "ISIN",
+                    "Unnamed: 2": "Quantity",
+                    "Unnamed: 3": "Average Price",
+                    "Unnamed: 4": "Buy Value",
+                    "Unnamed: 5": "LTP",
+                    "Unnamed: 6": "Current Value",
+                    "Unnamed: 7": "P&L",
+                }
+            )
+            holdings = holdings.dropna(subset=["Stock Name", "ISIN"])
+            holdings = holdings.merge(load_equity_mapping(), on="ISIN", how="left")
+            holdings = holdings.dropna(subset=["Symbol"])
+            holdings["Company Name"] = holdings["Company Name"].fillna(
+                holdings["Stock Name"]
+            )
+            holdings["Live LTP"] = holdings["LTP"]
+            holdings["Price Source"] = "LTP snapshot from Groww export"
+
+        required_columns = ["Symbol", "Quantity", "Average Price", "Live LTP"]
+        missing = [column for column in required_columns if column not in holdings.columns]
+        if missing:
+            raise ValueError(f"Holdings file is missing required fields: {missing}")
+
+        for column in ["Quantity", "Average Price", "Live LTP"]:
+            holdings[column] = pd.to_numeric(holdings[column], errors="coerce")
+
+        holdings = holdings.dropna(subset=required_columns)
+        holdings = holdings[
+            (holdings["Quantity"] > 0)
+            & (holdings["Average Price"] > 0)
+            & (holdings["Live LTP"] > 0)
+        ].copy()
+
+        holdings["Invested Amount"] = holdings["Quantity"] * holdings["Average Price"]
+        holdings["Current Value"] = holdings["Quantity"] * holdings["Live LTP"]
+        holdings["Profit/Loss"] = holdings["Current Value"] - holdings["Invested Amount"]
+        holdings["Profit/Loss (%)"] = np.where(
+            holdings["Invested Amount"] > 0,
+            holdings["Profit/Loss"] / holdings["Invested Amount"] * 100,
+            np.nan,
+        )
+
+        return holdings[
+            [
+                "Symbol",
+                "Company Name",
+                "Quantity",
+                "Average Price",
+                "Live LTP",
+                "Price Source",
+                "Invested Amount",
+                "Current Value",
+                "Profit/Loss",
+                "Profit/Loss (%)",
+            ]
+        ]
+    except Exception as exc:
+        st.error(f"❌ Could not process XLSX file: {exc}")
+        return None
+
+
+# -----------------------------------------------------------------------------
+# MMI DATABASE HELPERS AND UI
+# -----------------------------------------------------------------------------
+def read_mmi_from_mongodb() -> pd.DataFrame:
+    if mmi_collection is None:
+        return pd.DataFrame()
+    try:
+        records = list(mmi_collection.find({}, {"_id": 0}))
+        return pd.DataFrame(records) if records else pd.DataFrame()
+    except Exception as exc:
+        st.error(f"❌ Failed to read MMI data from MongoDB: {exc}")
         return pd.DataFrame()
 
-# ========== Upload full MMI dataset ==========
+
 with st.expander("📂 Upload Full MMI Dataset", expanded=False):
     uploaded_mmi_csv = st.file_uploader(
         "Upload full MMI dataset (CSV format)",
         type=["csv"],
-        key="upload_mmi_db"
+        key="upload_mmi_db",
     )
 
-    uploaded_bytes = None
+    uploaded_bytes: Optional[bytes] = None
     if uploaded_mmi_csv is not None and uploaded_mmi_csv.size > 0:
-        uploaded_bytes = uploaded_mmi_csv.read()
+        uploaded_bytes = uploaded_mmi_csv.getvalue()
         try:
-            mmi_df = pd.read_csv(BytesIO(uploaded_bytes))
-            mmi_df.columns = ['Date', 'MMI', 'Nifty']
-            mmi_df['Date'] = pd.to_datetime(mmi_df['Date'], format='%d/%m/%Y')
+            validated_analyzer = MarketMoodAnalyzer(uploaded_bytes)
+            validated_mmi_df = validated_analyzer.df[["Date", "MMI", "Nifty"]].copy()
 
-            # Store to MongoDB
-            mmi_collection.delete_many({})
-            mmi_collection.insert_many(mmi_df.to_dict(orient='records'))
+            if mmi_collection is not None:
+                documents = []
+                for row in validated_mmi_df.to_dict(orient="records"):
+                    documents.append(
+                        {
+                            "Date": pd.Timestamp(row["Date"]).to_pydatetime(),
+                            "MMI": float(row["MMI"]),
+                            "Nifty": None if pd.isna(row["Nifty"]) else float(row["Nifty"]),
+                        }
+                    )
+                # Validate everything before replacing the full collection.
+                mmi_collection.delete_many({})
+                if documents:
+                    mmi_collection.insert_many(documents, ordered=False)
+                st.success("✅ Validated MMI data replaced the full MongoDB dataset.")
+            else:
+                st.success("✅ MMI data validated. MongoDB is disabled, so it is used for this session only.")
+        except Exception as exc:
+            st.error(f"❌ Error processing MMI CSV: {exc}")
+            uploaded_bytes = None
 
-            st.success("✅ MMI data uploaded and saved to MongoDB")
-        except Exception as e:
-            st.error(f"❌ Error processing MMI CSV: {e}")
-            uploaded_bytes = None  # reset on failure
 
-# ========== MMI SECTION (Load Analyzer from MongoDB or Uploaded File) ==========
 try:
     if uploaded_bytes:
         st.info("📄 Using uploaded MMI CSV file")
-        analyzer = MarketMoodAnalyzer(uploaded_bytes)
+        analyzer: Optional[MarketMoodAnalyzer] = MarketMoodAnalyzer(uploaded_bytes)
     else:
-        df_from_db = read_mmi_from_mongodb()
-        if not df_from_db.empty:
+        database_mmi_df = read_mmi_from_mongodb()
+        if not database_mmi_df.empty:
             st.info("☁️ Using MMI data from MongoDB")
-            analyzer = MarketMoodAnalyzer(df_from_db)
+            analyzer = MarketMoodAnalyzer(database_mmi_df)
         else:
-            st.warning("⚠️ No valid MMI data found in MongoDB. Please upload or add today’s MMI.")
             analyzer = None
-except Exception as e:
+            st.warning("⚠️ No valid MMI data found. Upload the full dataset or configure MongoDB.")
+except Exception as exc:
     analyzer = None
-    st.error(f"❌ Error loading MMI data: {str(e)}")
+    st.error(f"❌ Error loading MMI data: {exc}")
+
 st.markdown("📊 [Visit Tickertape Market Mood Index](https://www.tickertape.in/market-mood-index)")
 
 with st.expander("📝 Add Today's MMI", expanded=False):
     with st.form("add_today_mmi"):
-        today_mmi = st.number_input("Today's MMI", min_value=0.0, max_value=100.0, step=0.1)
-        today = datetime.today().date()
-        submitted = st.form_submit_button("📥 Save to MongoDB")
+        today_mmi = st.number_input(
+            "Today's MMI",
+            min_value=0.0,
+            max_value=100.0,
+            step=0.1,
+        )
+        submitted = st.form_submit_button("📥 Save / Update in MongoDB")
 
     if submitted:
-        try:
-            # Fetch today's Nifty value
-            nifty_ticker = yf.Ticker("^NSEI")
-            nifty_today = nifty_ticker.history(period='1d')['Close'].iloc[-1]
+        if mmi_collection is None:
+            st.error("MongoDB is not configured. Set MONGODB_URI before saving daily MMI values.")
+        else:
+            try:
+                current_date = today_ist()
+                nifty_history = yf.Ticker("^NSEI").history(period="5d")
+                if nifty_history.empty:
+                    raise ValueError("Could not fetch a recent NIFTY close.")
+                nifty_value = float(nifty_history["Close"].dropna().iloc[-1])
+                date_datetime = datetime.datetime.combine(
+                    current_date,
+                    datetime.time.min,
+                )
+                mmi_collection.update_one(
+                    {"Date": date_datetime},
+                    {
+                        "$set": {
+                            "Date": date_datetime,
+                            "MMI": float(today_mmi),
+                            "Nifty": nifty_value,
+                        }
+                    },
+                    upsert=True,
+                )
+                st.success(f"✅ Saved MMI: {today_mmi:.1f} | Recent NIFTY close: {nifty_value:.2f}")
 
-            # Insert into MongoDB
-            mmi_collection.insert_one({
-                "Date": datetime.combine(today, datetime.min.time()),
-                "MMI": today_mmi,
-                "Nifty": nifty_today
-            })
+                refreshed_mmi_df = read_mmi_from_mongodb()
+                analyzer = (
+                    MarketMoodAnalyzer(refreshed_mmi_df)
+                    if not refreshed_mmi_df.empty
+                    else None
+                )
+            except Exception as exc:
+                st.error(f"❌ Could not save today's MMI: {exc}")
 
-            st.success(f"✅ Saved MMI: {today_mmi} | Nifty: {nifty_today:.2f}")
 
-            # Refresh analyzer with updated data
-            df_from_db = read_mmi_from_mongodb()
-            if not df_from_db.empty:
-                analyzer = MarketMoodAnalyzer(df_from_db)
-                st.success("🔄 Analyzer updated with new data")
-            else:
-                analyzer = None
-                st.warning("⚠️ MongoDB returned no data")
-
-        except Exception as e:
-            analyzer = None
-            st.error(f"❌ Error: {e}")
-
-# ========== Display Mood Analysis ==========
-# 🧩 Hook into Streamlit logic after analyzer.display_mood_analysis()
 if analyzer:
     analyzer.display_mood_analysis()
 
     if analyzer.current_mood == "Fear":
-        st.success("🟢 MMI indicates Fear – You may plan allocation")
-
-        st.markdown("""
-            💡 **Planning Your Investment**
-            
-            Since the market is currently in a *Fear* phase (MMI < 50), it may be a good time to start deploying capital gradually.
-            Enter the total amount you'd like to invest.  
-            The tool will generate a staggered buy allocation plan across the next few market days based on historical mood patterns.
-            
-            This approach helps reduce timing risk and allows disciplined entry during uncertain times.
-            """)
-
+        st.success("🟢 MMI indicates Fear — gradual allocation planning is enabled.")
+        st.markdown(
+            "The plan staggers deployable capital across estimated business sessions. "
+            "It reduces timing concentration but does not evaluate stock quality or valuation."
+        )
 
         with st.form("allocation_plan_form"):
-            amt = st.number_input("Investable Amount (₹)", min_value=100.0, step=1000.0)
-            submit_alloc = st.form_submit_button("Generate Allocation Plan")
+            investable_amount = st.number_input(
+                "Investable Amount (₹)",
+                min_value=100.0,
+                step=1000.0,
+            )
+            submit_allocation = st.form_submit_button("Generate Allocation Plan")
 
-        if submit_alloc:
-            alloc_df, confidence_date = analyzer.generate_allocation_plan(amt)
-            st.dataframe(alloc_df)
-        
-            # Extract total days from the plan
-            total_days = len(alloc_df)
-        
-            save_allocation_plan("default_user", alloc_df, amt, total_days, {
-                'mmi': analyzer.current_mmi,
-                'mood': analyzer.current_mood,
-                'streak': analyzer.current_streak,
-                'date': analyzer.mmi_last_date.strftime('%Y-%m-%d'),
-                'confidence_date': confidence_date.strftime('%Y-%m-%d')  # ✅ New field
-            })
-        
-            st.download_button("Download Allocation CSV", alloc_df.to_csv(index=False), file_name="allocation_plan.csv")
+        if submit_allocation:
+            allocation_plan_df, confidence_date = analyzer.generate_allocation_plan(
+                investable_amount
+            )
+            st.dataframe(allocation_plan_df, use_container_width=True)
+            save_allocation_plan(
+                "default_user",
+                allocation_plan_df,
+                investable_amount,
+                len(allocation_plan_df),
+                {
+                    "mmi": analyzer.current_mmi,
+                    "mood": analyzer.current_mood,
+                    "streak": analyzer.current_streak,
+                    "date": analyzer.mmi_last_date.strftime("%Y-%m-%d"),
+                    "confidence_date": confidence_date.strftime("%Y-%m-%d"),
+                },
+            )
+            st.download_button(
+                "Download Allocation CSV",
+                allocation_plan_df.to_csv(index=False),
+                file_name="allocation_plan.csv",
+            )
 
         with st.expander("🗂 View Last Saved Allocation Plan"):
-            prev = get_latest_allocation_plan("default_user")
-            if prev is not None:
-                st.dataframe(prev)
+            previous_plan = get_latest_allocation_plan("default_user")
+            if previous_plan is not None:
+                st.dataframe(previous_plan, use_container_width=True)
             else:
-                st.info("No saved plan yet.")
+                st.info("No saved plan is available.")
 
-uploaded_holdings = None  # ✅ Initialize at top (before condition)
+
+uploaded_holdings = None
 if analyzer and analyzer.current_mood == "Greed":
     st.header("📤 Upload Your Holdings")
-
     uploaded_holdings = st.file_uploader(
         "Upload your stock holdings file (.xlsx format only — Groww or Kite)",
-        type=['xlsx'],
-        key="upload_holdings_greed"
+        type=["xlsx"],
+        key="upload_holdings_greed",
     )
-    
-# ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
-# st.markdown("## 📌 Recommended Stocks to Explore")
 
-# # Google Sheet configuration
-# sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
-# sheet_name = "Sheet1"
-# csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-# sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
 
-# # Link to open the original Google Sheet
-# st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
-
-# try:
-#     # Load CSV without header (Google Sheets export format)
-#     df_raw = pd.read_csv(csv_url, header=None)
-
-#     # Slice rows 1 to 991 (i.e., A2 to A992), column A 
-#     df_reco = df_raw.iloc[1:11, [0]]
-#     df_reco.columns = ["Stock"]
-
-#     # Clean and format
-#     df_reco.dropna(subset=["Stock"], inplace=True)
-#     df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
-#     df_reco = df_reco[df_reco["Stock"] != ""]
-#     df_reco.reset_index(drop=True, inplace=True)
-
-#     if not df_reco.empty:
-#         st.markdown("These are **community-sourced stock ideas**. Use them as a starting point, not financial advice.")
-
-#         # Apply minimal styling
-#         styled_df = df_reco.style.set_table_styles([
-#             {"selector": "th", "props": [("padding", "4px"), ("font-size", "13px")]},
-#             {"selector": "td", "props": [("padding", "4px"), ("font-size", "13px")]}
-#         ])
-
-#         # Display the styled table
-#         st.dataframe(styled_df, use_container_width=True)
-
-#     else:
-#         st.warning("⚠️ No valid stock entries found between rows A2 to D992.")
-
-# except Exception as e:
-#     st.error("❌ Failed to load Google Sheet data.")
-#     st.code(str(e), language='text')
-
-# ==================== STOCK RECOMMENDATIONS FROM GOOGLE SHEET ====================
+# -----------------------------------------------------------------------------
+# STOCK RECOMMENDATIONS FROM GOOGLE SHEET
+# -----------------------------------------------------------------------------
 st.markdown("## 📌 Recommended Stocks to Explore")
-
-# Google Sheet configuration
 sheet_id = "1f1N_2T9xvifzf4BjeiwVgpAcak8_AVaEEbae_NXua8c"
 sheet_name = "Sheet1"
 csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
 sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?usp=sharing"
-
-# Link to open the original Google Sheet
 st.markdown(f"🔗 [Open Google Sheet]({sheet_url})")
 
 try:
-    # Load CSV without header (Google Sheets export format)
-    df_raw = pd.read_csv(csv_url, header=None)
+    recommendation_raw_df = pd.read_csv(csv_url, header=None)
+    recommendation_df = recommendation_raw_df.iloc[2:, [0, 1]].copy()
+    recommendation_df.columns = ["Stock", "Score"]
+    recommendation_df = recommendation_df.dropna(subset=["Stock"])
+    recommendation_df["Stock"] = recommendation_df["Stock"].astype(str).str.strip()
+    recommendation_df = recommendation_df[recommendation_df["Stock"] != ""]
+    recommendation_df["Score"] = pd.to_numeric(
+        recommendation_df["Score"],
+        errors="coerce",
+    ).fillna(0.0)
+    recommendation_df = recommendation_df.drop_duplicates(subset=["Stock"], keep="first")
 
-    # Slice rows 1 to 991 (i.e., A2 to A992), column A 
-    # Read Stock (A) and Score (B)
-    df_reco = df_raw.iloc[2:, [0, 1]]
-    df_reco.columns = ["Stock", "Score"]
-    
-    # Clean
-    df_reco.dropna(subset=["Stock"], inplace=True)
-    df_reco["Stock"] = df_reco["Stock"].astype(str).str.strip()
-    df_reco = df_reco[df_reco["Stock"] != ""]
-    
-    df_reco["Score"] = pd.to_numeric(df_reco["Score"], errors="coerce").fillna(0)
-    df_reco.reset_index(drop=True, inplace=True)
-    
-    if not df_reco.empty:
-    
-        # Sort by score descending
-        df_sorted = df_reco.sort_values(by="Score", ascending=False)
-    
-        # Top 10 by score
-        top_10 = df_sorted.head(10)["Stock"].tolist()
-    
-        # Remaining pool
-        remaining = df_sorted.iloc[10:]["Stock"].tolist()
-    
-        # Combine pool = deterministic top + random 10 from remaining
-        if len(remaining) >= 10:
-            random_10 = random.sample(remaining, 10)
-        else:
-            random_10 = remaining
-    
-        combined_pool = top_10 + random_10   # max 20
-    
-        # Session state init
+    if not recommendation_df.empty:
+        sorted_recommendations = recommendation_df.sort_values("Score", ascending=False)
+        top_ten = sorted_recommendations.head(10)["Stock"].tolist()
+        remaining_stocks = sorted_recommendations.iloc[10:]["Stock"].tolist()
+        random_ten = (
+            random.sample(remaining_stocks, 10)
+            if len(remaining_stocks) >= 10
+            else remaining_stocks
+        )
+        combined_pool = list(dict.fromkeys(top_ten + random_ten))
+
         if "display_selection" not in st.session_state:
             st.session_state.display_selection = []
-    
-        # Button controls display reshuffle only
+
         if st.button("🎯 Pick 10 to Display"):
-            if len(combined_pool) >= 10:
-                st.session_state.display_selection = random.sample(combined_pool, 10)
-            else:
-                st.session_state.display_selection = combined_pool
-    
-        # Display
+            st.session_state.display_selection = (
+                random.sample(combined_pool, 10)
+                if len(combined_pool) >= 10
+                else combined_pool
+            )
+
         if st.session_state.display_selection:
             st.markdown("### Selected Stocks")
             for stock in st.session_state.display_selection:
                 st.write(f"- {stock}")
-except Exception as e:
+        st.caption("Community or score-based ideas require independent fundamental and risk review.")
+except Exception as exc:
     st.error("❌ Failed to load Google Sheet data.")
-    st.code(str(e), language="text")
-    
-# Add these functions to your existing code
-def get_april_first_current_year():
-    today = datetime.now()
-    april_first = datetime(today.year, 4, 1)
-    return april_first.strftime("%Y-%m-%d")
+    st.code(str(exc), language="text")
 
-def trading_days_elapsed(start_date_str, end_date_str=None):
-    if end_date_str is None:
-        end_date = datetime.now().date()
-    else:
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-    start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
 
-    all_days = pd.date_range(start=start_date, end=end_date, freq='D')
-    trading_days = all_days[all_days.dayofweek < 5]  # Monday=0 ... Friday=4
-    return len(trading_days)
+# -----------------------------------------------------------------------------
+# PROFIT-BOOKING HELPERS
+# -----------------------------------------------------------------------------
+def get_april_first_current_year() -> str:
+    current_date = today_ist()
+    financial_year_start_year = (
+        current_date.year if current_date.month >= 4 else current_date.year - 1
+    )
+    return datetime.date(financial_year_start_year, 4, 1).strftime("%Y-%m-%d")
 
-def calculate_dynamic_sell_limit(net_pl, charges, target_net_daily_pct=0.28):
-    """Calculate dynamic sell limit based on P&L and charges"""
-    start_date_str = get_april_first_current_year()
-    days_elapsed = trading_days_elapsed(start_date_str)
+
+def trading_days_elapsed(start_date_str: str, end_date_str: Optional[str] = None) -> int:
+    end_date = (
+        today_ist()
+        if end_date_str is None
+        else datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    )
+    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    if end_date < start_date:
+        return 0
+    return len(pd.bdate_range(start=start_date, end=end_date))
+
+
+def calculate_dynamic_sell_limit(
+    net_pl: float,
+    charges: float,
+    target_net_daily_pct: float = DEFAULT_TARGET_NET_DAILY_PCT,
+) -> float:
+    """Calculate the gross return required to retain a target net return.
+
+    Charges are modelled as their historical share of gross trading profit:
+    gross P&L = net P&L + charges. The previous formula divided that percentage
+    by elapsed days, mixing incompatible units.
+    """
+    net_pl = float(net_pl)
+    charges = max(0.0, float(charges))
+    target_net_daily_pct = max(0.0, float(target_net_daily_pct))
+
     gross_pl = net_pl + charges
-    effective_cost_pct = (charges / gross_pl) * 100
-    daily_charges_pct = effective_cost_pct / days_elapsed
-    sell_limit_pct = target_net_daily_pct + daily_charges_pct
-    return round(1 + (sell_limit_pct/100), 6)  # Convert to multiplier (e.g., 1.005298)
+    if net_pl <= 0 or gross_pl <= 0:
+        raise ValueError("Positive net P&L is required to estimate charge drag.")
 
-import openpyxl
+    cost_fraction = float(np.clip(charges / gross_pl, 0.0, 0.95))
+    required_gross_return_pct = target_net_daily_pct / max(1.0 - cost_fraction, 0.05)
+    return round(1.0 + required_gross_return_pct / 100.0, 6)
 
-def extract_net_pl_and_charges(file) -> tuple:
-    wb = openpyxl.load_workbook(file, data_only=True)
-    ws = wb.active  # Or wb['Sheet1'] if known
 
-    net_pl = ws['B9'].value or 0.0
-    charges = ws['B25'].value or 0.0
-
+def extract_net_pl_and_charges(file: Any) -> tuple[float, float]:
+    file.seek(0)
+    workbook = openpyxl.load_workbook(file, data_only=True, read_only=True)
+    worksheet = workbook.active
+    net_pl = worksheet["B9"].value or 0.0
+    charges = worksheet["B25"].value or 0.0
     return float(net_pl), float(charges)
 
-# ==== PROFIT BOOKING SECTION ====
-if uploaded_holdings:
+
+# -----------------------------------------------------------------------------
+# PROFIT BOOKING UI
+# -----------------------------------------------------------------------------
+if uploaded_holdings is not None:
     st.header("💼 Your Portfolio Analysis")
     merged_df = analyze_holdings(uploaded_holdings)
 
-    if merged_df is not None:
-        # Display holdings
+    if merged_df is not None and not merged_df.empty:
         st.subheader("🧾 Current Holdings")
-        st.dataframe(merged_df[['Symbol', 'Company Name', 'Quantity', 'Average Price',
-                                'Live LTP', 'Current Value', 'Profit/Loss', 'Profit/Loss (%)']])
+        st.dataframe(
+            merged_df[
+                [
+                    "Symbol",
+                    "Company Name",
+                    "Quantity",
+                    "Average Price",
+                    "Live LTP",
+                    "Price Source",
+                    "Current Value",
+                    "Profit/Loss",
+                    "Profit/Loss (%)",
+                ]
+            ],
+            use_container_width=True,
+        )
+        if merged_df["Price Source"].str.contains("Previous close").any():
+            st.caption(
+                "Kite's exported 'Previous Closing Price' is a reference price, not a live quote."
+            )
 
-        # Portfolio summary
-        total_invested = merged_df['Invested Amount'].sum()
-        total_current_value = merged_df['Current Value'].sum()
-        total_pl = merged_df['Profit/Loss'].sum()
+        total_invested = float(merged_df["Invested Amount"].sum())
+        total_current_value = float(merged_df["Current Value"].sum())
+        total_profit_loss = float(merged_df["Profit/Loss"].sum())
+        overall_return_pct = (
+            total_profit_loss / total_invested * 100 if total_invested > 0 else 0.0
+        )
 
         st.subheader("📊 Portfolio Summary")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("💰 Total Invested", f"₹{total_invested:,.2f}")
-        col2.metric("📈 Current Value", f"₹{total_current_value:,.2f}")
-        col3.metric("📊 Overall P&L", f"₹{total_pl:,.2f}", delta=f"{(total_pl / total_invested) * 100:.2f}%")
+        summary_one, summary_two, summary_three = st.columns(3)
+        summary_one.metric("💰 Total Invested", f"₹{total_invested:,.2f}")
+        summary_two.metric("📈 Reference Value", f"₹{total_current_value:,.2f}")
+        summary_three.metric(
+            "📊 Overall P&L",
+            f"₹{total_profit_loss:,.2f}",
+            delta=f"{overall_return_pct:.2f}%",
+        )
 
-        USER_ID = "default_user"
+        user_id = "default_user"
+        uploaded_report = st.file_uploader(
+            "📄 Upload your P&L Report (B9 = Net P&L, B25 = Charges)",
+            type=["xlsx"],
+        )
+        latest_params = get_latest_input_params(user_id)
+        net_pl_default = float(latest_params.get("net_pl", 0.0))
+        charges_default = float(latest_params.get("charges", 0.0))
 
-        # 📂 Upload optional Net P&L Report
-        uploaded_report = st.file_uploader("📄 Upload your P&L Report (B9 = Net P&L, B25 = Charges)", type=["xlsx"])
-
-        # Load defaults from saved MongoDB values
-        latest_params = get_latest_input_params(USER_ID)
-        net_pl_default = float(latest_params.get('net_pl', 0.0))
-        charges_default = float(latest_params.get('charges', 0.0))
-
-        # Override if report uploaded
         if uploaded_report is not None:
             try:
-                net_pl_from_file, charges_from_file = extract_net_pl_and_charges(uploaded_report)
-                net_pl_default = net_pl_from_file
-                charges_default = charges_from_file
-                st.success("✅ Auto-filled Net P&L and Charges from uploaded report.")
-            except Exception as e:
-                st.error(f"⚠️ Failed to extract values from report: {e}")
+                net_pl_default, charges_default = extract_net_pl_and_charges(
+                    uploaded_report
+                )
+                st.success("✅ Auto-filled Net P&L and charges from the uploaded report.")
+            except Exception as exc:
+                st.error(f"⚠️ Failed to extract report values: {exc}")
 
         st.subheader("🎯 Profit Booking Strategy")
-        st.subheader("🔧 Adjust Profit Booking Parameters")
-
-        # User inputs
-        net_pl = st.number_input("Enter net P&L (INR)",
-                                 value=net_pl_default,
-                                 min_value=0.0,
-                                 step=1000.0)
-
-        charges_input = st.number_input("Enter charges (INR)",
-                                        value=charges_default,
-                                        min_value=0.0,
-                                        step=100.0)
-
-        target_net_daily_pct = st.number_input("Target net daily return (%)",
-                                               value=float(latest_params.get('target_pct', 0.28)),
-                                               min_value=0.01,
-                                               max_value=5.0,
-                                               step=0.01)
-
-        # Save input values
-        save_input_params(USER_ID, net_pl, charges_input, target_net_daily_pct)
-
-        if net_pl <= 0:
-            st.error("❌ Cannot calculate sell limit with zero or negative P&L")
-        else:
-            sell_limit_multiplier = calculate_dynamic_sell_limit(net_pl, charges_input, target_net_daily_pct)
-            daily_return_pct = round((sell_limit_multiplier - 1) * 100, 4)
-            st.markdown(f"💡 *Dynamic sell limit calculated at {daily_return_pct}% above buy price*")
-
+        with st.form("profit_booking_parameters"):
+            net_pl = st.number_input(
+                "Enter net P&L (INR)",
+                value=max(0.0, net_pl_default),
+                min_value=0.0,
+                step=1000.0,
+            )
+            charges_input = st.number_input(
+                "Enter charges (INR)",
+                value=max(0.0, charges_default),
+                min_value=0.0,
+                step=100.0,
+            )
+            target_net_daily_pct = st.number_input(
+                "Target net daily return (%)",
+                value=float(latest_params.get("target_pct", DEFAULT_TARGET_NET_DAILY_PCT)),
+                min_value=0.01,
+                max_value=5.0,
+                step=0.01,
+            )
             rotation_option = st.radio(
                 "Select rotation strategy for calculating target profit:",
                 ["Daily", "Weekly", "Monthly"],
                 index=0,
-                horizontal=True
+                horizontal=True,
             )
+            target_rupees_input = st.number_input(
+                "Target profit (₹); enter 0 to use the automatically calculated target",
+                value=0.0,
+                min_value=0.0,
+                step=100.0,
+            )
+            calculate_plan = st.form_submit_button("Save Parameters and Calculate")
 
-            # Determine profit target
-            if rotation_option == "Daily":
-                default_target = round(total_invested * (sell_limit_multiplier - 1), 2)
-            elif rotation_option == "Weekly":
-                default_target = round(total_invested * (sell_limit_multiplier - 1) * 4.84615385, 2)
+        if calculate_plan:
+            save_input_params(user_id, net_pl, charges_input, target_net_daily_pct)
+
+            if net_pl <= 0:
+                st.error("❌ A positive net P&L is required to calculate charge drag.")
             else:
-                default_target = round(total_invested * (sell_limit_multiplier - 1) * 21, 2)
+                try:
+                    sell_limit_multiplier = calculate_dynamic_sell_limit(
+                        net_pl,
+                        charges_input,
+                        target_net_daily_pct,
+                    )
+                    required_return_pct = (sell_limit_multiplier - 1.0) * 100.0
+                    st.markdown(
+                        f"💡 Required gross return is approximately **{required_return_pct:.4f}%** "
+                        "above average cost to retain the selected net target under the historical charge ratio."
+                    )
 
-            target_rupees = st.number_input("Enter target profit (₹)",
-                                            value=default_target,
-                                            min_value=0.0,
-                                            step=100.0)
+                    period_sessions = {"Daily": 1, "Weekly": 5, "Monthly": 21}
+                    period_target_pct = (
+                        (1.0 + required_return_pct / 100.0)
+                        ** period_sessions[rotation_option]
+                        - 1.0
+                    )
+                    default_target = round(total_invested * period_target_pct, 2)
+                    target_rupees = (
+                        float(target_rupees_input)
+                        if target_rupees_input > 0
+                        else max(0.0, default_target)
+                    )
+                    st.caption(f"Profit target used: ₹{target_rupees:,.2f}")
 
-            # Filter profitable holdings
-            profitable_df = merged_df[merged_df['Profit/Loss'] > 0].copy()
-            profitable_df = profitable_df.sort_values(by='Profit/Loss (%)', ascending=False)
-            profitable_df['Sell Limit (₹)'] = (profitable_df['Live LTP'] * sell_limit_multiplier).round(2)
+                    profitable_df = merged_df[merged_df["Profit/Loss"] > 0].copy()
+                    profitable_df = profitable_df.sort_values(
+                        "Profit/Loss (%)",
+                        ascending=False,
+                    )
+                    profitable_df["Target Price (₹)"] = (
+                        profitable_df["Average Price"] * sell_limit_multiplier
+                    ).round(2)
+                    profitable_df["Execution Estimate (₹)"] = profitable_df[
+                        ["Live LTP", "Target Price (₹)"]
+                    ].max(axis=1)
 
-            cumulative_profit = 0.0
-            sell_plan_rows = []
+                    cumulative_profit = 0.0
+                    sell_plan_rows = []
 
-            for _, row in profitable_df.iterrows():
-                if cumulative_profit >= target_rupees:
-                    break
+                    for _, row in profitable_df.iterrows():
+                        if cumulative_profit >= target_rupees:
+                            break
 
-                per_share_profit = row['Sell Limit (₹)'] - row['Average Price']
-                if per_share_profit <= 0:
-                    continue
+                        per_share_profit = (
+                            float(row["Execution Estimate (₹)"])
+                            - float(row["Average Price"])
+                        )
+                        if per_share_profit <= 0:
+                            continue
 
-                max_possible_shares = row['Quantity']
-                needed_profit = target_rupees - cumulative_profit
-                shares_to_sell = min(max_possible_shares, int(needed_profit // per_share_profit))
+                        maximum_shares = int(math.floor(float(row["Quantity"])))
+                        if maximum_shares <= 0:
+                            continue
 
-                if shares_to_sell <= 0:
-                    continue
+                        needed_profit = max(0.0, target_rupees - cumulative_profit)
+                        shares_to_sell = min(
+                            maximum_shares,
+                            max(1, int(math.ceil(needed_profit / per_share_profit))),
+                        )
+                        actual_profit = shares_to_sell * per_share_profit
+                        cumulative_profit += actual_profit
 
-                actual_profit = shares_to_sell * per_share_profit
-                cumulative_profit += actual_profit
+                        sell_plan_rows.append(
+                            {
+                                "Symbol": row["Symbol"],
+                                "Company Name": row["Company Name"],
+                                "Quantity to Sell": shares_to_sell,
+                                "Average Price": float(row["Average Price"]),
+                                "Reference Price": float(row["Live LTP"]),
+                                "Target Price (₹)": float(row["Target Price (₹)"]),
+                                "Execution Estimate (₹)": float(row["Execution Estimate (₹)"]),
+                                "Expected Gross Profit": actual_profit,
+                                "Profit (%)": per_share_profit / float(row["Average Price"]) * 100,
+                            }
+                        )
 
-                sell_plan_rows.append({
-                    'Symbol': row['Symbol'],
-                    'Company Name': row['Company Name'],
-                    'Quantity to Sell': shares_to_sell,
-                    'Average Price': row['Average Price'],
-                    'Current Price': row['Live LTP'],
-                    'Sell Limit (₹)': row['Sell Limit (₹)'],
-                    'Expected Profit': actual_profit,
-                    'Profit (%)': (row['Sell Limit (₹)'] - row['Average Price']) / row['Average Price'] * 100
-                })
+                    if sell_plan_rows:
+                        sell_plan_df = pd.DataFrame(sell_plan_rows)
+                        st.success(
+                            f"✅ Suggested sell plan estimates ₹{cumulative_profit:,.2f} gross profit."
+                        )
+                        st.dataframe(sell_plan_df, use_container_width=True)
+                        st.caption(
+                            "Execution price, taxes, slippage and live brokerage can differ. "
+                            "Use a current quote before placing an order."
+                        )
+                        st.download_button(
+                            "📥 Download Sell Plan",
+                            sell_plan_df.to_csv(index=False).encode("utf-8"),
+                            "sell_plan.csv",
+                            "text/csv",
+                            key="download-sell-plan",
+                        )
+                    else:
+                        st.warning("📉 No profitable holdings can currently support the target.")
+                except Exception as exc:
+                    st.error(f"Could not calculate the sell plan: {exc}")
 
-            if sell_plan_rows:
-                sell_plan_df = pd.DataFrame(sell_plan_rows)
-                st.success(f"✅ Suggested Sell Plan to Book ₹{cumulative_profit:.2f} Profit")
-                st.dataframe(sell_plan_df)
 
-                csv = sell_plan_df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Sell Plan", csv, "sell_plan.csv", "text/csv", key='download-sell-plan')
-            else:
-                st.warning("📉 Not enough profitable stocks to meet target")
-                st.info("⏳ Check back tomorrow when market conditions may improve")
-            
-import streamlit as st
-from datetime import datetime, timedelta
-
-# 🎯 Input your target profit %
+# -----------------------------------------------------------------------------
+# SELL OR HOLD STRATEGY
+# -----------------------------------------------------------------------------
 target_profit_percent = 7.2
+assumed_daily_net_return_pct = 0.278
 
-# 📆 Auto-calculate holding period
-holding_days = round((target_profit_percent * 7) / 5 / 0.278)
+holding_sessions = int(
+    math.ceil(
+        math.log1p(target_profit_percent / 100.0)
+        / math.log1p(assumed_daily_net_return_pct / 100.0)
+    )
+)
+strategy_today = today_ist()
+strategy_exit_date = add_business_sessions(strategy_today, holding_sessions)
+holding_calendar_days = (strategy_exit_date - strategy_today).days
 
-# 📅 Calculate dates
-today = datetime.today().date()
-exit_date = today + timedelta(days=holding_days)
-
-# 📌 Display holding rule
-st.markdown(f"""
+st.markdown(
+    f"""
 ### 📌 Sell or Hold Strategy
 
-- ✅ **Hold for {holding_days} days** from today (**{today.strftime('%b %d, %Y')}**)  
-  ➤ Target exit on **{exit_date.strftime('%b %d, %Y')}**
+- ✅ **Illustrative target period: {holding_sessions} trading sessions**  
+  From **{strategy_today.strftime('%b %d, %Y')}**, the weekday-based target date is **{strategy_exit_date.strftime('%b %d, %Y')}** ({holding_calendar_days} calendar days).
 
-- 📉 **If in loss after {holding_days} days**, continue to **hold until breakeven**
+- 📉 If a holding is in loss on that date, **reassess the business thesis, valuation, opportunity cost and risk**. Do not hold indefinitely only to reach breakeven.
 
-- 💰 **Sell anytime** after if **net profit ≥ {target_profit_percent}%** using brokerage-inclusive estimates:
+- 💰 Review for partial or full exit when estimated **net profit ≥ {target_profit_percent:.1f}%**, using current prices and brokerage-inclusive estimates:
   - [Groww Brokerage Calculator](https://groww.in/calculators/brokerage-calculator)
   - [Zerodha Brokerage Calculator](https://zerodha.com/brokerage-calculator/#tab-equities)
-""")
 
+The date is derived from an assumed compounded daily net return of **{assumed_daily_net_return_pct:.3f}%**. It is a planning assumption, not an expected-return guarantee.
+"""
+)
+
+if mongo_error:
+    st.caption(f"Database status: {mongo_error}")
