@@ -10,15 +10,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
-import yfinance as yf
-from scipy.optimize import minimize
-from scipy.stats import kurtosis, norm, skew
 
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-06-29-manual-coverage-preview-v8-ema252"
+APP_BUILD = "2026-07-10-streamlit-cloud-safe-lazy-native-imports"
 
 # =========================================================
 # HELPERS
@@ -38,6 +35,7 @@ def load_equity_mapping():
 
 @st.cache_data(show_spinner=False)
 def resolve_yahoo_tickers(symbols_base):
+    import yfinance as yf
     resolved = {}
     for sym in symbols_base:
         for suffix in [".NS", ".BO"]:
@@ -1077,6 +1075,7 @@ def download_close_history(
     buffer_days=7,
 ):
     """Download closing-price history once and reuse it during the same analysis."""
+    import yfinance as yf
     if end_date is None:
         end_date = datetime.today()
     else:
@@ -1286,6 +1285,7 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
 
 
 def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1):
+    from scipy.optimize import minimize
     mean_returns = log_returns.mean()
     cov_matrix = log_returns.cov()
     num_assets = len(mean_returns)
@@ -1319,6 +1319,7 @@ def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1
 
 
 def optimize_max_sharpe_ratio(log_returns):
+    from scipy.optimize import minimize
     mean_returns = log_returns.mean()
     cov_matrix = log_returns.cov()
     num_assets = len(mean_returns)
@@ -1339,6 +1340,7 @@ def optimize_max_sharpe_ratio(log_returns):
 
 
 def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
+    from scipy.optimize import minimize
     mean_returns = log_returns.mean()
     cov_matrix = log_returns.cov()
     num_assets = len(mean_returns)
@@ -1365,6 +1367,7 @@ def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
 
 
 def portfolio_stats(weights, log_returns):
+    from scipy.stats import kurtosis, norm, skew
     portfolio_returns = log_returns @ weights
     mean = portfolio_returns.mean()
     std = portfolio_returns.std()
@@ -1491,6 +1494,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
 @st.cache_data(show_spinner=False)
 def get_latest_price_map(latest_prices):
+    import yfinance as yf
     price_history = yf.download(latest_prices, period="15d", progress=False, auto_adjust=True)["Close"]
 
     if isinstance(price_history, pd.Series):
@@ -1509,6 +1513,7 @@ def get_latest_price_map(latest_prices):
 
 @st.cache_data(show_spinner=False)
 def get_ema252_change_map(tickers):
+    import yfinance as yf
     """Return each ticker's percentage distance from its latest 252-day EMA.
 
     Formula: (latest adjusted close / latest EMA-252) - 1.
