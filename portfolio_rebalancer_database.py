@@ -1846,7 +1846,16 @@ with st.sidebar:
         ),
     )
 
+    preview_requested = st.session_state.get("drop_bottom_preview_requested", False)
     if preview_coverage_btn:
+        preview_requested = True
+        st.session_state["drop_bottom_preview_requested"] = True
+
+    if (
+        preview_requested
+        or st.session_state.get("drop_bottom_last_pct") != drop_bottom_pct
+    ):
+        st.session_state["drop_bottom_last_pct"] = drop_bottom_pct
         st.session_state.pop("drop_bottom_coverage_preview", None)
         st.session_state.pop("drop_bottom_coverage_error", None)
         try:
@@ -1859,14 +1868,20 @@ with st.sidebar:
 
     coverage_preview = st.session_state.get("drop_bottom_coverage_preview")
     if coverage_preview:
+        kept_tickers = int(coverage_preview.get("tickers_kept", coverage_preview.get("assets", 0)))
+        total_tickers = int(coverage_preview.get("total_tickers", 0))
         st.info(
-            f"**drop_bottom_pct used:** `{coverage_preview['drop_bottom_pct']:.2f}`  |  "
+            f"**Preview:** using {coverage_preview['drop_bottom_pct']:.2f} will keep {kept_tickers} of {total_tickers} holdings.  |  "
             f"**Trading days analysed:** {coverage_preview['trading_days']:,}  |  "
             f"**Assets in return matrix:** {coverage_preview['assets']:,}"
         )
+        if kept_tickers < 10:
+            st.warning(
+                f"Only {kept_tickers} holdings remain after filtering, which may make the optimization unstable."
+            )
         st.caption(
             "Coverage preview only — portfolio optimization has not been run. "
-            "Adjust the percentage and preview again until satisfied."
+            "Adjust the percentage and watch this preview update live."
         )
 
     coverage_error = st.session_state.get("drop_bottom_coverage_error")
