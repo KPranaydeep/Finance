@@ -1686,13 +1686,13 @@ def find_drop_bottom_pct_by_return_gap(
             evaluated[pct] = None
             return None
 
+        gap = max((optimal_ret - current_ret) / abs(optimal_ret), 0.0) if abs(optimal_ret) > 1e-12 else abs(current_ret - optimal_ret)
+
         candidate = {
             "drop_bottom_pct": pct,
             "current_annual_return": current_ret,
             "optimized_annual_return": optimal_ret,
-            "return_gap_pct": max((optimal_ret - current_ret) / abs(optimal_ret), 0.0)
-            if abs(optimal_ret) > 1e-12
-            else abs(current_ret - optimal_ret),
+            "return_gap_pct": gap,
             "trading_days": int(log_returns.shape[0]) if log_returns is not None else 0,
             "assets": int(log_returns.shape[1]) if log_returns is not None else 0,
             "target_reached": True,
@@ -1701,30 +1701,42 @@ def find_drop_bottom_pct_by_return_gap(
         return candidate
 
     best_candidate = None
-    current_pct = 0.10
+    current_pct = 0.01
     current_candidate = evaluate_pct(current_pct)
     if current_candidate is not None:
-        return current_candidate
+        best_candidate = current_candidate
+        if current_candidate["target_reached"]:
+            return current_candidate
 
     step = 0.10
     while step >= 0.01:
         improved = False
         for direction in (1, -1):
             neighbor_pct = round(current_pct + direction * step, 2)
-            if neighbor_pct < 0.10 or neighbor_pct > 0.99:
+            if neighbor_pct < 0.01 or neighbor_pct > 0.99:
                 continue
 
             candidate = evaluate_pct(neighbor_pct)
             if candidate is None:
                 continue
 
-            if best_candidate is None or candidate["drop_bottom_pct"] < best_candidate["drop_bottom_pct"]:
+            if best_candidate is None or candidate["return_gap_pct"] < best_candidate["return_gap_pct"] or (
+                candidate["return_gap_pct"] == best_candidate["return_gap_pct"]
+                and candidate["drop_bottom_pct"] < best_candidate["drop_bottom_pct"]
+            ):
                 best_candidate = candidate
 
-            current_candidate = candidate
-            current_pct = neighbor_pct
-            improved = True
-            break
+            if candidate["target_reached"]:
+                return candidate
+
+            if (
+                current_candidate is None
+                or candidate["return_gap_pct"] < current_candidate["return_gap_pct"]
+            ):
+                current_candidate = candidate
+                current_pct = neighbor_pct
+                improved = True
+                break
 
         if not improved:
             step = round(step / 2, 2)
@@ -2048,13 +2060,12 @@ with st.sidebar:
         st.error(f"Could not calculate history coverage: {coverage_error}")
 
     st.button(
-        "Find drop_bottom_pct where optimized return is higher",
+        "Find drop_bottom_pct in 0.10–0.99 for higher optimized return",
         width="stretch",
         on_click=calculate_drop_bottom_pct_recommendation,
         help=(
-            "Searches drop_bottom_pct values by history length so the optimized portfolio's "
-            "annual return is strictly higher than the current portfolio's, and the current "
-            "return is within 5% of the optimized return."
+            "Searches drop_bottom_pct values by history length from 0.10 to 0.99 so the "
+            "optimized portfolio's annual return is strictly higher than the current portfolio's."
         ),
     )
 
