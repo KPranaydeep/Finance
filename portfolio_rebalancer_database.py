@@ -1700,54 +1700,35 @@ def find_drop_bottom_pct_by_return_gap(
         evaluated[pct] = candidate
         return candidate
 
-    best_candidate = None
+    low = 0.10
+    high = 0.99
     current_pct = 0.18
+
     current_candidate = evaluate_pct(current_pct)
     if current_candidate is not None:
-        best_candidate = current_candidate
-        if current_candidate["target_reached"]:
-            return current_candidate
+        return current_candidate
 
-    step = 0.10
-    while step >= 0.01:
-        improved = False
-        for direction in (1, -1):
-            neighbor_pct = round(current_pct + direction * step, 2)
-            if neighbor_pct < 0.01 or neighbor_pct > 0.99:
-                continue
+    queue = [(low, high)]
 
-            candidate = evaluate_pct(neighbor_pct)
-            if candidate is None:
-                continue
+    while queue:
+        low, high = queue.pop(0)
+        if round(high - low, 3) < 0.01:
+            continue
 
-            if best_candidate is None or candidate["return_gap_pct"] < best_candidate["return_gap_pct"] or (
-                candidate["return_gap_pct"] == best_candidate["return_gap_pct"]
-                and candidate["drop_bottom_pct"] < best_candidate["drop_bottom_pct"]
-            ):
-                best_candidate = candidate
+        mid = round((low + high) / 2, 2)
+        if mid == low or mid == high:
+            continue
 
-            if candidate["target_reached"]:
-                return candidate
+        mid_candidate = evaluate_pct(mid)
+        if mid_candidate is not None:
+            return mid_candidate
 
-            if (
-                current_candidate is None
-                or candidate["return_gap_pct"] < current_candidate["return_gap_pct"]
-            ):
-                current_candidate = candidate
-                current_pct = neighbor_pct
-                improved = True
-                break
+        queue.append((low, mid))
+        queue.append((mid, high))
 
-        if not improved:
-            step = round(step / 2, 2)
-
-    if best_candidate is None:
-        raise ValueError(
-            "Could not find a usable history filter that supports portfolio optimization."
-        )
-
-    best_candidate["target_reached"] = True
-    return best_candidate
+    raise ValueError(
+        "Could not find a usable history filter that supports portfolio optimization."
+    )
 
 
 def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
