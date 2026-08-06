@@ -702,7 +702,7 @@ def render_saved_analysis(placeholder):
             data=backup_json,
             file_name=f"portfolio_analysis_backup_{backup_date}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
             key="download_saved_analysis_main_" + saved_at,
         )
 
@@ -727,7 +727,7 @@ def render_saved_analysis(placeholder):
                         )
                         st.dataframe(
                             current_saved_df,
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                         )
                     else:
@@ -747,7 +747,7 @@ def render_saved_analysis(placeholder):
                         )
                         st.dataframe(
                             optimal_saved_df,
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                         )
                     else:
@@ -801,13 +801,13 @@ def render_saved_analysis(placeholder):
                 if required_style_columns.issubset(saved_rebal_df.columns):
                     st.dataframe(
                         style_rebalance_df(saved_rebal_df),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                 else:
                     st.dataframe(
                         saved_rebal_df,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
             else:
@@ -1661,40 +1661,74 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
     num_to_drop = int(np.floor(float(drop_bottom_pct) * total_tickers))
     tickers_kept = max(total_tickers - num_to_drop, 0)
 
+    import yfinance as yf
+
+    def safe_download(tickers):
+        try:
+            history = yf.download(
+                list(tickers),
+                period="5y",
+                progress=False,
+                auto_adjust=True,
+                threads=False,
+            )["Close"]
+            if isinstance(history, pd.Series):
+                history = history.to_frame()
+            history = history.dropna(axis=1, how="all")
+            if history.empty:
+                raise ValueError("No history data could be fetched for the current holdings.")
+            return history
+        except Exception:
+            valid_columns = []
+            for ticker in tickers:
+                try:
+                    partial = yf.download(
+                        ticker,
+                        period="5y",
+                        progress=False,
+                        auto_adjust=True,
+                        threads=False,
+                    )["Close"]
+                    if isinstance(partial, pd.Series):
+                        partial = partial.to_frame()
+                    partial = partial.dropna(axis=1, how="all")
+                    if not partial.empty:
+                        valid_columns.append(partial)
+                except Exception:
+                    continue
+            if not valid_columns:
+                raise ValueError("No valid history data could be fetched for the current holdings.")
+            history = pd.concat(valid_columns, axis=1)
+            history = history.loc[:, ~history.columns.duplicated()]
+            history = history.dropna(axis=1, how="all")
+            if history.empty:
+                raise ValueError("No valid history data could be fetched after fallback.")
+            return history
+
     try:
-        import yfinance as yf
-
-        history = yf.download(
-            list(yahoo_tickers),
-            period="5y",
-            progress=False,
-            auto_adjust=True,
-            threads=False,
-        )["Close"]
-
-        if isinstance(history, pd.Series):
-            history = history.to_frame()
-
-        if history.empty:
-            raise ValueError("No history data could be fetched for the current holdings.")
-
+        history = safe_download(list(yahoo_tickers))
         lengths = history.count().sort_values(ascending=False)
-        kept_lengths = lengths.head(max(tickers_kept, 1))
-        available_days = int(kept_lengths.min()) if not kept_lengths.empty else 0
+        available_tickers = len(lengths)
+        actual_kept = max(min(tickers_kept, available_tickers), 0)
+        filtered_tickers = lengths.head(actual_kept).index.tolist()
+        available_days = int(lengths.head(actual_kept).min()) if actual_kept > 0 else 0
+        dropped_tickers = lengths.tail(num_to_drop).index.tolist() if num_to_drop > 0 else []
     except Exception:
         available_days = 0
-
-    filtered_tickers = lengths.head(tickers_kept).index.tolist()
+        available_tickers = 0
+        actual_kept = 0
+        filtered_tickers = []
+        dropped_tickers = []
 
     return {
         "drop_bottom_pct": float(drop_bottom_pct),
         "trading_days": int(available_days),
-        "assets": int(tickers_kept),
+        "assets": int(actual_kept),
         "total_tickers": int(total_tickers),
         "tickers_dropped": int(num_to_drop),
-        "tickers_kept": int(tickers_kept),
+        "tickers_kept": int(actual_kept),
         "filtered_tickers": filtered_tickers,
-        "dropped_tickers": lengths.tail(num_to_drop).index.tolist() if num_to_drop > 0 else [],
+        "dropped_tickers": dropped_tickers,
         "resolved_tickers": int(len(yahoo_tickers)),
         "invalid_holding_rows": int(len(invalid_rows)),
     }
@@ -1761,7 +1795,7 @@ with st.sidebar:
         help="Symbols entered here are removed completely from the master holdings table.",
     )
 
-    update_holdings_btn = st.button("Update master holdings", use_container_width=True)
+    update_holdings_btn = st.button("Update master holdings", width="stretch")
 
     st.divider()
     st.header("Holdings backup and restore")
@@ -1773,7 +1807,7 @@ with st.sidebar:
         data=holdings_csv,
         file_name=f"portfolio_holdings_backup_{holdings_backup_date}.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
         key="download_holdings_backup_sidebar",
         disabled=get_unique_holdings_count() == 0,
         help="Download this before a Streamlit Cloud restart or redeployment.",
@@ -1797,7 +1831,7 @@ with st.sidebar:
     )
     restore_holdings_btn = st.button(
         "Restore uploaded holdings",
-        use_container_width=True,
+        width="stretch",
         key="restore_holdings_btn",
         disabled=holdings_backup_upload is None,
     )
@@ -1816,7 +1850,7 @@ with st.sidebar:
             data=existing_analysis_backup,
             file_name=f"portfolio_analysis_backup_{latest_saved_date}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
             key="download_saved_analysis_sidebar",
         )
     else:
@@ -1830,7 +1864,7 @@ with st.sidebar:
     )
     restore_analysis_btn = st.button(
         "Restore uploaded analysis",
-        use_container_width=True,
+        width="stretch",
         key="restore_analysis_btn",
         disabled=analysis_backup_upload is None,
     )
@@ -1866,7 +1900,7 @@ with st.sidebar:
 
     preview_coverage_btn = st.button(
         "Preview history coverage",
-        use_container_width=True,
+        width="stretch",
         help=(
             "Calculates history coverage for the current percentage without "
             "running optimization."
@@ -1913,7 +1947,7 @@ with st.sidebar:
 
     st.button(
         "Calculate 252-day recommendation",
-        use_container_width=True,
+        width="stretch",
         on_click=calculate_drop_bottom_pct_recommendation,
     )
 
@@ -1943,7 +1977,7 @@ with st.sidebar:
 
     run_btn = st.button(
         "Run optimization",
-        use_container_width=True,
+        width="stretch",
         type="primary",
     )
 
@@ -2030,7 +2064,7 @@ master_df = load_master_holdings()
 if master_df.empty:
     st.info("The master holdings table is empty. Add NSE symbols from the sidebar.")
 else:
-    st.dataframe(master_df, use_container_width=True, hide_index=True)
+    st.dataframe(master_df, width="stretch", hide_index=True)
 
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
@@ -2066,7 +2100,7 @@ else:
         ):
             edited_df = st.data_editor(
                 editable_df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 disabled=["Symbol", "Stock Name"],
                 column_config={
@@ -2085,7 +2119,7 @@ else:
             )
             save_holdings_btn = st.form_submit_button(
                 "Save quantity and price changes",
-                use_container_width=True,
+                width="stretch",
                 type="primary",
             )
 
@@ -2133,7 +2167,7 @@ if run_btn:
                     "Average Price": "₹{:,.2f}",
                     "Weight": "{:.2%}",
                 }),
-                use_container_width=True,
+                width="stretch",
             )
 
         with col2:
@@ -2190,10 +2224,10 @@ if run_btn:
 
         if not meta["dropped_df"].empty:
             st.subheader("Dropped Tickers")
-            st.dataframe(meta["dropped_df"], use_container_width=True)
+            st.dataframe(meta["dropped_df"], width="stretch")
 
         st.subheader("History Coverage")
-        st.dataframe(meta["min_len_df"], use_container_width=True)
+        st.dataframe(meta["min_len_df"], width="stretch")
         st.info(
             f"**drop_bottom_pct used:** `{drop_bottom_pct:.2f}`  |  "
             f"**Trading days analysed:** {int(log_returns.shape[0]):,}  |  "
@@ -2213,7 +2247,7 @@ if run_btn:
                     lambda r: f"{r['Value']:.2%}" if r["Metric"] != "Sharpe Ratio" else f"{r['Value']:.2f}",
                     axis=1,
                 )
-                st.dataframe(current_df, use_container_width=True)
+                st.dataframe(current_df, width="stretch")
 
             with c2:
                 st.markdown("**Optimized Portfolio**")
@@ -2222,7 +2256,7 @@ if run_btn:
                     lambda r: f"{r['Value']:.2%}" if r["Metric"] != "Sharpe Ratio" else f"{r['Value']:.2f}",
                     axis=1,
                 )
-                st.dataframe(optimal_df, use_container_width=True)
+                st.dataframe(optimal_df, width="stretch")
 
         st.subheader("Top Correlated Pairs")
 
@@ -2246,7 +2280,7 @@ if run_btn:
                     columns=["Ticker 1", "Ticker 2", "Abs Correlation"],
                 ).sort_values("Abs Correlation", ascending=False)
 
-                st.dataframe(top_corrs.head(5), use_container_width=True)
+                st.dataframe(top_corrs.head(5), width="stretch")
 
         with st.spinner("Fetching latest prices and 252 EMA changes..."):
             latest_prices = log_returns.columns.tolist()
@@ -2275,7 +2309,7 @@ if run_btn:
         if rebal_df.empty:
             st.success("No trades to execute after filtering Executable Quantity = 0")
         else:
-            st.dataframe(style_rebalance_df(rebal_df), use_container_width=True)
+            st.dataframe(style_rebalance_df(rebal_df), width="stretch")
 
             csv = rebal_df.to_csv(index=False).encode("utf-8")
             st.download_button(
@@ -2283,7 +2317,7 @@ if run_btn:
                 data=csv,
                 file_name="rebalancing_plan.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
 
         analysis_payload = {
