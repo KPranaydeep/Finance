@@ -1659,7 +1659,7 @@ def find_drop_bottom_pct_by_return_gap(
     best_candidate = None
     best_gap = float("inf")
 
-    for step_number in range(96):
+    for step_number in range(1, 100):
         pct = round(step_number / 100, 2)
 
         try:
@@ -2029,12 +2029,13 @@ with st.sidebar:
         st.error(f"Could not calculate history coverage: {coverage_error}")
 
     st.button(
-        "Find drop_bottom_pct for ≤5% return gap",
+        "Find drop_bottom_pct where optimized return is higher",
         width="stretch",
         on_click=calculate_drop_bottom_pct_recommendation,
         help=(
-            "Searches drop_bottom_pct values by history length so the current portfolio's "
-            "annual return is within 5% of the optimized portfolio's annual return."
+            "Searches drop_bottom_pct values by history length so the optimized portfolio's "
+            "annual return is strictly higher than the current portfolio's, and the current "
+            "return is within 5% of the optimized return."
         ),
     )
 
@@ -2045,7 +2046,7 @@ with st.sidebar:
         )
         st.info(
             f"Auto value: {auto_drop_result['drop_bottom_pct']:.2f} — "
-            f"Current return is {auto_drop_result['return_gap_pct']:.2%} behind optimized; "
+            f"Optimized return is higher and current return is {auto_drop_result['return_gap_pct']:.2%} behind; "
             f"{status} the 5% gap target. "
             f"Trading days: {auto_drop_result['trading_days']:,}."
         )
