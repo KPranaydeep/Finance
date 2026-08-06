@@ -1636,6 +1636,11 @@ def clear_drop_bottom_coverage_preview():
     st.session_state.pop("drop_bottom_coverage_error", None)
 
 
+def request_run_optimization():
+    """Flag the optimization run request in session state."""
+    st.session_state["run_optimization_requested"] = True
+
+
 def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
     """Estimate coverage using available history lengths only; do not run optimization."""
     portfolio_df, invalid_rows = build_current_allocation_from_db()
@@ -1975,11 +1980,15 @@ with st.sidebar:
         else None
     )
 
-    run_btn = st.button(
+    st.button(
         "Run optimization",
         width="stretch",
         type="primary",
+        key="run_optimization_btn",
+        on_click=request_run_optimization,
     )
+
+run_btn = st.session_state.pop("run_optimization_requested", False)
 
 if restore_holdings_btn:
     try:
