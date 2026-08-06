@@ -1701,7 +1701,7 @@ def find_drop_bottom_pct_by_return_gap(
         return candidate
 
     best_candidate = None
-    current_pct = 0.01
+    current_pct = 0.18
     current_candidate = evaluate_pct(current_pct)
     if current_candidate is not None:
         best_candidate = current_candidate
