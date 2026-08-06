@@ -1867,20 +1867,17 @@ with st.sidebar:
             "Calculates history coverage for the current percentage without "
             "running optimization."
         ),
+        key="preview_history_coverage_btn",
     )
 
-    preview_requested = st.session_state.get("drop_bottom_preview_requested", False)
     if preview_coverage_btn:
-        preview_requested = True
-        st.session_state["drop_bottom_preview_requested"] = True
+        st.session_state["drop_bottom_last_pct"] = None
+        st.session_state["drop_bottom_coverage_preview"] = None
+        st.session_state["drop_bottom_coverage_error"] = None
 
-    if (
-        preview_requested
-        or st.session_state.get("drop_bottom_last_pct") != drop_bottom_pct
-    ):
+    last_pct = st.session_state.get("drop_bottom_last_pct")
+    if last_pct != drop_bottom_pct or preview_coverage_btn:
         st.session_state["drop_bottom_last_pct"] = drop_bottom_pct
-        st.session_state.pop("drop_bottom_coverage_preview", None)
-        st.session_state.pop("drop_bottom_coverage_error", None)
         try:
             with st.spinner("Calculating history coverage only..."):
                 st.session_state["drop_bottom_coverage_preview"] = (
