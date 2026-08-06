@@ -1870,20 +1870,19 @@ with st.sidebar:
         key="preview_history_coverage_btn",
     )
 
-    if preview_coverage_btn:
-        st.session_state["drop_bottom_last_pct"] = None
-        st.session_state["drop_bottom_coverage_preview"] = None
-        st.session_state["drop_bottom_coverage_error"] = None
-
     last_pct = st.session_state.get("drop_bottom_last_pct")
-    if last_pct != drop_bottom_pct or preview_coverage_btn:
+    should_recalculate = preview_coverage_btn or last_pct != drop_bottom_pct
+
+    if should_recalculate:
         st.session_state["drop_bottom_last_pct"] = drop_bottom_pct
+        st.session_state["drop_bottom_coverage_error"] = None
         try:
             with st.spinner("Calculating history coverage only..."):
                 st.session_state["drop_bottom_coverage_preview"] = (
                     calculate_drop_bottom_coverage_preview(drop_bottom_pct)
                 )
         except Exception as exc:
+            st.session_state["drop_bottom_coverage_preview"] = None
             st.session_state["drop_bottom_coverage_error"] = str(exc)
 
     coverage_preview = st.session_state.get("drop_bottom_coverage_preview")
