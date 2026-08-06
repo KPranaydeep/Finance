@@ -1684,6 +1684,8 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
     except Exception:
         available_days = 0
 
+    filtered_tickers = lengths.head(tickers_kept).index.tolist()
+
     return {
         "drop_bottom_pct": float(drop_bottom_pct),
         "trading_days": int(available_days),
@@ -1691,6 +1693,8 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
         "total_tickers": int(total_tickers),
         "tickers_dropped": int(num_to_drop),
         "tickers_kept": int(tickers_kept),
+        "filtered_tickers": filtered_tickers,
+        "dropped_tickers": lengths.tail(num_to_drop).index.tolist() if num_to_drop > 0 else [],
         "resolved_tickers": int(len(yahoo_tickers)),
         "invalid_holding_rows": int(len(invalid_rows)),
     }
@@ -2150,6 +2154,26 @@ if run_btn:
         if not yahoo_tickers:
             st.error("No valid Yahoo tickers resolved.")
             st.stop()
+
+        preview = st.session_state.get("drop_bottom_coverage_preview")
+        selected_yahoo_tickers = None
+        if (
+            preview
+            and preview.get("drop_bottom_pct") == drop_bottom_pct
+            and preview.get("filtered_tickers")
+        ):
+            selected_yahoo_tickers = [
+                t for t in preview["filtered_tickers"] if t in yahoo_tickers
+            ]
+
+        if selected_yahoo_tickers:
+            yahoo_tickers = selected_yahoo_tickers
+            selected_symbols = {
+                symbol
+                for symbol, ticker in resolved_map.items()
+                if ticker in yahoo_tickers
+            }
+            portfolio_df = portfolio_df[portfolio_df["Symbol"].isin(selected_symbols)].copy()
 
         with st.spinner("Running optimization..."):
             optimal_weights, log_returns, current_stats, optimal_stats, meta = run_portfolio_analysis_multi(
