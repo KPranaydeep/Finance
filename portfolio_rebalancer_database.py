@@ -1637,7 +1637,7 @@ def clear_drop_bottom_coverage_preview():
 
 
 def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
-    """Calculate history coverage only; do not run portfolio optimization."""
+    """Estimate coverage using available history lengths only; do not run optimization."""
     portfolio_df, invalid_rows = build_current_allocation_from_db()
 
     if portfolio_df.empty:
@@ -1657,17 +1657,40 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
     if not yahoo_tickers:
         raise ValueError("No Yahoo Finance tickers could be resolved.")
 
-    log_returns, meta = get_daily_log_returns(
-        yahoo_tickers,
-        drop_bottom_pct=float(drop_bottom_pct),
-    )
+    total_tickers = len(yahoo_tickers)
+    num_to_drop = int(np.floor(float(drop_bottom_pct) * total_tickers))
+    tickers_kept = max(total_tickers - num_to_drop, 0)
+
+    try:
+        import yfinance as yf
+
+        history = yf.download(
+            list(yahoo_tickers),
+            period="5y",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )["Close"]
+
+        if isinstance(history, pd.Series):
+            history = history.to_frame()
+
+        if history.empty:
+            raise ValueError("No history data could be fetched for the current holdings.")
+
+        lengths = history.count().sort_values(ascending=False)
+        kept_lengths = lengths.head(max(tickers_kept, 1))
+        available_days = int(kept_lengths.min()) if not kept_lengths.empty else 0
+    except Exception:
+        available_days = 0
 
     return {
         "drop_bottom_pct": float(drop_bottom_pct),
-        "trading_days": int(log_returns.shape[0]),
-        "assets": int(log_returns.shape[1]),
-        "valid_start": str(meta["valid_start"]),
-        "valid_end": str(meta["valid_end"]),
+        "trading_days": int(available_days),
+        "assets": int(tickers_kept),
+        "total_tickers": int(total_tickers),
+        "tickers_dropped": int(num_to_drop),
+        "tickers_kept": int(tickers_kept),
         "resolved_tickers": int(len(yahoo_tickers)),
         "invalid_holding_rows": int(len(invalid_rows)),
     }
