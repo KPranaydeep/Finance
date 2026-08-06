@@ -830,6 +830,13 @@ def add_symbols_to_master(symbols):
             entered_symbol, available_symbols, allow_be_fallback=True
         )
         if resolved_symbol is None:
+            # If the symbol is not in the NSE equity reference, still allow it
+            # if Yahoo Finance recognizes it as a valid NSE ticker.
+            fallback = resolve_yahoo_tickers([entered_symbol])
+            if entered_symbol in fallback:
+                resolved_symbol = normalize_nse_symbol(entered_symbol)
+
+        if resolved_symbol is None:
             invalid_symbols.append(entered_symbol)
         elif resolved_symbol not in seen_resolved:
             valid_symbols.append(resolved_symbol)
@@ -1619,9 +1626,10 @@ def calculate_drop_bottom_pct_recommendation():
         if not yahoo_tickers:
             raise ValueError("No Yahoo Finance tickers could be resolved.")
 
-        selected = find_drop_bottom_pct_nearest_target(
+        selected = find_drop_bottom_pct_by_return_gap(
             yahoo_tickers,
-            target_trading_days=252,
+            portfolio_df[portfolio_df["Symbol"].isin(resolved_map.keys())].copy(),
+            return_gap_pct=0.05,
         )
 
         st.session_state["drop_bottom_auto_result"] = selected
@@ -1634,6 +1642,81 @@ def clear_drop_bottom_coverage_preview():
     """Discard a coverage preview when the manual percentage changes."""
     st.session_state.pop("drop_bottom_coverage_preview", None)
     st.session_state.pop("drop_bottom_coverage_error", None)
+
+
+@st.cache_data(show_spinner=False)
+def find_drop_bottom_pct_by_return_gap(
+    symbols,
+    current_alloc,
+    max_dd=0.05,
+    target_volatility=None,
+    return_gap_pct=0.05,
+):
+    """Search drop_bottom_pct values so current return is within return_gap_pct of optimal."""
+    if not symbols:
+        raise ValueError("No tickers were provided for the recommendation search.")
+
+    best_candidate = None
+    best_gap = float("inf")
+
+    for step_number in range(96):
+        pct = round(step_number / 100, 2)
+
+        try:
+            optimal_weights, log_returns, current_stats, optimal_stats, meta = (
+                run_portfolio_analysis_multi(
+                    symbols,
+                    current_alloc,
+                    max_dd=max_dd,
+                    target_volatility=target_volatility,
+                    drop_bottom_pct=pct,
+                )
+            )
+        except Exception:
+            continue
+
+        if current_stats is None or optimal_stats is None:
+            continue
+
+        current_ret = current_stats.get("Annual Return", 0.0)
+        optimal_ret = optimal_stats.get("Annual Return", 0.0)
+
+        if optimal_ret <= current_ret:
+            continue
+
+        if abs(optimal_ret) > 1e-12:
+            gap = max((optimal_ret - current_ret) / abs(optimal_ret), 0.0)
+            meets_target = current_ret >= optimal_ret * (1.0 - return_gap_pct)
+        else:
+            gap = abs(current_ret - optimal_ret)
+            meets_target = gap < return_gap_pct
+
+        candidate = {
+            "drop_bottom_pct": pct,
+            "current_annual_return": current_ret,
+            "optimized_annual_return": optimal_ret,
+            "return_gap_pct": gap,
+            "trading_days": int(log_returns.shape[0]) if log_returns is not None else 0,
+            "assets": int(log_returns.shape[1]) if log_returns is not None else 0,
+        }
+
+        if best_candidate is None or gap < best_gap or (
+            gap == best_gap and pct < best_candidate["drop_bottom_pct"]
+        ):
+            best_candidate = candidate
+            best_gap = gap
+
+        if meets_target:
+            candidate["target_reached"] = True
+            return candidate
+
+    if best_candidate is None:
+        raise ValueError(
+            "Could not find a usable history filter that supports portfolio optimization."
+        )
+
+    best_candidate["target_reached"] = False
+    return best_candidate
 
 
 def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
@@ -1946,16 +2029,25 @@ with st.sidebar:
         st.error(f"Could not calculate history coverage: {coverage_error}")
 
     st.button(
-        "Calculate 252-day recommendation",
+        "Find drop_bottom_pct for ≤5% return gap",
         width="stretch",
         on_click=calculate_drop_bottom_pct_recommendation,
+        help=(
+            "Searches drop_bottom_pct values by history length so the current portfolio's "
+            "annual return is within 5% of the optimized portfolio's annual return."
+        ),
     )
 
     auto_drop_result = st.session_state.get("drop_bottom_auto_result")
     if auto_drop_result:
+        status = (
+            "meets" if auto_drop_result.get("target_reached") else "does not meet"
+        )
         st.info(
             f"Auto value: {auto_drop_result['drop_bottom_pct']:.2f} — "
-            f"{auto_drop_result['trading_days']:,} trading days."
+            f"Current return is {auto_drop_result['return_gap_pct']:.2%} behind optimized; "
+            f"{status} the 5% gap target. "
+            f"Trading days: {auto_drop_result['trading_days']:,}."
         )
 
     auto_drop_error = st.session_state.get("drop_bottom_auto_error")
