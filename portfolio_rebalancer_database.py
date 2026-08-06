@@ -1629,7 +1629,6 @@ def calculate_drop_bottom_pct_recommendation():
         selected = find_drop_bottom_pct_by_return_gap(
             yahoo_tickers,
             portfolio_df[portfolio_df["Symbol"].isin(resolved_map.keys())].copy(),
-            return_gap_pct=0.05,
         )
 
         st.session_state["drop_bottom_auto_result"] = selected
@@ -1650,17 +1649,17 @@ def find_drop_bottom_pct_by_return_gap(
     current_alloc,
     max_dd=0.05,
     target_volatility=None,
-    return_gap_pct=0.05,
 ):
-    """Search drop_bottom_pct values so current return is within return_gap_pct of optimal."""
+    """Search drop_bottom_pct values from 0.10 to 0.99 for higher optimized returns."""
     if not symbols:
         raise ValueError("No tickers were provided for the recommendation search.")
 
-    best_candidate = None
-    best_gap = float("inf")
+    evaluated = {}
 
-    for step_number in range(1, 100):
-        pct = round(step_number / 100, 2)
+    def evaluate_pct(pct):
+        pct = round(min(max(pct, 0.10), 0.99), 2)
+        if pct in evaluated:
+            return evaluated[pct]
 
         try:
             optimal_weights, log_returns, current_stats, optimal_stats, meta = (
@@ -1673,49 +1672,69 @@ def find_drop_bottom_pct_by_return_gap(
                 )
             )
         except Exception:
-            continue
+            evaluated[pct] = None
+            return None
 
         if current_stats is None or optimal_stats is None:
-            continue
+            evaluated[pct] = None
+            return None
 
         current_ret = current_stats.get("Annual Return", 0.0)
         optimal_ret = optimal_stats.get("Annual Return", 0.0)
 
         if optimal_ret <= current_ret:
-            continue
-
-        if abs(optimal_ret) > 1e-12:
-            gap = max((optimal_ret - current_ret) / abs(optimal_ret), 0.0)
-            meets_target = current_ret >= optimal_ret * (1.0 - return_gap_pct)
-        else:
-            gap = abs(current_ret - optimal_ret)
-            meets_target = gap < return_gap_pct
+            evaluated[pct] = None
+            return None
 
         candidate = {
             "drop_bottom_pct": pct,
             "current_annual_return": current_ret,
             "optimized_annual_return": optimal_ret,
-            "return_gap_pct": gap,
+            "return_gap_pct": max((optimal_ret - current_ret) / abs(optimal_ret), 0.0)
+            if abs(optimal_ret) > 1e-12
+            else abs(current_ret - optimal_ret),
             "trading_days": int(log_returns.shape[0]) if log_returns is not None else 0,
             "assets": int(log_returns.shape[1]) if log_returns is not None else 0,
+            "target_reached": True,
         }
+        evaluated[pct] = candidate
+        return candidate
 
-        if best_candidate is None or gap < best_gap or (
-            gap == best_gap and pct < best_candidate["drop_bottom_pct"]
-        ):
-            best_candidate = candidate
-            best_gap = gap
+    best_candidate = None
+    current_pct = 0.10
+    current_candidate = evaluate_pct(current_pct)
+    if current_candidate is not None:
+        return current_candidate
 
-        if meets_target:
-            candidate["target_reached"] = True
-            return candidate
+    step = 0.10
+    while step >= 0.01:
+        improved = False
+        for direction in (1, -1):
+            neighbor_pct = round(current_pct + direction * step, 2)
+            if neighbor_pct < 0.10 or neighbor_pct > 0.99:
+                continue
+
+            candidate = evaluate_pct(neighbor_pct)
+            if candidate is None:
+                continue
+
+            if best_candidate is None or candidate["drop_bottom_pct"] < best_candidate["drop_bottom_pct"]:
+                best_candidate = candidate
+
+            current_candidate = candidate
+            current_pct = neighbor_pct
+            improved = True
+            break
+
+        if not improved:
+            step = round(step / 2, 2)
 
     if best_candidate is None:
         raise ValueError(
             "Could not find a usable history filter that supports portfolio optimization."
         )
 
-    best_candidate["target_reached"] = False
+    best_candidate["target_reached"] = True
     return best_candidate
 
 
