@@ -780,6 +780,71 @@ class MarketMoodAnalyzer:
 
         return max(1, int(round(residual_mean)))
 
+    @staticmethod
+    def prediction_objective(
+        predicted_remaining_sessions: Iterable[float],
+        actual_remaining_sessions: Iterable[float],
+    ) -> dict[str, float]:
+        """Return calibration and validation quality metrics for flip timing.
+
+        This scalar objective is intentionally simple and deterministic so the
+        dashboard can rank candidate estimators or compare a baseline survival
+        forecast against a contextual model without needing a ML framework.
+        """
+        predicted = np.asarray(list(predicted_remaining_sessions), dtype=float)
+        actual = np.asarray(list(actual_remaining_sessions), dtype=float)
+        if predicted.size == 0 or actual.size == 0:
+            return {
+                "mae": float("nan"),
+                "rmse": float("nan"),
+                "bias": float("nan"),
+                "mape": float("nan"),
+                "coverage_rate": float("nan"),
+                "calibration_error": float("nan"),
+                "objective": float("nan"),
+            }
+        if predicted.shape != actual.shape:
+            raise ValueError("predicted_remaining_sessions and actual_remaining_sessions must align.")
+
+        errors = predicted - actual
+        abs_errors = np.abs(errors)
+        mae = float(np.mean(abs_errors))
+        rmse = float(np.sqrt(np.mean(np.square(errors))))
+        bias = float(np.mean(errors))
+        mape = float(np.mean(np.abs(errors / np.clip(actual, 1.0, None)))) if np.any(actual > 0) else float("nan")
+
+        # Calibration-style diagnostics: ask if the model is conservative enough
+        # to make the horizon credible. Use a 5-session tolerance around the event.
+        tolerance = 5.0
+        within_tolerance = np.abs(errors) <= tolerance
+        coverage_rate = float(np.mean(within_tolerance))
+        calibration_error = abs(coverage_rate - 0.70)
+
+        # Single objective for model ranking:
+        # lower is better. Only a tiny penalty for bias is assigned; the main
+        # driver is forecast error and coverage quality.
+        objective = 0.55 * mae + 0.30 * rmse + 0.10 * abs(bias) + 0.05 * calibration_error
+        return {
+            "mae": mae,
+            "rmse": rmse,
+            "bias": bias,
+            "mape": mape,
+            "coverage_rate": coverage_rate,
+            "calibration_error": calibration_error,
+            "objective": float(objective),
+        }
+
+    def validate_flip_estimate(
+        self,
+        predicted_remaining_sessions: Iterable[float],
+        actual_remaining_sessions: Iterable[float],
+    ) -> dict[str, float]:
+        """Convenience wrapper for calibration and validation reporting."""
+        return self.prediction_objective(
+            predicted_remaining_sessions,
+            actual_remaining_sessions,
+        )
+
     def _get_days_until_confidence_flip(self, confidence: float = 0.05) -> Optional[int]:
         """Return conditional remaining trading sessions at the requested tail."""
         return self._conditional_quantile_remaining(self.current_mood, confidence)
