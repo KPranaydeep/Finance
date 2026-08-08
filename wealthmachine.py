@@ -585,6 +585,59 @@ class MarketMoodAnalyzer:
                 break
         return current_streak
 
+    def _contextual_flipping_pressure(self) -> float:
+        """Return a 0..1 pressure score that increases as current MMI nears threshold.
+
+        This is a lightweight discrete-time survival adjustment: the empirical
+        survival estimate remains the anchor, but the active regime is allowed to
+        respond to pressure from the latest MMI level and momentum. The aim is to
+        avoid assuming that the active right-censored run behaves like a generic
+        historical average, regardless of how near the threshold it already is.
+        """
+        if len(self.df) < 2:
+            return 0.0
+
+        current_mmi = float(self.current_mmi)
+        gap_to_threshold = abs(current_mmi - MMI_NEUTRAL_LEVEL)
+        proximity = max(0.0, 1.0 - (gap_to_threshold / 50.0))
+
+        latest_mmi = float(self.df["MMI"].iloc[-1])
+        previous_mmi = float(self.df["MMI"].iloc[-2])
+        mmi_slope = latest_mmi - previous_mmi
+        slope_strength = min(abs(mmi_slope) / 5.0, 1.0)
+
+        if self.current_mood == "Fear" and mmi_slope > 0:
+            trend_pressure = slope_strength
+        elif self.current_mood == "Greed" and mmi_slope < 0:
+            trend_pressure = slope_strength
+        else:
+            trend_pressure = 0.0
+
+        # Blend current state closeness and observed direction. Higher pressure means
+        # shorter conditional residual life relative to the historical baseline.
+        return float(np.clip(0.26 * proximity + 0.24 * trend_pressure, 0.0, 0.50))
+
+    def _contextual_expected_remaining_sessions(self, mood: Optional[str] = None) -> Optional[int]:
+        """Blend the Kaplan-Meier restricted mean with MMI state pressure.
+
+        The baseline is the censored survival estimate already in the class. The
+        context adjustment lowers the forecast horizon when the active streak is
+        near the binary flip threshold and moving in the direction of a switch.
+        """
+        mood = mood or self.current_mood
+        baseline = self._expected_remaining_sessions(mood)
+        if baseline is None:
+            return None
+        if mood != self.current_mood:
+            return baseline
+
+        pressure = self._contextual_flipping_pressure()
+        if pressure <= 0.0:
+            return baseline
+
+        adjusted = baseline * (1.0 - pressure)
+        return int(max(1, round(adjusted)))
+
     @staticmethod
     def _empirical_survival_hazard(
         data: Iterable[int],
@@ -740,12 +793,20 @@ class MarketMoodAnalyzer:
         return remaining if remaining is not None else 5
 
     def get_flip_estimate(self) -> dict[str, Any]:
-        """Return expected and uncertainty dates for the current mood flip."""
-        expected_remaining = self._expected_remaining_sessions() or 5
+        """Return expected and uncertainty dates for the current mood flip.
+
+        The visible estimator is now a blended output:
+        - baseline residual life comes from the conditional KM history
+        - the active-state contextual pressure reduces the remaining horizon when
+          the current MMI is near 50 and/or trending toward the boundary.
+        """
+        baseline_expected = self._expected_remaining_sessions() or 5
+        expected_remaining = self._contextual_expected_remaining_sessions() or baseline_expected
+
         median_remaining = self._conditional_quantile_remaining(
             self.current_mood,
             0.50,
-        ) or expected_remaining
+        ) or baseline_expected
         upper_90_remaining = self._conditional_quantile_remaining(
             self.current_mood,
             0.10,
@@ -760,11 +821,13 @@ class MarketMoodAnalyzer:
         )
         return {
             "expected_remaining_sessions": expected_remaining,
+            "baseline_expected_remaining_sessions": baseline_expected,
             "median_remaining_sessions": median_remaining,
             "upper_90_remaining_sessions": upper_90_remaining,
             "expected_date": expected_date,
             "median_date": median_date,
             "upper_90_date": upper_90_date,
+            "context_pressure": self._contextual_flipping_pressure(),
         }
 
     def _generate_survival_based_forecast(
@@ -917,9 +980,15 @@ class MarketMoodAnalyzer:
             if flip_estimate["upper_90_date"] is not None
             else f"Median estimate: {flip_estimate['median_date']:%d %b %Y}."
         )
+        pressure_text = (
+            f"Current MMI pressure toward the threshold is {flip_estimate['context_pressure']:.2f}. "
+        )
         st.caption(
-            "Conditional Kaplan-Meier estimate with the active streak treated as "
-            f"right-censored. {uncertainty_text} Business dates skip weekends but not NSE holidays. "
+            "Conditional Kaplan-Meier survival baseline with the active streak treated as "
+            "right-censored. The displayed residual-life estimate is then blended with "
+            "a lightweight current-state adjustment based on threshold proximity and "
+            "latest direction. "
+            f"{pressure_text}{uncertainty_text} Business dates skip weekends but not NSE holidays. "
             "This estimates an MMI threshold crossing, not a market correction."
         )
 
