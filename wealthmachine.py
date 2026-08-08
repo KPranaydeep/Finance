@@ -845,6 +845,51 @@ class MarketMoodAnalyzer:
             actual_remaining_sessions,
         )
 
+    def run_flip_estimator_validation(self) -> dict[str, Any]:
+        """Return a simple holdout-style validation report over completed streaks.
+
+        The class already has completed historical streak durations in
+        ``streak_records``. This helper leaves one completed run out, predicts it
+        using the median of the other completed durations, and reports objective
+        metrics that can rank the current estimator against alternative models.
+        """
+        completed_records = [
+            record for record in self.streak_records if record["event_observed"] == 1
+        ]
+        if len(completed_records) < 3:
+            return {
+                "n_completed_records": len(completed_records),
+                "metrics": self.prediction_objective([], []),
+                "method": "holdout-baseline",
+            }
+
+        predictions: list[float] = []
+        actuals: list[float] = []
+        for index, record in enumerate(completed_records):
+            training_records = [
+                candidate for candidate_index, candidate in enumerate(completed_records)
+                if candidate_index != index
+            ]
+            if len(training_records) < 2:
+                continue
+            training_durations = np.asarray(
+                [candidate["duration"] for candidate in training_records],
+                dtype=float,
+            )
+            baseline_prediction = float(np.median(training_durations))
+            predictions.append(baseline_prediction)
+            actuals.append(float(record["duration"]))
+
+        metrics = self.prediction_objective(predictions, actuals)
+        return {
+            "n_completed_records": len(completed_records),
+            "n_validation_points": len(predictions),
+            "method": "holdout-baseline",
+            "metrics": metrics,
+            "predictions": predictions,
+            "actuals": actuals,
+        }
+
     def _hazard_estimate(self, mood: Optional[str] = None) -> dict[str, Any]:
         """Fit a discrete-time hazard curve for historical MMI streak durations.
 
