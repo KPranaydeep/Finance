@@ -845,6 +845,75 @@ class MarketMoodAnalyzer:
             actual_remaining_sessions,
         )
 
+    def _hazard_estimate(self, mood: Optional[str] = None) -> dict[str, Any]:
+        """Fit a discrete-time hazard curve for historical MMI streak durations.
+
+        The method works on the same completed/censored streak record set as the
+        KM estimator, but translates that history into hazard ratios per possible
+        run length. This is the natural calibration layer for the survival model:
+        it answers, in each session t, how likely a flip is to occur at t given
+        that the current mood remained active up to t.
+        """
+        mood = mood or self.current_mood
+        records = [record for record in self.streak_records if record["mood"] == mood]
+        if not records:
+            return {
+                "timeline": np.array([0], dtype=int),
+                "hazard": np.array([0.0], dtype=float),
+                "survival": np.array([1.0], dtype=float),
+            }
+
+        durations = np.asarray([record["duration"] for record in records], dtype=int)
+        events = np.asarray([record["event_observed"] for record in records], dtype=int)
+        maximum_duration = int(np.max(durations))
+        timeline = np.arange(1, maximum_duration + 1, dtype=int)
+        hazard = np.zeros(maximum_duration, dtype=float)
+
+        for index, time_value in enumerate(timeline):
+            at_risk = int(np.sum(durations >= time_value))
+            observed_events = int(np.sum((durations == time_value) & (events == 1)))
+            if at_risk > 0:
+                hazard[index] = observed_events / at_risk
+
+        survival = np.zeros(maximum_duration + 1, dtype=float)
+        survival[0] = 1.0
+        cumulative = 1.0
+        for index, time_value in enumerate(timeline):
+            cumulative *= 1.0 - hazard[index]
+            survival[index + 1] = cumulative
+
+        return {
+            "timeline": timeline,
+            "hazard": hazard,
+            "survival": survival,
+        }
+
+    def _hazard_expected_remaining_sessions(self, mood: Optional[str] = None) -> Optional[int]:
+        """Return a conditional expected remaining sessions using discrete hazards."""
+        mood = mood or self.current_mood
+        hazard_result = self._hazard_estimate(mood)
+        timeline = hazard_result["timeline"]
+        survival = hazard_result["survival"]
+        if timeline.size == 0 or survival.size == 0:
+            return None
+
+        current = self.current_streak if mood == self.current_mood else 0
+        if current <= 0:
+            return None
+        survival_at_current = self._survival_at(current, timeline, survival)
+        if survival_at_current <= 0:
+            return 1
+
+        maximum_duration = int(np.max(timeline))
+        residual_mean = 0.0
+        for total_duration in range(current, maximum_duration):
+            if self._survival_at(total_duration, timeline, survival) > 0:
+                residual_mean += (
+                    self._survival_at(total_duration, timeline, survival)
+                    / survival_at_current
+                )
+        return max(1, int(round(residual_mean)))
+
     def _get_days_until_confidence_flip(self, confidence: float = 0.05) -> Optional[int]:
         """Return conditional remaining trading sessions at the requested tail."""
         return self._conditional_quantile_remaining(self.current_mood, confidence)
@@ -861,17 +930,20 @@ class MarketMoodAnalyzer:
         """Return expected and uncertainty dates for the current mood flip.
 
         The visible estimator is now a blended output:
-        - baseline residual life comes from the conditional KM history
+        - baseline residual life comes from a discrete-time hazard fit to the
+          historical completed/censored streak dataset
+        - the KM-style curve is retained as a robustness fallback
         - the active-state contextual pressure reduces the remaining horizon when
           the current MMI is near 50 and/or trending toward the boundary.
         """
-        baseline_expected = self._expected_remaining_sessions() or 5
+        baseline_expected = self._hazard_expected_remaining_sessions() or 5
+        km_expected = self._expected_remaining_sessions() or baseline_expected
         expected_remaining = self._contextual_expected_remaining_sessions() or baseline_expected
 
         median_remaining = self._conditional_quantile_remaining(
             self.current_mood,
             0.50,
-        ) or baseline_expected
+        ) or max(1, int(round(baseline_expected * 0.90)))
         upper_90_remaining = self._conditional_quantile_remaining(
             self.current_mood,
             0.10,
@@ -887,6 +959,7 @@ class MarketMoodAnalyzer:
         return {
             "expected_remaining_sessions": expected_remaining,
             "baseline_expected_remaining_sessions": baseline_expected,
+            "km_expected_remaining_sessions": km_expected,
             "median_remaining_sessions": median_remaining,
             "upper_90_remaining_sessions": upper_90_remaining,
             "expected_date": expected_date,
