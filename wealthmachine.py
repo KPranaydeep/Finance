@@ -192,7 +192,7 @@ allocation_fig.update_traces(
 )
 
 with st.expander("📊 Portfolio Allocation Visualization", expanded=False):
-    st.plotly_chart(allocation_fig, use_container_width=True)
+    st.plotly_chart(allocation_fig, width="stretch")
     total_allocation = allocation_visual_df["Allocation (%)"].sum()
     if not np.isclose(total_allocation, 100.0, atol=0.05):
         st.warning(f"Allocation totals {total_allocation:.2f}%, not 100%.")
@@ -1448,7 +1448,7 @@ if analyzer:
             allocation_plan_df, confidence_date = analyzer.generate_allocation_plan(
                 investable_amount
             )
-            st.dataframe(allocation_plan_df, use_container_width=True)
+            st.dataframe(allocation_plan_df, width="stretch")
             save_allocation_plan(
                 "default_user",
                 allocation_plan_df,
@@ -1471,7 +1471,7 @@ if analyzer:
         with st.expander("🗂 View Last Saved Allocation Plan"):
             previous_plan = get_latest_allocation_plan("default_user")
             if previous_plan is not None:
-                st.dataframe(previous_plan, use_container_width=True)
+                st.dataframe(previous_plan, width="stretch")
             else:
                 st.info("No saved plan is available.")
 
@@ -1619,7 +1619,7 @@ if uploaded_holdings is not None:
                     "Profit/Loss (%)",
                 ]
             ],
-            use_container_width=True,
+            width="stretch",
         )
         if merged_df["Price Source"].str.contains("Previous close").any():
             st.caption(
@@ -1785,7 +1785,7 @@ if uploaded_holdings is not None:
                         st.success(
                             f"✅ Suggested sell plan estimates ₹{cumulative_profit:,.2f} gross profit."
                         )
-                        st.dataframe(sell_plan_df, use_container_width=True)
+                        st.dataframe(sell_plan_df, width="stretch")
                         st.caption(
                             "Execution price, taxes, slippage and live brokerage can differ. "
                             "Use a current quote before placing an order."
