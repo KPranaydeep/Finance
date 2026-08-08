@@ -845,14 +845,62 @@ class MarketMoodAnalyzer:
             actual_remaining_sessions,
         )
 
-    def run_flip_estimator_validation(self) -> dict[str, Any]:
-        """Return a simple holdout-style validation report over completed streaks.
+    @staticmethod
+    def _hazard_estimate_from_records(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
+        """Compute a discrete-time hazard model from a completed/censored run list."""
+        record_list = list(records)
+        if not record_list:
+            return {
+                "timeline": np.array([0], dtype=int),
+                "hazard": np.array([0.0], dtype=float),
+                "survival": np.array([1.0], dtype=float),
+            }
+        durations = np.asarray([int(record["duration"]) for record in record_list], dtype=int)
+        events = np.asarray([int(record["event_observed"]) for record in record_list], dtype=int)
+        if durations.size == 0:
+            return {
+                "timeline": np.array([0], dtype=int),
+                "hazard": np.array([0.0], dtype=float),
+                "survival": np.array([1.0], dtype=float),
+            }
+        maximum_duration = int(np.max(durations))
+        timeline = np.arange(1, maximum_duration + 1, dtype=int)
+        hazard = np.zeros(maximum_duration, dtype=float)
 
-        The class already has completed historical streak durations in
-        ``streak_records``. This helper leaves one completed run out, predicts it
-        using the median of the other completed durations, and reports objective
-        metrics that can rank the current estimator against alternative models.
-        """
+        for index, time_value in enumerate(timeline):
+            at_risk = int(np.sum(durations >= time_value))
+            observed_events = int(np.sum((durations == time_value) & (events == 1)))
+            if at_risk > 0:
+                hazard[index] = observed_events / at_risk
+
+        survival = np.zeros(maximum_duration + 1, dtype=float)
+        survival[0] = 1.0
+        cumulative = 1.0
+        for index, _ in enumerate(timeline):
+            cumulative *= 1.0 - hazard[index]
+            survival[index + 1] = cumulative
+        return {
+            "timeline": timeline,
+            "hazard": hazard,
+            "survival": survival,
+        }
+
+    def _hazard_expected_duration_from_records(self, records: Iterable[dict[str, Any]]) -> Optional[int]:
+        """Return a restricted-mean expected duration from a training hazard curve."""
+        hazard_model = self._hazard_estimate_from_records(records)
+        timeline = hazard_model.get("timeline")
+        survival = hazard_model.get("survival")
+        if timeline is None or survival is None or len(timeline) == 0:
+            return None
+        if survival.size <= 1:
+            return 1
+        expected = 0.0
+        for idx in range(0, len(survival) - 1):
+            expected += float(survival[idx])
+        return max(1, int(round(expected)))
+
+    def run_flip_estimator_validation(self) -> dict[str, Any]:
+        """Return a holdout-style validation report for baseline and hazard candidates."""
         completed_records = [
             record for record in self.streak_records if record["event_observed"] == 1
         ]
@@ -863,8 +911,11 @@ class MarketMoodAnalyzer:
                 "method": "holdout-baseline",
             }
 
-        predictions: list[float] = []
-        actuals: list[float] = []
+        baseline_predictions: list[float] = []
+        baseline_actuals: list[float] = []
+        hazard_predictions: list[float] = []
+        hazard_actuals: list[float] = []
+
         for index, record in enumerate(completed_records):
             training_records = [
                 candidate for candidate_index, candidate in enumerate(completed_records)
@@ -872,22 +923,39 @@ class MarketMoodAnalyzer:
             ]
             if len(training_records) < 2:
                 continue
+
             training_durations = np.asarray(
                 [candidate["duration"] for candidate in training_records],
                 dtype=float,
             )
             baseline_prediction = float(np.median(training_durations))
-            predictions.append(baseline_prediction)
-            actuals.append(float(record["duration"]))
+            baseline_predictions.append(baseline_prediction)
+            baseline_actuals.append(float(record["duration"]))
 
-        metrics = self.prediction_objective(predictions, actuals)
+            hazard_prediction = self._hazard_expected_duration_from_records(training_records)
+            if hazard_prediction is not None:
+                hazard_predictions.append(float(hazard_prediction))
+                hazard_actuals.append(float(record["duration"]))
+
+        baseline_metrics = self.prediction_objective(baseline_predictions, baseline_actuals)
+        hazard_metrics = self.prediction_objective(hazard_predictions, hazard_actuals)
+
         return {
             "n_completed_records": len(completed_records),
-            "n_validation_points": len(predictions),
-            "method": "holdout-baseline",
-            "metrics": metrics,
-            "predictions": predictions,
-            "actuals": actuals,
+            "n_validation_points": len(baseline_predictions),
+            "method": "holdout-baseline-hazard",
+            "models": {
+                "baseline_median": {
+                    "metrics": baseline_metrics,
+                    "predictions": baseline_predictions,
+                    "actuals": baseline_actuals,
+                },
+                "hazard_expected_duration": {
+                    "metrics": hazard_metrics,
+                    "predictions": hazard_predictions,
+                    "actuals": hazard_actuals,
+                },
+            },
         }
 
     def _hazard_estimate(self, mood: Optional[str] = None) -> dict[str, Any]:
