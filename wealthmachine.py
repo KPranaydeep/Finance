@@ -1130,6 +1130,7 @@ class MarketMoodAnalyzer:
         fear_result = self._analyze_mood("Fear")
         greed_result = self._analyze_mood("Greed")
         flip_estimate = self.get_flip_estimate()
+        validation_report = self.run_flip_estimator_validation()
 
         st.subheader("📈 Current Market Mood Analysis")
         metric_one, metric_two, metric_three = st.columns(3)
@@ -1175,7 +1176,25 @@ class MarketMoodAnalyzer:
             "This estimates an MMI threshold crossing, not a market correction."
         )
 
-        with st.expander("📊 Show Historical Streak Patterns", expanded=False):
+        with st.expander("� Model Validation & Calibration Diagnostics", expanded=False):
+            metrics = validation_report.get("metrics") or {}
+            validation_rows = []
+            validation_summary = {
+                "Validation Points": validation_report.get("n_validation_points", 0),
+                "Completed Runs": validation_report.get("n_completed_records", 0),
+                "Method": validation_report.get("method", "holdout-baseline"),
+                "MAE": metrics.get("mae"),
+                "RMSE": metrics.get("rmse"),
+                "Bias": metrics.get("bias"),
+                "MAPE": metrics.get("mape"),
+                "Coverage rate": metrics.get("coverage_rate"),
+                "Calibration error": metrics.get("calibration_error"),
+                "Objective": metrics.get("objective"),
+            }
+            validation_df = pd.DataFrame([validation_summary])
+            st.table(validation_df)
+
+        with st.expander("�📊 Show Historical Streak Patterns", expanded=False):
             fear_runs = fear_result["runs"]
             greed_runs = greed_result["runs"]
             fear_mean, fear_ci = self._mean_confidence_interval(fear_runs)
