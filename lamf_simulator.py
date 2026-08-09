@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+import yfinance as yf
 from matplotlib.ticker import FuncFormatter
 
 
@@ -33,7 +34,7 @@ st.set_page_config(
 )
 
 st.title("🇮🇳 Loan Against Mutual Funds (LAMF) Simulator")
-st.caption("Build: 2026-08-09 FIXED • tenure-based gains • Nifty 200-DMA target sanction")
+st.caption("Build: 2026-08-09 YFINANCE • automatic Nifty 50 200-DMA target sanction")
 st.caption(
     "For Indian retail investors: compare **selling mutual funds vs taking LAMF**, "
     "including tax, cash-flow strain, LTV/margin-call risk, repayment style, renewals and sensitivity."
@@ -64,6 +65,45 @@ def inr(value: float) -> str:
 
 def monthly_rate(annual_percent: float) -> float:
     return (1 + annual_percent / 100.0) ** (1 / 12) - 1
+
+
+@st.cache_data(ttl=60 * 60, show_spinner=False)
+def fetch_nifty_200dma() -> dict[str, object]:
+    """Fetch Nifty 50 daily closes and calculate its latest 200-session SMA.
+
+    Yahoo Finance symbol ``^NSEI`` represents the Nifty 50 index. The result is
+    cached for one hour to avoid repeated network calls on every Streamlit rerun.
+    """
+    history = yf.Ticker("^NSEI").history(
+        period="2y",
+        interval="1d",
+        auto_adjust=False,
+        actions=False,
+        timeout=15,
+    )
+    if history.empty or "Close" not in history.columns:
+        raise ValueError("Yahoo Finance returned no Nifty 50 closing-price data.")
+
+    closes = pd.to_numeric(history["Close"], errors="coerce").dropna()
+    if len(closes) < 200:
+        raise ValueError(f"Only {len(closes)} valid sessions were returned; 200 are required.")
+
+    latest_close = float(closes.iloc[-1])
+    moving_average_200 = float(closes.tail(200).mean())
+    if moving_average_200 <= 0:
+        raise ValueError("The calculated Nifty 50 200-DMA is invalid.")
+
+    deviation_pct = (latest_close / moving_average_200 - 1.0) * 100.0
+    latest_index = closes.index[-1]
+    as_of_date = latest_index.date() if hasattr(latest_index, "date") else latest_index
+
+    return {
+        "latest_close": latest_close,
+        "moving_average_200": moving_average_200,
+        "deviation_pct": deviation_pct,
+        "as_of_date": as_of_date,
+        "sessions": int(len(closes)),
+    }
 
 
 def fv_lump_sum(pv: float, annual_percent: float, months: int) -> float:
@@ -497,17 +537,40 @@ with st.sidebar:
         step=1.0,
         help="Enter the exact LTV from the lender for the funds you are pledging.",
     )
-    nifty_200dma_deviation_pct = st.number_input(
-        "Nifty 50 change from 200-DMA (%)",
-        min_value=-100.0,
-        max_value=100.0,
-        value=0.0,
-        step=0.5,
-        help=(
-            "Enter the signed percentage deviation of Nifty 50 from its 200-day moving average. "
-            "The target sanction formula uses the absolute deviation."
-        ),
-    )
+    st.markdown("**Nifty 50 versus 200-DMA — automatic**")
+    if st.button("↻ Refresh Nifty data", width="stretch"):
+        fetch_nifty_200dma.clear()
+        st.rerun()
+
+    nifty_data_error = None
+    try:
+        nifty_data = fetch_nifty_200dma()
+        nifty_200dma_deviation_pct = float(nifty_data["deviation_pct"])
+        st.metric(
+            "Nifty 50 deviation from 200-DMA",
+            f"{nifty_200dma_deviation_pct:+.2f}%",
+        )
+        st.caption(
+            f"Yahoo Finance (^NSEI), as of {nifty_data['as_of_date']}: "
+            f"close **{nifty_data['latest_close']:,.2f}**, "
+            f"200-session SMA **{nifty_data['moving_average_200']:,.2f}**. "
+            "Data is cached for one hour."
+        )
+    except Exception as exc:
+        nifty_data_error = str(exc)
+        st.warning(
+            "Live Nifty data could not be loaded from Yahoo Finance. "
+            "A manual fallback is shown so the simulator remains usable."
+        )
+        nifty_200dma_deviation_pct = st.number_input(
+            "Manual Nifty 50 deviation from 200-DMA (%)",
+            min_value=-100.0,
+            max_value=100.0,
+            value=0.0,
+            step=0.1,
+            help=f"Automatic yfinance fetch error: {nifty_data_error}",
+        )
+
     formula_target_utilisation_pct = max(
         0.0,
         min(
