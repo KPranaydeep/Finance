@@ -34,7 +34,7 @@ st.set_page_config(
 )
 
 st.title("🇮🇳 Loan Against Mutual Funds (LAMF) Simulator")
-st.caption("Build: 2026-08-09 LEVERAGE • yfinance Nifty 200-DMA • disciplined stock-leverage analysis")
+st.caption("Build: 2026-08-09 LEVERAGE v2 • yfinance Nifty 200-DMA • no arbitrary personal borrow cap")
 st.caption(
     "For Indian retail investors: compare **selling mutual funds vs taking LAMF**, "
     "including tax, cash-flow strain, LTV/margin-call risk, repayment style, renewals and sensitivity."
@@ -570,7 +570,6 @@ with st.sidebar:
     historical_stock_xirr_pct = 0.0
     forward_return_haircut_pct = 0.0
     forward_stock_return_pct = 0.0
-    personal_max_leverage_pct = 100.0
     max_debt_service_share_pct = 100.0
     min_break_even_buffer_pct = 0.0
     leverage_exit_tax_rate_pct = 0.0
@@ -605,14 +604,6 @@ with st.sidebar:
         forward_stock_return_pct = historical_stock_xirr_pct * (1.0 - forward_return_haircut_pct / 100.0)
         st.metric("Forward planning stock return", f"{forward_stock_return_pct:.2f}% p.a.")
 
-        personal_max_leverage_pct = st.number_input(
-            "Personal max borrowed amount (% of existing stock portfolio)",
-            min_value=0.0,
-            max_value=300.0,
-            value=50.0,
-            step=5.0,
-            help="A personal position-sizing rule, separate from the lender's LTV and the Nifty 200-DMA sanction rule.",
-        )
         max_debt_service_share_pct = st.number_input(
             "Max debt service (% of monthly investable surplus)",
             min_value=1.0,
@@ -883,7 +874,7 @@ with st.sidebar:
 if use_case == "Disciplined leverage into stocks":
     st.warning(
         "Leverage mode: historical XIRR is used only as a reference. The forward case applies your chosen haircut, "
-        "and the strategy is evaluated against break-even return, cash-flow capacity, collateral risk and personal position-size limits."
+        "and the strategy is evaluated against break-even return, cash-flow capacity, lender LTV and the Nifty 200-DMA target sanction."
     )
 
 if eligible_collateral_value > portfolio_value:
@@ -1038,11 +1029,16 @@ if use_case == "Disciplined leverage into stocks":
                 be_lo, be_flo = be_mid, be_fmid
         leverage_breakeven = (be_lo + be_hi) / 2.0
 
-    personal_max_borrow = float(existing_stock_value) * float(personal_max_leverage_pct) / 100.0
     leverage_ratio_pct = (
         float(cash_required) / float(existing_stock_value) * 100.0
         if existing_stock_value > 0
         else math.inf
+    )
+    total_post_leverage_stock_exposure = float(existing_stock_value) + float(cash_required)
+    borrowed_share_total_exposure_pct = (
+        float(cash_required) / total_post_leverage_stock_exposure * 100.0
+        if total_post_leverage_stock_exposure > 0
+        else 0.0
     )
     debt_service_share_pct = (
         leverage_result.monthly_debt_service / float(monthly_surplus) * 100.0
@@ -1075,13 +1071,15 @@ if use_case == "Disciplined leverage into stocks":
     )
 
     l1, l2, l3, l4 = st.columns(4)
-    l1.metric("Existing stock capital", inr(existing_stock_value))
-    l2.metric("LAMF-funded stock sleeve", inr(cash_required))
-    l3.metric(
-        "Borrowed / existing stocks",
-        f"{leverage_ratio_pct:.1f}%" if math.isfinite(leverage_ratio_pct) else "N/A",
+    l1.metric("Existing stock portfolio (own capital)", inr(existing_stock_value))
+    l2.metric("LAMF-funded additional stock capital", inr(cash_required))
+    l3.metric("Total post-leverage stock exposure", inr(total_post_leverage_stock_exposure))
+    l4.metric("Borrowed share of total stock exposure", f"{borrowed_share_total_exposure_pct:.1f}%")
+    st.caption(
+        "Borrowed / existing own stock capital is "
+        + (f"{leverage_ratio_pct:.1f}%. " if math.isfinite(leverage_ratio_pct) else "N/A. ")
+        + "This is shown as an exposure metric only; it is not used as an arbitrary borrowing cap."
     )
-    l4.metric("Personal max leverage amount", inr(personal_max_borrow))
 
     w1, w2, w3, w4 = st.columns(4)
     w1.metric("No-leverage ending wealth", inr(leverage_result.no_leverage_end_wealth))
@@ -1099,8 +1097,6 @@ if use_case == "Disciplined leverage into stocks":
                   f"Draw {inr(cash_required)} vs lender max {inr(max_lender_loan)}"))
     gates.append(("Within Nifty 200-DMA target sanction", cash_required <= formula_target_sanction,
                   f"Draw {inr(cash_required)} vs formula target {inr(formula_target_sanction)}"))
-    gates.append(("Within personal stock-leverage cap", cash_required <= personal_max_borrow,
-                  f"{leverage_ratio_pct:.1f}% borrowed/existing vs cap {personal_max_leverage_pct:.1f}%"))
     gates.append(("Debt service within monthly-surplus cap", debt_service_share_pct <= max_debt_service_share_pct,
                   f"{debt_service_share_pct:.1f}% of surplus vs cap {max_debt_service_share_pct:.1f}%"))
     if leverage_breakeven is not None:
