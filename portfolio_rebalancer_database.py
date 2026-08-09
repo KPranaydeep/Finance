@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-08-09-multimarket-fx-inr"
+APP_BUILD = "2026-08-09-multimarket-fx-inr-v2"
 
 # =========================================================
 # HELPERS
@@ -35,18 +35,27 @@ def load_equity_mapping():
 
 @st.cache_data(show_spinner=False)
 def _download_probe(ticker):
-    """Return True when Yahoo Finance has recent price data for ticker."""
+    """Return True only when Yahoo Finance has at least one real recent price value."""
     import yfinance as yf
 
     try:
         data = yf.download(
             ticker,
-            period="5d",
+            period="10d",
             progress=False,
             auto_adjust=True,
             threads=False,
         )
-        return data is not None and not data.empty
+        if data is None or data.empty:
+            return False
+
+        # yfinance can occasionally return a non-empty frame whose price columns are
+        # entirely NaN for an invalid symbol. Treat that as unresolved.
+        if isinstance(data, pd.Series):
+            return bool(pd.to_numeric(data, errors="coerce").notna().any())
+
+        numeric = data.apply(pd.to_numeric, errors="coerce")
+        return bool(numeric.notna().any().any())
     except Exception:
         return False
 
@@ -136,8 +145,11 @@ def get_yahoo_metadata(yahoo_ticker):
 def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
     """Resolve NSE, BSE, US and explicit Yahoo symbols into one canonical record.
 
-    Resolution order for a plain symbol is NSE first, then the plain Yahoo ticker,
-    then BSE. Explicit Yahoo suffixes are tried exactly as entered.
+    Plain symbols that exist in the official NSE equity reference prefer ``.NS``.
+    Plain symbols absent from that reference prefer the unsuffixed Yahoo ticker.
+    This distinction is important for symbols such as ``VT``: ``VT`` is a US ETF
+    and must not be silently converted into ``VT.NS``. Explicit Yahoo suffixes are
+    always tried exactly as entered.
     """
     raw = str(symbol or "").strip().upper()
     if not raw:
@@ -149,22 +161,26 @@ def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
     if base.endswith("-BE"):
         base = base[:-3].rstrip("-").strip()
 
-    explicit = raw.endswith(".NS") or raw.endswith(".BO") or (
-        "." in raw and not raw.endswith(".NS") and not raw.endswith(".BO")
-    ) or raw.endswith("=X") or raw.startswith("^")
+    explicit = (
+        raw.endswith(".NS")
+        or raw.endswith(".BO")
+        or ("." in raw and not raw.endswith(".NS") and not raw.endswith(".BO"))
+        or raw.endswith("=X")
+        or raw.startswith("^")
+    )
 
-    candidates = []
     if explicit:
-        candidates.append(raw)
+        candidates = [raw]
+    elif base.isdigit():
+        # Numeric Indian security codes are overwhelmingly BSE identifiers.
+        candidates = [f"{base}.BO", base, f"{base}.NS"]
+    elif base in nse_company_lookup:
+        # The NSE reference is authoritative for ordinary Indian equity symbols.
+        candidates = [f"{base}.NS", base, f"{base}.BO"]
     else:
-        # Prefer NSE for plain Indian-looking symbols so RELIANCE resolves to RELIANCE.NS.
-        candidates.append(f"{base}.NS")
-        candidates.append(base)
-        # Numeric Indian security codes are far more likely to be BSE than US tickers.
-        if base.isdigit():
-            candidates = [f"{base}.BO", f"{base}.NS", base]
-        else:
-            candidates.append(f"{base}.BO")
+        # Unknown-to-NSE plain symbols are treated as global Yahoo symbols first.
+        # Example: VT -> VT (NYSE Arca / USD), not VT.NS.
+        candidates = [base, f"{base}.NS", f"{base}.BO"]
 
     seen = set()
     for ticker in candidates:
@@ -186,6 +202,8 @@ def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
             display_symbol = ticker[:-3]
         elif explicit:
             display_symbol = raw
+        else:
+            display_symbol = base
 
         metadata["symbol"] = display_symbol
         return metadata
@@ -324,20 +342,16 @@ def _ensure_master_holdings_schema(conn):
             conn.execute(sql)
 
     now = datetime.now().isoformat(timespec="seconds")
-    # Existing databases created by the NSE-only version are migrated as NSE/INR.
+    # Preserve old holdings without guessing their market. Missing metadata is
+    # resolved later using the current NSE reference + Yahoo validation. This avoids
+    # turning a legacy global symbol such as VT into VT.NS/NSE/INR.
     conn.execute(
         """
         UPDATE master_holdings
         SET stock_name = COALESCE(NULLIF(TRIM(stock_name), ''), symbol),
-            yahoo_ticker = COALESCE(
-                NULLIF(TRIM(yahoo_ticker), ''),
-                CASE
-                    WHEN UPPER(symbol) LIKE '%.NS' OR UPPER(symbol) LIKE '%.BO' THEN UPPER(symbol)
-                    ELSE UPPER(symbol) || '.NS'
-                END
-            ),
-            exchange = COALESCE(NULLIF(TRIM(exchange), ''), 'NSE'),
-            currency = COALESCE(NULLIF(TRIM(currency), ''), 'INR'),
+            yahoo_ticker = NULLIF(TRIM(yahoo_ticker), ''),
+            exchange = NULLIF(TRIM(exchange), ''),
+            currency = NULLIF(TRIM(currency), ''),
             quantity = CASE WHEN quantity IS NULL OR quantity <= 0 THEN 1 ELSE quantity END,
             added_at = COALESCE(NULLIF(TRIM(added_at), ''), ?),
             updated_at = COALESCE(NULLIF(TRIM(updated_at), ''), ?)
@@ -403,12 +417,13 @@ def resolve_nse_symbol(symbol, available_symbols, allow_be_fallback=False):
     return None
 
 def parse_symbol_input(raw_text):
+    """Split user input while preserving explicit Yahoo suffixes such as .NS/.BO/.L."""
     parts = re.split(r"[,;\n]+", raw_text or "")
     symbols = []
     seen = set()
 
     for part in parts:
-        symbol = normalize_portfolio_symbol(part)
+        symbol = str(part or "").strip().upper()
         if symbol and symbol not in seen:
             symbols.append(symbol)
             seen.add(symbol)
@@ -442,6 +457,86 @@ def load_master_holdings():
             conn,
         )
     return df
+
+def repair_master_holdings_metadata():
+    """Repair missing or obviously misclassified market metadata in-place.
+
+    The first multi-market build could migrate every legacy plain symbol to
+    ``<symbol>.NS / NSE / INR``. That is wrong for global symbols such as VT.
+    We use the NSE equity reference as the authority: if a row claims ``.NS``
+    but its symbol is not in that reference, re-resolve the plain symbol.
+
+    Returns a list of repaired display symbols. Network failures are tolerated;
+    unresolved rows are left unchanged for a later rerun.
+    """
+    try:
+        lookup = get_nse_company_lookup()
+    except Exception:
+        return []
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT symbol, stock_name, yahoo_ticker, exchange, currency
+            FROM master_holdings
+            """
+        ).fetchall()
+
+    repaired = []
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with get_db_connection() as conn:
+        for row in rows:
+            symbol = normalize_portfolio_symbol(row["symbol"])
+            ticker = str(row["yahoo_ticker"] or "").strip().upper()
+            exchange = str(row["exchange"] or "").strip().upper()
+            currency = _normalize_currency_code(row["currency"])
+
+            metadata_missing = not ticker or not currency
+            looks_like_bad_legacy_nse_guess = (
+                symbol not in lookup
+                and ticker == f"{symbol}.NS"
+                and exchange in {"", "NSE", "NSI"}
+                and currency in {"", "INR"}
+            )
+
+            if not metadata_missing and not looks_like_bad_legacy_nse_guess:
+                continue
+
+            instrument = resolve_yahoo_instrument(symbol, lookup)
+            if instrument is None:
+                continue
+
+            new_ticker = str(instrument["yahoo_ticker"]).upper()
+            new_exchange = str(instrument["exchange"] or "").strip()
+            new_currency = _normalize_currency_code(instrument["currency"])
+            old_name = str(row["stock_name"] or "").strip()
+            new_name = str(instrument["stock_name"] or symbol).strip()
+            if old_name and old_name.upper() != symbol.upper() and not looks_like_bad_legacy_nse_guess:
+                new_name = old_name
+
+            if (
+                ticker == new_ticker
+                and exchange == new_exchange.upper()
+                and currency == new_currency
+                and old_name == new_name
+            ):
+                continue
+
+            conn.execute(
+                """
+                UPDATE master_holdings
+                SET stock_name = ?, yahoo_ticker = ?, exchange = ?, currency = ?, updated_at = ?
+                WHERE symbol = ?
+                """,
+                (new_name, new_ticker, new_exchange, new_currency, now, row["symbol"]),
+            )
+            repaired.append(symbol)
+
+        conn.commit()
+
+    return repaired
+
 
 def holdings_backup_bytes():
     """Export the complete holdings master table as a UTF-8 CSV backup."""
@@ -545,20 +640,36 @@ def _read_holdings_backup(uploaded_file):
         currency = row["Currency"]
         stock_name = row["Stock Name"]
 
-        if not yahoo_ticker or not currency:
-            instrument = resolve_yahoo_instrument(row["Symbol"], lookup)
-            if instrument is not None:
-                yahoo_ticker = yahoo_ticker or instrument["yahoo_ticker"]
-                exchange = exchange or instrument["exchange"]
-                currency = currency or instrument["currency"]
-                stock_name = stock_name or instrument["stock_name"]
-            else:
-                # Preserve compatibility with old NSE-only backups even if Yahoo is temporarily unavailable.
-                yahoo_ticker = yahoo_ticker or f"{row['Symbol']}.NS"
-                exchange = exchange or "NSE"
-                currency = currency or "INR"
+        symbol = row["Symbol"]
+        suspicious_nse_guess = (
+            symbol not in lookup
+            and str(yahoo_ticker or "").upper() == f"{symbol}.NS"
+            and str(exchange or "").upper() in {"", "NSE", "NSI"}
+            and _normalize_currency_code(currency) in {"", "INR"}
+        )
 
-        resolved_rows.append((stock_name or row["Symbol"], yahoo_ticker, exchange, currency))
+        if not yahoo_ticker or not currency or suspicious_nse_guess:
+            instrument = resolve_yahoo_instrument(symbol, lookup)
+            if instrument is not None:
+                if suspicious_nse_guess:
+                    yahoo_ticker = instrument["yahoo_ticker"]
+                    exchange = instrument["exchange"]
+                    currency = instrument["currency"]
+                    stock_name = instrument["stock_name"]
+                else:
+                    yahoo_ticker = yahoo_ticker or instrument["yahoo_ticker"]
+                    exchange = exchange or instrument["exchange"]
+                    currency = currency or instrument["currency"]
+                    stock_name = stock_name or instrument["stock_name"]
+            # If Yahoo is temporarily unavailable, keep metadata blank rather than
+            # manufacturing an NSE classification that may be financially wrong.
+
+        resolved_rows.append((
+            stock_name or symbol,
+            str(yahoo_ticker or "").strip().upper(),
+            str(exchange or "").strip(),
+            _normalize_currency_code(currency),
+        ))
 
     cleaned[["Stock Name", "Yahoo Ticker", "Exchange", "Currency"]] = pd.DataFrame(
         resolved_rows, index=cleaned.index
@@ -1210,9 +1321,15 @@ def remove_symbols_from_master(symbols):
         return [], []
 
     with get_db_connection() as conn:
-        all_existing = {
-            row["symbol"]
-            for row in conn.execute("SELECT symbol FROM master_holdings").fetchall()
+        rows = conn.execute(
+            "SELECT symbol, yahoo_ticker FROM master_holdings"
+        ).fetchall()
+
+        by_symbol = {str(row["symbol"]).upper(): row["symbol"] for row in rows}
+        by_ticker = {
+            str(row["yahoo_ticker"] or "").upper(): row["symbol"]
+            for row in rows
+            if str(row["yahoo_ticker"] or "").strip()
         }
 
         resolved_to_remove = []
@@ -1220,9 +1337,16 @@ def remove_symbols_from_master(symbols):
         seen_resolved = set()
 
         for entered_symbol in symbols:
-            resolved_symbol = resolve_nse_symbol(entered_symbol, all_existing)
+            raw = str(entered_symbol or "").strip().upper()
+            base = normalize_portfolio_symbol(raw)
+            resolved_symbol = (
+                by_ticker.get(raw)
+                or by_symbol.get(raw)
+                or by_symbol.get(base)
+            )
+
             if resolved_symbol is None:
-                missing.append(entered_symbol)
+                missing.append(raw)
             elif resolved_symbol not in seen_resolved:
                 resolved_to_remove.append(resolved_symbol)
                 seen_resolved.add(resolved_symbol)
@@ -1332,12 +1456,21 @@ def build_current_allocation_from_db():
 
     df = normalize_frame(df)
 
-    # Repair metadata lazily for rows originating from old databases/backups.
+    # Repair metadata lazily for rows originating from old databases/backups,
+    # including the v1 multi-market bug that could classify VT as VT.NS/NSE/INR.
+    lookup = get_nse_company_lookup()
+    suspicious_nse_guess = (
+        ~df["Symbol"].isin(set(lookup))
+        & (df["Yahoo Ticker"] == (df["Symbol"] + ".NS"))
+        & df["Exchange"].fillna("").astype(str).str.upper().isin(["", "NSE", "NSI"])
+        & df["Currency"].isin(["", "INR"])
+    )
     rows_needing_metadata = df[
-        (df["Yahoo Ticker"] == "") | (df["Currency"] == "")
+        (df["Yahoo Ticker"] == "")
+        | (df["Currency"] == "")
+        | suspicious_nse_guess
     ]["Symbol"].tolist()
     if rows_needing_metadata:
-        lookup = get_nse_company_lookup()
         with get_db_connection() as conn:
             for symbol in rows_needing_metadata:
                 instrument = resolve_yahoo_instrument(symbol, lookup)
@@ -2198,6 +2331,23 @@ for flash_key, target in (
     if flash_message:
         target.append(flash_message)
 
+# Self-heal market metadata created by older/NSE-only builds. In particular, the
+# first multi-market build could leave VT stored as VT.NS/NSE/INR.
+try:
+    repaired_market_symbols = repair_master_holdings_metadata()
+except Exception:
+    repaired_market_symbols = []
+
+if repaired_market_symbols:
+    st.session_state.pop("drop_bottom_coverage_preview", None)
+    st.session_state.pop("drop_bottom_coverage_error", None)
+    st.session_state.pop("drop_bottom_auto_result", None)
+    st.session_state.pop("drop_bottom_auto_error", None)
+    update_messages.append(
+        "Repaired market/currency metadata: " + ", ".join(sorted(repaired_market_symbols))
+        + ". Re-run optimization to refresh the saved analysis."
+    )
+
 with st.sidebar:
     st.header("Holdings database")
     sidebar_count_placeholder = st.empty()
@@ -2205,7 +2355,7 @@ with st.sidebar:
     buy_input = st.text_area(
         "Buy / add symbols",
         placeholder="RELIANCE, TCS, VT, VOO, QQQ",
-        help="Plain symbols try NSE first, then global Yahoo (for example VT). You can also enter explicit Yahoo tickers such as 500325.BO or VUSA.L.",
+        help="Plain symbols found in the NSE equity list use .NS; otherwise the global Yahoo ticker is tried first (for example VT). Explicit Yahoo tickers such as RELIANCE.BO, 500325.BO or VUSA.L are preserved.",
     )
     sell_input = st.text_area(
         "Sell / remove symbols",
@@ -2420,6 +2570,9 @@ if restore_holdings_btn:
             mode=restore_mode,
         )
         st.session_state["holdings_editor_version"] += 1
+        clear_drop_bottom_coverage_preview()
+        st.session_state.pop("drop_bottom_auto_result", None)
+        st.session_state.pop("drop_bottom_auto_error", None)
         st.session_state["holdings_flash_success"] = (
             f"Restored {restored_count} holdings from the CSV backup using "
             f"{restore_mode} mode."
@@ -2441,7 +2594,9 @@ if restore_analysis_btn:
 if update_holdings_btn:
     buy_symbols = parse_symbol_input(buy_input)
     sell_symbols = parse_symbol_input(sell_input)
-    overlap = sorted(set(buy_symbols) & set(sell_symbols))
+    buy_keys = {normalize_portfolio_symbol(symbol) for symbol in buy_symbols}
+    sell_keys = {normalize_portfolio_symbol(symbol) for symbol in sell_symbols}
+    overlap = sorted(buy_keys & sell_keys)
 
     if overlap:
         update_errors.append(
@@ -2470,8 +2625,12 @@ if update_holdings_btn:
             )
 
         if added or removed:
-            # The holdings row set changed, so use a fresh editor widget key.
+            # The holdings row set changed, so use a fresh editor widget key and
+            # invalidate previews that were calculated for the previous holdings set.
             st.session_state["holdings_editor_version"] += 1
+            clear_drop_bottom_coverage_preview()
+            st.session_state.pop("drop_bottom_auto_result", None)
+            st.session_state.pop("drop_bottom_auto_error", None)
 
 for message in update_messages:
     st.success(message)
@@ -2555,6 +2714,9 @@ else:
                 updated_count = save_holding_values(edited_df)
                 # A new key forces Streamlit to discard the old editor snapshot.
                 st.session_state["holdings_editor_version"] += 1
+                clear_drop_bottom_coverage_preview()
+                st.session_state.pop("drop_bottom_auto_result", None)
+                st.session_state.pop("drop_bottom_auto_error", None)
                 st.session_state["holdings_flash_success"] = (
                     f"Saved Quantity and Average Price for {updated_count} holdings."
                 )
