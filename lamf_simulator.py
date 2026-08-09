@@ -1,444 +1,980 @@
-import streamlit as st
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-import datetime as dt
-import holidays
-from datetime import datetime, date
-import io
-import base64
+"""Indian retail-investor Loan Against Mutual Funds (LAMF) simulator.
 
-# --- Streamlit Page Setup ---
-st.set_page_config(page_title="LAMF Simulator", layout="centered", initial_sidebar_state="auto")
-st.title("📌 Loan Against Mutual Fund (LAMF) Simulator")
+This Streamlit app compares two ways to fund a genuine cash requirement:
+A) Redeem mutual-fund units and pay applicable capital-gains tax.
+B) Borrow against eligible mutual-fund units and keep the portfolio invested.
 
-# --- Intro ---
-st.markdown("""
-## LAMF Simulator: Financial Outcome of Taking Loan Against Mutual Funds
+The model intentionally does NOT assume that borrowed money is reinvested in equity.
+A separate high-risk leverage mode is shown only for education and is never presented
+as the default recommendation.
 
-This tool simulates the financial outcome of taking a **Loan Against Mutual Funds (LAMF)** and investing that borrowed amount in the market.
-
-It compares:
-- 🟥 **Total Loan Outflow** (principal + interest + processing fee)  
-- 🟩 **Investment Value** (with monthly compounding)  
-
----
-""")
-
-# --- Input Header ---
-st.markdown("### 🔧 Simulation Inputs")
-
-# --- Loan Date and Tenure ---
-col1, col2 = st.columns(2)
-with col1:
-    loan_start_date = st.date_input(
-        "📅 Loan Start Date",
-        value=dt.date(2025, 3, 27),
-        help="Enter the date when the loan started."
-    )
-with col2:
-    loan_tenure_months = st.number_input(
-        "🏁 Loan Tenure (Months)",
-        min_value=1,
-        max_value=36,
-        value=36,
-        help="Total loan duration agreed with lender (used for foreclosure calculation)."
-    )
-
-# --- Foreclosure Logic ---
-def is_blackout(date):
-    return date.day >= 27 or date.day <= 3
-
-def is_valid_foreclosure_day(date, indian_holidays):
-    return (
-        date.weekday() < 5 and
-        date not in indian_holidays and
-        not is_blackout(date)
-    )
-
-def count_working_days(start_date, end_date, holidays_set):
-    current = start_date
-    count = 0
-    while current <= end_date:
-        if current.weekday() < 5 and current not in holidays_set:
-            count += 1
-        current += dt.timedelta(days=1)
-    return count
-
-def get_foreclosure_date(start_date, tenure_months):
-    end_date = start_date + pd.DateOffset(months=tenure_months)
-    earliest_check_date = start_date + dt.timedelta(days=7)
-    all_years = list(set([start_date.year, end_date.year]))
-    indian_holidays = holidays.India(years=all_years)
-    check_date = end_date.date()
-    while check_date >= earliest_check_date:
-        if is_valid_foreclosure_day(check_date, indian_holidays):
-            working_days = count_working_days(check_date, end_date.date(), indian_holidays)
-            if working_days >= 7:
-                return check_date
-        check_date -= dt.timedelta(days=1)
-    return None
-
-# --- Calculate Foreclosure Date ---
-foreclosure_date = get_foreclosure_date(loan_start_date, loan_tenure_months)
-today = datetime.today().date()
-if isinstance(foreclosure_date, datetime):
-    foreclosure_date = foreclosure_date.date()
-
-# --- Default Tenure ---
-if foreclosure_date:
-    delta_days = (foreclosure_date - today).days
-    default_tenure_months = max(2, delta_days // 30)
-else:
-    default_tenure_months = 12
-
-# --- Dasara Date Logic ---
-dasara_date = date(2025, 10, 12)
-dasara_months = (dasara_date - today).days // 30
-dasara_months = min(max(dasara_months, 2), 36)
-
-if "tenure_months" not in st.session_state:
-    st.session_state.tenure_months = default_tenure_months
-
-# --- Loan Details: Amount, Fee, Dasara Button ---
-fee_col, button_col = st.columns([2, 3])
-with fee_col:
-    loan_amount = st.number_input(
-        "🏦 Loan Amount (₹)", min_value=25_000, max_value=40_00_000, step=5_000, value=4_00_000,
-        help="Specify the loan amount you want to borrow against your mutual funds."
-    )
-    processing_fee = st.number_input(
-        "💰 Processing Fee (₹)", min_value=0, max_value=10_000, step=10, value=1179,
-        help="Enter the one-time processing fee charged for the loan."
-    )
-with button_col:
-    st.markdown("### ")  # Vertical space
-    if st.button(f"🎯 Set Tenure to Dasara ({dasara_months} months left)"):
-        st.session_state.tenure_months = dasara_months
-
-# --- Investment Tenure ---
-st.number_input(
-    "⏳ Investment Holding Period (Months)",
-    min_value=1,
-    max_value=36,
-    step=1,
-    value=st.session_state.tenure_months,
-    key="tenure_months",
-    help="Number of months you plan to hold the loan to generate returns."
-)
-
-# --- Interest and Return Rates ---
-col3, col4 = st.columns(2)
-with col3:
-    interest_rate = st.number_input(
-        "💸 Loan Interest Rate (Annual %)", min_value=4.0, max_value=18.0, step=0.25, value=10.5,
-        help="Select the annual interest rate charged on the loan."
-    )
-with col4:
-    expected_annual_return = st.number_input(
-        "📈 Expected Market Return (Annual %)", min_value=0.0, max_value=200.0, step=0.25, value=100.0,
-        help="Annual return rate you expect from investing the loaned amount."
-    )
-# After user inputs section ends
-tenure_months = st.session_state.get("tenure_months", default_tenure_months)
-
-# --- Financial Calculations ---
-monthly_interest_rate = interest_rate / 12 / 100
-monthly_return_rate = (1 + expected_annual_return / 100) ** (1 / 12) - 1
-
-# Total interest assumes simple interest on principal over tenure
-total_interest_paid = loan_amount * monthly_interest_rate * tenure_months
-total_outflow = loan_amount + total_interest_paid + processing_fee
-
-# Investment value grows with monthly compounding
-investment_value = loan_amount * ((1 + monthly_return_rate) ** tenure_months)
-
-net_profit_loss = investment_value - total_outflow
-decision_text = "✅ YES, Take LAMF" if net_profit_loss > 0 else "❌ NO, Not Worth It"
-    
-# --- Display Results Table ---
-st.markdown("### 📊 Simulation Results")
-
-# Format dates correctly
-formatted_start_date = loan_start_date.strftime("%d-%b-%Y")
-formatted_foreclosure_date = foreclosure_date.strftime("%d-%b-%Y") if foreclosure_date else "N/A"
-
-# --- Results Dictionary with Labels ---
-results = {
-    "📅 Loan Start Date": formatted_start_date,
-    "🔓 Foreclosure Date": formatted_foreclosure_date,
-    "💵 Loan Amount (₹)": loan_amount,
-    "💸 Processing Fee (₹)": processing_fee,
-    "📈 Interest Rate (Annual)": f"{interest_rate:.2f}%",
-    "📆 Monthly Interest Rate": f"{monthly_interest_rate * 100:.3f}%",
-    "📊 Expected Return (Annual)": f"{expected_annual_return:.2f}%",
-    "📅 Monthly Return Rate": f"{monthly_return_rate * 100:.3f}%",
-    "⏳ Loan Tenure Left": f"{tenure_months} months",
-    "💰 Total Interest Paid (₹)": total_interest_paid,
-    "📤 Total Outflow (₹)": total_outflow,
-    "📈 Investment Value at Maturity (₹)": investment_value,
-    "📉 Net Profit / Loss (₹)": net_profit_loss,
-    "✅ Decision": decision_text
-}
-
-# --- Formatting Function ---
-def format_currency(value):
-    if isinstance(value, (int, float)):
-        abs_val = abs(value)
-        if abs_val >= 1_00_00_000:
-            return f"₹{value/1_00_00_000:.2f} Crores"
-        elif abs_val >= 1_00_000:
-            return f"₹{value/1_00_000:.2f} Lakhs"
-        else:
-            return f"₹{value:,.2f}"
-    return value
-
-# Format currency fields selectively
-formatted_results = {
-    k: format_currency(v) if not isinstance(v, str) or "₹" in k else v
-    for k, v in results.items()
-}
-
-# --- Create and Display DataFrame ---
-df_results = pd.DataFrame.from_dict(formatted_results, orient='index', columns=['Value'])
-st.dataframe(df_results, use_container_width=True)
-
-# --- Final Emotional Verdict ---
-st.markdown("### 🧠 Final Verdict")
-
-formatted_profit = format_currency(net_profit_loss)
-
-if net_profit_loss > 0:
-    st.success(f"✅ Gain of {formatted_profit} — **Worth considering LAMF!**")
-else:
-    st.error(f"⚠️ Loss of {format_currency(abs(net_profit_loss))} — **Better avoid LAMF under these terms.**")
-    
-summary_text = f"""
-Let's break this down:
-
-You plan to borrow ₹{loan_amount:,.0f} starting from {formatted_start_date}, with a loan tenure of {loan_tenure_months} months.  
-At an annual interest rate of {interest_rate:.2f}%. Over the loan period, you will pay a total interest of approximately {format_currency(total_interest_paid)}, plus a processing fee of {format_currency(processing_fee)}.  
-This means your total outflow (principal + interest + fees) will be around {format_currency(total_outflow)}.  
-
-Assuming you reinvest the loan amount, expecting an annual return of {expected_annual_return:.2f}%, your investment could grow to {format_currency(investment_value)} by the end of the tenure.  
-
-This results in a net {"profit" if net_profit_loss >= 0 else "loss"} of {format_currency(abs(net_profit_loss))}.  
-
-So, is it financially sound to proceed? {decision_text}
-
-Remember, these are projections based on current assumptions. Real markets fluctuate, but this gives you a realistic outlook to help you make an informed decision.
-
-{f"Foreclosure is scheduled for {formatted_foreclosure_date}." if foreclosure_date else ""}
+All lender terms and tax inputs remain editable because eligibility, LTV, charges,
+prepayment rules and tax treatment depend on the scheme, lender, acquisition date,
+and the investor's own tax situation.
 """
 
-st.markdown("### 📋 Summary of Your Loan & Investment Simulation")
-st.markdown(summary_text)
+import math
+from dataclasses import dataclass
 
-# --- Foreclosure Date Output ---
-if foreclosure_date:
-    st.success(f"📅 The foreclosure date is {foreclosure_date.strftime('%A, %d %B %Y')}")
-else:
-    st.error("Could not find a valid foreclosure date within the loan tenure period.")
+import matplotlib.pyplot as plt
+import pandas as pd
+import streamlit as st
+from matplotlib.ticker import FuncFormatter
 
-# --- Bar Chart: Visual Comparison ---
-st.markdown("### 📈 Visual Comparison")
 
-plt.style.use("seaborn-v0_8-muted")
-fig, ax = plt.subplots(figsize=(4.5, 5.0),dpi=600)
-
-labels = ["Investment Value", "Total Outflow", "Net P&L"]
-values = [investment_value, total_outflow, net_profit_loss]
-values_in_lakhs = [v / 1_00_000 for v in values]
-colors = ['green', 'red', 'green' if net_profit_loss > 0 else 'red']
-
-bars = ax.bar(labels, values_in_lakhs, color=colors)
-
-for i, bar in enumerate(bars):
-    yval = bar.get_height()
-    ax.text(bar.get_x() + bar.get_width() / 2, yval + 0.001,
-            f"₹{abs(values[i]) / 1_00_000:.2f}L",
-            ha='center', va='bottom', fontsize=11, fontweight='bold')
-
-ax.set_title("Investment vs Outflow vs Net Profit/Loss", fontsize=14, fontweight='bold')
-ax.set_ylabel("₹ (in Lakhs)")
-ax.grid(True, linestyle='--', alpha=0.6, axis='y')
-plt.tight_layout()
-st.pyplot(fig)
-# Save the figure to a BytesIO buffer
-buf = io.BytesIO()
-fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-buf.seek(0)
-
-# Encode buffer to base64
-b64 = base64.b64encode(buf.read()).decode()
-href = f'<a href="data:image/png;base64,{b64}" download="visual_comparison.png">📥 Download Chart as PNG</a>'
-
-# Show the download link
-st.markdown(href, unsafe_allow_html=True)
-
-# --- Sensitivity Plot: Net P&L vs Loan Amount ---
-st.markdown("### 🔍 Sensitivity: Net P&L vs Loan Amount")
-
-# --- Input Variables ---
-
-loan_range = np.concatenate([
-    np.arange(25000, 100001, 25000),
-    np.arange(150000, 350001, 50000),
-    np.arange(400000, 1000001, 100000),
-    np.arange(1250000, 2000001, 250000),
-    np.arange(2500000, 3500001, 500000)
-])
-
-loan_range = np.unique(np.append(loan_range, loan_amount))
-loan_range.sort()
-
-net_pnl_list = []
-for loan in loan_range:
-    total_interest = loan * monthly_interest_rate * tenure_months
-    total_cost = loan + total_interest + processing_fee
-    investment = loan * ((1 + monthly_return_rate) ** tenure_months)
-    net_pnl = investment - total_cost
-    net_pnl_list.append(net_pnl)
-
-def format_rupee(x, _=None):
-    abs_x = abs(x)
-    if abs_x >= 10000000:
-        return f"₹{x / 10000000:.1f}Cr".rstrip('0').rstrip('.')
-    elif abs_x >= 100000:
-        return f"₹{x / 100000:.1f}L".rstrip('0').rstrip('.')
-    else:
-        return f"₹{x / 1000:.1f}k".rstrip('0').rstrip('.')
-
-# Plot using indices for equidistant bars
-indices = np.arange(len(loan_range))
-
-fig, ax = plt.subplots(figsize=(12, 6),dpi=1000)
-bars = ax.bar(
-    indices,
-    net_pnl_list,
-    width=0.6,
-    color=['green' if val >= 0 else 'red' for val in net_pnl_list]
+# -----------------------------------------------------------------------------
+# Page setup
+# -----------------------------------------------------------------------------
+st.set_page_config(
+    page_title="LAMF Simulator – India",
+    page_icon="🇮🇳",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# Annotate each bar
-for i, (bar, value) in enumerate(zip(bars, net_pnl_list)):
+st.title("🇮🇳 Loan Against Mutual Funds (LAMF) Simulator")
+st.caption(
+    "For Indian retail investors: compare **selling mutual funds vs taking LAMF**, "
+    "including tax, cash-flow strain, LTV/margin-call risk, repayment style, renewals and sensitivity."
+)
+
+st.info(
+    "This is a decision-support model, not a loan recommendation. Enter the exact terms from your "
+    "lender's sanction letter and your own tax position. Borrowing against market-linked assets can "
+    "trigger margin calls or forced redemption when markets fall."
+)
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+def inr(value: float) -> str:
+    """Indian-style compact currency formatter."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "—"
+    sign = "-" if value < 0 else ""
+    x = abs(float(value))
+    if x >= 1_00_00_000:
+        return f"{sign}₹{x / 1_00_00_000:.2f} Cr"
+    if x >= 1_00_000:
+        return f"{sign}₹{x / 1_00_000:.2f} L"
+    return f"{sign}₹{x:,.0f}"
+
+
+def monthly_rate(annual_percent: float) -> float:
+    return (1 + annual_percent / 100.0) ** (1 / 12) - 1
+
+
+def fv_lump_sum(pv: float, annual_percent: float, months: int) -> float:
+    return pv * (1 + monthly_rate(annual_percent)) ** months
+
+
+def fv_monthly_contribution(payment: float, annual_percent: float, months: int) -> float:
+    """Future value of end-of-month contributions."""
+    r = monthly_rate(annual_percent)
+    if months <= 0:
+        return 0.0
+    if abs(r) < 1e-12:
+        return payment * months
+    return payment * (((1 + r) ** months - 1) / r)
+
+
+def amortizing_emi(principal: float, annual_percent: float, months: int) -> float:
+    r = annual_percent / 1200.0
+    if months <= 0:
+        return 0.0
+    if abs(r) < 1e-12:
+        return principal / months
+    return principal * r * (1 + r) ** months / ((1 + r) ** months - 1)
+
+
+def amortization_schedule(principal: float, annual_percent: float, months: int) -> pd.DataFrame:
+    """Standard reducing-balance amortization used as an EMI-style manual prepayment proxy."""
+    emi = amortizing_emi(principal, annual_percent, months)
+    r = annual_percent / 1200.0
+    balance = principal
+    rows = []
+    for m in range(1, months + 1):
+        interest = balance * r
+        principal_paid = min(balance, max(0.0, emi - interest))
+        payment = interest + principal_paid
+        balance = max(0.0, balance - principal_paid)
+        rows.append((m, payment, interest, principal_paid, balance))
+    return pd.DataFrame(rows, columns=["Month", "Payment", "Interest", "Principal", "Balance"])
+
+
+def required_sinking_fund_payment(target: float, annual_percent: float, months: int) -> float:
+    """Monthly contribution required to accumulate target by the end of the horizon."""
+    r = monthly_rate(annual_percent)
+    if months <= 0:
+        return target
+    if abs(r) < 1e-12:
+        return target / months
+    factor = ((1 + r) ** months - 1) / r
+    return target / factor
+
+
+def tax_on_redemption(
+    gross_redemption: float,
+    embedded_gain_pct: float,
+    tax_rate_pct: float,
+    exemption_remaining: float,
+    cess_pct: float,
+    surcharge_pct: float,
+) -> float:
+    gain = gross_redemption * embedded_gain_pct / 100.0
+    taxable_gain = max(0.0, gain - exemption_remaining)
+    base_tax = taxable_gain * tax_rate_pct / 100.0
+    surcharge = base_tax * surcharge_pct / 100.0
+    tax_plus_surcharge = base_tax + surcharge
+    cess = tax_plus_surcharge * cess_pct / 100.0
+    return tax_plus_surcharge + cess
+
+
+def gross_redemption_for_net_cash(
+    net_cash_needed: float,
+    embedded_gain_pct: float,
+    tax_rate_pct: float,
+    exemption_remaining: float,
+    cess_pct: float,
+    surcharge_pct: float,
+) -> tuple[float, float]:
+    """Solve gross redemption such that gross - tax ~= requested net cash."""
+    if net_cash_needed <= 0:
+        return 0.0, 0.0
+
+    lo = net_cash_needed
+    hi = net_cash_needed * 2.0 + 1_00_000
+
+    # Expand upper bound if an extreme custom tax rate is entered.
+    for _ in range(20):
+        tax_hi = tax_on_redemption(
+            hi, embedded_gain_pct, tax_rate_pct, exemption_remaining, cess_pct, surcharge_pct
+        )
+        if hi - tax_hi >= net_cash_needed:
+            break
+        hi *= 1.5
+
+    for _ in range(100):
+        mid = (lo + hi) / 2.0
+        tax_mid = tax_on_redemption(
+            mid, embedded_gain_pct, tax_rate_pct, exemption_remaining, cess_pct, surcharge_pct
+        )
+        net_mid = mid - tax_mid
+        if net_mid < net_cash_needed:
+            lo = mid
+        else:
+            hi = mid
+
+    gross = hi
+    tax = tax_on_redemption(
+        gross, embedded_gain_pct, tax_rate_pct, exemption_remaining, cess_pct, surcharge_pct
+    )
+    return gross, tax
+
+
+def flat_rate_loan_irr(flat_rate_pct: float, principal: float, months: int) -> float:
+    """Approximate annual effective rate for a flat-rate installment loan via bisection."""
+    if principal <= 0 or months <= 0:
+        return 0.0
+    years = months / 12.0
+    total_interest = principal * flat_rate_pct / 100.0 * years
+    payment = (principal + total_interest) / months
+
+    def npv(monthly_r: float) -> float:
+        return principal - sum(payment / ((1 + monthly_r) ** m) for m in range(1, months + 1))
+
+    lo, hi = 0.0, 0.10  # up to 10% per month, intentionally wide
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if npv(mid) > 0:
+            hi = mid
+        else:
+            lo = mid
+    monthly_irr = (lo + hi) / 2
+    return ((1 + monthly_irr) ** 12 - 1) * 100
+
+
+@dataclass
+class ScenarioResult:
+    sell_end_wealth: float
+    loan_end_wealth: float
+    advantage: float
+    gross_redemption: float
+    redemption_tax: float
+    loan_monthly_debt_service: float
+    residual_monthly_investment: float
+    cashflow_shortfall: float
+    total_interest: float
+    total_fees: float
+    ending_loan_balance: float
+    sinking_fund_value: float
+    bullet_repayment_tax: float
+    renewal_count: int
+
+
+def run_scenario(
+    *,
+    cash_required: float,
+    portfolio_value: float,
+    embedded_gain_pct: float,
+    tax_rate_pct: float,
+    exemption_remaining: float,
+    cess_pct: float,
+    surcharge_pct: float,
+    expected_return_pct: float,
+    monthly_surplus: float,
+    loan_rate_pct: float,
+    horizon_months: int,
+    sanction_months: int,
+    processing_fee_pre_gst: float,
+    processing_gst_pct: float,
+    other_upfront_charges: float,
+    prepayment_charge_pct: float,
+    repayment_style: str,
+    sinking_return_pct: float,
+    bullet_repayment_from_mf: bool,
+    repayment_embedded_gain_pct: float,
+    repayment_exemption_available: float,
+) -> ScenarioResult:
+    # Path A: sell enough units to receive the same usable cash after tax.
+    gross_redemption, redemption_tax = gross_redemption_for_net_cash(
+        cash_required,
+        embedded_gain_pct,
+        tax_rate_pct,
+        exemption_remaining,
+        cess_pct,
+        surcharge_pct,
+    )
+    remaining_portfolio = max(0.0, portfolio_value - gross_redemption)
+    sell_end_wealth = fv_lump_sum(remaining_portfolio, expected_return_pct, horizon_months)
+    sell_end_wealth += fv_monthly_contribution(monthly_surplus, expected_return_pct, horizon_months)
+
+    # Loan fees repeat on every sanction/renewal cycle. Example: 12y planned / 3y sanction = 4 fee events.
+    fee_events = max(1, math.ceil(horizon_months / max(1, sanction_months)))
+    renewal_count = max(0, fee_events - 1)
+    processing_with_gst = processing_fee_pre_gst * (1 + processing_gst_pct / 100.0)
+    total_fees = fee_events * (processing_with_gst + other_upfront_charges)
+
+    principal = cash_required
+    ending_balance = principal
+    sinking_fund_value = 0.0
+    bullet_repayment_tax = 0.0
+    bullet_gross_redemption = principal
+
+    if repayment_style == "EMI-style manual principal prepayment":
+        schedule = amortization_schedule(principal, loan_rate_pct, horizon_months)
+        monthly_debt_service = float(schedule["Payment"].iloc[0]) if not schedule.empty else 0.0
+        total_interest = float(schedule["Interest"].sum())
+        ending_balance = float(schedule["Balance"].iloc[-1]) if not schedule.empty else 0.0
+        # Optional foreclosure/prepayment cost; user can set zero if lender waives it.
+        prepayment_charge = principal * prepayment_charge_pct / 100.0
+        total_fees += prepayment_charge
+
+    elif repayment_style == "Interest-only + sinking fund":
+        monthly_interest = principal * loan_rate_pct / 1200.0
+        sinking_payment = required_sinking_fund_payment(principal, sinking_return_pct, horizon_months)
+        monthly_debt_service = monthly_interest + sinking_payment
+        total_interest = monthly_interest * horizon_months
+        sinking_fund_value = fv_monthly_contribution(sinking_payment, sinking_return_pct, horizon_months)
+        ending_balance = principal
+
+    else:  # Interest-only, bullet principal at end
+        monthly_interest = principal * loan_rate_pct / 1200.0
+        monthly_debt_service = monthly_interest
+        total_interest = monthly_interest * horizon_months
+        ending_balance = principal
+        if bullet_repayment_from_mf:
+            bullet_gross_redemption, bullet_repayment_tax = gross_redemption_for_net_cash(
+                principal,
+                repayment_embedded_gain_pct,
+                tax_rate_pct,
+                repayment_exemption_available,
+                cess_pct,
+                surcharge_pct,
+            )
+
+    residual_monthly_investment = max(0.0, monthly_surplus - monthly_debt_service)
+    monthly_shortfall = max(0.0, monthly_debt_service - monthly_surplus)
+    cashflow_shortfall = monthly_shortfall * horizon_months
+
+    # Path B: keep portfolio intact. Any monthly surplus left after debt service continues into investments.
+    loan_end_wealth = fv_lump_sum(portfolio_value, expected_return_pct, horizon_months)
+    loan_end_wealth += fv_monthly_contribution(
+        residual_monthly_investment, expected_return_pct, horizon_months
+    )
+    loan_end_wealth += sinking_fund_value
+    if repayment_style == "Interest-only, bullet principal at end" and bullet_repayment_from_mf:
+        # Repaying from the portfolio may require redeeming more than the principal because tax can be triggered.
+        loan_end_wealth -= bullet_gross_redemption
+    else:
+        loan_end_wealth -= ending_balance
+    loan_end_wealth -= total_fees
+
+    # If the stated monthly surplus cannot cover debt service, make the comparison conservative by
+    # subtracting the additional outside cash that would have to be brought into the loan path.
+    loan_end_wealth -= cashflow_shortfall
+
+    return ScenarioResult(
+        sell_end_wealth=sell_end_wealth,
+        loan_end_wealth=loan_end_wealth,
+        advantage=loan_end_wealth - sell_end_wealth,
+        gross_redemption=gross_redemption,
+        redemption_tax=redemption_tax,
+        loan_monthly_debt_service=monthly_debt_service,
+        residual_monthly_investment=residual_monthly_investment,
+        cashflow_shortfall=cashflow_shortfall,
+        total_interest=total_interest,
+        total_fees=total_fees,
+        ending_loan_balance=ending_balance,
+        sinking_fund_value=sinking_fund_value,
+        bullet_repayment_tax=bullet_repayment_tax,
+        renewal_count=renewal_count,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Inputs
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.header("1) Cash requirement")
+    use_case = st.selectbox(
+        "Purpose",
+        [
+            "Emergency / medical / family need",
+            "Used vehicle / large purchase",
+            "Business working capital",
+            "Debt consolidation",
+            "Home down payment / token",
+            "Other genuine expense",
+            "Invest borrowed money (high-risk leverage)",
+        ],
+    )
+    cash_required = st.number_input(
+        "Net cash required (₹)",
+        min_value=25_000,
+        max_value=5_00_00_000,
+        value=5_00_000,
+        step=25_000,
+    )
+    monthly_surplus = st.number_input(
+        "Monthly amount available for SIP / debt service (₹)",
+        min_value=0,
+        max_value=10_00_000,
+        value=25_000,
+        step=1_000,
+        help="Use the amount you can sustainably allocate each month. The comparison keeps this budget equal across both paths.",
+    )
+
+    st.header("2) Mutual-fund portfolio")
+    portfolio_value = st.number_input(
+        "Current MF portfolio value (₹)",
+        min_value=50_000,
+        max_value=50_00_00_000,
+        value=20_00_000,
+        step=50_000,
+    )
+    eligible_collateral_value = st.number_input(
+        "LAMF-eligible / pledgeable value (₹)",
+        min_value=0,
+        max_value=50_00_00_000,
+        value=min(20_00_000, portfolio_value),
+        step=50_000,
+        help="Only enter units actually eligible with your lender; not every scheme/unit may be accepted.",
+    )
+    embedded_gain_pct = st.slider(
+        "Estimated unrealised gain embedded in units sold (%)",
+        min_value=0,
+        max_value=95,
+        value=35,
+        help="Example: 35% means roughly ₹35 of every ₹100 redeemed is capital gain and ₹65 is cost basis.",
+    )
+    expected_return_pct = st.number_input(
+        "Expected portfolio return (p.a. %)",
+        min_value=-20.0,
+        max_value=30.0,
+        value=10.0,
+        step=0.5,
+        help="Use a conservative long-term assumption; this is uncertain, unlike loan interest.",
+    )
+
+    st.header("3) Tax on redemption")
+    tax_bucket = st.selectbox(
+        "Tax bucket for the units that would be sold",
+        [
+            "Equity-oriented LTCG (editable defaults)",
+            "Equity-oriented STCG (editable defaults)",
+            "Custom / other mutual-fund tax treatment",
+        ],
+    )
+
+    if tax_bucket.startswith("Equity-oriented LTCG"):
+        default_tax_rate = 12.5
+        default_exemption = 1_25_000
+    elif tax_bucket.startswith("Equity-oriented STCG"):
+        default_tax_rate = 20.0
+        default_exemption = 0
+    else:
+        default_tax_rate = 12.5
+        default_exemption = 0
+
+    tax_rate_pct = st.number_input(
+        "Capital-gains tax rate (%)",
+        min_value=0.0,
+        max_value=50.0,
+        value=float(default_tax_rate),
+        step=0.1,
+    )
+    annual_exemption = st.number_input(
+        "Applicable annual exemption (₹)",
+        min_value=0,
+        max_value=10_00_000,
+        value=int(default_exemption),
+        step=5_000,
+    )
+    exemption_used = st.number_input(
+        "Exemption already used this FY (₹)",
+        min_value=0,
+        max_value=10_00_000,
+        value=0,
+        step=5_000,
+    )
+    exemption_remaining = max(0.0, annual_exemption - exemption_used)
+    cess_pct = st.number_input("Health & education cess (%)", 0.0, 10.0, 4.0, 0.5)
+    surcharge_pct = st.number_input("Surcharge on this tax, if applicable (%)", 0.0, 50.0, 0.0, 1.0)
+
+    st.header("4) LAMF terms")
+    loan_rate_pct = st.number_input(
+        "LAMF interest rate (p.a. %)", 4.0, 24.0, 10.5, 0.1
+    )
+    horizon_months = st.number_input(
+        "How long you expect to need the loan (months)", 1, 180, 36, 1
+    )
+    sanction_months = st.number_input(
+        "Lender sanction / renewal cycle (months)", 1, 120, 36, 1,
+        help="If your planned horizon is longer, the simulator repeats fees at each renewal cycle.",
+    )
+    lender_ltv_pct = st.number_input(
+        "Lender maximum LTV (%)",
+        min_value=5.0,
+        max_value=95.0,
+        value=50.0,
+        step=1.0,
+        help="Enter the exact LTV from the lender for the funds you are pledging.",
+    )
+    self_imposed_ltv_pct = st.number_input(
+        "Your safer target LTV (%)",
+        min_value=1.0,
+        max_value=float(lender_ltv_pct),
+        value=min(30.0, float(lender_ltv_pct)),
+        step=1.0,
+        help="A personal buffer below the lender's maximum. Lower LTV means more room for market falls.",
+    )
+    processing_fee_pre_gst = st.number_input(
+        "Processing / renewal fee before GST (₹)", 0, 2_00_000, 5_000, 500
+    )
+    processing_gst_pct = st.number_input("GST on processing fee (%)", 0.0, 30.0, 18.0, 1.0)
+    other_upfront_charges = st.number_input(
+        "Other charges per sanction cycle (₹)", 0, 2_00_000, 0, 500
+    )
+    prepayment_charge_pct = st.number_input(
+        "Prepayment / foreclosure charge (%)", 0.0, 10.0, 0.0, 0.25,
+        help="Keep at 0 only if your lender actually waives it.",
+    )
+
+    st.header("5) Repayment")
+    repayment_style = st.selectbox(
+        "Repayment style",
+        [
+            "EMI-style manual principal prepayment",
+            "Interest-only + sinking fund",
+            "Interest-only, bullet principal at end",
+        ],
+    )
+    sinking_return_pct = 0.0
+    bullet_repayment_from_mf = False
+    repayment_embedded_gain_pct = float(embedded_gain_pct)
+    repayment_exemption_available = float(annual_exemption)
+    if repayment_style == "Interest-only + sinking fund":
+        sinking_return_pct = st.number_input(
+            "Expected sinking-fund return (p.a. %)",
+            min_value=0.0,
+            max_value=12.0,
+            value=6.0,
+            step=0.25,
+            help="Use a low-risk assumption if this money is meant to repay principal on a fixed date.",
+        )
+    elif repayment_style == "Interest-only, bullet principal at end":
+        bullet_source = st.selectbox(
+            "Expected principal repayment source",
+            ["Redeem mutual funds at horizon", "Future cash outside the portfolio"],
+        )
+        bullet_repayment_from_mf = bullet_source == "Redeem mutual funds at horizon"
+        if bullet_repayment_from_mf:
+            repayment_embedded_gain_pct = st.slider(
+                "Estimated gain embedded in repayment-time redemption (%)",
+                min_value=0,
+                max_value=95,
+                value=min(50, int(embedded_gain_pct)),
+                help="Approximation for the units you may redeem at the end to settle principal.",
+            )
+            repayment_exemption_available = st.number_input(
+                "Expected exemption available in repayment FY (₹)",
+                min_value=0,
+                max_value=10_00_000,
+                value=int(annual_exemption),
+                step=5_000,
+                help="Future-year exemption is uncertain; enter what you expect to remain unused in that financial year.",
+            )
+
+
+# -----------------------------------------------------------------------------
+# Core calculations
+# -----------------------------------------------------------------------------
+if use_case == "Invest borrowed money (high-risk leverage)":
+    st.error(
+        "⚠️ High-risk leverage mode selected. Loan interest is certain; market returns are not. "
+        "This app will still show collateral and cash-flow risk, but it will not label leveraged investing as 'recommended'."
+    )
+
+if eligible_collateral_value > portfolio_value:
+    st.warning("Eligible collateral cannot logically exceed the total portfolio value. Check the inputs.")
+
+max_lender_loan = eligible_collateral_value * lender_ltv_pct / 100.0
+safe_target_loan = eligible_collateral_value * self_imposed_ltv_pct / 100.0
+initial_ltv = cash_required / eligible_collateral_value * 100.0 if eligible_collateral_value > 0 else math.inf
+
+result = run_scenario(
+    cash_required=float(cash_required),
+    portfolio_value=float(portfolio_value),
+    embedded_gain_pct=float(embedded_gain_pct),
+    tax_rate_pct=float(tax_rate_pct),
+    exemption_remaining=float(exemption_remaining),
+    cess_pct=float(cess_pct),
+    surcharge_pct=float(surcharge_pct),
+    expected_return_pct=float(expected_return_pct),
+    monthly_surplus=float(monthly_surplus),
+    loan_rate_pct=float(loan_rate_pct),
+    horizon_months=int(horizon_months),
+    sanction_months=int(sanction_months),
+    processing_fee_pre_gst=float(processing_fee_pre_gst),
+    processing_gst_pct=float(processing_gst_pct),
+    other_upfront_charges=float(other_upfront_charges),
+    prepayment_charge_pct=float(prepayment_charge_pct),
+    repayment_style=repayment_style,
+    sinking_return_pct=float(sinking_return_pct),
+    bullet_repayment_from_mf=bool(bullet_repayment_from_mf),
+    repayment_embedded_gain_pct=float(repayment_embedded_gain_pct),
+    repayment_exemption_available=float(repayment_exemption_available),
+)
+
+# Margin-call math based on initial principal. For amortizing loans, risk generally declines as principal is prepaid.
+margin_call_collateral = cash_required / (lender_ltv_pct / 100.0) if lender_ltv_pct > 0 else math.inf
+crash_to_margin_call_pct = (
+    max(0.0, 1 - margin_call_collateral / eligible_collateral_value) * 100.0
+    if eligible_collateral_value > 0
+    else -math.inf
+)
+
+
+# -----------------------------------------------------------------------------
+# Dashboard
+# -----------------------------------------------------------------------------
+st.subheader("Decision dashboard")
+
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Net cash needed", inr(cash_required))
+c2.metric("Current LTV", f"{initial_ltv:.1f}%" if math.isfinite(initial_ltv) else "N/A")
+c3.metric("Lender max loan", inr(max_lender_loan))
+c4.metric("Your safer target loan", inr(safe_target_loan))
+
+if cash_required > max_lender_loan:
+    st.error(
+        f"❌ Requested loan {inr(cash_required)} exceeds the lender-LTV capacity of {inr(max_lender_loan)}. "
+        "LAMF is not feasible with the entered eligible collateral."
+    )
+elif cash_required > safe_target_loan:
+    st.warning(
+        f"⚠️ The loan fits the lender's LTV, but exceeds your self-imposed safer limit of {inr(safe_target_loan)}. "
+        "You have less crash buffer than your target."
+    )
+else:
+    st.success("✅ Requested loan is within both the lender LTV and your self-imposed LTV buffer.")
+
+sell_feasible = result.gross_redemption <= portfolio_value
+if not sell_feasible:
+    st.error(
+        f"Selling the entered portfolio cannot provide {inr(cash_required)} net after estimated tax: "
+        f"the model would need to redeem about {inr(result.gross_redemption)} from a {inr(portfolio_value)} portfolio."
+    )
+
+if result.cashflow_shortfall > 0:
+    st.error(
+        f"💸 Cash-flow stress: debt service exceeds your stated monthly surplus by about "
+        f"{inr(result.cashflow_shortfall / horizon_months)} per month. "
+        "A loan that wins on spreadsheet wealth but strains monthly cash flow is not practical."
+    )
+
+
+# -----------------------------------------------------------------------------
+# Sell vs borrow comparison
+# -----------------------------------------------------------------------------
+st.subheader("A) Sell mutual funds vs B) Take LAMF")
+
+comparison = pd.DataFrame(
+    {
+        "Metric": [
+            "Cash available for expense",
+            "MF units redeemed today",
+            "Estimated tax triggered today",
+            "Monthly debt service",
+            "Monthly MF investment that can continue",
+            f"Estimated investment wealth after {horizon_months} months",
+            "Loan balance at horizon",
+            "Total loan interest",
+            "Total lender fees / charges",
+        ],
+        "Sell MF": [
+            cash_required,
+            result.gross_redemption,
+            result.redemption_tax,
+            0.0,
+            monthly_surplus,
+            result.sell_end_wealth,
+            0.0,
+            0.0,
+            0.0,
+        ],
+        "Take LAMF": [
+            cash_required,
+            0.0,
+            0.0,
+            result.loan_monthly_debt_service,
+            result.residual_monthly_investment,
+            result.loan_end_wealth,
+            result.ending_loan_balance,
+            result.total_interest,
+            result.total_fees,
+        ],
+    }
+)
+
+formatted_comparison = comparison.copy()
+for col in ["Sell MF", "Take LAMF"]:
+    formatted_comparison[col] = formatted_comparison[col].map(inr)
+st.dataframe(formatted_comparison, use_container_width=True, hide_index=True)
+
+adv1, adv2, adv3 = st.columns(3)
+adv1.metric("Tax avoided today by not selling", inr(result.redemption_tax))
+adv2.metric("Renewals assumed", f"{result.renewal_count}")
+adv3.metric(
+    "LAMF wealth advantage vs selling",
+    inr(result.advantage),
+    delta=f"{result.advantage / max(1.0, result.sell_end_wealth) * 100:.2f}%",
+)
+
+if use_case == "Invest borrowed money (high-risk leverage)":
+    st.warning(
+        "No positive/negative verdict is issued for leveraged investing. The comparison above assumes the loan funds a cash need, "
+        "not an additional equity purchase."
+    )
+elif cash_required > max_lender_loan:
+    st.error("Verdict: LAMF is not feasible at the entered lender LTV.")
+elif not sell_feasible:
+    st.info("Verdict: the 'sell MF' alternative is not feasible with the entered portfolio; compare LAMF with other funding sources instead.")
+elif result.cashflow_shortfall > 0:
+    st.warning("Verdict: financially stressed — fix monthly affordability before comparing expected wealth outcomes.")
+elif result.advantage > 0:
+    st.success(
+        f"Model result: keeping the portfolio pledged is ahead by about {inr(result.advantage)} under your assumptions. "
+        "This is only attractive if you can tolerate the LTV risk and repay on schedule."
+    )
+else:
+    st.warning(
+        f"Model result: selling units is ahead by about {inr(abs(result.advantage))} under your assumptions. "
+        "LAMF does not compensate for its interest/fees in this scenario."
+    )
+
+
+# -----------------------------------------------------------------------------
+# Tax details
+# -----------------------------------------------------------------------------
+with st.expander("Tax calculation details", expanded=False):
+    estimated_gain_realised = result.gross_redemption * embedded_gain_pct / 100.0
+    taxable_gain = max(0.0, estimated_gain_realised - exemption_remaining)
+    tax_df = pd.DataFrame(
+        {
+            "Item": [
+                "Net cash needed",
+                "Gross MF redemption required",
+                "Estimated embedded gain realised",
+                "Exemption remaining",
+                "Estimated taxable gain",
+                "Estimated tax incl. surcharge/cess",
+            ],
+            "Value": [
+                cash_required,
+                result.gross_redemption,
+                estimated_gain_realised,
+                exemption_remaining,
+                taxable_gain,
+                result.redemption_tax,
+            ],
+        }
+    )
+    tax_df["Value"] = tax_df["Value"].map(inr)
+    st.dataframe(tax_df, hide_index=True, use_container_width=True)
+    st.caption(
+        "This is an estimate. Mutual-fund taxation can depend on fund classification, acquisition/redemption dates, "
+        "grandfathering/cost rules, set-off of losses and your overall tax situation."
+    )
+
+
+# -----------------------------------------------------------------------------
+# Margin/LTV safety
+# -----------------------------------------------------------------------------
+st.subheader("Margin-call / collateral safety")
+
+if eligible_collateral_value <= 0:
+    st.error("Enter a positive eligible collateral value to evaluate LTV safety.")
+else:
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("Initial LTV", f"{initial_ltv:.1f}%")
+    mc2.metric("Collateral value at lender-LTV breach", inr(margin_call_collateral))
+    mc3.metric("Approx. fall to lender-LTV breach", f"{crash_to_margin_call_pct:.1f}%")
+
+    crash_levels = [0, 10, 20, 30, 40, 50, 60]
+    stress_rows = []
+    for crash in crash_levels:
+        stressed_collateral = eligible_collateral_value * (1 - crash / 100.0)
+        stressed_ltv = cash_required / stressed_collateral * 100.0 if stressed_collateral > 0 else math.inf
+        top_up_needed = max(0.0, cash_required / (lender_ltv_pct / 100.0) - stressed_collateral)
+        principal_repay_needed = max(0.0, cash_required - stressed_collateral * lender_ltv_pct / 100.0)
+        stress_rows.append(
+            {
+                "Market fall": f"-{crash}%",
+                "Collateral value": inr(stressed_collateral),
+                "LTV": f"{stressed_ltv:.1f}%" if math.isfinite(stressed_ltv) else "∞",
+                "Extra collateral to restore max LTV": inr(top_up_needed),
+                "Principal repayment to restore max LTV": inr(principal_repay_needed),
+                "Status": "BREACH" if stressed_ltv > lender_ltv_pct else "OK",
+            }
+        )
+    st.dataframe(pd.DataFrame(stress_rows), use_container_width=True, hide_index=True)
+
+    st.caption(
+        "The breach calculation is intentionally conservative and uses the original principal. Under EMI-style principal prepayment, "
+        "your actual LTV normally improves over time as the outstanding balance falls. Lender cure periods and liquidation rules vary."
+    )
+
+
+# -----------------------------------------------------------------------------
+# Repayment details
+# -----------------------------------------------------------------------------
+st.subheader("Repayment and renewal details")
+
+rep1, rep2, rep3, rep4 = st.columns(4)
+rep1.metric("Monthly debt service", inr(result.loan_monthly_debt_service))
+rep2.metric("Total interest", inr(result.total_interest))
+rep3.metric("Fees across sanction cycles", inr(result.total_fees))
+rep4.metric("Ending principal outstanding", inr(result.ending_loan_balance))
+
+if repayment_style == "Interest-only + sinking fund":
+    st.info(
+        f"Sinking fund is projected to reach about {inr(result.sinking_fund_value)} by month {horizon_months}, "
+        f"against a bullet principal of {inr(result.ending_loan_balance)}."
+    )
+elif repayment_style == "Interest-only, bullet principal at end":
+    if bullet_repayment_from_mf:
+        st.warning(
+            f"Bullet risk: the full principal remains due at the end. With the entered repayment-time gain estimate, "
+            f"the model includes about {inr(result.bullet_repayment_tax)} of capital-gains tax in the final MF redemption. "
+            "A market fall near repayment can still make the timing painful."
+        )
+    else:
+        st.warning(
+            "Bullet risk: the full principal remains due at the end and must come from future cash outside the modeled portfolio."
+        )
+
+if horizon_months > sanction_months:
+    st.warning(
+        f"The model assumes {result.renewal_count} renewal(s) and repeats charges. It also assumes the loan can be renewed. "
+        "In real life, renewal rate, eligible schemes, LTV and rollover terms can change; the lender may require principal settlement."
+    )
+
+
+# -----------------------------------------------------------------------------
+# Break-even return
+# -----------------------------------------------------------------------------
+st.subheader("Break-even portfolio return")
+
+
+def advantage_at_return(ret: float) -> float:
+    r = run_scenario(
+        cash_required=float(cash_required),
+        portfolio_value=float(portfolio_value),
+        embedded_gain_pct=float(embedded_gain_pct),
+        tax_rate_pct=float(tax_rate_pct),
+        exemption_remaining=float(exemption_remaining),
+        cess_pct=float(cess_pct),
+        surcharge_pct=float(surcharge_pct),
+        expected_return_pct=float(ret),
+        monthly_surplus=float(monthly_surplus),
+        loan_rate_pct=float(loan_rate_pct),
+        horizon_months=int(horizon_months),
+        sanction_months=int(sanction_months),
+        processing_fee_pre_gst=float(processing_fee_pre_gst),
+        processing_gst_pct=float(processing_gst_pct),
+        other_upfront_charges=float(other_upfront_charges),
+        prepayment_charge_pct=float(prepayment_charge_pct),
+        repayment_style=repayment_style,
+        sinking_return_pct=float(sinking_return_pct),
+        bullet_repayment_from_mf=bool(bullet_repayment_from_mf),
+        repayment_embedded_gain_pct=float(repayment_embedded_gain_pct),
+        repayment_exemption_available=float(repayment_exemption_available),
+    )
+    return r.advantage
+
+
+lo, hi = -20.0, 40.0
+flo, fhi = advantage_at_return(lo), advantage_at_return(hi)
+if flo == 0:
+    breakeven_return = lo
+elif fhi == 0:
+    breakeven_return = hi
+elif flo * fhi < 0:
+    for _ in range(80):
+        mid = (lo + hi) / 2.0
+        fmid = advantage_at_return(mid)
+        if flo * fmid <= 0:
+            hi, fhi = mid, fmid
+        else:
+            lo, flo = mid, fmid
+    breakeven_return = (lo + hi) / 2.0
+else:
+    breakeven_return = None
+
+if breakeven_return is not None:
+    st.metric("Return at which LAMF and selling are roughly equal", f"{breakeven_return:.2f}% p.a.")
+    if expected_return_pct < breakeven_return:
+        st.caption("Your entered expected return is below the modeled break-even return.")
+    else:
+        st.caption("Your entered expected return is above the modeled break-even return — but that return is not guaranteed.")
+else:
+    st.caption("No break-even crossing was found between -20% and +40% p.a. for the current inputs.")
+
+
+# -----------------------------------------------------------------------------
+# Sensitivity matrix
+# -----------------------------------------------------------------------------
+st.subheader("Sensitivity: LAMF advantage vs selling")
+return_grid = sorted(set([0, 4, 6, 8, 10, 12, 15, round(float(expected_return_pct), 1)]))
+rate_grid = sorted(set([8, 9, 10, 11, 12, 14, round(float(loan_rate_pct), 1)]))
+
+matrix = []
+for ret in return_grid:
+    row = []
+    for lr in rate_grid:
+        temp = run_scenario(
+            cash_required=float(cash_required),
+            portfolio_value=float(portfolio_value),
+            embedded_gain_pct=float(embedded_gain_pct),
+            tax_rate_pct=float(tax_rate_pct),
+            exemption_remaining=float(exemption_remaining),
+            cess_pct=float(cess_pct),
+            surcharge_pct=float(surcharge_pct),
+            expected_return_pct=float(ret),
+            monthly_surplus=float(monthly_surplus),
+            loan_rate_pct=float(lr),
+            horizon_months=int(horizon_months),
+            sanction_months=int(sanction_months),
+            processing_fee_pre_gst=float(processing_fee_pre_gst),
+            processing_gst_pct=float(processing_gst_pct),
+            other_upfront_charges=float(other_upfront_charges),
+            prepayment_charge_pct=float(prepayment_charge_pct),
+            repayment_style=repayment_style,
+            sinking_return_pct=float(sinking_return_pct),
+            bullet_repayment_from_mf=bool(bullet_repayment_from_mf),
+            repayment_embedded_gain_pct=float(repayment_embedded_gain_pct),
+            repayment_exemption_available=float(repayment_exemption_available),
+        )
+        row.append(temp.advantage)
+    matrix.append(row)
+
+sens_df = pd.DataFrame(
+    matrix,
+    index=[f"MF {r:g}%" for r in return_grid],
+    columns=[f"Loan {r:g}%" for r in rate_grid],
+)
+st.dataframe(sens_df.style.format(lambda x: inr(x)), use_container_width=True)
+st.caption("Positive = LAMF path ends with higher modeled financial wealth. Negative = selling path is ahead.")
+
+
+# -----------------------------------------------------------------------------
+# Wealth chart
+# -----------------------------------------------------------------------------
+st.subheader("Visual comparison")
+fig, ax = plt.subplots(figsize=(7, 4.5))
+labels = ["Sell MF", "Take LAMF"]
+values = [result.sell_end_wealth, result.loan_end_wealth]
+bars = ax.bar(labels, values)
+for bar, val in zip(bars, values):
     ax.text(
         bar.get_x() + bar.get_width() / 2,
-        value + (3000 if value >= 0 else -3000),
-        format_rupee(value, None),
-        ha='center', va='bottom' if value >= 0 else 'top',
-        fontsize=8, fontweight='bold'
+        bar.get_height(),
+        inr(val),
+        ha="center",
+        va="bottom",
+        fontsize=10,
     )
-
-# Highlight user's loan bar
-user_index = np.argmin(np.abs(loan_range - loan_amount))
-highlight_bar = bars[user_index]
-
-highlight_bar.set_width(0.6)            
-highlight_bar.set_edgecolor((1.0, 0.843, 0.0, 1.0))  # RGBA glitter gold
-highlight_bar.set_linewidth(3)
-highlight_bar.set_hatch(".*")           # Simulates a glittery pattern
-
-# Axis labels and title
-ax.set_title("Net Profit / Loss vs Loan Amount", fontsize=14, fontweight='bold')
-ax.set_ylabel("Net P&L", fontsize=12)
-ax.set_xlabel("Loan Amount", fontsize=12)
-y_max = max(net_pnl_list) * 1.05
-ax.set_ylim(0, y_max)
-
-# Custom ticks and formatting
-ax.set_xticks(indices)
-ax.set_xticklabels([format_rupee(x, None) for x in loan_range], rotation=45, ha='right')
-ax.yaxis.set_major_formatter(FuncFormatter(format_rupee))
-
-# Input summary
-input_summary = (
-    f"Input Variables:\n"
-    f"Loan: ₹{loan_amount:,.0f}\n"
-    f"Interest: {interest_rate:.1f}% p.a.\n"
-    f"Tenure: {tenure_months} months\n"
-    f"Return: {expected_annual_return:.1f}% p.a.\n"
-    f"Fee: ₹{processing_fee}"
-)
-
-ax.text(
-    0.01, 0.98, input_summary,
-    transform=ax.transAxes,
-    fontsize=9,
-    verticalalignment='top',
-    horizontalalignment='left',
-    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.5', alpha=0.8)
-)
-
-ax.grid(True, linestyle='--', alpha=0.5, axis='y')
+ax.set_ylabel("Estimated ending financial wealth (₹)")
+ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: inr(x)))
+ax.set_title(f"Estimated position after {horizon_months} months")
+ax.grid(axis="y", alpha=0.25)
 plt.tight_layout()
+st.pyplot(fig, use_container_width=False)
+plt.close(fig)
 
-st.pyplot(fig)
-# Save figure to buffer
-buf = io.BytesIO()
-fig.savefig(buf, format="png", dpi=1000, bbox_inches="tight")
-buf.seek(0)
 
-# Encode to base64
-b64 = base64.b64encode(buf.read()).decode()
-href = f'<a href="data:image/png;base64,{b64}" download="net_pnl_vs_loan.png">📥 Download Plot as PNG</a>'
+# -----------------------------------------------------------------------------
+# Alternative loan comparator: flat vs reducing balance
+# -----------------------------------------------------------------------------
+with st.expander("Compare an alternative flat-rate vehicle / consumer loan"):
+    st.write(
+        "A quoted flat rate is not directly comparable with a reducing-balance annual rate because interest is charged "
+        "on the original principal even while installments reduce the amount economically outstanding."
+    )
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        flat_rate = st.number_input("Quoted flat rate (p.a. %)", 0.0, 40.0, 8.0, 0.25)
+    with fc2:
+        flat_months = st.number_input("Flat-loan tenure (months)", 1, 120, 48, 1)
+    with fc3:
+        flat_principal = st.number_input(
+            "Principal for comparison (₹)", 10_000, 1_00_00_000, int(cash_required), 10_000
+        )
+    effective_rate = flat_rate_loan_irr(float(flat_rate), float(flat_principal), int(flat_months))
+    st.metric("Approx. effective reducing-balance equivalent", f"{effective_rate:.2f}% p.a.")
+    st.caption("Approximation assumes equal monthly installments and no fees/insurance/prepayment charges.")
 
-# Show download link
-st.markdown(href, unsafe_allow_html=True)
 
-from scipy.optimize import fsolve
+# -----------------------------------------------------------------------------
+# Practical checklist
+# -----------------------------------------------------------------------------
+st.subheader("Practical checks before using LAMF")
+checks = [
+    "Confirm the exact eligible schemes/units and haircut/LTV in the lender's sanction letter.",
+    "Keep a personal LTV buffer; do not automatically borrow the maximum sanctioned amount.",
+    "Know the margin-call cure period: cash repayment, extra collateral, or forced redemption can be required.",
+    "Budget monthly interest/principal from income; do not depend on market returns to make mandatory payments.",
+    "If the loan horizon exceeds the sanction tenure, verify rollover/renewal mechanics instead of assuming automatic renewal.",
+    "Check processing fee + GST, annual/renewal charges, documentation, foreclosure/prepayment terms and penal interest.",
+    "For the sell alternative, use the tax lot / holding-period information for the units actually likely to be redeemed.",
+    "Prefer LAMF for a genuine funding need when it is cheaper and manageable—not simply to increase market leverage.",
+]
+for item in checks:
+    st.write(f"• {item}")
 
-st.markdown("### 🔥 FIRE Target Simulation")
-fire_target = st.number_input(
-    "🎯 Enter Desired Net P&L (FIRE Goal in ₹)",
-    min_value=-1_00_00_000, max_value=5_00_00_000,
-    step=50_000, value=1_90_00_000, # ₹1,87,78,023
-    help="This is your desired gain from taking a loan and investing it. We will estimate the required loan amount to achieve this."
+st.caption(
+    "Tax defaults in the app are editable reference inputs. Verify the applicable tax law and lender terms at the time you transact."
 )
-
-# Define the net P&L function to zero-in on
-def net_pnl_solver(loan_guess):
-    loan = loan_guess
-    total_interest = loan * monthly_interest_rate * tenure_months
-    total_cost = loan + total_interest + processing_fee
-    investment = loan * ((1 + monthly_return_rate) ** tenure_months)
-    return investment - total_cost - fire_target
-
-# Use fsolve to find the loan amount that gives the desired net P&L
-initial_guess = 1_00_000
-try:
-    fire_loan_amount = float(fsolve(net_pnl_solver, initial_guess)[0])
-    fire_loan_amount = round(fire_loan_amount, -2)  # round to nearest ₹100
-except Exception:
-    fire_loan_amount = None
-
-if fire_loan_amount > 0:
-    st.success(
-        f"💡 To achieve a Net P&L of {format_currency(fire_target)}, "
-        f"you need to borrow approximately **{format_currency(fire_loan_amount)}**."
-    )
-    st.caption("Note: This assumes fixed processing fee and your current input rates.")
-else:
-    st.error(
-        f"❌ Unable to compute a valid loan amount for a target Net P&L of {format_currency(fire_target)} "
-        f"with the current parameters."
-    )
-
-# --- Educational Guide ---
-st.markdown("---")
-st.markdown("""
-### 📘 How This Works
-1. You borrow a sum against your mutual funds (collateralized, no liquidation).
-2. You **pay interest monthly** and **repay principal before the last month**.
-3. You **invest the borrowed amount** expecting monthly compounded returns.
-4. At the end, we calculate:
-    - 🟥 Total money *you paid* (outflow)
-    - 🟩 Final investment value
-5. If 🟩 > 🟥 → **Profit** 💰  
-   If 🟥 > 🟩 → **Loss** 😓
-
----
-
-> 📌 **Note:** This tool assumes reinvestment in funds or equity markets you trust—ones that you believe have a track record of consistent, strong returns, not solely based on past performance. Remember, investing always carries risk, so please invest thoughtfully and within your comfort zone.
-""")
