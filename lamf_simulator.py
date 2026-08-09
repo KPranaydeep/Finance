@@ -33,6 +33,7 @@ st.set_page_config(
 )
 
 st.title("🇮🇳 Loan Against Mutual Funds (LAMF) Simulator")
+st.caption("Build: 2026-08-09 FIXED • tenure-based gains • Nifty 200-DMA target sanction")
 st.caption(
     "For Indian retail investors: compare **selling mutual funds vs taking LAMF**, "
     "including tax, cash-flow strain, LTV/margin-call risk, repayment style, renewals and sensitivity."
@@ -77,6 +78,24 @@ def fv_monthly_contribution(payment: float, annual_percent: float, months: int) 
     if abs(r) < 1e-12:
         return payment * months
     return payment * (((1 + r) ** months - 1) / r)
+
+
+def estimate_embedded_gain_pct(annual_return_pct: float, holding_months: int) -> float:
+    """Estimate the gain share of current value from tenure + annualised return.
+
+    If an investment starts at cost C and compounds to value V, then
+    embedded gain share = (V - C) / V = 1 - 1 / growth_factor.
+    Negative/zero estimated returns are treated as 0% embedded capital gain
+    for the redemption-tax approximation.
+    """
+    months = max(0, int(holding_months))
+    if months == 0 or annual_return_pct <= 0:
+        return 0.0
+    growth_factor = (1 + annual_return_pct / 100.0) ** (months / 12.0)
+    if growth_factor <= 0:
+        return 0.0
+    gain_pct = (1.0 - 1.0 / growth_factor) * 100.0
+    return max(0.0, min(99.99, gain_pct))
 
 
 def amortizing_emi(principal: float, annual_percent: float, months: int) -> float:
@@ -382,30 +401,46 @@ with st.sidebar:
         step=50_000,
         help="Only enter units actually eligible with your lender; not every scheme/unit may be accepted.",
     )
-    embedded_gain_pct = st.slider(
-        "Estimated unrealised gain embedded in units sold (%)",
-        min_value=0,
-        max_value=95,
-        value=35,
-        help="Example: 35% means roughly ₹35 of every ₹100 redeemed is capital gain and ₹65 is cost basis.",
-    )
     expected_return_pct = st.number_input(
         "Expected portfolio return (p.a. %)",
         min_value=-20.0,
         max_value=30.0,
         value=10.0,
         step=0.5,
-        help="Use a conservative long-term assumption; this is uncertain, unlike loan interest.",
+        help="Used for portfolio projection and to estimate embedded gains from the holding tenure.",
+    )
+    holding_period_months = st.number_input(
+        "Holding period of units likely to be sold (months)",
+        min_value=1,
+        max_value=600,
+        value=60,
+        step=1,
+        help="Approximate weighted holding period of units you would redeem. Use tax-lot data when available.",
+    )
+    embedded_gain_pct = estimate_embedded_gain_pct(
+        float(expected_return_pct), int(holding_period_months)
+    )
+    st.metric(
+        "Estimated unrealised gain embedded in units sold",
+        f"{embedded_gain_pct:.2f}%",
+    )
+    st.caption(
+        "Auto-estimated from holding tenure and expected annual return: "
+        "gain share = 1 - 1 / (1 + return)^(tenure in years)."
     )
 
     st.header("3) Tax on redemption")
+    tax_options = [
+        "Equity-oriented LTCG (editable defaults)",
+        "Equity-oriented STCG (editable defaults)",
+        "Custom / other mutual-fund tax treatment",
+    ]
+    default_tax_index = 1 if int(holding_period_months) <= 12 else 0
     tax_bucket = st.selectbox(
         "Tax bucket for the units that would be sold",
-        [
-            "Equity-oriented LTCG (editable defaults)",
-            "Equity-oriented STCG (editable defaults)",
-            "Custom / other mutual-fund tax treatment",
-        ],
+        tax_options,
+        index=default_tax_index,
+        help="Default follows the entered holding period for equity-oriented funds; override when your fund/tax lot differs.",
     )
 
     if tax_bucket.startswith("Equity-oriented LTCG"):
@@ -462,13 +497,27 @@ with st.sidebar:
         step=1.0,
         help="Enter the exact LTV from the lender for the funds you are pledging.",
     )
-    self_imposed_ltv_pct = st.number_input(
-        "Your safer target LTV (%)",
-        min_value=1.0,
-        max_value=float(lender_ltv_pct),
-        value=min(30.0, float(lender_ltv_pct)),
-        step=1.0,
-        help="A personal buffer below the lender's maximum. Lower LTV means more room for market falls.",
+    nifty_200dma_deviation_pct = st.number_input(
+        "Nifty 50 change from 200-DMA (%)",
+        min_value=-100.0,
+        max_value=100.0,
+        value=0.0,
+        step=0.5,
+        help=(
+            "Enter the signed percentage deviation of Nifty 50 from its 200-day moving average. "
+            "The target sanction formula uses the absolute deviation."
+        ),
+    )
+    formula_target_utilisation_pct = max(
+        0.0,
+        min(
+            100.0,
+            50.0 + 0.5 * (100.0 - 2.0 * abs(float(nifty_200dma_deviation_pct))),
+        ),
+    )
+    st.caption(
+        f"Target utilisation = 50 + 0.5 × (100 − 2 × |{nifty_200dma_deviation_pct:.2f}%|) "
+        f"= **{formula_target_utilisation_pct:.2f}% of lender maximum eligible loan**."
     )
     processing_fee_pre_gst = st.number_input(
         "Processing / renewal fee before GST (₹)", 0, 2_00_000, 5_000, 500
@@ -511,12 +560,17 @@ with st.sidebar:
         )
         bullet_repayment_from_mf = bullet_source == "Redeem mutual funds at horizon"
         if bullet_repayment_from_mf:
-            repayment_embedded_gain_pct = st.slider(
-                "Estimated gain embedded in repayment-time redemption (%)",
-                min_value=0,
-                max_value=95,
-                value=min(50, int(embedded_gain_pct)),
-                help="Approximation for the units you may redeem at the end to settle principal.",
+            repayment_holding_months = int(holding_period_months) + int(horizon_months)
+            repayment_embedded_gain_pct = estimate_embedded_gain_pct(
+                float(expected_return_pct), repayment_holding_months
+            )
+            st.metric(
+                "Estimated gain embedded in repayment-time redemption",
+                f"{repayment_embedded_gain_pct:.2f}%",
+            )
+            st.caption(
+                f"Auto-estimated using {repayment_holding_months} months "
+                "(current holding tenure + loan horizon) at {expected_return_pct:.2f}% p.a."
             )
             repayment_exemption_available = st.number_input(
                 "Expected exemption available in repayment FY (₹)",
@@ -541,7 +595,7 @@ if eligible_collateral_value > portfolio_value:
     st.warning("Eligible collateral cannot logically exceed the total portfolio value. Check the inputs.")
 
 max_lender_loan = eligible_collateral_value * lender_ltv_pct / 100.0
-safe_target_loan = eligible_collateral_value * self_imposed_ltv_pct / 100.0
+formula_target_sanction = max_lender_loan * formula_target_utilisation_pct / 100.0
 initial_ltv = cash_required / eligible_collateral_value * 100.0 if eligible_collateral_value > 0 else math.inf
 
 result = run_scenario(
@@ -584,22 +638,30 @@ st.subheader("Decision dashboard")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Net cash needed", inr(cash_required))
-c2.metric("Current LTV", f"{initial_ltv:.1f}%" if math.isfinite(initial_ltv) else "N/A")
-c3.metric("Lender max loan", inr(max_lender_loan))
-c4.metric("Your safer target loan", inr(safe_target_loan))
+c2.metric("Current drawn LTV", f"{initial_ltv:.1f}%" if math.isfinite(initial_ltv) else "N/A")
+c3.metric("Lender maximum eligible loan", inr(max_lender_loan))
+c4.metric("200-DMA formula target sanction", inr(formula_target_sanction))
+
+st.caption(
+    f"Formula utilisation: {formula_target_utilisation_pct:.2f}% of lender maximum "
+    f"(Nifty 50 vs 200-DMA: {nifty_200dma_deviation_pct:+.2f}%)."
+)
 
 if cash_required > max_lender_loan:
     st.error(
         f"❌ Requested loan {inr(cash_required)} exceeds the lender-LTV capacity of {inr(max_lender_loan)}. "
         "LAMF is not feasible with the entered eligible collateral."
     )
-elif cash_required > safe_target_loan:
+elif cash_required > formula_target_sanction:
     st.warning(
-        f"⚠️ The loan fits the lender's LTV, but exceeds your self-imposed safer limit of {inr(safe_target_loan)}. "
-        "You have less crash buffer than your target."
+        f"⚠️ Requested draw {inr(cash_required)} is within lender eligibility but exceeds the "
+        f"200-DMA formula target sanction of {inr(formula_target_sanction)}."
     )
 else:
-    st.success("✅ Requested loan is within both the lender LTV and your self-imposed LTV buffer.")
+    st.success(
+        f"✅ Requested draw is within the 200-DMA formula target sanction of "
+        f"{inr(formula_target_sanction)} and within lender eligibility."
+    )
 
 sell_feasible = result.gross_redemption <= portfolio_value
 if not sell_feasible:
@@ -662,7 +724,7 @@ comparison = pd.DataFrame(
 formatted_comparison = comparison.copy()
 for col in ["Sell MF", "Take LAMF"]:
     formatted_comparison[col] = formatted_comparison[col].map(inr)
-st.dataframe(formatted_comparison, use_container_width=True, hide_index=True)
+st.dataframe(formatted_comparison, width='stretch', hide_index=True)
 
 adv1, adv2, adv3 = st.columns(3)
 adv1.metric("Tax avoided today by not selling", inr(result.redemption_tax))
@@ -723,7 +785,7 @@ with st.expander("Tax calculation details", expanded=False):
         }
     )
     tax_df["Value"] = tax_df["Value"].map(inr)
-    st.dataframe(tax_df, hide_index=True, use_container_width=True)
+    st.dataframe(tax_df, hide_index=True, width='stretch')
     st.caption(
         "This is an estimate. Mutual-fund taxation can depend on fund classification, acquisition/redemption dates, "
         "grandfathering/cost rules, set-off of losses and your overall tax situation."
@@ -760,7 +822,7 @@ else:
                 "Status": "BREACH" if stressed_ltv > lender_ltv_pct else "OK",
             }
         )
-    st.dataframe(pd.DataFrame(stress_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(stress_rows), width='stretch', hide_index=True)
 
     st.caption(
         "The breach calculation is intentionally conservative and uses the original principal. Under EMI-style principal prepayment, "
@@ -787,7 +849,7 @@ if repayment_style == "Interest-only + sinking fund":
 elif repayment_style == "Interest-only, bullet principal at end":
     if bullet_repayment_from_mf:
         st.warning(
-            f"Bullet risk: the full principal remains due at the end. With the entered repayment-time gain estimate, "
+            f"Bullet risk: the full principal remains due at the end. With the auto-estimated repayment-time embedded gain, "
             f"the model includes about {inr(result.bullet_repayment_tax)} of capital-gains tax in the final MF redemption. "
             "A market fall near repayment can still make the timing painful."
         )
@@ -906,7 +968,7 @@ sens_df = pd.DataFrame(
     index=[f"MF {r:g}%" for r in return_grid],
     columns=[f"Loan {r:g}%" for r in rate_grid],
 )
-st.dataframe(sens_df.style.format(lambda x: inr(x)), use_container_width=True)
+st.dataframe(sens_df.style.format(lambda x: inr(x)), width='stretch')
 st.caption("Positive = LAMF path ends with higher modeled financial wealth. Negative = selling path is ahead.")
 
 
@@ -932,7 +994,7 @@ ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: inr(x)))
 ax.set_title(f"Estimated position after {horizon_months} months")
 ax.grid(axis="y", alpha=0.25)
 plt.tight_layout()
-st.pyplot(fig, use_container_width=False)
+st.pyplot(fig, width='content')
 plt.close(fig)
 
 
@@ -964,7 +1026,7 @@ with st.expander("Compare an alternative flat-rate vehicle / consumer loan"):
 st.subheader("Practical checks before using LAMF")
 checks = [
     "Confirm the exact eligible schemes/units and haircut/LTV in the lender's sanction letter.",
-    "Keep a personal LTV buffer; do not automatically borrow the maximum sanctioned amount.",
+    "Use the 200-DMA formula target as a sanction/draw discipline; lender maximum LTV remains a separate eligibility limit.",
     "Know the margin-call cure period: cash repayment, extra collateral, or forced redemption can be required.",
     "Budget monthly interest/principal from income; do not depend on market returns to make mandatory payments.",
     "If the loan horizon exceeds the sanction tenure, verify rollover/renewal mechanics instead of assuming automatic renewal.",
