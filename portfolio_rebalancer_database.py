@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-07-10-streamlit-cloud-safe-lazy-native-imports"
+APP_BUILD = "2026-08-09-multimarket-fx-inr"
 
 # =========================================================
 # HELPERS
@@ -34,20 +34,174 @@ def load_equity_mapping():
 
 
 @st.cache_data(show_spinner=False)
-def resolve_yahoo_tickers(symbols_base):
+def _download_probe(ticker):
+    """Return True when Yahoo Finance has recent price data for ticker."""
     import yfinance as yf
+
+    try:
+        data = yf.download(
+            ticker,
+            period="5d",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )
+        return data is not None and not data.empty
+    except Exception:
+        return False
+
+
+def normalize_portfolio_symbol(value):
+    """Normalize a user-facing holding key while preserving non-India Yahoo suffixes."""
+    symbol = str(value or "").strip().upper()
+    if symbol.endswith(".NS") or symbol.endswith(".BO"):
+        symbol = symbol[:-3]
+    return symbol
+
+
+def _infer_market_from_ticker(ticker):
+    ticker = str(ticker or "").upper()
+    if ticker.endswith(".NS"):
+        return "NSE", "INR"
+    if ticker.endswith(".BO"):
+        return "BSE", "INR"
+    if ticker.endswith(".L"):
+        return "LSE", "GBP"
+    if ticker.endswith(".TO"):
+        return "TSX", "CAD"
+    if ticker.endswith(".AX"):
+        return "ASX", "AUD"
+    if ticker.endswith(".HK"):
+        return "HKEX", "HKD"
+    if ticker.endswith(".T"):
+        return "TSE", "JPY"
+    return "US/Global", "USD"
+
+
+def _read_fast_info_value(fast_info, key):
+    try:
+        if hasattr(fast_info, "get"):
+            return fast_info.get(key)
+        return getattr(fast_info, key, None)
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def get_yahoo_metadata(yahoo_ticker):
+    """Fetch lightweight name/exchange/currency metadata with safe fallbacks."""
+    import yfinance as yf
+
+    ticker = str(yahoo_ticker).strip().upper()
+    inferred_exchange, inferred_currency = _infer_market_from_ticker(ticker)
+    name = ticker
+    exchange = inferred_exchange
+    currency = inferred_currency
+
+    try:
+        obj = yf.Ticker(ticker)
+        fast_info = obj.fast_info
+        currency = _read_fast_info_value(fast_info, "currency") or currency
+        exchange = (
+            _read_fast_info_value(fast_info, "exchange")
+            or _read_fast_info_value(fast_info, "market")
+            or exchange
+        )
+    except Exception:
+        pass
+
+    try:
+        info = yf.Ticker(ticker).info or {}
+        name = info.get("shortName") or info.get("longName") or name
+        currency = info.get("currency") or currency
+        exchange = info.get("exchange") or info.get("fullExchangeName") or exchange
+    except Exception:
+        pass
+
+    currency = str(currency or inferred_currency).strip()
+    if currency.upper() in {"GBP", "GBX"}:
+        # Yahoo sometimes reports London securities in GBp/GBX (pence).
+        currency = "GBp" if currency.upper() == "GBX" else currency
+    else:
+        currency = currency.upper()
+
+    return {
+        "yahoo_ticker": ticker,
+        "stock_name": str(name or ticker).strip(),
+        "exchange": str(exchange or inferred_exchange).strip(),
+        "currency": currency,
+    }
+
+
+def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
+    """Resolve NSE, BSE, US and explicit Yahoo symbols into one canonical record.
+
+    Resolution order for a plain symbol is NSE first, then the plain Yahoo ticker,
+    then BSE. Explicit Yahoo suffixes are tried exactly as entered.
+    """
+    raw = str(symbol or "").strip().upper()
+    if not raw:
+        return None
+
+    nse_company_lookup = nse_company_lookup or get_nse_company_lookup()
+    base = normalize_portfolio_symbol(raw)
+
+    if base.endswith("-BE"):
+        base = base[:-3].rstrip("-").strip()
+
+    explicit = raw.endswith(".NS") or raw.endswith(".BO") or (
+        "." in raw and not raw.endswith(".NS") and not raw.endswith(".BO")
+    ) or raw.endswith("=X") or raw.startswith("^")
+
+    candidates = []
+    if explicit:
+        candidates.append(raw)
+    else:
+        # Prefer NSE for plain Indian-looking symbols so RELIANCE resolves to RELIANCE.NS.
+        candidates.append(f"{base}.NS")
+        candidates.append(base)
+        # Numeric Indian security codes are far more likely to be BSE than US tickers.
+        if base.isdigit():
+            candidates = [f"{base}.BO", f"{base}.NS", base]
+        else:
+            candidates.append(f"{base}.BO")
+
+    seen = set()
+    for ticker in candidates:
+        ticker = ticker.strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        if not _download_probe(ticker):
+            continue
+
+        metadata = get_yahoo_metadata(ticker)
+        display_symbol = normalize_portfolio_symbol(raw)
+        if ticker.endswith(".NS"):
+            display_symbol = ticker[:-3]
+            metadata["stock_name"] = nse_company_lookup.get(
+                display_symbol, metadata["stock_name"]
+            )
+        elif ticker.endswith(".BO"):
+            display_symbol = ticker[:-3]
+        elif explicit:
+            display_symbol = raw
+
+        metadata["symbol"] = display_symbol
+        return metadata
+
+    return None
+
+
+def resolve_yahoo_tickers(symbols_base):
+    """Resolve user-facing holding symbols to Yahoo tickers across markets."""
+    lookup = get_nse_company_lookup()
     resolved = {}
     for sym in symbols_base:
-        for suffix in [".NS", ".BO", ""]:
-            try:
-                test = yf.download(sym + suffix, period="5d", progress=False, auto_adjust=True)
-                if test is not None and not test.empty:
-                    resolved[sym] = sym + suffix
-                    break
-            except Exception:
-                continue
+        instrument = resolve_yahoo_instrument(sym, lookup)
+        if instrument is not None:
+            resolved[normalize_portfolio_symbol(sym)] = instrument["yahoo_ticker"]
     return resolved
-
 
 # =========================================================
 # DATABASE / HOLDINGS INPUT
@@ -66,6 +220,9 @@ MASTER_HOLDINGS_DDL = """
 CREATE TABLE IF NOT EXISTS master_holdings (
     symbol TEXT PRIMARY KEY,
     stock_name TEXT NOT NULL,
+    yahoo_ticker TEXT,
+    exchange TEXT,
+    currency TEXT,
     quantity REAL NOT NULL DEFAULT 1,
     average_price REAL,
     added_at TEXT NOT NULL,
@@ -109,9 +266,7 @@ def _ensure_master_holdings_schema(conn):
         legacy_latest_name = (
             "latest_analysis_legacy_" + datetime.now().strftime("%Y%m%d_%H%M%S")
         )
-        conn.execute(
-            f'ALTER TABLE latest_analysis RENAME TO "{legacy_latest_name}"'
-        )
+        conn.execute(f'ALTER TABLE latest_analysis RENAME TO "{legacy_latest_name}"')
         conn.execute(LATEST_ANALYSIS_DDL)
 
         legacy_columns = {
@@ -145,8 +300,6 @@ def _ensure_master_holdings_schema(conn):
     table_info = conn.execute("PRAGMA table_info(master_holdings)").fetchall()
     columns = {str(row["name"]).lower() for row in table_info}
 
-    # A table with this name but no symbol column belongs to an incompatible old
-    # schema. Preserve it rather than deleting user data, then create a clean table.
     if "symbol" not in columns:
         legacy_name = "master_holdings_legacy_" + datetime.now().strftime("%Y%m%d_%H%M%S")
         conn.execute(f'ALTER TABLE master_holdings RENAME TO "{legacy_name}"')
@@ -156,9 +309,11 @@ def _ensure_master_holdings_schema(conn):
             for row in conn.execute("PRAGMA table_info(master_holdings)").fetchall()
         }
 
-    # IF NOT EXISTS does not add columns to a table created by an older app version.
     migrations = {
         "stock_name": "ALTER TABLE master_holdings ADD COLUMN stock_name TEXT",
+        "yahoo_ticker": "ALTER TABLE master_holdings ADD COLUMN yahoo_ticker TEXT",
+        "exchange": "ALTER TABLE master_holdings ADD COLUMN exchange TEXT",
+        "currency": "ALTER TABLE master_holdings ADD COLUMN currency TEXT",
         "quantity": "ALTER TABLE master_holdings ADD COLUMN quantity REAL DEFAULT 1",
         "average_price": "ALTER TABLE master_holdings ADD COLUMN average_price REAL",
         "added_at": "ALTER TABLE master_holdings ADD COLUMN added_at TEXT",
@@ -169,10 +324,20 @@ def _ensure_master_holdings_schema(conn):
             conn.execute(sql)
 
     now = datetime.now().isoformat(timespec="seconds")
+    # Existing databases created by the NSE-only version are migrated as NSE/INR.
     conn.execute(
         """
         UPDATE master_holdings
         SET stock_name = COALESCE(NULLIF(TRIM(stock_name), ''), symbol),
+            yahoo_ticker = COALESCE(
+                NULLIF(TRIM(yahoo_ticker), ''),
+                CASE
+                    WHEN UPPER(symbol) LIKE '%.NS' OR UPPER(symbol) LIKE '%.BO' THEN UPPER(symbol)
+                    ELSE UPPER(symbol) || '.NS'
+                END
+            ),
+            exchange = COALESCE(NULLIF(TRIM(exchange), ''), 'NSE'),
+            currency = COALESCE(NULLIF(TRIM(currency), ''), 'INR'),
             quantity = CASE WHEN quantity IS NULL OR quantity <= 0 THEN 1 ELSE quantity END,
             added_at = COALESCE(NULLIF(TRIM(added_at), ''), ?),
             updated_at = COALESCE(NULLIF(TRIM(updated_at), ''), ?)
@@ -180,7 +345,6 @@ def _ensure_master_holdings_schema(conn):
         (now, now),
     )
     conn.commit()
-
 
 def get_db_connection():
     """Return a connection only after the required holdings schema is available."""
@@ -222,22 +386,12 @@ def init_holdings_db():
 
 
 def normalize_nse_symbol(value):
-    symbol = str(value or "").strip().upper()
-    if symbol.endswith(".NS"):
-        symbol = symbol[:-3]
-    return symbol
-
+    """Backward-compatible alias for the now multi-market symbol normalizer."""
+    return normalize_portfolio_symbol(value)
 
 def resolve_nse_symbol(symbol, available_symbols, allow_be_fallback=False):
-    """Resolve broker-style NSE symbols against canonical NSE symbols.
-
-    The broker may append the trading-series suffix ``-BE`` to the NSE symbol.
-    We first try the exact value. When it ends in ``-BE``, we retry with the
-    suffix removed. For additions, ``allow_be_fallback=True`` permits the
-    trimmed base symbol even when the external equity mapping is stale or
-    incomplete; Yahoo price lookup is then used by the normal add workflow.
-    """
-    normalized = normalize_nse_symbol(symbol)
+    """Resolve broker-style NSE symbols against canonical NSE symbols."""
+    normalized = normalize_portfolio_symbol(symbol)
     if normalized in available_symbols:
         return normalized
 
@@ -248,20 +402,18 @@ def resolve_nse_symbol(symbol, available_symbols, allow_be_fallback=False):
 
     return None
 
-
 def parse_symbol_input(raw_text):
     parts = re.split(r"[,;\n]+", raw_text or "")
     symbols = []
     seen = set()
 
     for part in parts:
-        symbol = normalize_nse_symbol(part)
+        symbol = normalize_portfolio_symbol(part)
         if symbol and symbol not in seen:
             symbols.append(symbol)
             seen.add(symbol)
 
     return symbols
-
 
 def get_nse_company_lookup():
     equity_map = load_equity_mapping().copy()
@@ -277,6 +429,9 @@ def load_master_holdings():
             SELECT
                 symbol AS Symbol,
                 stock_name AS "Stock Name",
+                yahoo_ticker AS "Yahoo Ticker",
+                exchange AS Exchange,
+                currency AS Currency,
                 quantity AS Quantity,
                 average_price AS "Average Price",
                 added_at AS "Added At",
@@ -287,8 +442,6 @@ def load_master_holdings():
             conn,
         )
     return df
-
-
 
 def holdings_backup_bytes():
     """Export the complete holdings master table as a UTF-8 CSV backup."""
@@ -310,11 +463,14 @@ def _read_holdings_backup(uploaded_file):
     except Exception as exc:
         raise ValueError(f"Could not read the holdings CSV backup: {exc}") from exc
 
-    # Allow either the exported display headings or direct SQLite column names.
     aliases = {
         "symbol": "Symbol",
         "stock name": "Stock Name",
         "stock_name": "Stock Name",
+        "yahoo ticker": "Yahoo Ticker",
+        "yahoo_ticker": "Yahoo Ticker",
+        "exchange": "Exchange",
+        "currency": "Currency",
         "quantity": "Quantity",
         "average price": "Average Price",
         "average_price": "Average Price",
@@ -337,18 +493,28 @@ def _read_holdings_backup(uploaded_file):
             "The holdings backup is missing required columns: " + ", ".join(missing)
         )
 
-    if "Stock Name" not in backup_df.columns:
-        backup_df["Stock Name"] = backup_df["Symbol"]
-    if "Added At" not in backup_df.columns:
-        backup_df["Added At"] = None
-    if "Updated At" not in backup_df.columns:
-        backup_df["Updated At"] = None
+    for column, default in (
+        ("Stock Name", None),
+        ("Yahoo Ticker", None),
+        ("Exchange", None),
+        ("Currency", None),
+        ("Added At", None),
+        ("Updated At", None),
+    ):
+        if column not in backup_df.columns:
+            backup_df[column] = default
 
     cleaned = backup_df[
-        ["Symbol", "Stock Name", "Quantity", "Average Price", "Added At", "Updated At"]
+        [
+            "Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency",
+            "Quantity", "Average Price", "Added At", "Updated At"
+        ]
     ].copy()
-    cleaned["Symbol"] = cleaned["Symbol"].map(normalize_nse_symbol)
+    cleaned["Symbol"] = cleaned["Symbol"].map(normalize_portfolio_symbol)
     cleaned["Stock Name"] = cleaned["Stock Name"].fillna("").astype(str).str.strip()
+    cleaned["Yahoo Ticker"] = cleaned["Yahoo Ticker"].fillna("").astype(str).str.strip().str.upper()
+    cleaned["Exchange"] = cleaned["Exchange"].fillna("").astype(str).str.strip()
+    cleaned["Currency"] = cleaned["Currency"].fillna("").astype(str).str.strip()
     cleaned["Quantity"] = pd.to_numeric(cleaned["Quantity"], errors="coerce")
     cleaned["Average Price"] = pd.to_numeric(cleaned["Average Price"], errors="coerce")
 
@@ -371,11 +537,33 @@ def _read_holdings_backup(uploaded_file):
             "Average Price must be blank or greater than zero for every restored holding."
         )
 
-    cleaned["Stock Name"] = cleaned.apply(
-        lambda row: row["Stock Name"] or row["Symbol"], axis=1
+    lookup = get_nse_company_lookup()
+    resolved_rows = []
+    for _, row in cleaned.iterrows():
+        yahoo_ticker = row["Yahoo Ticker"]
+        exchange = row["Exchange"]
+        currency = row["Currency"]
+        stock_name = row["Stock Name"]
+
+        if not yahoo_ticker or not currency:
+            instrument = resolve_yahoo_instrument(row["Symbol"], lookup)
+            if instrument is not None:
+                yahoo_ticker = yahoo_ticker or instrument["yahoo_ticker"]
+                exchange = exchange or instrument["exchange"]
+                currency = currency or instrument["currency"]
+                stock_name = stock_name or instrument["stock_name"]
+            else:
+                # Preserve compatibility with old NSE-only backups even if Yahoo is temporarily unavailable.
+                yahoo_ticker = yahoo_ticker or f"{row['Symbol']}.NS"
+                exchange = exchange or "NSE"
+                currency = currency or "INR"
+
+        resolved_rows.append((stock_name or row["Symbol"], yahoo_ticker, exchange, currency))
+
+    cleaned[["Stock Name", "Yahoo Ticker", "Exchange", "Currency"]] = pd.DataFrame(
+        resolved_rows, index=cleaned.index
     )
     return cleaned
-
 
 def restore_holdings_backup(uploaded_file, mode="merge"):
     """Restore holdings from CSV using replace or merge/update semantics."""
@@ -388,21 +576,13 @@ def restore_holdings_backup(uploaded_file, mode="merge"):
     records = []
     for _, row in cleaned.iterrows():
         added_at = str(row["Added At"]).strip() if pd.notna(row["Added At"]) else now
-        updated_at = (
-            str(row["Updated At"]).strip() if pd.notna(row["Updated At"]) else now
-        )
+        updated_at = str(row["Updated At"]).strip() if pd.notna(row["Updated At"]) else now
         records.append(
             (
-                row["Symbol"],
-                row["Stock Name"],
-                float(row["Quantity"]),
-                (
-                    float(row["Average Price"])
-                    if pd.notna(row["Average Price"])
-                    else None
-                ),
-                added_at or now,
-                updated_at or now,
+                row["Symbol"], row["Stock Name"], row["Yahoo Ticker"],
+                row["Exchange"], row["Currency"], float(row["Quantity"]),
+                float(row["Average Price"]) if pd.notna(row["Average Price"]) else None,
+                added_at or now, updated_at or now,
             )
         )
 
@@ -415,10 +595,14 @@ def restore_holdings_backup(uploaded_file, mode="merge"):
             conn.executemany(
                 """
                 INSERT INTO master_holdings
-                    (symbol, stock_name, quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                     stock_name = excluded.stock_name,
+                    yahoo_ticker = excluded.yahoo_ticker,
+                    exchange = excluded.exchange,
+                    currency = excluded.currency,
                     quantity = excluded.quantity,
                     average_price = excluded.average_price,
                     added_at = excluded.added_at,
@@ -433,9 +617,8 @@ def restore_holdings_backup(uploaded_file, mode="merge"):
 
     return len(records)
 
-
 def get_unique_holdings_count():
-    """Return the current distinct NSE-symbol count directly from SQLite."""
+    """Return the current distinct holding count directly from SQLite."""
     with get_db_connection() as conn:
         row = conn.execute(
             """
@@ -814,34 +997,161 @@ def render_saved_analysis(placeholder):
                 st.success("The saved analysis had no executable trades.")
 
 
+def _normalize_currency_code(currency):
+    value = str(currency or "").strip()
+    if not value:
+        return ""
+    if value.upper() in {"GBX", "GBPENCE", "PENCE"} or value == "GBp":
+        return "GBp"
+    return value.upper()
+
+
+def _currency_major_and_unit_factor(currency):
+    currency = _normalize_currency_code(currency)
+    if currency == "GBp":
+        return "GBP", 0.01
+    return currency, 1.0
+
+
+@st.cache_data(show_spinner=False)
+def _latest_fx_rate_to_inr(currency):
+    """Return INR per one quoted currency unit (including pence handling)."""
+    import yfinance as yf
+
+    major, unit_factor = _currency_major_and_unit_factor(currency)
+    if major == "INR":
+        return 1.0
+
+    def last_price(ticker):
+        data = yf.download(
+            ticker,
+            period="15d",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )["Close"]
+        if isinstance(data, pd.DataFrame):
+            if data.empty:
+                return None
+            series = pd.to_numeric(data.iloc[:, 0], errors="coerce").dropna()
+        else:
+            series = pd.to_numeric(data, errors="coerce").dropna()
+        return float(series.iloc[-1]) if not series.empty else None
+
+    direct = last_price(f"{major}INR=X")
+    if direct is not None and np.isfinite(direct) and direct > 0:
+        return float(direct) * unit_factor
+
+    if major != "USD":
+        to_usd = last_price(f"{major}USD=X")
+        usd_inr = last_price("USDINR=X")
+        if (
+            to_usd is not None and usd_inr is not None
+            and np.isfinite(to_usd) and np.isfinite(usd_inr)
+            and to_usd > 0 and usd_inr > 0
+        ):
+            return float(to_usd) * float(usd_inr) * unit_factor
+
+    raise ValueError(f"Could not obtain an FX rate from {currency} to INR.")
+
+
+def get_fx_to_inr_map(currencies):
+    result = {}
+    for currency in sorted({_normalize_currency_code(c) for c in currencies if str(c or '').strip()}):
+        result[currency] = _latest_fx_rate_to_inr(currency)
+    return result
+
+
+@st.cache_data(show_spinner=False)
+def download_fx_history_to_inr(currency, start_date, end_date):
+    """Return a daily series of INR per one quoted currency unit."""
+    import yfinance as yf
+
+    major, unit_factor = _currency_major_and_unit_factor(currency)
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date) + timedelta(days=7)
+
+    if major == "INR":
+        idx = pd.date_range(start=start.normalize(), end=end.normalize(), freq="D")
+        return pd.Series(1.0, index=idx, name="INR")
+
+    def close_series(ticker):
+        try:
+            data = yf.download(
+                ticker,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                progress=False,
+                auto_adjust=True,
+                threads=False,
+            )["Close"]
+            if isinstance(data, pd.DataFrame):
+                if data.empty:
+                    return pd.Series(dtype=float)
+                series = data.iloc[:, 0]
+            else:
+                series = data
+            return pd.to_numeric(series, errors="coerce").dropna().sort_index()
+        except Exception:
+            return pd.Series(dtype=float)
+
+    direct = close_series(f"{major}INR=X")
+    if not direct.empty:
+        return direct * unit_factor
+
+    if major != "USD":
+        to_usd = close_series(f"{major}USD=X")
+        usd_inr = close_series("USDINR=X")
+        if not to_usd.empty and not usd_inr.empty:
+            joined = pd.concat([to_usd.rename("to_usd"), usd_inr.rename("usd_inr")], axis=1)
+            joined = joined.sort_index().ffill().dropna()
+            if not joined.empty:
+                return joined["to_usd"] * joined["usd_inr"] * unit_factor
+
+    raise ValueError(f"No usable historical FX series was found for {currency}/INR.")
+
+
+def convert_price_history_to_inr(prices, ticker_currency_pairs):
+    """Convert every asset price series to INR before calculating returns."""
+    if prices.empty:
+        return prices
+
+    currency_map = {str(t): _normalize_currency_code(c) for t, c in ticker_currency_pairs}
+    converted = prices.copy().astype(float)
+
+    for ticker in converted.columns:
+        currency = currency_map.get(str(ticker), "INR")
+        if currency == "INR":
+            continue
+        fx = download_fx_history_to_inr(currency, converted.index.min(), converted.index.max())
+        fx = fx.reindex(converted.index).ffill().bfill()
+        if fx.isna().all():
+            raise ValueError(f"FX history for {currency}/INR could not be aligned with {ticker}.")
+        converted[ticker] = converted[ticker] * fx
+
+    return converted
+
+
 def add_symbols_to_master(symbols):
     if not symbols:
         return [], [], [], []
 
-    company_lookup = get_nse_company_lookup()
-    available_symbols = set(company_lookup)
-
-    valid_symbols = []
+    lookup = get_nse_company_lookup()
+    instruments = []
     invalid_symbols = []
-    seen_resolved = set()
+    seen_symbols = set()
 
     for entered_symbol in symbols:
-        resolved_symbol = resolve_nse_symbol(
-            entered_symbol, available_symbols, allow_be_fallback=True
-        )
-        if resolved_symbol is None:
-            # If the symbol is not in the NSE equity reference, still allow it
-            # if Yahoo Finance recognizes it as a valid NSE ticker.
-            fallback = resolve_yahoo_tickers([entered_symbol])
-            if entered_symbol in fallback:
-                resolved_symbol = normalize_nse_symbol(entered_symbol)
-
-        if resolved_symbol is None:
+        instrument = resolve_yahoo_instrument(entered_symbol, lookup)
+        if instrument is None:
             invalid_symbols.append(entered_symbol)
-        elif resolved_symbol not in seen_resolved:
-            valid_symbols.append(resolved_symbol)
-            seen_resolved.add(resolved_symbol)
+            continue
+        symbol = instrument["symbol"]
+        if symbol not in seen_symbols:
+            instruments.append(instrument)
+            seen_symbols.add(symbol)
 
+    valid_symbols = [item["symbol"] for item in instruments]
     with get_db_connection() as conn:
         existing = {
             row["symbol"]
@@ -854,46 +1164,46 @@ def add_symbols_to_master(symbols):
         } if valid_symbols else set()
 
     duplicates = [s for s in valid_symbols if s in existing]
-    new_symbols = [s for s in valid_symbols if s not in existing]
+    new_instruments = [item for item in instruments if item["symbol"] not in existing]
 
-    price_map = {}
-    if new_symbols:
+    ticker_price_map = {}
+    if new_instruments:
         try:
-            price_map = get_latest_price_map([f"{s}.NS" for s in new_symbols])
+            ticker_price_map = get_latest_price_map(
+                tuple(item["yahoo_ticker"] for item in new_instruments)
+            )
         except Exception:
-            price_map = {}
+            ticker_price_map = {}
 
     now = datetime.now().isoformat(timespec="seconds")
     added = []
     missing_initial_price = []
 
     with get_db_connection() as conn:
-        for symbol in new_symbols:
-            initial_price = price_map.get(symbol)
+        for item in new_instruments:
+            ticker = item["yahoo_ticker"]
+            initial_price = ticker_price_map.get(ticker)
             if initial_price is None or not np.isfinite(initial_price) or initial_price <= 0:
                 initial_price = None
-                missing_initial_price.append(symbol)
+                missing_initial_price.append(item["symbol"])
 
             conn.execute(
                 """
                 INSERT INTO master_holdings
-                    (symbol, stock_name, quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    symbol,
-                    company_lookup.get(symbol, symbol),
-                    1.0,
-                    initial_price,
-                    now,
-                    now,
+                    item["symbol"], item["stock_name"], ticker,
+                    item["exchange"], _normalize_currency_code(item["currency"]),
+                    1.0, initial_price, now, now,
                 ),
             )
-            added.append(symbol)
+            added.append(item["symbol"])
         conn.commit()
 
     return added, duplicates, invalid_symbols, missing_initial_price
-
 
 def remove_symbols_from_master(symbols):
     if not symbols:
@@ -1011,27 +1321,58 @@ def build_current_allocation_from_db():
     if df.empty:
         return pd.DataFrame(), []
 
-    df["Symbol"] = df["Symbol"].map(normalize_nse_symbol)
-    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
-    df["Average Price"] = pd.to_numeric(df["Average Price"], errors="coerce")
+    def normalize_frame(frame):
+        frame = frame.copy()
+        frame["Symbol"] = frame["Symbol"].map(normalize_portfolio_symbol)
+        frame["Yahoo Ticker"] = frame["Yahoo Ticker"].fillna("").astype(str).str.strip().str.upper()
+        frame["Currency"] = frame["Currency"].fillna("").map(_normalize_currency_code)
+        frame["Quantity"] = pd.to_numeric(frame["Quantity"], errors="coerce")
+        frame["Average Price"] = pd.to_numeric(frame["Average Price"], errors="coerce")
+        return frame
+
+    df = normalize_frame(df)
+
+    # Repair metadata lazily for rows originating from old databases/backups.
+    rows_needing_metadata = df[
+        (df["Yahoo Ticker"] == "") | (df["Currency"] == "")
+    ]["Symbol"].tolist()
+    if rows_needing_metadata:
+        lookup = get_nse_company_lookup()
+        with get_db_connection() as conn:
+            for symbol in rows_needing_metadata:
+                instrument = resolve_yahoo_instrument(symbol, lookup)
+                if instrument is None:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE master_holdings
+                    SET stock_name = ?, yahoo_ticker = ?, exchange = ?, currency = ?, updated_at = ?
+                    WHERE symbol = ?
+                    """,
+                    (
+                        instrument["stock_name"], instrument["yahoo_ticker"],
+                        instrument["exchange"], _normalize_currency_code(instrument["currency"]),
+                        datetime.now().isoformat(timespec="seconds"), symbol,
+                    ),
+                )
+            conn.commit()
+        df = normalize_frame(load_master_holdings())
+
+    # Fetch current native-market prices for all holdings. This is used for current
+    # portfolio weights; Average Price remains the editable cost-basis field.
+    all_tickers = tuple(t for t in df["Yahoo Ticker"].tolist() if t)
+    latest_price_map = get_latest_price_map(all_tickers) if all_tickers else {}
 
     needs_price = df[
         df["Average Price"].isna()
         | ~np.isfinite(df["Average Price"])
         | (df["Average Price"] <= 0)
-    ]["Symbol"].tolist()
-
-    price_map = {}
-    if needs_price:
-        try:
-            price_map = get_latest_price_map([f"{s}.NS" for s in needs_price])
-        except Exception:
-            price_map = {}
-
+    ].copy()
+    if not needs_price.empty:
         now = datetime.now().isoformat(timespec="seconds")
         with get_db_connection() as conn:
-            for symbol in needs_price:
-                price = price_map.get(symbol)
+            for _, row in needs_price.iterrows():
+                price = latest_price_map.get(row["Yahoo Ticker"])
                 if price is not None and np.isfinite(price) and price > 0:
                     conn.execute(
                         """
@@ -1039,33 +1380,44 @@ def build_current_allocation_from_db():
                         SET average_price = ?, updated_at = ?
                         WHERE symbol = ?
                         """,
-                        (float(price), now, symbol),
+                        (float(price), now, row["Symbol"]),
                     )
             conn.commit()
+        df = normalize_frame(load_master_holdings())
 
-        df = load_master_holdings()
-        df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
-        df["Average Price"] = pd.to_numeric(df["Average Price"], errors="coerce")
+    df["Latest Price"] = df["Yahoo Ticker"].map(latest_price_map)
 
-    invalid_rows = df[
-        df["Quantity"].isna()
-        | (df["Quantity"] <= 0)
-        | df["Average Price"].isna()
-        | (df["Average Price"] <= 0)
-    ]["Symbol"].tolist()
-
-    usable = df[~df["Symbol"].isin(invalid_rows)].copy()
+    invalid_mask = (
+        df["Quantity"].isna() | (df["Quantity"] <= 0)
+        | df["Average Price"].isna() | (df["Average Price"] <= 0)
+        | df["Latest Price"].isna() | (df["Latest Price"] <= 0)
+        | (df["Yahoo Ticker"].fillna("").astype(str).str.strip() == "")
+        | (df["Currency"].fillna("").astype(str).str.strip() == "")
+    )
+    invalid_rows = df.loc[invalid_mask, "Symbol"].tolist()
+    usable = df.loc[~invalid_mask].copy()
     if usable.empty:
         return pd.DataFrame(), invalid_rows
 
-    usable["Invested"] = usable["Quantity"] * usable["Average Price"]
-    total = usable["Invested"].sum()
-    if total <= 0:
-        raise ValueError("The master holdings table has no positive portfolio value.")
+    fx_map = get_fx_to_inr_map(usable["Currency"].tolist())
+    usable["FX to INR"] = usable["Currency"].map(fx_map)
+    usable["Average Price INR"] = usable["Average Price"] * usable["FX to INR"]
+    usable["Latest Price INR"] = usable["Latest Price"] * usable["FX to INR"]
+    usable["Invested INR"] = usable["Quantity"] * usable["Average Price INR"]
+    usable["Current Value INR"] = usable["Quantity"] * usable["Latest Price INR"]
 
-    usable["Weight"] = usable["Invested"] / total
+    total_current = usable["Current Value INR"].sum()
+    if total_current <= 0:
+        raise ValueError("The master holdings table has no positive current INR portfolio value.")
+
+    usable["Weight"] = usable["Current Value INR"] / total_current
     portfolio_df = usable[
-        ["Symbol", "Stock Name", "Quantity", "Average Price", "Weight"]
+        [
+            "Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency",
+            "Quantity", "Average Price", "Latest Price", "FX to INR",
+            "Average Price INR", "Latest Price INR", "Invested INR",
+            "Current Value INR", "Weight"
+        ]
     ].sort_values("Weight", ascending=False).reset_index(drop=True)
 
     return portfolio_df, invalid_rows
@@ -1222,7 +1574,14 @@ def find_drop_bottom_pct_nearest_target(
 
 
 @st.cache_data(show_spinner=False)
-def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7, drop_bottom_pct=0.1):
+def get_daily_log_returns(
+    symbols,
+    start_date=None,
+    end_date=None,
+    buffer_days=7,
+    drop_bottom_pct=0.1,
+    ticker_currency_pairs=(),
+):
     if end_date is None:
         end_date = datetime.today()
     else:
@@ -1241,6 +1600,10 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
     if df.empty:
         raise ValueError("No data available for the given tickers.")
 
+    # Convert foreign-market price histories into INR before calculating returns.
+    if ticker_currency_pairs:
+        df = convert_price_history_to_inr(df, ticker_currency_pairs)
+
     lengths = df.count().sort_values(ascending=False)
     num_to_drop = int(np.floor(drop_bottom_pct * len(lengths)))
 
@@ -1249,13 +1612,15 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
         dropped = lengths.tail(num_to_drop)
         kept = lengths.head(len(lengths) - num_to_drop)
         df = df[kept.index]
-
         dropped_df = pd.DataFrame({
             "Ticker": dropped.index,
-            "Valid Days of Data": dropped.values
+            "Valid Days of Data": dropped.values,
         }).reset_index(drop=True)
     else:
         kept = lengths
+
+    if len(kept) == 0:
+        raise ValueError("History filtering removed every ticker.")
 
     valid_start = df[kept.index].apply(lambda x: x.first_valid_index()).max()
     valid_end = df[kept.index].apply(lambda x: x.last_valid_index()).min()
@@ -1263,7 +1628,7 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
     if valid_start is None or valid_end is None or valid_start >= valid_end:
         raise ValueError("No overlapping date range found across tickers after filtering.")
 
-    df_aligned = df.loc[valid_start:valid_end].dropna(axis=1, how="any")
+    df_aligned = df.loc[valid_start:valid_end].ffill().dropna(axis=0, how="any")
     log_returns = np.log(df_aligned / df_aligned.shift(1)).dropna()
 
     lengths = df[kept.index].count()
@@ -1279,17 +1644,18 @@ def get_daily_log_returns(symbols, start_date=None, end_date=None, buffer_days=7
     min_len_df = pd.DataFrame({
         "Ticker": [min_len_ticker],
         "History Length (days)": [lengths[min_len_ticker]],
-        "P&L (simulated)": [f"{simulated_pnl:.2f}%" if not np.isnan(simulated_pnl) else "N/A"]
+        "P&L (simulated, INR-adjusted)": [
+            f"{simulated_pnl:.2f}%" if not np.isnan(simulated_pnl) else "N/A"
+        ],
     })
 
     meta = {
         "valid_start": valid_start,
         "valid_end": valid_end,
         "dropped_df": dropped_df,
-        "min_len_df": min_len_df
+        "min_len_df": min_len_df,
     }
     return log_returns, meta
-
 
 def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1):
     from scipy.optimize import minimize
@@ -1401,86 +1767,117 @@ def portfolio_stats(weights, log_returns):
 
 
 def portfolio_stats_comparison(current_alloc, log_returns, optimal_weights):
-    lr_symbols = [col.replace(".NS", "").replace(".BO", "") for col in log_returns.columns]
+    aligned = (
+        current_alloc.set_index("Yahoo Ticker")
+        .reindex(log_returns.columns)
+        .dropna(subset=["Weight"])
+    )
+    if aligned.empty:
+        raise ValueError("No holdings align with the return matrix.")
 
-    aligned = current_alloc.set_index("Symbol").reindex(lr_symbols).dropna(subset=["Weight"])
     current_weights = aligned["Weight"].values
     current_weights = current_weights / current_weights.sum()
+    current_log_returns = log_returns[list(aligned.index)]
 
-    current_log_returns = log_returns[
-        [c for c in log_returns.columns if c.replace(".NS", "").replace(".BO", "") in aligned.index]
-    ]
     current_stats = portfolio_stats(current_weights, current_log_returns)
     optimal_stats = portfolio_stats(optimal_weights, log_returns)
-
     return current_stats, optimal_stats
 
-
-def run_portfolio_analysis_multi(symbols, current_alloc, max_dd=0.05, target_volatility=None, drop_bottom_pct=0.1):
-    log_returns, meta = get_daily_log_returns(symbols, drop_bottom_pct=drop_bottom_pct)
+def run_portfolio_analysis_multi(
+    symbols,
+    current_alloc,
+    max_dd=0.05,
+    target_volatility=None,
+    drop_bottom_pct=0.1,
+):
+    ticker_currency_pairs = tuple(
+        sorted(
+            (str(row["Yahoo Ticker"]), _normalize_currency_code(row["Currency"]))
+            for _, row in current_alloc.iterrows()
+            if str(row.get("Yahoo Ticker", "")).strip()
+        )
+    )
+    log_returns, meta = get_daily_log_returns(
+        tuple(symbols),
+        drop_bottom_pct=drop_bottom_pct,
+        ticker_currency_pairs=ticker_currency_pairs,
+    )
 
     if target_volatility is not None:
-        optimal_weights = optimize_portfolio_target_volatility(log_returns, target_volatility=target_volatility)
+        optimal_weights = optimize_portfolio_target_volatility(
+            log_returns, target_volatility=target_volatility
+        )
     else:
         optimal_weights = None
 
     if optimal_weights is None:
-        optimal_weights = optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=max_dd)
-
+        optimal_weights = optimize_portfolio_max_return_given_daily_risk(
+            log_returns, max_drawdown=max_dd
+        )
     if optimal_weights is None:
         optimal_weights = optimize_max_sharpe_ratio(log_returns)
-
     if optimal_weights is None:
         return None, log_returns, None, None, meta
 
-    current_stats, optimal_stats = portfolio_stats_comparison(current_alloc, log_returns, optimal_weights)
+    current_stats, optimal_stats = portfolio_stats_comparison(
+        current_alloc, log_returns, optimal_weights
+    )
     return optimal_weights, log_returns, current_stats, optimal_stats, meta
-
 
 # =========================================================
 # REBALANCING
 # =========================================================
 
 def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip):
-    lr_symbols = [col.replace(".NS", "").replace(".BO", "") for col in log_returns.columns]
-    alloc_df = current_alloc.set_index("Symbol").copy()
+    alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
+    lr_tickers = list(log_returns.columns)
+    common_tickers = [t for t in lr_tickers if t in alloc_df.index and t in prices]
 
-    common_symbols = [s for s in lr_symbols if s in alloc_df.index and s in prices]
+    missing_prices = [t for t in lr_tickers if t not in prices]
+    missing_alloc = [t for t in lr_tickers if t not in alloc_df.index]
 
-    missing_prices = [s for s in lr_symbols if s not in prices]
-    missing_alloc = [s for s in lr_symbols if s not in alloc_df.index]
+    if not common_tickers:
+        raise ValueError("No common tickers between returns, allocation, and latest prices.")
 
-    if not common_symbols:
-        raise ValueError("No common symbols between returns, allocation, and prices.")
-
-    pos = [lr_symbols.index(s) for s in common_symbols]
+    pos = [lr_tickers.index(t) for t in common_tickers]
     aligned_optimal_weights = np.array(optimal_weights)[pos]
     aligned_optimal_weights = aligned_optimal_weights / aligned_optimal_weights.sum()
 
     current_values = np.array(
-        [alloc_df.loc[s, "Quantity"] * prices[s] for s in common_symbols],
-        dtype=float
+        [
+            alloc_df.loc[t, "Quantity"]
+            * prices[t]
+            * alloc_df.loc[t, "FX to INR"]
+            for t in common_tickers
+        ],
+        dtype=float,
     )
     portfolio_value = current_values.sum()
     current_weights = current_values / portfolio_value
 
     change_weights = aligned_optimal_weights - current_weights
-    value_change = portfolio_value * change_weights
-    qty_change = np.array([vc / prices[s] for vc, s in zip(value_change, common_symbols)])
+    value_change_inr = portfolio_value * change_weights
+    price_inr = np.array(
+        [prices[t] * alloc_df.loc[t, "FX to INR"] for t in common_tickers],
+        dtype=float,
+    )
+    qty_change = value_change_inr / price_inr
 
     action = np.where(change_weights > 0, "Buy", "Sell")
     abs_qty_change = np.abs(qty_change)
-
     exec_qty = np.where(
         action == "Sell",
         np.maximum(0, np.floor(abs_qty_change).astype(int) - 1),
-        np.floor(abs_qty_change / days_to_flip).astype(int)
+        np.floor(abs_qty_change / days_to_flip).astype(int),
     )
-
-    exec_val = np.array([eq * prices[s] for eq, s in zip(exec_qty, common_symbols)], dtype=float)
+    exec_val = exec_qty * price_inr
 
     rebal_df = pd.DataFrame({
-        "Symbol": common_symbols,
+        "Symbol": [alloc_df.loc[t, "Symbol"] for t in common_tickers],
+        "Yahoo Ticker": common_tickers,
+        "Currency": [alloc_df.loc[t, "Currency"] for t in common_tickers],
+        "Native Price": [prices[t] for t in common_tickers],
+        "FX to INR": [alloc_df.loc[t, "FX to INR"] for t in common_tickers],
         "Current Weight": current_weights,
         "Optimal Weight": aligned_optimal_weights,
         "Action": action,
@@ -1495,76 +1892,75 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         .sort_values(by="Executable Value", ascending=False)
         .reset_index(drop=True)
     )
-
     return rebal_df, missing_prices, missing_alloc
-
 
 @st.cache_data(show_spinner=False)
 def get_latest_price_map(latest_prices):
     import yfinance as yf
-    price_history = yf.download(latest_prices, period="15d", progress=False, auto_adjust=True)["Close"]
+
+    tickers = tuple(dict.fromkeys(str(t).strip().upper() for t in latest_prices if str(t).strip()))
+    if not tickers:
+        return {}
+
+    price_history = yf.download(
+        list(tickers),
+        period="15d",
+        progress=False,
+        auto_adjust=True,
+        threads=False,
+    )["Close"]
 
     if isinstance(price_history, pd.Series):
-        price_history = price_history.to_frame()
+        name = tickers[0] if len(tickers) == 1 else str(price_history.name)
+        price_history = price_history.to_frame(name=name)
+
+    if price_history.empty:
+        return {}
 
     price_history = price_history.ffill()
     last_row = price_history.iloc[-1]
-
-    price_map = {
-        col.replace(".NS", "").replace(".BO", ""): float(last_row[col])
+    return {
+        str(col).upper(): float(last_row[col])
         for col in price_history.columns
-        if pd.notna(last_row[col])
+        if pd.notna(last_row[col]) and np.isfinite(float(last_row[col]))
     }
-    return price_map
-
 
 @st.cache_data(show_spinner=False)
 def get_ema252_change_map(tickers):
     import yfinance as yf
-    """Return each ticker's percentage distance from its latest 252-day EMA.
 
-    Formula: (latest adjusted close / latest EMA-252) - 1.
-    Positive values are above the EMA; negative values are below it.
-    """
     if not tickers:
         return {}
 
-    # Two years provides enough observations for a meaningful 252-session EMA.
     history = yf.download(
         list(tickers),
         period="2y",
         progress=False,
         auto_adjust=True,
+        threads=False,
     )["Close"]
 
     if isinstance(history, pd.Series):
-        history = history.to_frame()
+        history = history.to_frame(name=str(tickers[0]))
 
     history = history.sort_index().ffill()
     ema252_change_map = {}
 
     for ticker in history.columns:
         prices = pd.to_numeric(history[ticker], errors="coerce").dropna()
-
-        # Require at least 252 valid sessions before reporting the indicator.
         if len(prices) < 252:
             continue
-
         latest_price = float(prices.iloc[-1])
         ema252 = float(
             prices.ewm(span=252, adjust=False, min_periods=252).mean().iloc[-1]
         )
-
         if not np.isfinite(latest_price) or latest_price <= 0:
             continue
         if not np.isfinite(ema252) or ema252 <= 0:
             continue
-
-        base_symbol = str(ticker).replace(".NS", "").replace(".BO", "")
-        ema252_change_map[base_symbol] = (latest_price / ema252) - 1.0
+        ema252_change_map[str(ticker).upper()] = (latest_price / ema252) - 1.0
 
     return ema252_change_map
-
 
 def style_rebalance_df(df):
     def color_action_row(row):
@@ -1573,22 +1969,19 @@ def style_rebalance_df(df):
         return ["background-color: #f8d7da; color: #721c24;"] * len(row)
 
     formatters = {
+        "Native Price": "{:,.2f}",
+        "FX to INR": "{:,.4f}",
         "Current Weight": "{:.2%}",
         "Optimal Weight": "{:.2%}",
         "Change": "{:.2%}",
-        "Quantity": "{:.0f}",
+        "Quantity": "{:.2f}",
         "Executable Quantity": "{:.0f}",
         "Executable Value": "₹{:,.0f}",
     }
     if "Change from 252 EMA" in df.columns:
         formatters["Change from 252 EMA"] = "{:.2%}"
 
-    return (
-        df.style
-        .apply(color_action_row, axis=1)
-        .format(formatters, na_rep="N/A")
-    )
-
+    return df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
 
 def metrics_df(stats_dict):
     return pd.DataFrame({
@@ -1598,44 +1991,23 @@ def metrics_df(stats_dict):
 
 
 def calculate_drop_bottom_pct_recommendation():
-    """Calculate a display-only 252-day recommendation.
-
-    The recommendation is stored separately and never changes the manual
-    drop_bottom_pct input.
-    """
+    """Calculate a display-only recommendation using INR-adjusted return history."""
     st.session_state.pop("drop_bottom_auto_result", None)
     st.session_state.pop("drop_bottom_auto_error", None)
 
     try:
         portfolio_df, _ = build_current_allocation_from_db()
-
         if portfolio_df.empty:
             raise ValueError("No usable holdings are available.")
 
-        symbols = (
-            portfolio_df["Symbol"]
-            .dropna()
-            .astype(str)
-            .str.upper()
-            .tolist()
-        )
-
-        resolved_map = resolve_yahoo_tickers(symbols)
-        yahoo_tickers = tuple(resolved_map.values())
-
+        yahoo_tickers = tuple(portfolio_df["Yahoo Ticker"].dropna().astype(str).tolist())
         if not yahoo_tickers:
             raise ValueError("No Yahoo Finance tickers could be resolved.")
 
-        selected = find_drop_bottom_pct_by_return_gap(
-            yahoo_tickers,
-            portfolio_df[portfolio_df["Symbol"].isin(resolved_map.keys())].copy(),
-        )
-
+        selected = find_drop_bottom_pct_by_return_gap(yahoo_tickers, portfolio_df.copy())
         st.session_state["drop_bottom_auto_result"] = selected
-
     except Exception as exc:
         st.session_state["drop_bottom_auto_error"] = str(exc)
-
 
 def clear_drop_bottom_coverage_preview():
     """Discard a coverage preview when the manual percentage changes."""
@@ -1732,23 +2104,12 @@ def find_drop_bottom_pct_by_return_gap(
 
 
 def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
-    """Estimate coverage using available history lengths only; do not run optimization."""
+    """Estimate coverage using available Yahoo histories; do not run optimization."""
     portfolio_df, invalid_rows = build_current_allocation_from_db()
-
     if portfolio_df.empty:
         raise ValueError("No usable holdings are available.")
 
-    symbols = (
-        portfolio_df["Symbol"]
-        .dropna()
-        .astype(str)
-        .str.upper()
-        .tolist()
-    )
-
-    resolved_map = resolve_yahoo_tickers(symbols)
-    yahoo_tickers = tuple(resolved_map.values())
-
+    yahoo_tickers = tuple(portfolio_df["Yahoo Ticker"].dropna().astype(str).tolist())
     if not yahoo_tickers:
         raise ValueError("No Yahoo Finance tickers could be resolved.")
 
@@ -1758,62 +2119,25 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
 
     import yfinance as yf
 
-    def safe_download(tickers):
-        try:
-            history = yf.download(
-                list(tickers),
-                period="5y",
-                progress=False,
-                auto_adjust=True,
-                threads=False,
-            )["Close"]
-            if isinstance(history, pd.Series):
-                history = history.to_frame()
-            history = history.dropna(axis=1, how="all")
-            if history.empty:
-                raise ValueError("No history data could be fetched for the current holdings.")
-            return history
-        except Exception:
-            valid_columns = []
-            for ticker in tickers:
-                try:
-                    partial = yf.download(
-                        ticker,
-                        period="5y",
-                        progress=False,
-                        auto_adjust=True,
-                        threads=False,
-                    )["Close"]
-                    if isinstance(partial, pd.Series):
-                        partial = partial.to_frame()
-                    partial = partial.dropna(axis=1, how="all")
-                    if not partial.empty:
-                        valid_columns.append(partial)
-                except Exception:
-                    continue
-            if not valid_columns:
-                raise ValueError("No valid history data could be fetched for the current holdings.")
-            history = pd.concat(valid_columns, axis=1)
-            history = history.loc[:, ~history.columns.duplicated()]
-            history = history.dropna(axis=1, how="all")
-            if history.empty:
-                raise ValueError("No valid history data could be fetched after fallback.")
-            return history
+    history = yf.download(
+        list(yahoo_tickers),
+        period="5y",
+        progress=False,
+        auto_adjust=True,
+        threads=False,
+    )["Close"]
+    if isinstance(history, pd.Series):
+        history = history.to_frame(name=str(yahoo_tickers[0]))
+    history = history.dropna(axis=1, how="all")
+    if history.empty:
+        raise ValueError("No history data could be fetched for the current holdings.")
 
-    try:
-        history = safe_download(list(yahoo_tickers))
-        lengths = history.count().sort_values(ascending=False)
-        available_tickers = len(lengths)
-        actual_kept = max(min(tickers_kept, available_tickers), 0)
-        filtered_tickers = lengths.head(actual_kept).index.tolist()
-        available_days = int(lengths.head(actual_kept).min()) if actual_kept > 0 else 0
-        dropped_tickers = lengths.tail(num_to_drop).index.tolist() if num_to_drop > 0 else []
-    except Exception:
-        available_days = 0
-        available_tickers = 0
-        actual_kept = 0
-        filtered_tickers = []
-        dropped_tickers = []
+    lengths = history.count().sort_values(ascending=False)
+    available_tickers = len(lengths)
+    actual_kept = max(min(tickers_kept, available_tickers), 0)
+    filtered_tickers = lengths.head(actual_kept).index.tolist()
+    available_days = int(lengths.head(actual_kept).min()) if actual_kept > 0 else 0
+    dropped_tickers = lengths.tail(num_to_drop).index.tolist() if num_to_drop > 0 else []
 
     return {
         "drop_bottom_pct": float(drop_bottom_pct),
@@ -1827,7 +2151,6 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
         "resolved_tickers": int(len(yahoo_tickers)),
         "invalid_holding_rows": int(len(invalid_rows)),
     }
-
 
 # =========================================================
 # UI
@@ -1843,7 +2166,7 @@ except sqlite3.Error as exc:
     st.stop()
 
 st.title("📊 Portfolio Rebalancer")
-st.caption("Holdings are stored in a local SQLite master table instead of being uploaded from Excel.")
+st.caption("Holdings are stored in a local SQLite master table with multi-market ticker and currency metadata.")
 st.caption(f"Active SQLite file: `{DB_PATH}`")
 st.caption(f"App build: `{APP_BUILD}`")
 
@@ -1880,12 +2203,12 @@ with st.sidebar:
     sidebar_count_placeholder = st.empty()
 
     buy_input = st.text_area(
-        "Buy / add NSE symbols",
-        placeholder="RELIANCE, TCS, INFY",
-        help="Enter one or more NSE symbols separated by commas, semicolons, or new lines.",
+        "Buy / add symbols",
+        placeholder="RELIANCE, TCS, VT, VOO, QQQ",
+        help="Plain symbols try NSE first, then global Yahoo (for example VT). You can also enter explicit Yahoo tickers such as 500325.BO or VUSA.L.",
     )
     sell_input = st.text_area(
-        "Sell / remove NSE symbols",
+        "Sell / remove symbols",
         placeholder="HDFCBANK, SBIN",
         help="Symbols entered here are removed completely from the master holdings table.",
     )
@@ -1912,7 +2235,7 @@ with st.sidebar:
         "Upload holdings backup CSV",
         type=["csv"],
         key="holdings_backup_upload",
-        help="Restore Symbol, Stock Name, Quantity, Average Price and timestamps.",
+        help="Restore Symbol, Yahoo Ticker, Exchange, Currency, Quantity, Average Price and timestamps. Old NSE-only backups are still accepted.",
     )
     holdings_restore_choice = st.radio(
         "Restore behaviour",
@@ -2125,7 +2448,7 @@ if update_holdings_btn:
             "The same symbol cannot be present in both Buy and Sell: " + ", ".join(overlap)
         )
     elif not buy_symbols and not sell_symbols:
-        update_warnings.append("Enter at least one NSE symbol in Buy or Sell.")
+        update_warnings.append("Enter at least one symbol in Buy or Sell.")
     else:
         removed, not_held = remove_symbols_from_master(sell_symbols)
         added, duplicates, invalid, missing_initial_price = add_symbols_to_master(buy_symbols)
@@ -2139,7 +2462,7 @@ if update_holdings_btn:
         if not_held:
             update_warnings.append("Not present in master table: " + ", ".join(not_held))
         if invalid:
-            update_errors.append("Not found in the NSE equity symbol list: " + ", ".join(invalid))
+            update_errors.append("Could not resolve on Yahoo Finance/NSE/BSE: " + ", ".join(invalid))
         if missing_initial_price:
             update_warnings.append(
                 "Added without an initial price; enter Average Price in the editor before analysis: "
@@ -2166,17 +2489,17 @@ st.subheader("Master Holdings")
 master_df = load_master_holdings()
 
 if master_df.empty:
-    st.info("The master holdings table is empty. Add NSE symbols from the sidebar.")
+    st.info("The master holdings table is empty. Add symbols from the sidebar.")
 else:
     st.dataframe(master_df, width="stretch", hide_index=True)
 
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
-            "A newly added symbol starts with quantity 1 and the latest available NSE price. "
+            "A newly added symbol starts with quantity 1 and the latest available native-market price. "
             "After you save an edit, Quantity and Average Price are reloaded from SQLite."
         )
         editable_df = master_df[
-            ["Symbol", "Stock Name", "Quantity", "Average Price"]
+            ["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency", "Quantity", "Average Price"]
         ].copy()
 
         # Sort only the editable table by invested value (Quantity × Average Price).
@@ -2206,7 +2529,7 @@ else:
                 editable_df,
                 width="stretch",
                 hide_index=True,
-                disabled=["Symbol", "Stock Name"],
+                disabled=["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency"],
                 column_config={
                     "Quantity": st.column_config.NumberColumn(
                         "Quantity",
@@ -2216,7 +2539,7 @@ else:
                     "Average Price": st.column_config.NumberColumn(
                         "Average Price",
                         min_value=0.01,
-                        format="₹%.2f",
+                        format="%.2f",
                     ),
                 },
                 key=f"holdings_editor_{editor_version}",
@@ -2243,7 +2566,7 @@ else:
 if run_btn:
     try:
         if master_df.empty:
-            st.error("Add at least one NSE symbol before running the analysis.")
+            st.error("Add at least one symbol before running the analysis.")
             st.stop()
 
         with st.spinner("Loading holdings from the database..."):
@@ -2268,27 +2591,27 @@ if run_btn:
             st.dataframe(
                 portfolio_df.style.format({
                     "Quantity": "{:,.4f}",
-                    "Average Price": "₹{:,.2f}",
+                    "Average Price": "{:,.2f}",
+                    "Latest Price": "{:,.2f}",
+                    "FX to INR": "{:,.4f}",
+                    "Average Price INR": "₹{:,.2f}",
+                    "Latest Price INR": "₹{:,.2f}",
+                    "Invested INR": "₹{:,.2f}",
+                    "Current Value INR": "₹{:,.2f}",
                     "Weight": "{:.2%}",
                 }),
                 width="stretch",
             )
 
         with col2:
-            total_invested = float((portfolio_df["Quantity"] * portfolio_df["Average Price"]).sum())
-            st.metric("Stocks in database", len(portfolio_df))
-            st.metric("Total invested", f"₹{total_invested:,.2f}")
+            total_invested = float(portfolio_df["Invested INR"].sum())
+            total_current_value = float(portfolio_df["Current Value INR"].sum())
+            st.metric("Holdings in database", len(portfolio_df))
+            st.metric("Cost basis (INR @ current FX)", f"₹{total_invested:,.2f}")
+            st.metric("Current portfolio value", f"₹{total_current_value:,.2f}")
 
-        symbols = portfolio_df["Symbol"].dropna().astype(str).str.upper().tolist()
-
-        with st.spinner("Resolving Yahoo tickers..."):
-            resolved_map = resolve_yahoo_tickers(symbols)
-
-        unresolved = sorted(set(symbols) - set(resolved_map.keys()))
-        if unresolved:
-            st.warning(f"Unresolved Yahoo tickers: {', '.join(unresolved)}")
-
-        yahoo_tickers = list(resolved_map.values())
+        yahoo_tickers = portfolio_df["Yahoo Ticker"].dropna().astype(str).tolist()
+        unresolved = []
         if not yahoo_tickers:
             st.error("No valid Yahoo tickers resolved.")
             st.stop()
@@ -2296,7 +2619,7 @@ if run_btn:
         with st.spinner("Running optimization..."):
             optimal_weights, log_returns, current_stats, optimal_stats, meta = run_portfolio_analysis_multi(
                 yahoo_tickers,
-                portfolio_df[portfolio_df["Symbol"].isin(resolved_map.keys())].copy(),
+                portfolio_df.copy(),
                 max_dd=max_dd,
                 target_volatility=target_volatility,
                 drop_bottom_pct=drop_bottom_pct,
@@ -2318,7 +2641,7 @@ if run_btn:
             f"**Assets in return matrix:** {int(log_returns.shape[1]):,}"
         )
         st.caption(f"Overlapping date range: {meta['valid_start'].date()} to {meta['valid_end'].date()}")
-        st.caption(f"Log return shape: {log_returns.shape}")
+        st.caption(f"Log return shape: {log_returns.shape} — foreign assets are FX-adjusted to INR before return calculation.")
 
         if current_stats and optimal_stats:
             st.subheader("Portfolio Stats Comparison")
@@ -2372,7 +2695,7 @@ if run_btn:
             ema252_change_map = get_ema252_change_map(tuple(latest_prices))
 
         rebal_df, missing_prices, missing_alloc = rebalance_plan_multi(
-            portfolio_df[portfolio_df["Symbol"].isin(price_map.keys())].copy(),
+            portfolio_df.copy(),
             optimal_weights,
             log_returns,
             price_map,
@@ -2380,7 +2703,7 @@ if run_btn:
         )
 
         if not rebal_df.empty:
-            ema252_values = rebal_df["Symbol"].map(ema252_change_map)
+            ema252_values = rebal_df["Yahoo Ticker"].map(ema252_change_map)
             rebal_df.insert(5, "Change from 252 EMA", ema252_values)
 
         if missing_prices:
