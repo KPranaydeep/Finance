@@ -5,8 +5,8 @@ A) Redeem mutual-fund units and pay applicable capital-gains tax.
 B) Borrow against eligible mutual-fund units and keep the portfolio invested.
 
 The model intentionally does NOT assume that borrowed money is reinvested in equity.
-A separate high-risk leverage mode is shown only for education and is never presented
-as the default recommendation.
+A separate disciplined-leverage mode evaluates borrowing against mutual funds to invest in stocks,
+with explicit return haircuts, break-even return, cash-flow gates and drawdown stress tests.
 
 All lender terms and tax inputs remain editable because eligibility, LTV, charges,
 prepayment rules and tax treatment depend on the scheme, lender, acquisition date,
@@ -34,7 +34,7 @@ st.set_page_config(
 )
 
 st.title("🇮🇳 Loan Against Mutual Funds (LAMF) Simulator")
-st.caption("Build: 2026-08-09 YFINANCE • automatic Nifty 50 200-DMA target sanction")
+st.caption("Build: 2026-08-09 LEVERAGE • yfinance Nifty 200-DMA • disciplined stock-leverage analysis")
 st.caption(
     "For Indian retail investors: compare **selling mutual funds vs taking LAMF**, "
     "including tax, cash-flow strain, LTV/margin-call risk, repayment style, renewals and sensitivity."
@@ -392,6 +392,135 @@ def run_scenario(
     )
 
 
+@dataclass
+class LeverageResult:
+    no_leverage_end_wealth: float
+    leverage_end_wealth: float
+    advantage: float
+    borrowed_sleeve_value: float
+    monthly_debt_service: float
+    residual_monthly_investment: float
+    cashflow_shortfall: float
+    total_interest: float
+    total_fees: float
+    ending_loan_balance: float
+    sinking_fund_value: float
+    exit_tax: float
+    exit_gross_redemption: float
+    repayment_shortfall: float
+
+
+def run_leverage_scenario(
+    *,
+    borrowed_amount: float,
+    existing_stock_value: float,
+    stock_return_pct: float,
+    monthly_surplus: float,
+    loan_rate_pct: float,
+    horizon_months: int,
+    sanction_months: int,
+    processing_fee_pre_gst: float,
+    processing_gst_pct: float,
+    other_upfront_charges: float,
+    prepayment_charge_pct: float,
+    repayment_style: str,
+    sinking_return_pct: float,
+    repay_bullet_from_stock_sleeve: bool,
+    exit_tax_rate_pct: float,
+    exit_exemption: float,
+    exit_cess_pct: float,
+    exit_surcharge_pct: float,
+) -> LeverageResult:
+    """Compare a stock portfolio with and without an incremental LAMF-funded stock sleeve.
+
+    The same monthly investable surplus is used in both paths. In the leverage path,
+    mandatory debt service consumes part of that surplus, so the model does not assume
+    that salary/investing capacity magically increases after borrowing.
+    """
+    months = max(1, int(horizon_months))
+    sanction = max(1, int(sanction_months))
+    principal = max(0.0, float(borrowed_amount))
+
+    fee_events = max(1, math.ceil(months / sanction))
+    processing_with_gst = processing_fee_pre_gst * (1 + processing_gst_pct / 100.0)
+    total_fees = fee_events * (processing_with_gst + other_upfront_charges)
+
+    ending_balance = principal
+    sinking_fund_value = 0.0
+    exit_tax = 0.0
+    exit_gross_redemption = principal
+    repayment_shortfall = 0.0
+
+    if repayment_style == "EMI-style manual principal prepayment":
+        schedule = amortization_schedule(principal, loan_rate_pct, months)
+        monthly_debt_service = float(schedule["Payment"].iloc[0]) if not schedule.empty else 0.0
+        total_interest = float(schedule["Interest"].sum()) if not schedule.empty else 0.0
+        ending_balance = float(schedule["Balance"].iloc[-1]) if not schedule.empty else 0.0
+        total_fees += principal * prepayment_charge_pct / 100.0
+    elif repayment_style == "Interest-only + sinking fund":
+        monthly_interest = principal * loan_rate_pct / 1200.0
+        sinking_payment = required_sinking_fund_payment(principal, sinking_return_pct, months)
+        monthly_debt_service = monthly_interest + sinking_payment
+        total_interest = monthly_interest * months
+        sinking_fund_value = fv_monthly_contribution(sinking_payment, sinking_return_pct, months)
+    else:
+        monthly_interest = principal * loan_rate_pct / 1200.0
+        monthly_debt_service = monthly_interest
+        total_interest = monthly_interest * months
+
+    residual_monthly_investment = max(0.0, monthly_surplus - monthly_debt_service)
+    monthly_shortfall = max(0.0, monthly_debt_service - monthly_surplus)
+    cashflow_shortfall = monthly_shortfall * months
+
+    no_leverage_end_wealth = fv_lump_sum(existing_stock_value, stock_return_pct, months)
+    no_leverage_end_wealth += fv_monthly_contribution(monthly_surplus, stock_return_pct, months)
+
+    borrowed_sleeve_value = fv_lump_sum(principal, stock_return_pct, months)
+    leverage_end_wealth = fv_lump_sum(existing_stock_value, stock_return_pct, months)
+    leverage_end_wealth += borrowed_sleeve_value
+    leverage_end_wealth += fv_monthly_contribution(
+        residual_monthly_investment, stock_return_pct, months
+    )
+    leverage_end_wealth += sinking_fund_value
+
+    if repayment_style == "Interest-only, bullet principal at end" and repay_bullet_from_stock_sleeve:
+        gain_share_pct = 0.0
+        if borrowed_sleeve_value > 0 and borrowed_sleeve_value > principal:
+            gain_share_pct = (borrowed_sleeve_value - principal) / borrowed_sleeve_value * 100.0
+        exit_gross_redemption, exit_tax = gross_redemption_for_net_cash(
+            principal,
+            gain_share_pct,
+            exit_tax_rate_pct,
+            exit_exemption,
+            exit_cess_pct,
+            exit_surcharge_pct,
+        )
+        leverage_end_wealth -= exit_gross_redemption
+        repayment_shortfall = max(0.0, exit_gross_redemption - borrowed_sleeve_value)
+    else:
+        leverage_end_wealth -= ending_balance
+
+    leverage_end_wealth -= total_fees
+    leverage_end_wealth -= cashflow_shortfall
+
+    return LeverageResult(
+        no_leverage_end_wealth=no_leverage_end_wealth,
+        leverage_end_wealth=leverage_end_wealth,
+        advantage=leverage_end_wealth - no_leverage_end_wealth,
+        borrowed_sleeve_value=borrowed_sleeve_value,
+        monthly_debt_service=monthly_debt_service,
+        residual_monthly_investment=residual_monthly_investment,
+        cashflow_shortfall=cashflow_shortfall,
+        total_interest=total_interest,
+        total_fees=total_fees,
+        ending_loan_balance=ending_balance,
+        sinking_fund_value=sinking_fund_value,
+        exit_tax=exit_tax,
+        exit_gross_redemption=exit_gross_redemption,
+        repayment_shortfall=repayment_shortfall,
+    )
+
+
 # -----------------------------------------------------------------------------
 # Inputs
 # -----------------------------------------------------------------------------
@@ -406,15 +535,26 @@ with st.sidebar:
             "Debt consolidation",
             "Home down payment / token",
             "Other genuine expense",
-            "Invest borrowed money (high-risk leverage)",
+            "Disciplined leverage into stocks",
         ],
     )
+    cash_input_label = (
+        "Planned LAMF draw for stock leverage (₹)"
+        if use_case == "Disciplined leverage into stocks"
+        else "Net cash required (₹)"
+    )
+    cash_input_default = 1_50_000 if use_case == "Disciplined leverage into stocks" else 5_00_000
     cash_required = st.number_input(
-        "Net cash required (₹)",
+        cash_input_label,
         min_value=25_000,
         max_value=5_00_00_000,
-        value=5_00_000,
+        value=cash_input_default,
         step=25_000,
+        help=(
+            "This is the amount actually drawn and invested. Interest is charged on the draw, not merely the sanctioned limit."
+            if use_case == "Disciplined leverage into stocks"
+            else None
+        ),
     )
     monthly_surplus = st.number_input(
         "Monthly amount available for SIP / debt service (₹)",
@@ -424,6 +564,87 @@ with st.sidebar:
         step=1_000,
         help="Use the amount you can sustainably allocate each month. The comparison keeps this budget equal across both paths.",
     )
+
+    # Stock-leverage inputs are deliberately separate from the MF collateral assumptions.
+    existing_stock_value = 0.0
+    historical_stock_xirr_pct = 0.0
+    forward_return_haircut_pct = 0.0
+    forward_stock_return_pct = 0.0
+    personal_max_leverage_pct = 100.0
+    max_debt_service_share_pct = 100.0
+    min_break_even_buffer_pct = 0.0
+    leverage_exit_tax_rate_pct = 0.0
+    leverage_exit_exemption = 0.0
+
+    if use_case == "Disciplined leverage into stocks":
+        st.header("1A) Stock leverage discipline")
+        existing_stock_value = st.number_input(
+            "Current stock portfolio value (₹)",
+            min_value=0,
+            max_value=50_00_00_000,
+            value=3_70_000,
+            step=10_000,
+            help="Existing unlevered stock capital. Default reflects the portfolio figure you provided and is editable.",
+        )
+        historical_stock_xirr_pct = st.number_input(
+            "Historical stock XIRR (%)",
+            min_value=-100.0,
+            max_value=100.0,
+            value=18.0,
+            step=0.5,
+            help="Backward-looking reference only. It is not assumed to repeat automatically.",
+        )
+        forward_return_haircut_pct = st.number_input(
+            "Haircut to historical XIRR for forward planning (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=25.0,
+            step=5.0,
+            help="Example: 18% historical XIRR with a 25% haircut gives a 13.5% forward planning return.",
+        )
+        forward_stock_return_pct = historical_stock_xirr_pct * (1.0 - forward_return_haircut_pct / 100.0)
+        st.metric("Forward planning stock return", f"{forward_stock_return_pct:.2f}% p.a.")
+
+        personal_max_leverage_pct = st.number_input(
+            "Personal max borrowed amount (% of existing stock portfolio)",
+            min_value=0.0,
+            max_value=300.0,
+            value=50.0,
+            step=5.0,
+            help="A personal position-sizing rule, separate from the lender's LTV and the Nifty 200-DMA sanction rule.",
+        )
+        max_debt_service_share_pct = st.number_input(
+            "Max debt service (% of monthly investable surplus)",
+            min_value=1.0,
+            max_value=100.0,
+            value=50.0,
+            step=5.0,
+            help="Keeps mandatory loan payments from consuming your entire monthly investing capacity.",
+        )
+        min_break_even_buffer_pct = st.number_input(
+            "Minimum forward-return buffer above break-even (percentage points)",
+            min_value=0.0,
+            max_value=20.0,
+            value=3.0,
+            step=0.5,
+            help="A margin of safety: forward expected return should exceed the modeled break-even return by at least this amount.",
+        )
+        with st.expander("Optional exit-tax assumption for leveraged stock sleeve"):
+            leverage_exit_tax_rate_pct = st.number_input(
+                "Tax rate on gains when leveraged stock sleeve is sold (%)",
+                min_value=0.0,
+                max_value=50.0,
+                value=12.5,
+                step=0.5,
+                help="Editable. Used only when a bullet principal is assumed to be repaid by selling the leveraged stock sleeve.",
+            )
+            leverage_exit_exemption = st.number_input(
+                "Gain exemption available at leverage exit (₹)",
+                min_value=0,
+                max_value=10_00_000,
+                value=1_25_000,
+                step=5_000,
+            )
 
     st.header("2) Mutual-fund portfolio")
     portfolio_value = st.number_input(
@@ -605,6 +826,7 @@ with st.sidebar:
     )
     sinking_return_pct = 0.0
     bullet_repayment_from_mf = False
+    repay_bullet_from_stock_sleeve = False
     repayment_embedded_gain_pct = float(embedded_gain_pct)
     repayment_exemption_available = float(annual_exemption)
     if repayment_style == "Interest-only + sinking fund":
@@ -617,41 +839,51 @@ with st.sidebar:
             help="Use a low-risk assumption if this money is meant to repay principal on a fixed date.",
         )
     elif repayment_style == "Interest-only, bullet principal at end":
-        bullet_source = st.selectbox(
-            "Expected principal repayment source",
-            ["Redeem mutual funds at horizon", "Future cash outside the portfolio"],
-        )
-        bullet_repayment_from_mf = bullet_source == "Redeem mutual funds at horizon"
-        if bullet_repayment_from_mf:
-            repayment_holding_months = int(holding_period_months) + int(horizon_months)
-            repayment_embedded_gain_pct = estimate_embedded_gain_pct(
-                float(expected_return_pct), repayment_holding_months
+        if use_case == "Disciplined leverage into stocks":
+            bullet_source = st.selectbox(
+                "Expected principal repayment source",
+                ["Sell leveraged stock sleeve at horizon", "Future cash outside the portfolio"],
             )
-            st.metric(
-                "Estimated gain embedded in repayment-time redemption",
-                f"{repayment_embedded_gain_pct:.2f}%",
-            )
+            repay_bullet_from_stock_sleeve = bullet_source == "Sell leveraged stock sleeve at horizon"
             st.caption(
-                f"Auto-estimated using {repayment_holding_months} months "
-                "(current holding tenure + loan horizon) at {expected_return_pct:.2f}% p.a."
+                "If the leveraged stock sleeve is sold to clear principal, the leverage dashboard estimates tax on the gain portion using the optional exit-tax inputs above."
             )
-            repayment_exemption_available = st.number_input(
-                "Expected exemption available in repayment FY (₹)",
-                min_value=0,
-                max_value=10_00_000,
-                value=int(annual_exemption),
-                step=5_000,
-                help="Future-year exemption is uncertain; enter what you expect to remain unused in that financial year.",
+        else:
+            bullet_source = st.selectbox(
+                "Expected principal repayment source",
+                ["Redeem mutual funds at horizon", "Future cash outside the portfolio"],
             )
+            bullet_repayment_from_mf = bullet_source == "Redeem mutual funds at horizon"
+            if bullet_repayment_from_mf:
+                repayment_holding_months = int(holding_period_months) + int(horizon_months)
+                repayment_embedded_gain_pct = estimate_embedded_gain_pct(
+                    float(expected_return_pct), repayment_holding_months
+                )
+                st.metric(
+                    "Estimated gain embedded in repayment-time redemption",
+                    f"{repayment_embedded_gain_pct:.2f}%",
+                )
+                st.caption(
+                    f"Auto-estimated using {repayment_holding_months} months "
+                    f"(current holding tenure + loan horizon) at {expected_return_pct:.2f}% p.a."
+                )
+                repayment_exemption_available = st.number_input(
+                    "Expected exemption available in repayment FY (₹)",
+                    min_value=0,
+                    max_value=10_00_000,
+                    value=int(annual_exemption),
+                    step=5_000,
+                    help="Future-year exemption is uncertain; enter what you expect to remain unused in that financial year.",
+                )
 
 
 # -----------------------------------------------------------------------------
 # Core calculations
 # -----------------------------------------------------------------------------
-if use_case == "Invest borrowed money (high-risk leverage)":
-    st.error(
-        "⚠️ High-risk leverage mode selected. Loan interest is certain; market returns are not. "
-        "This app will still show collateral and cash-flow risk, but it will not label leveraged investing as 'recommended'."
+if use_case == "Disciplined leverage into stocks":
+    st.warning(
+        "Leverage mode: historical XIRR is used only as a reference. The forward case applies your chosen haircut, "
+        "and the strategy is evaluated against break-even return, cash-flow capacity, collateral risk and personal position-size limits."
     )
 
 if eligible_collateral_value > portfolio_value:
@@ -742,6 +974,262 @@ if result.cashflow_shortfall > 0:
 
 
 # -----------------------------------------------------------------------------
+# Dedicated disciplined stock-leverage dashboard
+# -----------------------------------------------------------------------------
+if use_case == "Disciplined leverage into stocks":
+    leverage_result = run_leverage_scenario(
+        borrowed_amount=float(cash_required),
+        existing_stock_value=float(existing_stock_value),
+        stock_return_pct=float(forward_stock_return_pct),
+        monthly_surplus=float(monthly_surplus),
+        loan_rate_pct=float(loan_rate_pct),
+        horizon_months=int(horizon_months),
+        sanction_months=int(sanction_months),
+        processing_fee_pre_gst=float(processing_fee_pre_gst),
+        processing_gst_pct=float(processing_gst_pct),
+        other_upfront_charges=float(other_upfront_charges),
+        prepayment_charge_pct=float(prepayment_charge_pct),
+        repayment_style=repayment_style,
+        sinking_return_pct=float(sinking_return_pct),
+        repay_bullet_from_stock_sleeve=bool(repay_bullet_from_stock_sleeve),
+        exit_tax_rate_pct=float(leverage_exit_tax_rate_pct),
+        exit_exemption=float(leverage_exit_exemption),
+        exit_cess_pct=float(cess_pct),
+        exit_surcharge_pct=float(surcharge_pct),
+    )
+
+    def leverage_advantage_at_return(ret: float) -> float:
+        return run_leverage_scenario(
+            borrowed_amount=float(cash_required),
+            existing_stock_value=float(existing_stock_value),
+            stock_return_pct=float(ret),
+            monthly_surplus=float(monthly_surplus),
+            loan_rate_pct=float(loan_rate_pct),
+            horizon_months=int(horizon_months),
+            sanction_months=int(sanction_months),
+            processing_fee_pre_gst=float(processing_fee_pre_gst),
+            processing_gst_pct=float(processing_gst_pct),
+            other_upfront_charges=float(other_upfront_charges),
+            prepayment_charge_pct=float(prepayment_charge_pct),
+            repayment_style=repayment_style,
+            sinking_return_pct=float(sinking_return_pct),
+            repay_bullet_from_stock_sleeve=bool(repay_bullet_from_stock_sleeve),
+            exit_tax_rate_pct=float(leverage_exit_tax_rate_pct),
+            exit_exemption=float(leverage_exit_exemption),
+            exit_cess_pct=float(cess_pct),
+            exit_surcharge_pct=float(surcharge_pct),
+        ).advantage
+
+    # Solve the forward stock CAGR at which leverage and no-leverage end wealth are equal.
+    be_lo, be_hi = -50.0, 100.0
+    be_flo, be_fhi = leverage_advantage_at_return(be_lo), leverage_advantage_at_return(be_hi)
+    leverage_breakeven = None
+    if be_flo == 0:
+        leverage_breakeven = be_lo
+    elif be_fhi == 0:
+        leverage_breakeven = be_hi
+    elif be_flo * be_fhi < 0:
+        for _ in range(100):
+            be_mid = (be_lo + be_hi) / 2.0
+            be_fmid = leverage_advantage_at_return(be_mid)
+            if be_flo * be_fmid <= 0:
+                be_hi, be_fhi = be_mid, be_fmid
+            else:
+                be_lo, be_flo = be_mid, be_fmid
+        leverage_breakeven = (be_lo + be_hi) / 2.0
+
+    personal_max_borrow = float(existing_stock_value) * float(personal_max_leverage_pct) / 100.0
+    leverage_ratio_pct = (
+        float(cash_required) / float(existing_stock_value) * 100.0
+        if existing_stock_value > 0
+        else math.inf
+    )
+    debt_service_share_pct = (
+        leverage_result.monthly_debt_service / float(monthly_surplus) * 100.0
+        if monthly_surplus > 0
+        else math.inf
+    )
+    forward_buffer = (
+        float(forward_stock_return_pct) - leverage_breakeven
+        if leverage_breakeven is not None
+        else math.nan
+    )
+
+    st.divider()
+    st.header("📈 Disciplined stock-leverage dashboard")
+    st.caption(
+        "This compares keeping your existing stock portfolio unlevered versus adding a stock sleeve funded by the LAMF draw. "
+        "The same monthly investable surplus is used in both paths, so loan payments reduce what can continue into SIPs/investing."
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Historical stock XIRR", f"{historical_stock_xirr_pct:.2f}%")
+    m2.metric("Forward planning return", f"{forward_stock_return_pct:.2f}%")
+    m3.metric(
+        "Modeled break-even stock CAGR",
+        f"{leverage_breakeven:.2f}%" if leverage_breakeven is not None else "No crossing",
+    )
+    m4.metric(
+        "Forward cushion over break-even",
+        f"{forward_buffer:+.2f} pp" if math.isfinite(forward_buffer) else "N/A",
+    )
+
+    l1, l2, l3, l4 = st.columns(4)
+    l1.metric("Existing stock capital", inr(existing_stock_value))
+    l2.metric("LAMF-funded stock sleeve", inr(cash_required))
+    l3.metric(
+        "Borrowed / existing stocks",
+        f"{leverage_ratio_pct:.1f}%" if math.isfinite(leverage_ratio_pct) else "N/A",
+    )
+    l4.metric("Personal max leverage amount", inr(personal_max_borrow))
+
+    w1, w2, w3, w4 = st.columns(4)
+    w1.metric("No-leverage ending wealth", inr(leverage_result.no_leverage_end_wealth))
+    w2.metric("Leveraged ending wealth", inr(leverage_result.leverage_end_wealth))
+    w3.metric(
+        "Incremental leverage advantage",
+        inr(leverage_result.advantage),
+        delta=f"{leverage_result.advantage / max(1.0, leverage_result.no_leverage_end_wealth) * 100:.2f}%",
+    )
+    w4.metric("Borrowed sleeve at horizon", inr(leverage_result.borrowed_sleeve_value))
+
+    st.subheader("Discipline gates")
+    gates = []
+    gates.append(("Within lender maximum LTV", cash_required <= max_lender_loan,
+                  f"Draw {inr(cash_required)} vs lender max {inr(max_lender_loan)}"))
+    gates.append(("Within Nifty 200-DMA target sanction", cash_required <= formula_target_sanction,
+                  f"Draw {inr(cash_required)} vs formula target {inr(formula_target_sanction)}"))
+    gates.append(("Within personal stock-leverage cap", cash_required <= personal_max_borrow,
+                  f"{leverage_ratio_pct:.1f}% borrowed/existing vs cap {personal_max_leverage_pct:.1f}%"))
+    gates.append(("Debt service within monthly-surplus cap", debt_service_share_pct <= max_debt_service_share_pct,
+                  f"{debt_service_share_pct:.1f}% of surplus vs cap {max_debt_service_share_pct:.1f}%"))
+    if leverage_breakeven is not None:
+        gates.append(("Forward return clears break-even margin", forward_buffer >= min_break_even_buffer_pct,
+                      f"Buffer {forward_buffer:+.2f} pp vs required {min_break_even_buffer_pct:.2f} pp"))
+    else:
+        gates.append(("Forward return clears break-even margin", False,
+                      "No break-even crossing found in -50% to +100% CAGR search range"))
+    gates.append(("No monthly cash-flow shortfall", leverage_result.cashflow_shortfall <= 0,
+                  f"Monthly debt service {inr(leverage_result.monthly_debt_service)} vs surplus {inr(monthly_surplus)}"))
+
+    gate_df = pd.DataFrame([
+        {"Gate": name, "Status": "PASS" if ok else "FAIL", "Detail": detail}
+        for name, ok, detail in gates
+    ])
+    st.dataframe(gate_df, hide_index=True, width="stretch")
+    failed_gates = [name for name, ok, _ in gates if not ok]
+    if not failed_gates:
+        st.success(
+            "All configured discipline gates pass under the current assumptions. This means the setup fits your rules; "
+            "it does not make the future stock return certain."
+        )
+    else:
+        st.warning("Discipline gates failing: " + "; ".join(failed_gates))
+
+    st.subheader("Loan carrying cost and cash-flow load")
+    cst1, cst2, cst3, cst4 = st.columns(4)
+    cst1.metric("Monthly debt service", inr(leverage_result.monthly_debt_service))
+    cst2.metric("Debt service / monthly surplus", f"{debt_service_share_pct:.1f}%" if math.isfinite(debt_service_share_pct) else "N/A")
+    cst3.metric("Total modeled interest", inr(leverage_result.total_interest))
+    cst4.metric("Fees across sanction cycles", inr(leverage_result.total_fees))
+    if leverage_result.exit_tax > 0:
+        st.caption(
+            f"If the bullet is repaid by selling the leveraged stock sleeve, estimated exit tax included: "
+            f"{inr(leverage_result.exit_tax)}; gross sale needed to net principal: {inr(leverage_result.exit_gross_redemption)}."
+        )
+    if leverage_result.repayment_shortfall > 0:
+        st.error(
+            f"At the forward return assumption, the leveraged stock sleeve is short by about "
+            f"{inr(leverage_result.repayment_shortfall)} of the gross amount needed to clear the bullet principal after tax."
+        )
+
+    st.subheader("Return sensitivity — incremental wealth from leverage")
+    leverage_return_grid = sorted(set([
+        -20.0, -10.0, 0.0, 8.0, 12.0,
+        round(float(forward_stock_return_pct), 2),
+        round(float(historical_stock_xirr_pct), 2),
+        25.0,
+    ]))
+    lev_rows = []
+    for ret in leverage_return_grid:
+        temp = run_leverage_scenario(
+            borrowed_amount=float(cash_required),
+            existing_stock_value=float(existing_stock_value),
+            stock_return_pct=float(ret),
+            monthly_surplus=float(monthly_surplus),
+            loan_rate_pct=float(loan_rate_pct),
+            horizon_months=int(horizon_months),
+            sanction_months=int(sanction_months),
+            processing_fee_pre_gst=float(processing_fee_pre_gst),
+            processing_gst_pct=float(processing_gst_pct),
+            other_upfront_charges=float(other_upfront_charges),
+            prepayment_charge_pct=float(prepayment_charge_pct),
+            repayment_style=repayment_style,
+            sinking_return_pct=float(sinking_return_pct),
+            repay_bullet_from_stock_sleeve=bool(repay_bullet_from_stock_sleeve),
+            exit_tax_rate_pct=float(leverage_exit_tax_rate_pct),
+            exit_exemption=float(leverage_exit_exemption),
+            exit_cess_pct=float(cess_pct),
+            exit_surcharge_pct=float(surcharge_pct),
+        )
+        lev_rows.append({
+            "Stock CAGR": f"{ret:.2f}%",
+            "Borrowed sleeve at horizon": inr(temp.borrowed_sleeve_value),
+            "No-leverage wealth": inr(temp.no_leverage_end_wealth),
+            "Leveraged wealth": inr(temp.leverage_end_wealth),
+            "Incremental advantage": inr(temp.advantage),
+            "Result": "Ahead" if temp.advantage >= 0 else "Behind",
+        })
+    st.dataframe(pd.DataFrame(lev_rows), hide_index=True, width="stretch")
+
+    st.subheader("Immediate drawdown stress on leveraged stock sleeve")
+    shock_rows = []
+    for shock in [0, 10, 20, 30, 40, 50, 60]:
+        sleeve_after_shock = cash_required * (1 - shock / 100.0)
+        sleeve_loss = cash_required - sleeve_after_shock
+        net_sleeve_equity_vs_principal = sleeve_after_shock - cash_required
+        shock_rows.append({
+            "Immediate stock fall": f"-{shock}%",
+            "Leveraged sleeve value": inr(sleeve_after_shock),
+            "Mark-to-market loss": inr(sleeve_loss),
+            "Sleeve value minus original principal": inr(net_sleeve_equity_vs_principal),
+        })
+    st.dataframe(pd.DataFrame(shock_rows), hide_index=True, width="stretch")
+    st.caption(
+        "The stock-sleeve drawdown and the LAMF margin call are different risks: the loan is secured by the pledged MF collateral, "
+        "while the borrowed stock sleeve can simultaneously be down."
+    )
+
+    st.subheader("Collateral / margin-call stress")
+    if eligible_collateral_value > 0:
+        cc1, cc2, cc3 = st.columns(3)
+        cc1.metric("Current drawn LTV", f"{initial_ltv:.1f}%")
+        cc2.metric("Collateral at lender-LTV breach", inr(margin_call_collateral))
+        cc3.metric("Approx. collateral fall to breach", f"{crash_to_margin_call_pct:.1f}%")
+        collateral_rows = []
+        for crash in [0, 10, 20, 30, 40, 50, 60]:
+            stressed_collateral = eligible_collateral_value * (1 - crash / 100.0)
+            stressed_ltv = cash_required / stressed_collateral * 100.0 if stressed_collateral > 0 else math.inf
+            principal_repay_needed = max(0.0, cash_required - stressed_collateral * lender_ltv_pct / 100.0)
+            collateral_rows.append({
+                "MF collateral fall": f"-{crash}%",
+                "Collateral value": inr(stressed_collateral),
+                "Resulting LTV": f"{stressed_ltv:.1f}%" if math.isfinite(stressed_ltv) else "∞",
+                "Principal repay needed to restore lender max": inr(principal_repay_needed),
+                "Status": "BREACH" if stressed_ltv > lender_ltv_pct else "OK",
+            })
+        st.dataframe(pd.DataFrame(collateral_rows), hide_index=True, width="stretch")
+
+    st.info(
+        f"Your historical XIRR of {historical_stock_xirr_pct:.2f}% is useful as evidence of past execution, but the leverage decision is based on the "
+        f"haircut forward assumption of {forward_stock_return_pct:.2f}% and a modeled break-even of "
+        f"{leverage_breakeven:.2f}% p.a." if leverage_breakeven is not None else
+        "Your historical XIRR is useful as evidence of past execution, but the model could not find a break-even return in the search range."
+    )
+    st.stop()
+
+
+# -----------------------------------------------------------------------------
 # Sell vs borrow comparison
 # -----------------------------------------------------------------------------
 st.subheader("A) Sell mutual funds vs B) Take LAMF")
@@ -798,7 +1286,7 @@ adv3.metric(
     delta=f"{result.advantage / max(1.0, result.sell_end_wealth) * 100:.2f}%",
 )
 
-if use_case == "Invest borrowed money (high-risk leverage)":
+if use_case == "Disciplined leverage into stocks":
     st.warning(
         "No positive/negative verdict is issued for leveraged investing. The comparison above assumes the loan funds a cash need, "
         "not an additional equity purchase."
