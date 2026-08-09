@@ -38,7 +38,7 @@ def resolve_yahoo_tickers(symbols_base):
     import yfinance as yf
     resolved = {}
     for sym in symbols_base:
-        for suffix in [".NS", ".BO"]:
+        for suffix in [".NS", ".BO", ""]:
             try:
                 test = yf.download(sym + suffix, period="5d", progress=False, auto_adjust=True)
                 if test is not None and not test.empty:
