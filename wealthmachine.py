@@ -803,6 +803,8 @@ class MarketMoodAnalyzer:
     def prediction_objective(
         predicted_remaining_sessions: Iterable[float],
         actual_remaining_sessions: Iterable[float],
+        tolerance: float = 10.0,
+        calibration_weight: float = 0.05,
     ) -> dict[str, float]:
         """Return calibration and validation quality metrics for flip timing.
 
@@ -832,17 +834,17 @@ class MarketMoodAnalyzer:
         bias = float(np.mean(errors))
         mape = float(np.mean(np.abs(errors / np.clip(actual, 1.0, None)))) if np.any(actual > 0) else float("nan")
 
-        # Calibration-style diagnostics: ask if the model is conservative enough
-        # to make the horizon credible. Use a 10-session tolerance (≈2 trading weeks).
-        tolerance = 10.0
-        within_tolerance = np.abs(errors) <= tolerance
+        within_tolerance = np.abs(errors) <= float(tolerance)
         coverage_rate = float(np.mean(within_tolerance))
         calibration_error = abs(coverage_rate - 0.70)
 
-        # Single objective for model ranking:
-        # lower is better. Only a tiny penalty for bias is assigned; the main
-        # driver is forecast error and coverage quality.
-        objective = 0.55 * mae + 0.30 * rmse + 0.10 * abs(bias) + 0.05 * calibration_error
+        # Remaining weight budget split proportionally among accuracy metrics.
+        calibration_weight = float(np.clip(calibration_weight, 0.0, 0.50))
+        accuracy_budget = 1.0 - calibration_weight
+        objective = (
+            accuracy_budget * (0.579 * mae + 0.316 * rmse + 0.105 * abs(bias))
+            + calibration_weight * calibration_error
+        )
         return {
             "mae": mae,
             "rmse": rmse,
@@ -1285,12 +1287,33 @@ class MarketMoodAnalyzer:
         )
 
         with st.expander("🔬 Model Validation & Calibration Diagnostics", expanded=False):
+            # --- tuning controls (recompute without re-running the O(n²) loop) ---
+            t_col, c_col, b_col = st.columns(3)
+            ui_tolerance = t_col.slider(
+                "Coverage window (sessions)",
+                min_value=5, max_value=25, value=10, step=1,
+                help="Predictions within ±N sessions count as covered. Wider = easier to cover.",
+            )
+            ui_cal_weight = c_col.slider(
+                "Calibration weight in objective",
+                min_value=0.00, max_value=0.50, value=0.05, step=0.05,
+                help="How much coverage error penalises the objective score. Higher = coverage matters more.",
+            )
+            ui_bias_guard = b_col.slider(
+                "Hazard bias guard (sessions)",
+                min_value=0.0, max_value=10.0, value=3.0, step=0.5,
+                help="If hazard absolute bias exceeds this, KM is preferred even when hazard objective is lower.",
+            )
+
             # success path returns "models"; fallback path returns "metrics"
             models = validation_report.get("models") or {}
             if models:
                 rows = []
                 for model_name, model_data in models.items():
-                    m = model_data.get("metrics") or {}
+                    # Recompute metrics with user-tuned parameters.
+                    preds = model_data.get("predictions") or []
+                    acts = model_data.get("actuals") or []
+                    m = self.prediction_objective(preds, acts, tolerance=ui_tolerance, calibration_weight=ui_cal_weight)
                     rows.append({
                         "Model": model_name,
                         "Validation Points": validation_report.get("n_validation_points", 0),
@@ -1304,6 +1327,20 @@ class MarketMoodAnalyzer:
                         "Objective": m.get("objective"),
                     })
                 validation_df = pd.DataFrame(rows)
+
+                # Show which model would be selected under current tuning.
+                objs = {r["Model"]: r["Objective"] for r in rows}
+                biases = {r["Model"]: abs(r["Bias"] or 0.0) for r in rows}
+                km_o = objs.get("baseline_median", float("inf"))
+                hz_o = objs.get("hazard_expected_duration", float("inf"))
+                hz_b = biases.get("hazard_expected_duration", 0.0)
+                if math.isnan(hz_o) or (hz_b > ui_bias_guard and km_o <= hz_o):
+                    tuned_winner = "baseline_median"
+                elif hz_o <= km_o:
+                    tuned_winner = "hazard_expected_duration"
+                else:
+                    tuned_winner = "baseline_median"
+                st.info(f"🏆 With these parameters the selected model would be: **{tuned_winner}**")
                 # Warn when any model's coverage is well below the 70% target.
                 for row in rows:
                     cr = row.get("Coverage rate")
