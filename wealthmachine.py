@@ -803,8 +803,8 @@ class MarketMoodAnalyzer:
     def prediction_objective(
         predicted_remaining_sessions: Iterable[float],
         actual_remaining_sessions: Iterable[float],
-        tolerance: float = 10.0,
-        calibration_weight: float = 0.05,
+        tolerance: float = 25.0,
+        calibration_weight: float = 0.50,
     ) -> dict[str, float]:
         """Return calibration and validation quality metrics for flip timing.
 
@@ -1291,17 +1291,17 @@ class MarketMoodAnalyzer:
             t_col, c_col, b_col = st.columns(3)
             ui_tolerance = t_col.slider(
                 "Coverage window (sessions)",
-                min_value=5, max_value=25, value=10, step=1,
+                min_value=5, max_value=25, value=25, step=1,
                 help="Predictions within ±N sessions count as covered. Wider = easier to cover.",
             )
             ui_cal_weight = c_col.slider(
                 "Calibration weight in objective",
-                min_value=0.00, max_value=0.50, value=0.05, step=0.05,
+                min_value=0.00, max_value=0.50, value=0.50, step=0.05,
                 help="How much coverage error penalises the objective score. Higher = coverage matters more.",
             )
             ui_bias_guard = b_col.slider(
                 "Hazard bias guard (sessions)",
-                min_value=0.0, max_value=10.0, value=3.0, step=0.5,
+                min_value=0.0, max_value=10.0, value=10.0, step=0.5,
                 help="If hazard absolute bias exceeds this, KM is preferred even when hazard objective is lower.",
             )
 
