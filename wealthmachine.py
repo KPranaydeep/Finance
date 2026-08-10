@@ -1748,12 +1748,17 @@ if analyzer:
 
 
 uploaded_holdings = None
-if analyzer and analyzer.current_mood == "Greed":
+if analyzer:
     st.header("📤 Upload Your Holdings")
+    if analyzer.current_mood == "Fear":
+        st.caption(
+            "Fear regime: portfolio analysis is available. "
+            "Sell-plan targets use average cost — review before acting in a down market."
+        )
     uploaded_holdings = st.file_uploader(
         "Upload your stock holdings file (.xlsx format only — Groww or Kite)",
         type=["xlsx"],
-        key="upload_holdings_greed",
+        key="upload_holdings",
     )
 
 
