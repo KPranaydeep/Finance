@@ -222,14 +222,19 @@ def save_input_params(user_id: str, net_pl: float, charges: float, target_pct: f
     """Persist the user's profit-booking inputs when MongoDB is available."""
     if collection is None:
         return
-    record = {
-        "user_id": user_id,
-        "timestamp": datetime.datetime.now(datetime.timezone.utc),
-        "net_pl": float(net_pl),
-        "charges": float(charges),
-        "target_pct": float(target_pct),
-    }
-    collection.insert_one(record)
+    # Upsert keeps exactly one document per user; avoids unbounded collection growth.
+    collection.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "timestamp": datetime.datetime.now(datetime.timezone.utc),
+                "net_pl": float(net_pl),
+                "charges": float(charges),
+                "target_pct": float(target_pct),
+            }
+        },
+        upsert=True,
+    )
 
 
 def get_latest_input_params(user_id: str) -> dict[str, float]:
@@ -1264,6 +1269,15 @@ class MarketMoodAnalyzer:
                         "Objective": m.get("objective"),
                     })
                 validation_df = pd.DataFrame(rows)
+                # Warn when any model's coverage is well below the 70% target.
+                for row in rows:
+                    cr = row.get("Coverage rate")
+                    if cr is not None and not math.isnan(cr) and cr < 0.40:
+                        st.warning(
+                            f"⚠️ **{row['Model']}** coverage rate is {cr:.0%}, well below the "
+                            "70% target. Its horizon estimates carry high uncertainty and "
+                            "should be treated as indicative only."
+                        )
             else:
                 metrics = validation_report.get("metrics") or {}
                 validation_df = pd.DataFrame([{
@@ -1572,10 +1586,13 @@ with st.expander("📂 Upload Full MMI Dataset", expanded=False):
                             "Nifty": None if pd.isna(row["Nifty"]) else float(row["Nifty"]),
                         }
                     )
-                # Validate everything before replacing the full collection.
-                mmi_collection.delete_many({})
+                # Write to a staging collection first; swap only on success.
+                staging = db["mmi_data_staging"]
+                staging.drop()
                 if documents:
-                    mmi_collection.insert_many(documents, ordered=False)
+                    staging.insert_many(documents, ordered=False)
+                mmi_collection.drop()
+                staging.rename("mmi_data")
                 st.success("✅ Validated MMI data replaced the full MongoDB dataset.")
             else:
                 st.success("✅ MMI data validated. MongoDB is disabled, so it is used for this session only.")
