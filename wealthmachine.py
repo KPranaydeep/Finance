@@ -192,7 +192,7 @@ allocation_fig.update_traces(
 )
 
 with st.expander("📊 Portfolio Allocation Visualization", expanded=False):
-    st.plotly_chart(allocation_fig, width="stretch")
+    st.plotly_chart(allocation_fig, use_container_width=True)
     total_allocation = allocation_visual_df["Allocation (%)"].sum()
     if not np.isclose(total_allocation, 100.0, atol=0.05):
         st.warning(f"Allocation totals {total_allocation:.2f}%, not 100%.")
@@ -1244,22 +1244,40 @@ class MarketMoodAnalyzer:
             "This estimates an MMI threshold crossing, not a market correction."
         )
 
-        with st.expander("� Model Validation & Calibration Diagnostics", expanded=False):
-            metrics = validation_report.get("metrics") or {}
-            validation_rows = []
-            validation_summary = {
-                "Validation Points": validation_report.get("n_validation_points", 0),
-                "Completed Runs": validation_report.get("n_completed_records", 0),
-                "Method": validation_report.get("method", "holdout-baseline"),
-                "MAE": metrics.get("mae"),
-                "RMSE": metrics.get("rmse"),
-                "Bias": metrics.get("bias"),
-                "MAPE": metrics.get("mape"),
-                "Coverage rate": metrics.get("coverage_rate"),
-                "Calibration error": metrics.get("calibration_error"),
-                "Objective": metrics.get("objective"),
-            }
-            validation_df = pd.DataFrame([validation_summary])
+        with st.expander("🔬 Model Validation & Calibration Diagnostics", expanded=False):
+            # success path returns "models"; fallback path returns "metrics"
+            models = validation_report.get("models") or {}
+            if models:
+                rows = []
+                for model_name, model_data in models.items():
+                    m = model_data.get("metrics") or {}
+                    rows.append({
+                        "Model": model_name,
+                        "Validation Points": validation_report.get("n_validation_points", 0),
+                        "Completed Runs": validation_report.get("n_completed_records", 0),
+                        "MAE": m.get("mae"),
+                        "RMSE": m.get("rmse"),
+                        "Bias": m.get("bias"),
+                        "MAPE": m.get("mape"),
+                        "Coverage rate": m.get("coverage_rate"),
+                        "Calibration error": m.get("calibration_error"),
+                        "Objective": m.get("objective"),
+                    })
+                validation_df = pd.DataFrame(rows)
+            else:
+                metrics = validation_report.get("metrics") or {}
+                validation_df = pd.DataFrame([{
+                    "Model": validation_report.get("method", "holdout-baseline"),
+                    "Validation Points": 0,
+                    "Completed Runs": validation_report.get("n_completed_records", 0),
+                    "MAE": metrics.get("mae"),
+                    "RMSE": metrics.get("rmse"),
+                    "Bias": metrics.get("bias"),
+                    "MAPE": metrics.get("mape"),
+                    "Coverage rate": metrics.get("coverage_rate"),
+                    "Calibration error": metrics.get("calibration_error"),
+                    "Objective": metrics.get("objective"),
+                }])
             st.table(validation_df)
 
         with st.expander("�📊 Show Historical Streak Patterns", expanded=False):
@@ -1653,7 +1671,7 @@ if analyzer:
             allocation_plan_df, confidence_date = analyzer.generate_allocation_plan(
                 investable_amount
             )
-            st.dataframe(allocation_plan_df, width="stretch")
+            st.dataframe(allocation_plan_df, use_container_width=True)
             save_allocation_plan(
                 "default_user",
                 allocation_plan_df,
@@ -1676,7 +1694,7 @@ if analyzer:
         with st.expander("🗂 View Last Saved Allocation Plan"):
             previous_plan = get_latest_allocation_plan("default_user")
             if previous_plan is not None:
-                st.dataframe(previous_plan, width="stretch")
+                st.dataframe(previous_plan, use_container_width=True)
             else:
                 st.info("No saved plan is available.")
 
@@ -1824,7 +1842,7 @@ if uploaded_holdings is not None:
                     "Profit/Loss (%)",
                 ]
             ],
-            width="stretch",
+            use_container_width=True,
         )
         if merged_df["Price Source"].str.contains("Previous close").any():
             st.caption(
@@ -1990,7 +2008,7 @@ if uploaded_holdings is not None:
                         st.success(
                             f"✅ Suggested sell plan estimates ₹{cumulative_profit:,.2f} gross profit."
                         )
-                        st.dataframe(sell_plan_df, width="stretch")
+                        st.dataframe(sell_plan_df, use_container_width=True)
                         st.caption(
                             "Execution price, taxes, slippage and live brokerage can differ. "
                             "Use a current quote before placing an order."
