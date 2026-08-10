@@ -1236,7 +1236,7 @@ class MarketMoodAnalyzer:
         validation_report = self._validation_report
 
         st.subheader("📈 Current Market Mood Analysis")
-        metric_one, metric_two, metric_three = st.columns(3)
+        metric_one, metric_two, metric_three, metric_four = st.columns(4)
         metric_one.metric("Current MMI", f"{self.current_mmi:.2f}", self.current_mood)
         metric_two.metric("Current Streak", f"{self.current_streak} trading sessions")
 
@@ -1252,6 +1252,11 @@ class MarketMoodAnalyzer:
             "Expected Flip Date",
             flip_estimate["expected_date"].strftime("%d %b %Y"),
             status_text,
+        )
+        metric_four.metric(
+            "🏆 Active Model",
+            flip_estimate["primary_model"].replace("_", " "),
+            f"obj {(self._validation_report.get('models') or {}).get(flip_estimate['primary_model'], {}).get('metrics', {}).get('objective', float('nan')):.3f}",
         )
 
         if self.mmi_last_date < self.today_date:
@@ -1275,7 +1280,6 @@ class MarketMoodAnalyzer:
             "right-censored. The displayed residual-life estimate is then blended with "
             "a lightweight current-state adjustment based on threshold proximity and "
             "latest direction. "
-            f"Primary estimator selected by holdout objective: **{flip_estimate['primary_model']}**. "
             f"{pressure_text}{uncertainty_text} Business dates skip weekends but not NSE holidays. "
             "This estimates an MMI threshold crossing, not a market correction."
         )
