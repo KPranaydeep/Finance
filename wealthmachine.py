@@ -49,7 +49,6 @@ st.set_page_config(
 # CONFIG
 # -----------------------------------------------------------------------------
 IST = pytz.timezone("Asia/Kolkata")
-GROWTH_RATE = 0.04  # 4% per market day. The original value 0.456 meant 45.6%.
 DEFAULT_PROFIT_BOOKING_THRESHOLD = 7.2
 DEFAULT_TARGET_NET_DAILY_PCT = 0.28
 DEFAULT_LAMF_CAP = 0.30  # Fraction of mutual-fund corpus; 0.30 means 30%.
@@ -77,11 +76,6 @@ def add_business_sessions(
     """
     sessions = max(0, int(sessions))
     return (pd.Timestamp(from_date) + pd.offsets.BDay(sessions)).date()
-
-
-def get_next_trading_day(from_date: datetime.date) -> datetime.date:
-    """Return the next weekday trading date approximation."""
-    return add_business_sessions(from_date, 1)
 
 
 def get_market_status(now: datetime.datetime) -> str:
@@ -466,6 +460,25 @@ class MarketMoodAnalyzer:
         self.current_streak = self._get_current_streak_length()
         self.streak_records = self._build_streak_records()
         self.run_lengths = self._identify_mood_streaks()
+        # Cache validation and bias correction; both are O(n²) on streak records.
+        self._validation_report = self.run_flip_estimator_validation()
+        self._bias_correction = self._compute_bias_correction()
+
+    def _compute_bias_correction(self) -> int:
+        """Return a session-count correction for the KM model's holdout bias."""
+        completed = [
+            r for r in self.streak_records
+            if r["mood"] == self.current_mood and r["event_observed"] == 1
+        ]
+        if len(completed) < 3:
+            return 0
+        predictions = [
+            float(np.median([c["duration"] for c in completed if c is not r]))
+            for r in completed
+        ]
+        actuals = [float(r["duration"]) for r in completed]
+        historical_bias = float(np.mean(np.asarray(predictions) - np.asarray(actuals)))
+        return int(round(float(np.clip(-historical_bias, -5.0, 10.0))))
 
     def _prepare_mmi_data_from_bytes(self, mmi_bytes: bytes) -> pd.DataFrame:
         if not mmi_bytes:
@@ -1047,29 +1060,30 @@ class MarketMoodAnalyzer:
     def get_flip_estimate(self) -> dict[str, Any]:
         """Return expected and uncertainty dates for the current mood flip.
 
-        The visible estimator is now a blended output:
-        - baseline residual life comes from the KM restricted-mean (66% holdout
-          coverage vs 23% for the hazard model; prefer the better-calibrated one)
-        - the hazard estimate is retained as a secondary diagnostic
-        - the active-state contextual pressure reduces the remaining horizon when
-          the current MMI is near 50 and/or trending toward the boundary.
+        The primary estimator is selected dynamically: both KM and hazard models
+        are scored on their holdout objective; the lower-scoring model wins. The
+        KM estimate receives a bias correction computed at construction time.
         """
-        # KM baseline is the primary anchor; contextual adjustment shares the same origin.
-        baseline_expected = self._expected_remaining_sessions() or 5
+        km_raw = self._expected_remaining_sessions() or 5
+        km_expected = max(1, km_raw + self._bias_correction)
+        hazard_expected = self._hazard_expected_remaining_sessions() or km_expected
 
-        # Apply a bias correction: validation shows KM systematically under-predicts
-        # by ~7 sessions. Clamp correction to avoid inflating estimates on short streaks.
-        completed = [r for r in self.streak_records
-                     if r["mood"] == self.current_mood and r["event_observed"] == 1]
-        if len(completed) >= 3:
-            predictions = [float(np.median([c["duration"] for c in completed if c is not r]))
-                           for r in completed]
-            actuals = [float(r["duration"]) for r in completed]
-            historical_bias = float(np.mean(np.asarray(predictions) - np.asarray(actuals)))
-            correction = int(round(float(np.clip(-historical_bias, -5.0, 10.0))))
-            baseline_expected = max(1, baseline_expected + correction)
+        # Pick primary anchor by holdout objective (lower is better).
+        models = self._validation_report.get("models") or {}
+        km_obj = (models.get("baseline_median") or {}).get("metrics", {}).get("objective") or float("inf")
+        hz_obj = (models.get("hazard_expected_duration") or {}).get("metrics", {}).get("objective") or float("inf")
+        # Hazard bias penalty: if |hazard bias| > 3 sessions, prefer KM.
+        hz_bias = abs((models.get("hazard_expected_duration") or {}).get("metrics", {}).get("bias") or 0.0)
+        if math.isnan(hz_obj) or (hz_bias > 3.0 and km_obj <= hz_obj):
+            baseline_expected = km_expected
+            primary_model = "baseline_median"
+        elif hz_obj <= km_obj:
+            baseline_expected = hazard_expected
+            primary_model = "hazard_expected_duration"
+        else:
+            baseline_expected = km_expected
+            primary_model = "baseline_median"
 
-        hazard_expected = self._hazard_expected_remaining_sessions() or baseline_expected
         expected_remaining = self._contextual_expected_remaining_sessions() or baseline_expected
 
         median_remaining = self._conditional_quantile_remaining(
@@ -1092,6 +1106,8 @@ class MarketMoodAnalyzer:
             "expected_remaining_sessions": expected_remaining,
             "baseline_expected_remaining_sessions": baseline_expected,
             "hazard_expected_remaining_sessions": hazard_expected,
+            "km_expected_remaining_sessions": km_expected,
+            "primary_model": primary_model,
             "median_remaining_sessions": median_remaining,
             "upper_90_remaining_sessions": upper_90_remaining,
             "expected_date": expected_date,
@@ -1217,7 +1233,7 @@ class MarketMoodAnalyzer:
         fear_result = self._analyze_mood("Fear")
         greed_result = self._analyze_mood("Greed")
         flip_estimate = self.get_flip_estimate()
-        validation_report = self.run_flip_estimator_validation()
+        validation_report = self._validation_report
 
         st.subheader("📈 Current Market Mood Analysis")
         metric_one, metric_two, metric_three = st.columns(3)
@@ -1259,6 +1275,7 @@ class MarketMoodAnalyzer:
             "right-censored. The displayed residual-life estimate is then blended with "
             "a lightweight current-state adjustment based on threshold proximity and "
             "latest direction. "
+            f"Primary estimator selected by holdout objective: **{flip_estimate['primary_model']}**. "
             f"{pressure_text}{uncertainty_text} Business dates skip weekends but not NSE holidays. "
             "This estimates an MMI threshold crossing, not a market correction."
         )
@@ -1797,26 +1814,6 @@ except Exception as exc:
 # -----------------------------------------------------------------------------
 # PROFIT-BOOKING HELPERS
 # -----------------------------------------------------------------------------
-def get_april_first_current_year() -> str:
-    current_date = today_ist()
-    financial_year_start_year = (
-        current_date.year if current_date.month >= 4 else current_date.year - 1
-    )
-    return datetime.date(financial_year_start_year, 4, 1).strftime("%Y-%m-%d")
-
-
-def trading_days_elapsed(start_date_str: str, end_date_str: Optional[str] = None) -> int:
-    end_date = (
-        today_ist()
-        if end_date_str is None
-        else datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
-    )
-    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
-    if end_date < start_date:
-        return 0
-    return len(pd.bdate_range(start=start_date, end=end_date))
-
-
 def calculate_dynamic_sell_limit(
     net_pl: float,
     charges: float,
