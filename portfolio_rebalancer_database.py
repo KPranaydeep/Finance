@@ -2005,6 +2005,26 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     )
     exec_val = exec_qty * price_inr
 
+    # Build a simple portfolio-improvement score that ranks trades by how much they
+    # move the portfolio toward the optimized allocation and how valuable the asset
+    # is to the optimized objective. This replaces the older EMA proxy with a direct
+    # target-gap and expected-contribution score.
+    annualized_mean = log_returns[common_tickers].mean().to_numpy() * 250.0
+    annualized_vol = log_returns[common_tickers].std(ddof=1).to_numpy() * np.sqrt(250.0)
+    sharpness = np.divide(
+        annualized_mean,
+        annualized_vol + 1e-6,
+        out=np.zeros_like(annualized_mean, dtype=float),
+        where=annualized_vol > 0,
+    )
+    target_gap = np.abs(change_weights)
+    direction_factor = np.where(
+        action == "Buy",
+        np.clip(1.0 + np.maximum(sharpness, 0.0), 1.0, 3.0),
+        np.clip(1.0 + np.maximum(-sharpness, 0.0), 1.0, 3.0),
+    )
+    trade_score = target_gap * direction_factor
+
     rebal_df = pd.DataFrame({
         "Symbol": [alloc_df.loc[t, "Symbol"] for t in common_tickers],
         "Yahoo Ticker": common_tickers,
@@ -2015,6 +2035,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         "Optimal Weight": aligned_optimal_weights,
         "Action": action,
         "Change": np.abs(change_weights),
+        "Trade Impact Score": trade_score,
         "Quantity": abs_qty_change,
         "Executable Quantity": exec_qty,
         "Executable Value": exec_val,
@@ -2022,7 +2043,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
     rebal_df = (
         rebal_df[rebal_df["Executable Quantity"] != 0]
-        .sort_values(by="Executable Value", ascending=False)
+        .sort_values(by="Trade Impact Score", ascending=False)
         .reset_index(drop=True)
     )
     return rebal_df, missing_prices, missing_alloc
@@ -2058,43 +2079,6 @@ def get_latest_price_map(latest_prices):
         if pd.notna(last_row[col]) and np.isfinite(float(last_row[col]))
     }
 
-@st.cache_data(show_spinner=False)
-def get_ema252_change_map(tickers):
-    import yfinance as yf
-
-    if not tickers:
-        return {}
-
-    history = yf.download(
-        list(tickers),
-        period="2y",
-        progress=False,
-        auto_adjust=True,
-        threads=False,
-    )["Close"]
-
-    if isinstance(history, pd.Series):
-        history = history.to_frame(name=str(tickers[0]))
-
-    history = history.sort_index().ffill()
-    ema252_change_map = {}
-
-    for ticker in history.columns:
-        prices = pd.to_numeric(history[ticker], errors="coerce").dropna()
-        if len(prices) < 252:
-            continue
-        latest_price = float(prices.iloc[-1])
-        ema252 = float(
-            prices.ewm(span=252, adjust=False, min_periods=252).mean().iloc[-1]
-        )
-        if not np.isfinite(latest_price) or latest_price <= 0:
-            continue
-        if not np.isfinite(ema252) or ema252 <= 0:
-            continue
-        ema252_change_map[str(ticker).upper()] = (latest_price / ema252) - 1.0
-
-    return ema252_change_map
-
 def style_rebalance_df(df):
     def color_action_row(row):
         if row["Action"] == "Buy":
@@ -2107,12 +2091,11 @@ def style_rebalance_df(df):
         "Current Weight": "{:.2%}",
         "Optimal Weight": "{:.2%}",
         "Change": "{:.2%}",
+        "Trade Impact Score": "{:.3f}",
         "Quantity": "{:.2f}",
         "Executable Quantity": "{:.0f}",
         "Executable Value": "₹{:,.0f}",
     }
-    if "Change from 252 EMA" in df.columns:
-        formatters["Change from 252 EMA"] = "{:.2%}"
 
     return df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
 
@@ -2851,10 +2834,9 @@ if run_btn:
 
                 st.dataframe(top_corrs.head(5), width="stretch")
 
-        with st.spinner("Fetching latest prices and 252 EMA changes..."):
+        with st.spinner("Fetching latest prices for the rebalancing plan..."):
             latest_prices = log_returns.columns.tolist()
             price_map = get_latest_price_map(latest_prices)
-            ema252_change_map = get_ema252_change_map(tuple(latest_prices))
 
         rebal_df, missing_prices, missing_alloc = rebalance_plan_multi(
             portfolio_df.copy(),
@@ -2863,10 +2845,6 @@ if run_btn:
             price_map,
             days_to_flip,
         )
-
-        if not rebal_df.empty:
-            ema252_values = rebal_df["Yahoo Ticker"].map(ema252_change_map)
-            rebal_df.insert(5, "Change from 252 EMA", ema252_values)
 
         if missing_prices:
             st.warning(f"Skipped symbols with missing latest price: {', '.join(missing_prices)}")
