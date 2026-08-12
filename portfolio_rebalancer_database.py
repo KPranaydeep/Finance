@@ -2005,25 +2005,18 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     )
     exec_val = exec_qty * price_inr
 
-    # Build a simple portfolio-improvement score that ranks trades by how much they
-    # move the portfolio toward the optimized allocation and how valuable the asset
-    # is to the optimized objective. This replaces the older EMA proxy with a direct
-    # target-gap and expected-contribution score.
+    # Rank the trades by expected annual return lift from moving the portfolio
+    # toward the optimized weights. This is expressed in percentage-point return
+    # terms, which is easier to interpret than an abstract trade score.
     annualized_mean = log_returns[common_tickers].mean().to_numpy() * 250.0
     annualized_vol = log_returns[common_tickers].std(ddof=1).to_numpy() * np.sqrt(250.0)
-    sharpness = np.divide(
-        annualized_mean,
-        annualized_vol + 1e-6,
-        out=np.zeros_like(annualized_mean, dtype=float),
-        where=annualized_vol > 0,
-    )
     target_gap = np.abs(change_weights)
-    direction_factor = np.where(
-        action == "Buy",
-        np.clip(1.0 + np.maximum(sharpness, 0.0), 1.0, 3.0),
-        np.clip(1.0 + np.maximum(-sharpness, 0.0), 1.0, 3.0),
-    )
-    trade_score = target_gap * direction_factor
+
+    # Estimate annual return lift from the target-gap, and penalise high-volatility
+    # assets so the ranking stays in a return-like, natural scale.
+    return_lift_pct = target_gap * annualized_mean * 100.0
+    volatility_penalty = target_gap * annualized_vol * 50.0
+    trade_score = np.clip(return_lift_pct - volatility_penalty, 0.0, None)
 
     rebal_df = pd.DataFrame({
         "Symbol": [alloc_df.loc[t, "Symbol"] for t in common_tickers],
@@ -2035,7 +2028,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         "Optimal Weight": aligned_optimal_weights,
         "Action": action,
         "Change": np.abs(change_weights),
-        "Trade Impact Score": trade_score,
+        "Expected Annual Return Lift (%)": trade_score,
         "Quantity": abs_qty_change,
         "Executable Quantity": exec_qty,
         "Executable Value": exec_val,
@@ -2043,7 +2036,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
     rebal_df = (
         rebal_df[rebal_df["Executable Quantity"] != 0]
-        .sort_values(by="Trade Impact Score", ascending=False)
+        .sort_values(by="Expected Annual Return Lift (%)", ascending=False)
         .reset_index(drop=True)
     )
     return rebal_df, missing_prices, missing_alloc
@@ -2091,7 +2084,7 @@ def style_rebalance_df(df):
         "Current Weight": "{:.2%}",
         "Optimal Weight": "{:.2%}",
         "Change": "{:.2%}",
-        "Trade Impact Score": "{:.3f}",
+        "Expected Annual Return Lift (%)": "{:.2f}",
         "Quantity": "{:.2f}",
         "Executable Quantity": "{:.0f}",
         "Executable Value": "₹{:,.0f}",
