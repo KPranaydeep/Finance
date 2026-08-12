@@ -1050,38 +1050,7 @@ def render_saved_analysis(placeholder):
         with st.expander("Saved rebalancing plan", expanded=True):
             if rebalancing_plan:
                 saved_rebal_df = pd.DataFrame(rebalancing_plan)
-
-                # Sort only the saved rebalancing-plan display by Optimal Weight
-                # in descending order. The temporary sort key is removed before
-                # rendering, so no additional column is shown to the user.
-                if "Optimal Weight" in saved_rebal_df.columns:
-                    optimal_weight_text = (
-                        saved_rebal_df["Optimal Weight"]
-                        .astype(str)
-                        .str.strip()
-                    )
-                    optimal_weight_is_percent = optimal_weight_text.str.endswith("%")
-                    optimal_weight_sort = pd.to_numeric(
-                        optimal_weight_text.str.rstrip("%"),
-                        errors="coerce",
-                    )
-                    optimal_weight_sort = optimal_weight_sort.where(
-                        ~optimal_weight_is_percent,
-                        optimal_weight_sort / 100.0,
-                    )
-                    saved_rebal_df = (
-                        saved_rebal_df.assign(
-                            _optimal_weight_sort=optimal_weight_sort
-                        )
-                        .sort_values(
-                            "_optimal_weight_sort",
-                            ascending=False,
-                            na_position="last",
-                            kind="stable",
-                        )
-                        .drop(columns="_optimal_weight_sort")
-                        .reset_index(drop=True)
-                    )
+                saved_rebal_df = _sort_rebalance_df_for_priority(saved_rebal_df)
 
                 required_style_columns = {
                     "Current Weight",
@@ -2072,6 +2041,48 @@ def get_latest_price_map(latest_prices):
         if pd.notna(last_row[col]) and np.isfinite(float(last_row[col]))
     }
 
+def _sort_rebalance_df_for_priority(df):
+    """Return a rebalancing table sorted by expected annual return lift first."""
+    if df is None or df.empty:
+        return df
+
+    frame = df.copy()
+    if "Expected Annual Return Lift (%)" in frame.columns:
+        frame["_priority_sort"] = pd.to_numeric(
+            frame["Expected Annual Return Lift (%)"],
+            errors="coerce",
+        )
+        return (
+            frame.sort_values(
+                by="_priority_sort",
+                ascending=False,
+                na_position="last",
+                kind="stable",
+            )
+            .drop(columns="_priority_sort")
+            .reset_index(drop=True)
+        )
+
+    if "Optimal Weight" in frame.columns:
+        weight_text = frame["Optimal Weight"].astype(str).str.strip()
+        weight_is_percent = weight_text.str.endswith("%")
+        weight_sort = pd.to_numeric(weight_text.str.rstrip("%"), errors="coerce")
+        weight_sort = weight_sort.where(~weight_is_percent, weight_sort / 100.0)
+        frame["_priority_sort"] = weight_sort
+        return (
+            frame.sort_values(
+                by="_priority_sort",
+                ascending=False,
+                na_position="last",
+                kind="stable",
+            )
+            .drop(columns="_priority_sort")
+            .reset_index(drop=True)
+        )
+
+    return frame.sort_values(by=list(frame.columns[:1]), ascending=False, kind="stable").reset_index(drop=True)
+
+
 def style_rebalance_df(df):
     def color_action_row(row):
         if row["Action"] == "Buy":
@@ -2090,7 +2101,8 @@ def style_rebalance_df(df):
         "Executable Value": "₹{:,.0f}",
     }
 
-    return df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
+    sorted_df = _sort_rebalance_df_for_priority(df)
+    return sorted_df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
 
 def metrics_df(stats_dict):
     return pd.DataFrame({
@@ -2849,9 +2861,10 @@ if run_btn:
         if rebal_df.empty:
             st.success("No trades to execute after filtering Executable Quantity = 0")
         else:
-            st.dataframe(style_rebalance_df(rebal_df), width="stretch")
+            ordered_rebal_df = _sort_rebalance_df_for_priority(rebal_df)
+            st.dataframe(style_rebalance_df(ordered_rebal_df), width="stretch")
 
-            csv = rebal_df.to_csv(index=False).encode("utf-8")
+            csv = ordered_rebal_df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "Download rebalancing plan CSV",
                 data=csv,
