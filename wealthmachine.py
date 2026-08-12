@@ -457,6 +457,8 @@ class MarketMoodAnalyzer:
         self.today_date = today_ist()
         self.current_mmi = float(self.df["MMI"].iloc[-1])
         self.current_mood = "Fear" if self.current_mmi <= MMI_NEUTRAL_LEVEL else "Greed"
+        self.current_mood_signal = float(self.df["MoodSignal"].iloc[-1])
+        self.current_mood_intensity = float(self.df["MoodIntensity"].iloc[-1])
         self.current_streak = self._get_current_streak_length()
         self.streak_records = self._build_streak_records()
         self.run_lengths = self._identify_mood_streaks()
@@ -537,6 +539,8 @@ class MarketMoodAnalyzer:
         selected["Date"] = selected["Date"].dt.normalize()
         selected = selected.sort_values("Date")
         selected = selected.drop_duplicates(subset=["Date"], keep="last")
+        selected["MoodSignal"] = (selected["MMI"] - MMI_NEUTRAL_LEVEL) / MMI_NEUTRAL_LEVEL
+        selected["MoodIntensity"] = np.abs(selected["MoodSignal"])
         selected["Mood"] = np.where(
             selected["MMI"] <= MMI_NEUTRAL_LEVEL,
             "Fear",
@@ -617,7 +621,8 @@ class MarketMoodAnalyzer:
 
         current_mmi = float(self.current_mmi)
         gap_to_threshold = abs(current_mmi - MMI_NEUTRAL_LEVEL)
-        proximity = max(0.0, 1.0 - (gap_to_threshold / 50.0))
+        intensity = float(np.clip(gap_to_threshold / MMI_NEUTRAL_LEVEL, 0.0, 1.0))
+        proximity = 1.0 - intensity
 
         # 5-day average slope is more stable than a single-day difference.
         window = min(5, len(self.df) - 1)
@@ -632,9 +637,16 @@ class MarketMoodAnalyzer:
         else:
             trend_pressure = 0.0
 
-        # Blend current state closeness and observed direction. Higher pressure means
-        # shorter conditional residual life relative to the historical baseline.
-        return float(np.clip(0.26 * proximity + 0.24 * trend_pressure, 0.0, 0.50))
+        # Use both the distance from the neutral threshold and the recent direction.
+        # Stronger mood intensity means the regime is more entrenched, so it should
+        # reduce the chance of an immediate flip; being close to 50 with momentum
+        # toward the threshold raises the pressure to flip.
+        pressure = (
+            0.22 * proximity
+            + 0.18 * trend_pressure
+            - 0.12 * intensity
+        )
+        return float(np.clip(pressure, 0.0, 0.50))
 
     def _contextual_expected_remaining_sessions(self, mood: Optional[str] = None) -> Optional[int]:
         """Blend the Kaplan-Meier restricted mean with MMI state pressure.
