@@ -35,12 +35,14 @@ st.markdown(
         h1 { font-size: 1.5rem !important; }
         h2 { font-size: 1.2rem !important; }
         h3 { font-size: 1.05rem !important; }
+        [data-testid="stVerticalBlockBorderWrapper"] { padding: 0.75rem !important; }
     }
     button[kind="primary"], button[kind="secondary"] { min-height: 2.75rem; }
     [data-testid="stDataFrame"], [data-testid="stTable"] {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
+    [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -431,6 +433,10 @@ USER_DB_PATH = Path.home() / ".portfolio_rebalancer" / "portfolio_holdings.db"
 DEFAULT_DB_PATH = SCRIPT_DB_PATH if SCRIPT_DB_PATH.exists() else USER_DB_PATH
 DB_PATH = Path(os.getenv("PORTFOLIO_DB_PATH", str(DEFAULT_DB_PATH))).expanduser()
 
+# Reserved owner key for the shared universal portfolio (visible/editable by everyone,
+# quantity always 0 so it never counts as anyone's real holding).
+UNIVERSAL_OWNER = "__universal__"
+
 MASTER_HOLDINGS_DDL = """
 CREATE TABLE IF NOT EXISTS master_holdings (
     owner TEXT NOT NULL DEFAULT '',
@@ -787,22 +793,6 @@ def holdings_backup_bytes(owner):
     """Export the complete holdings master table as a UTF-8 CSV backup."""
     holdings = load_master_holdings(owner)
     return holdings.to_csv(index=False).encode("utf-8-sig")
-
-
-def reset_master_holdings_to_universe(owner):
-    """Reset every holding to a neutral 1-share/no-cost-basis universe row.
-
-    This lets multiple users share one symbol universe: reset first, then merge in
-    a personal broker holdings Excel so quantities/prices reflect only that user.
-    """
-    now = datetime.now().isoformat(timespec="seconds")
-    with get_db_connection() as conn:
-        cursor = conn.execute(
-            "UPDATE master_holdings SET quantity = 1, average_price = NULL, updated_at = ? WHERE owner = ?",
-            (now, owner),
-        )
-        conn.commit()
-        return cursor.rowcount
 
 
 # Broker holdings statement column names vary a lot, so accept common aliases.
@@ -1764,6 +1754,70 @@ def add_symbols_to_master(symbols, owner):
 
     return added, duplicates, invalid_symbols, missing_initial_price
 
+
+def add_symbols_to_universal(symbols):
+    """Add symbols to the shared universal portfolio (quantity fixed at 0).
+
+    This list is visible/editable by every user and never counts toward anyone's
+    real holdings; it exists purely as a shared reference/watchlist that any user
+    can copy into their own personal holdings.
+    """
+    if not symbols:
+        return [], [], []
+
+    lookup = get_nse_company_lookup()
+    instruments = []
+    invalid_symbols = []
+    seen_symbols = set()
+
+    for entered_symbol in symbols:
+        instrument = resolve_yahoo_instrument(entered_symbol, lookup)
+        if instrument is None:
+            invalid_symbols.append(entered_symbol)
+            continue
+        symbol = instrument["symbol"]
+        if symbol not in seen_symbols:
+            instruments.append(instrument)
+            seen_symbols.add(symbol)
+
+    valid_symbols = [item["symbol"] for item in instruments]
+    with get_db_connection() as conn:
+        existing = {
+            row["symbol"]
+            for row in conn.execute(
+                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
+                    ",".join("?" for _ in valid_symbols)
+                ),
+                [UNIVERSAL_OWNER, *valid_symbols],
+            ).fetchall()
+        } if valid_symbols else set()
+
+    duplicates = [s for s in valid_symbols if s in existing]
+    new_instruments = [item for item in instruments if item["symbol"] not in existing]
+
+    now = datetime.now().isoformat(timespec="seconds")
+    added = []
+
+    with get_db_connection() as conn:
+        for item in new_instruments:
+            conn.execute(
+                """
+                INSERT INTO master_holdings
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+                """,
+                (
+                    UNIVERSAL_OWNER, item["symbol"], item["stock_name"], item["yahoo_ticker"],
+                    item["exchange"], _normalize_currency_code(item["currency"]), now, now,
+                ),
+            )
+            added.append(item["symbol"])
+        conn.commit()
+
+    return added, duplicates, invalid_symbols
+
+
 def remove_symbols_from_master(symbols, owner):
     if not symbols:
         return [], []
@@ -2003,6 +2057,67 @@ def build_current_allocation_from_db(owner):
     ].sort_values("Weight", ascending=False).reset_index(drop=True)
 
     return portfolio_df, invalid_rows
+
+
+def extend_allocation_with_universal_candidates(portfolio_df):
+    """Add zero-quantity rows for Universal Portfolio symbols not already held.
+
+    This lets the optimizer treat every shared Universal Portfolio symbol as a
+    candidate for the optimal allocation (current weight 0) alongside the user's
+    real holdings, so the rebalancing plan can recommend buying new stocks too.
+    Returns (extended_df, added_symbols).
+    """
+    universal_df = load_master_holdings(UNIVERSAL_OWNER)
+    if universal_df.empty:
+        return portfolio_df, []
+
+    held_symbols = set(portfolio_df["Symbol"]) if not portfolio_df.empty else set()
+    candidates = universal_df[~universal_df["Symbol"].isin(held_symbols)].copy()
+    if candidates.empty:
+        return portfolio_df, []
+
+    candidates["Symbol"] = candidates["Symbol"].map(normalize_portfolio_symbol)
+    candidates["Yahoo Ticker"] = candidates["Yahoo Ticker"].fillna("").astype(str).str.strip().str.upper()
+    candidates["Currency"] = candidates["Currency"].fillna("").map(_normalize_currency_code)
+    candidates = candidates[candidates["Yahoo Ticker"] != ""]
+    if candidates.empty:
+        return portfolio_df, []
+
+    latest_price_map = get_latest_price_map(tuple(candidates["Yahoo Ticker"].tolist()))
+    fx_map = get_fx_to_inr_map(candidates["Currency"].tolist())
+
+    rows = []
+    added_symbols = []
+    for _, row in candidates.iterrows():
+        price = latest_price_map.get(row["Yahoo Ticker"])
+        fx = fx_map.get(row["Currency"])
+        if price is None or not np.isfinite(price) or price <= 0 or fx is None:
+            continue
+
+        price_inr = float(price) * float(fx)
+        rows.append({
+            "Symbol": row["Symbol"],
+            "Stock Name": row["Stock Name"],
+            "Yahoo Ticker": row["Yahoo Ticker"],
+            "Exchange": row["Exchange"],
+            "Currency": row["Currency"],
+            "Quantity": 0.0,
+            "Average Price": float(price),
+            "Latest Price": float(price),
+            "FX to INR": float(fx),
+            "Average Price INR": price_inr,
+            "Latest Price INR": price_inr,
+            "Invested INR": 0.0,
+            "Current Value INR": 0.0,
+            "Weight": 0.0,
+        })
+        added_symbols.append(row["Symbol"])
+
+    if not rows:
+        return portfolio_df, []
+
+    extended_df = pd.concat([portfolio_df, pd.DataFrame(rows)], ignore_index=True)
+    return extended_df, added_symbols
 
 # =========================================================
 # RETURNS / OPTIMIZATION
@@ -2778,16 +2893,17 @@ if recovered_db_path is not None:
 
 st.divider()
 st.subheader("👤 Your profile")
-st.caption(
-    "Each nickname keeps its holdings and saved analysis completely separate from "
-    "every other person using this app — nobody can see or overwrite your data."
-)
-entered_user = st.text_input(
-    "Enter your name/nickname",
-    value=st.session_state.get("current_user", ""),
-    key="current_user_input",
-    placeholder="e.g. Pranay",
-).strip()
+with st.container(border=True):
+    st.caption(
+        "Each nickname keeps its holdings and saved analysis completely separate from "
+        "every other person using this app — nobody can see or overwrite your data."
+    )
+    entered_user = st.text_input(
+        "Enter your name/nickname",
+        value=st.session_state.get("current_user", ""),
+        key="current_user_input",
+        placeholder="e.g. Pranay",
+    ).strip()
 
 if entered_user != st.session_state.get("current_user", ""):
     st.session_state["current_user"] = entered_user
@@ -2800,6 +2916,10 @@ CURRENT_USER = st.session_state.get("current_user", "").strip()
 
 if not CURRENT_USER:
     st.info("Enter your name above to load your personal holdings and continue.")
+    st.stop()
+
+if CURRENT_USER.lower() == UNIVERSAL_OWNER.lower():
+    st.error("That name is reserved for the shared universal portfolio. Please choose another nickname.")
     st.stop()
 
 st.caption(f"Signed in as: **{CURRENT_USER}**")
@@ -3051,65 +3171,102 @@ with st.sidebar:
 st.divider()
 st.subheader("✅ Required steps for every user")
 st.caption(
-    "These three steps are mandatory for a personalized analysis: reset the shared "
-    "universe, upload your own broker holdings, then run optimization."
+    "Upload your own broker holdings, then run optimization — it automatically "
+    "considers both your holdings and the shared Universal Portfolio as candidates."
 )
 
-step_col1, step_col2, step_col3 = st.columns(3)
+step_col1, step_col2 = st.columns(2, gap="medium")
 
 with step_col1:
-    st.markdown("**1️⃣ Reset to universe**")
-    st.caption("Clears Quantity/Average Price for every holding (shared universe).")
-    confirm_reset_universe = st.checkbox(
-        "I understand this sets Quantity = 1 and clears Average Price for every holding",
-        key="confirm_reset_universe",
-    )
-    reset_universe_btn = st.button(
-        "Reset all holdings to universe (qty = 1)",
-        width="stretch",
-        key="reset_universe_btn",
-        disabled=not confirm_reset_universe or get_unique_holdings_count(CURRENT_USER) == 0,
-    )
+    with st.container(border=True):
+        st.markdown("**1️⃣ Upload your broker holdings**")
+        broker_holdings_upload = st.file_uploader(
+            "Upload broker holdings .xlsx",
+            type=["xlsx", "xls"],
+            key="broker_holdings_upload",
+            help=(
+                "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
+                "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
+                "(row 11 by default). Stocks are matched to symbols by ISIN."
+            ),
+        )
+        broker_holdings_mode = st.radio(
+            "Import behaviour",
+            options=["Merge/update current holdings", "Replace current holdings"],
+            index=0,
+            key="broker_holdings_import_mode",
+            help=(
+                "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
+                "deletes the current holdings first."
+            ),
+        )
+        import_broker_holdings_btn = st.button(
+            "Import broker holdings",
+            width="stretch",
+            key="import_broker_holdings_btn",
+            disabled=broker_holdings_upload is None,
+        )
 
 with step_col2:
-    st.markdown("**2️⃣ Upload your broker holdings**")
-    broker_holdings_upload = st.file_uploader(
-        "Upload broker holdings .xlsx",
-        type=["xlsx", "xls"],
-        key="broker_holdings_upload",
-        help=(
-            "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
-            "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
-            "(row 11 by default). Stocks are matched to symbols by ISIN. Reset to "
-            "universe first so only your holdings' quantities are personalized."
-        ),
-    )
-    broker_holdings_mode = st.radio(
-        "Import behaviour",
-        options=["Merge/update current holdings", "Replace current holdings"],
-        index=0,
-        key="broker_holdings_import_mode",
-        help=(
-            "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
-            "deletes the current holdings first."
-        ),
-    )
-    import_broker_holdings_btn = st.button(
-        "Import broker holdings",
-        width="stretch",
-        key="import_broker_holdings_btn",
-        disabled=broker_holdings_upload is None,
-    )
+    with st.container(border=True):
+        st.markdown("**2️⃣ Run optimization**")
+        st.caption(
+            "Uses the days-to-flip/drawdown/drop_bottom_pct/target-volatility settings "
+            "from the sidebar, and includes Universal Portfolio symbols as buy candidates."
+        )
+        run_btn = st.button(
+            "Run optimization",
+            width="stretch",
+            type="primary",
+            key="run_optimization_btn_main",
+        )
 
-with step_col3:
-    st.markdown("**3️⃣ Run optimization**")
-    st.caption("Uses the days-to-flip/drawdown/drop_bottom_pct/target-volatility settings from the sidebar.")
-    run_btn = st.button(
-        "Run optimization",
-        width="stretch",
-        type="primary",
-        key="run_optimization_btn_main",
-    )
+st.divider()
+st.subheader("🌐 Universal Portfolio")
+st.caption(
+    "One shared list of symbols visible and editable by everyone (quantity is always "
+    "0, so it never counts as anyone's real holding). Run optimization automatically "
+    "considers these as additional buy candidates alongside your own holdings."
+)
+with st.container(border=True):
+    universal_df = load_master_holdings(UNIVERSAL_OWNER)
+    if universal_df.empty:
+        st.info("The universal portfolio is empty. Add symbols below.")
+    else:
+        st.dataframe(
+            universal_df[["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency"]],
+            width="stretch",
+            hide_index=True,
+        )
+
+    universal_col1, universal_col2 = st.columns(2, gap="medium")
+    with universal_col1:
+        universal_buy_input = st.text_area(
+            "Add symbols to universal portfolio",
+            key="universal_buy_input",
+            placeholder="RELIANCE, TCS, VOO",
+        )
+        universal_sell_input = st.text_area(
+            "Remove symbols from universal portfolio",
+            key="universal_sell_input",
+            placeholder="HDFCBANK, SBIN",
+        )
+        update_universal_btn = st.button(
+            "Update universal portfolio",
+            width="stretch",
+            key="update_universal_btn",
+        )
+    with universal_col2:
+        st.caption(
+            "Copies every symbol currently in the universal portfolio into your own "
+            "holdings at quantity 1, so you can personalize it with a broker import."
+        )
+        copy_universal_btn = st.button(
+            "Copy universal portfolio into my holdings",
+            width="stretch",
+            key="copy_universal_btn",
+            disabled=universal_df.empty,
+        )
 
 st.divider()
 
@@ -3166,22 +3323,6 @@ if import_broker_holdings_btn:
     except Exception as exc:
         update_errors.append(f"Could not import broker holdings: {exc}")
 
-if reset_universe_btn:
-    try:
-        reset_count = reset_master_holdings_to_universe(CURRENT_USER)
-        st.session_state["holdings_editor_version"] += 1
-        clear_drop_bottom_coverage_preview()
-        st.session_state.pop("drop_bottom_auto_result", None)
-        st.session_state.pop("drop_bottom_auto_error", None)
-        st.session_state["confirm_reset_universe"] = False
-        st.session_state["holdings_flash_success"] = (
-            f"Reset {reset_count} holdings to the shared universe (quantity = 1, "
-            "average price cleared). Now import your broker holdings statement."
-        )
-        st.rerun()
-    except Exception as exc:
-        update_errors.append(f"Could not reset holdings to universe: {exc}")
-
 if restore_analysis_btn:
     try:
         restored_payload = restore_latest_analysis_backup(analysis_backup_upload, CURRENT_USER)
@@ -3232,6 +3373,55 @@ if update_holdings_btn:
             clear_drop_bottom_coverage_preview()
             st.session_state.pop("drop_bottom_auto_result", None)
             st.session_state.pop("drop_bottom_auto_error", None)
+
+if update_universal_btn:
+    universal_buy_symbols = parse_symbol_input(universal_buy_input)
+    universal_sell_symbols = parse_symbol_input(universal_sell_input)
+    universal_buy_keys = {normalize_portfolio_symbol(s) for s in universal_buy_symbols}
+    universal_sell_keys = {normalize_portfolio_symbol(s) for s in universal_sell_symbols}
+    universal_overlap = sorted(universal_buy_keys & universal_sell_keys)
+
+    if universal_overlap:
+        update_errors.append(
+            "The same symbol cannot be present in both Add and Remove: " + ", ".join(universal_overlap)
+        )
+    elif not universal_buy_symbols and not universal_sell_symbols:
+        update_warnings.append("Enter at least one symbol to add or remove from the universal portfolio.")
+    else:
+        universal_removed, universal_not_held = remove_symbols_from_master(universal_sell_symbols, UNIVERSAL_OWNER)
+        universal_added, universal_duplicates, universal_invalid = add_symbols_to_universal(universal_buy_symbols)
+
+        if universal_added:
+            update_messages.append("Added to universal portfolio: " + ", ".join(universal_added))
+        if universal_removed:
+            update_messages.append("Removed from universal portfolio: " + ", ".join(universal_removed))
+        if universal_duplicates:
+            update_warnings.append("Already in universal portfolio: " + ", ".join(universal_duplicates))
+        if universal_not_held:
+            update_warnings.append("Not present in universal portfolio: " + ", ".join(universal_not_held))
+        if universal_invalid:
+            update_errors.append("Could not resolve on Yahoo Finance/NSE/BSE: " + ", ".join(universal_invalid))
+
+if copy_universal_btn:
+    universal_symbols_to_copy = load_master_holdings(UNIVERSAL_OWNER)["Symbol"].tolist()
+    copied, copy_duplicates, copy_invalid, copy_missing_price = add_symbols_to_master(
+        universal_symbols_to_copy, CURRENT_USER
+    )
+    if copied:
+        update_messages.append("Copied into your holdings: " + ", ".join(copied))
+        st.session_state["holdings_editor_version"] += 1
+        clear_drop_bottom_coverage_preview()
+        st.session_state.pop("drop_bottom_auto_result", None)
+        st.session_state.pop("drop_bottom_auto_error", None)
+    if copy_duplicates:
+        update_warnings.append("Already in your holdings: " + ", ".join(copy_duplicates))
+    if copy_missing_price:
+        update_warnings.append(
+            "Copied without an initial price; enter Average Price in the editor before analysis: "
+            + ", ".join(copy_missing_price)
+        )
+    if not copied and not copy_duplicates:
+        update_warnings.append("The universal portfolio is empty — nothing to copy.")
 
 for message in update_messages:
     st.success(message)
@@ -3347,7 +3537,15 @@ if run_btn:
                 + ", ".join(invalid_holding_rows)
             )
 
-        col1, col2 = st.columns([2, 1])
+        with st.spinner("Adding Universal Portfolio symbols as buy candidates..."):
+            portfolio_df, universal_candidate_symbols = extend_allocation_with_universal_candidates(portfolio_df)
+        if universal_candidate_symbols:
+            st.info(
+                "Universal Portfolio candidates included in this optimization (quantity 0): "
+                + ", ".join(universal_candidate_symbols)
+            )
+
+        col1, col2 = st.columns([2, 1], gap="medium")
 
         with col1:
             st.subheader("Current Allocation")
@@ -3369,7 +3567,7 @@ if run_btn:
         with col2:
             total_invested = float(portfolio_df["Invested INR"].sum())
             total_current_value = float(portfolio_df["Current Value INR"].sum())
-            st.metric("Holdings in database", len(portfolio_df))
+            st.metric("Holdings in database", int((portfolio_df["Quantity"] > 0).sum()))
             st.metric("Cost basis (INR @ current FX)", f"₹{total_invested:,.2f}")
             st.metric("Current portfolio value", f"₹{total_current_value:,.2f}")
 
@@ -3496,7 +3694,7 @@ if run_btn:
 
         analysis_payload = {
             "saved_at": datetime.now().isoformat(timespec="seconds"),
-            "holdings_analyzed": int(len(portfolio_df)),
+            "holdings_analyzed": int((portfolio_df["Quantity"] > 0).sum()),
             "total_invested": float(total_invested),
             "executable_trade_count": int(len(rebal_df)),
             "settings": {
