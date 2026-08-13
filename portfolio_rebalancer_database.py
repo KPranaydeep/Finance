@@ -688,6 +688,226 @@ def holdings_backup_bytes():
     return holdings.to_csv(index=False).encode("utf-8-sig")
 
 
+# Broker holdings statement column names vary a lot, so accept common aliases.
+BROKER_HOLDINGS_COLUMN_ALIASES = {
+    "stock name": "Stock Name",
+    "instrument": "Stock Name",
+    "symbol": "Stock Name",
+    "isin": "ISIN",
+    "quantity": "Quantity",
+    "quantity available": "Quantity",
+    "qty": "Quantity",
+    "average buy price": "Average Buy Price",
+    "average price": "Average Buy Price",
+    "avg. cost": "Average Buy Price",
+    "avg cost": "Average Buy Price",
+    "buy value": "Buy Value",
+    "closing price": "Closing Price",
+    "previous closing price": "Closing Price",
+    "closing value": "Closing Value",
+    "unrealised p&l": "Unrealised P&L",
+    "unrealized p&l": "Unrealised P&L",
+}
+
+
+def _detect_broker_holdings_header_row(raw_df, max_scan_rows=25):
+    """Locate the header row by scanning for ISIN + Quantity column labels.
+
+    This tolerates broker exports that don't always place headers on row 11.
+    """
+    required_tokens = {"isin", "quantity"}
+    for row_idx in range(min(max_scan_rows, len(raw_df))):
+        row_values = {
+            str(v).strip().lower() for v in raw_df.iloc[row_idx].tolist() if pd.notna(v)
+        }
+        if required_tokens.issubset(row_values):
+            return row_idx
+    return None
+
+
+def _read_broker_holdings_excel(uploaded_file):
+    """Parse a broker holdings statement (.xlsx) with Stock Name/ISIN/Quantity/
+    Average Buy Price/Buy Value/Closing Price/Closing Value/Unrealised P&L columns.
+
+    The header row is auto-detected; it defaults to row 11 (index 10) when it
+    cannot be located, matching the layout described by the user.
+    """
+    if uploaded_file is None:
+        raise ValueError("Choose a broker holdings Excel file first.")
+
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("The selected broker holdings file is empty.")
+
+    try:
+        preview_df = pd.read_excel(io.BytesIO(raw), header=None, nrows=25)
+    except ImportError as exc:
+        raise ValueError(
+            "Reading .xlsx files requires the 'openpyxl' package. Install it with "
+            "`pip install openpyxl` and retry."
+        ) from exc
+    except Exception as exc:
+        raise ValueError(f"Could not read the Excel file: {exc}") from exc
+
+    header_row = _detect_broker_holdings_header_row(preview_df)
+    if header_row is None:
+        header_row = 10
+
+    try:
+        df = pd.read_excel(io.BytesIO(raw), header=header_row)
+    except Exception as exc:
+        raise ValueError(
+            f"Could not read the Excel file with header row {header_row + 1}: {exc}"
+        ) from exc
+
+    df.columns = [str(c).strip() for c in df.columns]
+    renamed = {}
+    for col in df.columns:
+        key = col.strip().lower()
+        if key in BROKER_HOLDINGS_COLUMN_ALIASES:
+            renamed[col] = BROKER_HOLDINGS_COLUMN_ALIASES[key]
+    df = df.rename(columns=renamed)
+
+    required = ["ISIN", "Quantity", "Average Buy Price"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(
+            "The broker holdings file is missing required columns: " + ", ".join(missing)
+        )
+
+    if "Stock Name" not in df.columns:
+        df["Stock Name"] = df["ISIN"]
+
+    df["ISIN"] = df["ISIN"].astype(str).str.strip().str.upper()
+    df["Stock Name"] = df["Stock Name"].fillna("").astype(str).str.strip()
+    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
+    df["Average Buy Price"] = pd.to_numeric(df["Average Buy Price"], errors="coerce")
+
+    df = df[df["ISIN"].str.match(r"^IN[A-Z0-9]{10}$", na=False)].copy()
+    df = df[df["Quantity"].notna() & (df["Quantity"] > 0)]
+    df = df[df["Average Buy Price"].notna() & (df["Average Buy Price"] > 0)]
+
+    if df.empty:
+        raise ValueError(
+            "No valid holdings rows (with ISIN, Quantity, Average Buy Price) were found."
+        )
+
+    def _combine(group):
+        total_qty = group["Quantity"].sum()
+        weighted_price = (group["Quantity"] * group["Average Buy Price"]).sum() / total_qty
+        return pd.Series({
+            "Stock Name": group["Stock Name"].iloc[0],
+            "Quantity": total_qty,
+            "Average Buy Price": weighted_price,
+        })
+
+    df = df.groupby("ISIN", as_index=False).apply(_combine).reset_index(drop=True)
+    return df[["ISIN", "Stock Name", "Quantity", "Average Buy Price"]]
+
+
+def import_broker_holdings_excel(uploaded_file, mode="merge"):
+    """Resolve broker holdings by ISIN and upsert them into master_holdings.
+
+    Returns (imported_row_count, unresolved_isins).
+    """
+    cleaned = _read_broker_holdings_excel(uploaded_file)
+    normalized_mode = str(mode or "merge").strip().lower()
+    if normalized_mode not in {"replace", "merge"}:
+        raise ValueError("Import mode must be either 'replace' or 'merge'.")
+
+    equity_map = load_equity_mapping().copy()
+    equity_map["ISIN"] = equity_map["ISIN"].astype(str).str.strip().str.upper()
+    isin_to_symbol = dict(
+        zip(equity_map["ISIN"], equity_map["Symbol"].astype(str).str.strip().str.upper())
+    )
+    nse_lookup = get_nse_company_lookup()
+
+    resolved_rows = []
+    unresolved_isins = []
+
+    for _, row in cleaned.iterrows():
+        isin = row["ISIN"]
+        symbol_guess = isin_to_symbol.get(isin)
+        instrument = resolve_yahoo_instrument(symbol_guess, nse_lookup) if symbol_guess else None
+        if instrument is None:
+            unresolved_isins.append(f"{isin} ({row['Stock Name']})")
+            continue
+
+        resolved_rows.append({
+            "Symbol": instrument["symbol"],
+            "Stock Name": instrument["stock_name"],
+            "Yahoo Ticker": instrument["yahoo_ticker"],
+            "Exchange": instrument["exchange"],
+            "Currency": _normalize_currency_code(instrument["currency"]),
+            "Quantity": float(row["Quantity"]),
+            "Average Price": float(row["Average Buy Price"]),
+        })
+
+    if not resolved_rows:
+        raise ValueError(
+            "None of the ISINs in the broker holdings file could be resolved. Unresolved: "
+            + ", ".join(unresolved_isins[:10])
+        )
+
+    resolved_df = pd.DataFrame(resolved_rows)
+    if resolved_df["Symbol"].duplicated().any():
+        def _combine_symbol(group):
+            total_qty = group["Quantity"].sum()
+            weighted_price = (group["Quantity"] * group["Average Price"]).sum() / total_qty
+            first = group.iloc[0]
+            return pd.Series({
+                "Stock Name": first["Stock Name"],
+                "Yahoo Ticker": first["Yahoo Ticker"],
+                "Exchange": first["Exchange"],
+                "Currency": first["Currency"],
+                "Quantity": total_qty,
+                "Average Price": weighted_price,
+            })
+
+        resolved_df = (
+            resolved_df.groupby("Symbol", as_index=False).apply(_combine_symbol).reset_index(drop=True)
+        )
+
+    now = datetime.now().isoformat(timespec="seconds")
+    records = [
+        (
+            row["Symbol"], row["Stock Name"], row["Yahoo Ticker"], row["Exchange"],
+            row["Currency"], float(row["Quantity"]), float(row["Average Price"]), now, now,
+        )
+        for _, row in resolved_df.iterrows()
+    ]
+
+    with get_db_connection() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            if normalized_mode == "replace":
+                conn.execute("DELETE FROM master_holdings")
+
+            conn.executemany(
+                """
+                INSERT INTO master_holdings
+                    (symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    stock_name = excluded.stock_name,
+                    yahoo_ticker = excluded.yahoo_ticker,
+                    exchange = excluded.exchange,
+                    currency = excluded.currency,
+                    quantity = excluded.quantity,
+                    average_price = excluded.average_price,
+                    updated_at = excluded.updated_at
+                """,
+                records,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return len(records), unresolved_isins
+
+
 def _read_holdings_backup(uploaded_file):
     """Read and validate a holdings CSV uploaded through Streamlit."""
     if uploaded_file is None:
@@ -2538,6 +2758,36 @@ with st.sidebar:
     )
 
     st.divider()
+    st.header("Import broker holdings statement (Excel)")
+
+    broker_holdings_upload = st.file_uploader(
+        "Upload broker holdings .xlsx",
+        type=["xlsx", "xls"],
+        key="broker_holdings_upload",
+        help=(
+            "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
+            "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
+            "(row 11 by default). Stocks are matched to symbols by ISIN."
+        ),
+    )
+    broker_holdings_mode = st.radio(
+        "Import behaviour",
+        options=["Merge/update current holdings", "Replace current holdings"],
+        index=0,
+        key="broker_holdings_import_mode",
+        help=(
+            "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
+            "deletes the current holdings first."
+        ),
+    )
+    import_broker_holdings_btn = st.button(
+        "Import broker holdings",
+        width="stretch",
+        key="import_broker_holdings_btn",
+        disabled=broker_holdings_upload is None,
+    )
+
+    st.divider()
     st.header("Analysis results backup")
 
     existing_analysis_backup = latest_analysis_backup_bytes()
@@ -2713,6 +2963,34 @@ if restore_holdings_btn:
         st.rerun()
     except Exception as exc:
         update_errors.append(f"Could not restore holdings backup: {exc}")
+
+if import_broker_holdings_btn:
+    try:
+        broker_import_mode = (
+            "replace"
+            if broker_holdings_mode == "Replace current holdings"
+            else "merge"
+        )
+        imported_count, unresolved_isins = import_broker_holdings_excel(
+            broker_holdings_upload,
+            mode=broker_import_mode,
+        )
+        st.session_state["holdings_editor_version"] += 1
+        clear_drop_bottom_coverage_preview()
+        st.session_state.pop("drop_bottom_auto_result", None)
+        st.session_state.pop("drop_bottom_auto_error", None)
+        flash_message = (
+            f"Imported {imported_count} holdings from the broker statement using "
+            f"{broker_import_mode} mode."
+        )
+        if unresolved_isins:
+            flash_message += (
+                " Unresolved ISINs (skipped): " + ", ".join(unresolved_isins[:10])
+            )
+        st.session_state["holdings_flash_success"] = flash_message
+        st.rerun()
+    except Exception as exc:
+        update_errors.append(f"Could not import broker holdings: {exc}")
 
 if restore_analysis_btn:
     try:
