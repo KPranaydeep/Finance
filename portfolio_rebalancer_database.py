@@ -3222,13 +3222,12 @@ with step_col2:
         )
 
 st.divider()
-st.subheader("🌐 Universal Portfolio")
-st.caption(
-    "One shared list of symbols visible and editable by everyone (quantity is always "
-    "0, so it never counts as anyone's real holding). Run optimization automatically "
-    "considers these as additional buy candidates alongside your own holdings."
-)
-with st.container(border=True):
+with st.expander("🌐 Universal Portfolio", expanded=False):
+    st.caption(
+        "One shared list of symbols visible and editable by everyone (quantity is always "
+        "0, so it never counts as anyone's real holding). Run optimization automatically "
+        "considers these as additional buy candidates alongside your own holdings."
+    )
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
     if universal_df.empty:
         st.info("The universal portfolio is empty. Add symbols below.")
