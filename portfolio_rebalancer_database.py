@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import warnings
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,7 +16,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-APP_BUILD = "2026-08-09-multimarket-fx-inr-v2"
+APP_BUILD = "2026-08-13-yf-resilient-downloads-v1"
 
 # =========================================================
 # HELPERS
@@ -94,6 +95,149 @@ def _read_fast_info_value(fast_info, key):
         return getattr(fast_info, key, None)
     except Exception:
         return None
+
+
+def _chunked(values, size):
+    for idx in range(0, len(values), size):
+        yield values[idx:idx + size]
+
+
+def _extract_close_prices_frame(data, expected_tickers):
+    """Normalize yfinance output into a Close-price DataFrame keyed by ticker."""
+    if data is None:
+        return pd.DataFrame()
+
+    if isinstance(data, pd.Series):
+        if len(expected_tickers) == 1:
+            return data.to_frame(name=expected_tickers[0]).astype(float)
+        return pd.DataFrame()
+
+    if getattr(data, "empty", True):
+        return pd.DataFrame()
+
+    frame = data
+    if isinstance(frame.columns, pd.MultiIndex):
+        if "Close" in frame.columns.get_level_values(0):
+            frame = frame["Close"]
+        elif "Adj Close" in frame.columns.get_level_values(0):
+            frame = frame["Adj Close"]
+        else:
+            return pd.DataFrame()
+    else:
+        if "Close" in frame.columns:
+            if len(expected_tickers) == 1:
+                frame = frame[["Close"]].rename(columns={"Close": expected_tickers[0]})
+            else:
+                return pd.DataFrame()
+
+    if isinstance(frame, pd.Series):
+        column_name = expected_tickers[0] if len(expected_tickers) == 1 else str(frame.name)
+        frame = frame.to_frame(name=column_name)
+
+    frame.columns = [str(col).strip().upper() for col in frame.columns]
+    frame = frame.apply(pd.to_numeric, errors="coerce")
+    return frame
+
+
+def _download_close_prices_resilient(
+    tickers,
+    *,
+    start=None,
+    end=None,
+    period=None,
+    batch_size=12,
+):
+    """Download close-price history with chunking and per-ticker fallback."""
+    import yfinance as yf
+
+    unique_tickers = [
+        str(t).strip().upper()
+        for t in dict.fromkeys(tickers)
+        if str(t).strip()
+    ]
+    if not unique_tickers:
+        return pd.DataFrame(), {}
+
+    failures = {}
+    collected_frames = []
+
+    for batch in _chunked(unique_tickers, batch_size):
+        batch_frame = pd.DataFrame()
+        try:
+            kwargs = {
+                "progress": False,
+                "auto_adjust": True,
+                "threads": False,
+            }
+            if period is not None:
+                kwargs["period"] = period
+            else:
+                kwargs["start"] = start
+                kwargs["end"] = end
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                downloaded = yf.download(batch, **kwargs)
+            batch_frame = _extract_close_prices_frame(downloaded, batch)
+        except Exception as exc:
+            batch_frame = pd.DataFrame()
+            batch_error = str(exc) or exc.__class__.__name__
+            for ticker in batch:
+                failures.setdefault(ticker, batch_error)
+
+        recovered = set(batch_frame.columns)
+        for ticker in batch:
+            if ticker in recovered:
+                continue
+            try:
+                kwargs = {
+                    "progress": False,
+                    "auto_adjust": True,
+                    "threads": False,
+                }
+                if period is not None:
+                    kwargs["period"] = period
+                else:
+                    kwargs["start"] = start
+                    kwargs["end"] = end
+
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    single_download = yf.download(ticker, **kwargs)
+                single_frame = _extract_close_prices_frame(single_download, [ticker])
+                if single_frame.empty:
+                    failures.setdefault(ticker, "No usable price history returned by Yahoo Finance.")
+                    continue
+
+                batch_frame = pd.concat([batch_frame, single_frame], axis=1)
+                failures.pop(ticker, None)
+            except Exception as exc:
+                failures[ticker] = str(exc) or exc.__class__.__name__
+
+        if not batch_frame.empty:
+            collected_frames.append(batch_frame)
+
+    if not collected_frames:
+        return pd.DataFrame(), failures
+
+    merged = pd.concat(collected_frames, axis=1)
+    merged = merged.loc[:, ~merged.columns.duplicated()].sort_index()
+    return merged, failures
+
+
+def _format_download_failure_message(tickers, failures, context):
+    total = len(tickers)
+    failed = len(failures)
+    if failed == 0:
+        return f"No data available for the requested symbols ({context})."
+
+    sample = sorted(failures)[:10]
+    details = ", ".join(sample)
+    suffix = "" if failed <= 10 else f" (+{failed - 10} more)"
+    return (
+        f"No usable price data could be downloaded ({context}). "
+        f"Failed symbols: {details}{suffix}. "
+        "Yahoo Finance may be rate-limiting requests or the symbols may be inactive."
+        f" Requested symbols: {total}, failed: {failed}."
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -1536,7 +1680,6 @@ def download_close_history(
     buffer_days=7,
 ):
     """Download closing-price history once and reuse it during the same analysis."""
-    import yfinance as yf
     if end_date is None:
         end_date = datetime.today()
     else:
@@ -1544,21 +1687,23 @@ def download_close_history(
 
     effective_end = (end_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
 
-    prices = yf.download(
+    prices, failures = _download_close_prices_resilient(
         list(symbols),
         start=start_date,
         end=effective_end,
-        progress=False,
-        auto_adjust=True,
-    )["Close"]
-
-    if isinstance(prices, pd.Series):
-        prices = prices.to_frame()
+        batch_size=12,
+    )
 
     prices = prices.dropna(axis=1, how="all")
 
     if prices.empty:
-        raise ValueError("No data available for the given tickers.")
+        raise ValueError(
+            _format_download_failure_message(
+                [str(symbol).strip().upper() for symbol in symbols],
+                failures,
+                context="historical close history",
+            )
+        )
 
     return prices
 
@@ -1692,6 +1837,8 @@ def get_daily_log_returns(
     if start_date is None:
         start_date = "2000-01-01"
 
+    requested_tickers = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
+
     df = download_close_history(
         tuple(symbols),
         start_date=start_date,
@@ -1701,6 +1848,9 @@ def get_daily_log_returns(
 
     if df.empty:
         raise ValueError("No data available for the given tickers.")
+
+    available_tickers = {str(col).strip().upper() for col in df.columns}
+    missing_history_tickers = sorted(set(requested_tickers) - available_tickers)
 
     # Convert foreign-market price histories into INR before calculating returns.
     if ticker_currency_pairs:
@@ -1756,6 +1906,7 @@ def get_daily_log_returns(
         "valid_end": valid_end,
         "dropped_df": dropped_df,
         "min_len_df": min_len_df,
+        "missing_history_tickers": missing_history_tickers,
     }
     return log_returns, meta
 
@@ -2012,23 +2163,15 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
 @st.cache_data(show_spinner=False)
 def get_latest_price_map(latest_prices):
-    import yfinance as yf
-
     tickers = tuple(dict.fromkeys(str(t).strip().upper() for t in latest_prices if str(t).strip()))
     if not tickers:
         return {}
 
-    price_history = yf.download(
+    price_history, _ = _download_close_prices_resilient(
         list(tickers),
         period="15d",
-        progress=False,
-        auto_adjust=True,
-        threads=False,
-    )["Close"]
-
-    if isinstance(price_history, pd.Series):
-        name = tickers[0] if len(tickers) == 1 else str(price_history.name)
-        price_history = price_history.to_frame(name=name)
+        batch_size=12,
+    )
 
     if price_history.empty:
         return {}
@@ -2240,18 +2383,20 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
 
     import yfinance as yf
 
-    history = yf.download(
+    history, failures = _download_close_prices_resilient(
         list(yahoo_tickers),
         period="5y",
-        progress=False,
-        auto_adjust=True,
-        threads=False,
-    )["Close"]
-    if isinstance(history, pd.Series):
-        history = history.to_frame(name=str(yahoo_tickers[0]))
+        batch_size=12,
+    )
     history = history.dropna(axis=1, how="all")
     if history.empty:
-        raise ValueError("No history data could be fetched for the current holdings.")
+        raise ValueError(
+            _format_download_failure_message(
+                list(yahoo_tickers),
+                failures,
+                context="coverage preview",
+            )
+        )
 
     lengths = history.count().sort_values(ascending=False)
     available_tickers = len(lengths)
@@ -2790,6 +2935,14 @@ if run_btn:
             f"**Trading days analysed:** {int(log_returns.shape[0]):,}  |  "
             f"**Assets in return matrix:** {int(log_returns.shape[1]):,}"
         )
+
+        missing_history_tickers = meta.get("missing_history_tickers") or []
+        if missing_history_tickers:
+            st.warning(
+                "Skipped symbols without usable history from Yahoo Finance: "
+                + ", ".join(missing_history_tickers)
+            )
+
         st.caption(f"Overlapping date range: {meta['valid_start'].date()} to {meta['valid_end'].date()}")
         st.caption(f"Log return shape: {log_returns.shape} — foreign assets are FX-adjusted to INR before return calculation.")
 
@@ -2918,6 +3071,7 @@ if run_btn:
             "warnings": {
                 "invalid_holding_rows": invalid_holding_rows,
                 "unresolved_yahoo_tickers": unresolved,
+                "missing_history_tickers": meta.get("missing_history_tickers", []),
                 "missing_latest_prices": missing_prices,
                 "missing_allocation": missing_alloc,
             },
