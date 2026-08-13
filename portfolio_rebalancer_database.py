@@ -3262,16 +3262,10 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             )
     with universal_col2:
         with st.container(border=True):
-            st.markdown("**Copy into my holdings**")
+            st.markdown("**Shared watchlist**")
             st.caption(
-                "Adds the shared watchlist to your personal holdings as quantity 1 so you can "
-                "adjust or replace entries with your own broker import."
-            )
-            copy_universal_btn = st.button(
-                "Copy universal portfolio into my holdings",
-                width="stretch",
-                key="copy_universal_btn",
-                disabled=universal_df.empty,
+                "This list is shared with everyone and is used as additional buy candidates "
+                "during optimization. You can still edit it here without affecting your personal holdings."
             )
 
     with st.container(border=True):
@@ -3445,27 +3439,6 @@ if update_universal_btn:
             update_warnings.append("Not present in universal portfolio: " + ", ".join(universal_not_held))
         if universal_invalid:
             update_errors.append("Could not resolve on Yahoo Finance/NSE/BSE: " + ", ".join(universal_invalid))
-
-if copy_universal_btn:
-    universal_symbols_to_copy = load_master_holdings(UNIVERSAL_OWNER)["Symbol"].tolist()
-    copied, copy_duplicates, copy_invalid, copy_missing_price = add_symbols_to_master(
-        universal_symbols_to_copy, CURRENT_USER
-    )
-    if copied:
-        update_messages.append("Copied into your holdings: " + ", ".join(copied))
-        st.session_state["holdings_editor_version"] += 1
-        clear_drop_bottom_coverage_preview()
-        st.session_state.pop("drop_bottom_auto_result", None)
-        st.session_state.pop("drop_bottom_auto_error", None)
-    if copy_duplicates:
-        update_warnings.append("Already in your holdings: " + ", ".join(copy_duplicates))
-    if copy_missing_price:
-        update_warnings.append(
-            "Copied without an initial price; enter Average Price in the editor before analysis: "
-            + ", ".join(copy_missing_price)
-        )
-    if not copied and not copy_duplicates:
-        update_warnings.append("The universal portfolio is empty — nothing to copy.")
 
 if restore_universal_backup_btn:
     try:
