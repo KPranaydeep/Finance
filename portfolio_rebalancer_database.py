@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
@@ -37,10 +38,8 @@ def load_equity_mapping():
 @st.cache_data(show_spinner=False)
 def _download_probe(ticker):
     """Return True only when Yahoo Finance has at least one real recent price value."""
-    import yfinance as yf
-
     try:
-        data = yf.download(
+        data = _yf_download_quiet(
             ticker,
             period="10d",
             progress=False,
@@ -102,6 +101,35 @@ def _chunked(values, size):
         yield values[idx:idx + size]
 
 
+def _is_rate_limit_error(exc):
+    """Detect Yahoo Finance rate-limit errors across yfinance versions."""
+    name = type(exc).__name__
+    message = str(exc)
+    return (
+        "RateLimit" in name
+        or "Too Many Requests" in message
+        or "rate limited" in message.lower()
+    )
+
+
+def _yf_download_quiet(*args, max_retries=2, retry_backoff_seconds=3, **kwargs):
+    """Call yf.download with console noise suppressed and rate-limit retries."""
+    import yfinance as yf
+
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                return yf.download(*args, **kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if _is_rate_limit_error(exc) and attempt < max_retries:
+                time.sleep(retry_backoff_seconds * (attempt + 1))
+                continue
+            raise
+    raise last_exc
+
+
 def _extract_close_prices_frame(data, expected_tickers):
     """Normalize yfinance output into a Close-price DataFrame keyed by ticker."""
     if data is None:
@@ -148,8 +176,6 @@ def _download_close_prices_resilient(
     batch_size=12,
 ):
     """Download close-price history with chunking and per-ticker fallback."""
-    import yfinance as yf
-
     unique_tickers = [
         str(t).strip().upper()
         for t in dict.fromkeys(tickers)
@@ -175,8 +201,7 @@ def _download_close_prices_resilient(
                 kwargs["start"] = start
                 kwargs["end"] = end
 
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                downloaded = yf.download(batch, **kwargs)
+            downloaded = _yf_download_quiet(batch, **kwargs)
             batch_frame = _extract_close_prices_frame(downloaded, batch)
         except Exception as exc:
             batch_frame = pd.DataFrame()
@@ -200,8 +225,7 @@ def _download_close_prices_resilient(
                     kwargs["start"] = start
                     kwargs["end"] = end
 
-                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                    single_download = yf.download(ticker, **kwargs)
+                single_download = _yf_download_quiet(ticker, **kwargs)
                 single_frame = _extract_close_prices_frame(single_download, [ticker])
                 if single_frame.empty:
                     failures.setdefault(ticker, "No usable price history returned by Yahoo Finance.")
@@ -1476,14 +1500,12 @@ def _currency_major_and_unit_factor(currency):
 @st.cache_data(show_spinner=False)
 def _latest_fx_rate_to_inr(currency):
     """Return INR per one quoted currency unit (including pence handling)."""
-    import yfinance as yf
-
     major, unit_factor = _currency_major_and_unit_factor(currency)
     if major == "INR":
         return 1.0
 
     def last_price(ticker):
-        data = yf.download(
+        data = _yf_download_quiet(
             ticker,
             period="15d",
             progress=False,
@@ -1525,8 +1547,6 @@ def get_fx_to_inr_map(currencies):
 @st.cache_data(show_spinner=False)
 def download_fx_history_to_inr(currency, start_date, end_date):
     """Return a daily series of INR per one quoted currency unit."""
-    import yfinance as yf
-
     major, unit_factor = _currency_major_and_unit_factor(currency)
     start = pd.to_datetime(start_date)
     end = pd.to_datetime(end_date) + timedelta(days=7)
@@ -1537,7 +1557,7 @@ def download_fx_history_to_inr(currency, start_date, end_date):
 
     def close_series(ticker):
         try:
-            data = yf.download(
+            data = _yf_download_quiet(
                 ticker,
                 start=start.strftime("%Y-%m-%d"),
                 end=end.strftime("%Y-%m-%d"),
@@ -2616,8 +2636,6 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
     total_tickers = len(yahoo_tickers)
     num_to_drop = int(np.floor(float(drop_bottom_pct) * total_tickers))
     tickers_kept = max(total_tickers - num_to_drop, 0)
-
-    import yfinance as yf
 
     history, failures = _download_close_prices_resilient(
         list(yahoo_tickers),
