@@ -3241,32 +3241,23 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 hide_index=True,
             )
 
-    universal_col1, universal_col2 = st.columns(2, gap="medium")
-    with universal_col1:
-        with st.container(border=True):
-            st.markdown("**Add / remove symbols**")
-            universal_buy_input = st.text_area(
-                "Add symbols to universal portfolio",
-                key="universal_buy_input",
-                placeholder="RELIANCE, TCS, VOO",
-            )
-            universal_sell_input = st.text_area(
-                "Remove symbols from universal portfolio",
-                key="universal_sell_input",
-                placeholder="HDFCBANK, SBIN",
-            )
-            update_universal_btn = st.button(
-                "Update universal portfolio",
-                width="stretch",
-                key="update_universal_btn",
-            )
-    with universal_col2:
-        with st.container(border=True):
-            st.markdown("**Shared watchlist**")
-            st.caption(
-                "This list is shared with everyone and is used as additional buy candidates "
-                "during optimization. You can still edit it here without affecting your personal holdings."
-            )
+    with st.container(border=True):
+        st.markdown("**Add / remove symbols**")
+        universal_buy_input = st.text_area(
+            "Add symbols to universal portfolio",
+            key="universal_buy_input",
+            placeholder="RELIANCE, TCS, VOO",
+        )
+        universal_sell_input = st.text_area(
+            "Remove symbols from universal portfolio",
+            key="universal_sell_input",
+            placeholder="HDFCBANK, SBIN",
+        )
+        update_universal_btn = st.button(
+            "Update universal portfolio",
+            width="stretch",
+            key="update_universal_btn",
+        )
 
     with st.container(border=True):
         st.markdown("**Backup and restore**")
