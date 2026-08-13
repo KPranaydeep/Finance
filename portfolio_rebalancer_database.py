@@ -2902,7 +2902,7 @@ with st.container(border=True):
         "Enter your name/nickname",
         value=st.session_state.get("current_user", ""),
         key="current_user_input",
-        placeholder="e.g. Pranay",
+        placeholder="e.g. Warren Buffett, Jane Doe, or just your initials",
     ).strip()
 
 if entered_user != st.session_state.get("current_user", ""):
