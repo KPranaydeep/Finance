@@ -688,6 +688,22 @@ def holdings_backup_bytes():
     return holdings.to_csv(index=False).encode("utf-8-sig")
 
 
+def reset_master_holdings_to_universe():
+    """Reset every holding to a neutral 1-share/no-cost-basis universe row.
+
+    This lets multiple users share one symbol universe: reset first, then merge in
+    a personal broker holdings Excel so quantities/prices reflect only that user.
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE master_holdings SET quantity = 1, average_price = NULL, updated_at = ?",
+            (now,),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
 # Broker holdings statement column names vary a lot, so accept common aliases.
 BROKER_HOLDINGS_COLUMN_ALIASES = {
     "stock name": "Stock Name",
@@ -2758,6 +2774,24 @@ with st.sidebar:
     )
 
     st.divider()
+    st.header("Multi-user universe workflow")
+    st.caption(
+        "Master holdings act as one shared stock universe. Each user should reset "
+        "quantities to 1 first, then import their own broker holdings statement so "
+        "the merged quantities/average prices reflect only that user's portfolio."
+    )
+    confirm_reset_universe = st.checkbox(
+        "I understand this sets Quantity = 1 and clears Average Price for every holding",
+        key="confirm_reset_universe",
+    )
+    reset_universe_btn = st.button(
+        "Reset all holdings to universe (qty = 1)",
+        width="stretch",
+        key="reset_universe_btn",
+        disabled=not confirm_reset_universe or get_unique_holdings_count() == 0,
+    )
+
+    st.divider()
     st.header("Import broker holdings statement (Excel)")
 
     broker_holdings_upload = st.file_uploader(
@@ -2767,7 +2801,8 @@ with st.sidebar:
         help=(
             "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
             "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
-            "(row 11 by default). Stocks are matched to symbols by ISIN."
+            "(row 11 by default). Stocks are matched to symbols by ISIN. Reset to "
+            "universe first so only your holdings' quantities are personalized."
         ),
     )
     broker_holdings_mode = st.radio(
@@ -2991,6 +3026,22 @@ if import_broker_holdings_btn:
         st.rerun()
     except Exception as exc:
         update_errors.append(f"Could not import broker holdings: {exc}")
+
+if reset_universe_btn:
+    try:
+        reset_count = reset_master_holdings_to_universe()
+        st.session_state["holdings_editor_version"] += 1
+        clear_drop_bottom_coverage_preview()
+        st.session_state.pop("drop_bottom_auto_result", None)
+        st.session_state.pop("drop_bottom_auto_error", None)
+        st.session_state["confirm_reset_universe"] = False
+        st.session_state["holdings_flash_success"] = (
+            f"Reset {reset_count} holdings to the shared universe (quantity = 1, "
+            "average price cleared). Now import your broker holdings statement."
+        )
+        st.rerun()
+    except Exception as exc:
+        update_errors.append(f"Could not reset holdings to universe: {exc}")
 
 if restore_analysis_btn:
     try:
