@@ -17,6 +17,35 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
+# Mobile-friendly tweaks: stack side-by-side columns vertically on narrow
+# screens, enlarge tap targets, and let wide tables scroll horizontally
+# instead of being clipped. No widgets/features are removed by this CSS.
+st.markdown(
+    """
+    <style>
+    @media (max-width: 768px) {
+        .block-container { padding: 1rem 0.6rem 2rem 0.6rem; }
+        [data-testid="stHorizontalBlock"] { flex-direction: column; }
+        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+        [data-testid="stMetric"] { padding: 0.4rem 0; }
+        h1 { font-size: 1.5rem !important; }
+        h2 { font-size: 1.2rem !important; }
+        h3 { font-size: 1.05rem !important; }
+    }
+    button[kind="primary"], button[kind="secondary"] { min-height: 2.75rem; }
+    [data-testid="stDataFrame"], [data-testid="stTable"] {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 APP_BUILD = "2026-08-13-yf-resilient-downloads-v1"
 
 # =========================================================
@@ -2753,125 +2782,122 @@ with st.sidebar:
     update_holdings_btn = st.button("Update master holdings", width="stretch")
 
     st.divider()
-    st.header("Holdings backup and restore")
-
-    holdings_csv = holdings_backup_bytes()
-    holdings_backup_date = datetime.now().strftime("%Y-%m-%d")
-    st.download_button(
-        "Download holdings backup CSV",
-        data=holdings_csv,
-        file_name=f"portfolio_holdings_backup_{holdings_backup_date}.csv",
-        mime="text/csv",
-        width="stretch",
-        key="download_holdings_backup_sidebar",
-        disabled=get_unique_holdings_count() == 0,
-        help="Download this before a Streamlit Cloud restart or redeployment.",
-    )
-
-    holdings_backup_upload = st.file_uploader(
-        "Upload holdings backup CSV",
-        type=["csv"],
-        key="holdings_backup_upload",
-        help="Restore Symbol, Yahoo Ticker, Exchange, Currency, Quantity, Average Price and timestamps. Old NSE-only backups are still accepted.",
-    )
-    holdings_restore_choice = st.radio(
-        "Restore behaviour",
-        options=["Merge/update current holdings", "Replace current holdings"],
-        index=0,
-        key="holdings_restore_choice",
-        help=(
-            "Merge updates matching symbols and keeps other rows. Replace deletes the "
-            "current holdings first."
-        ),
-    )
-    restore_holdings_btn = st.button(
-        "Restore uploaded holdings",
-        width="stretch",
-        key="restore_holdings_btn",
-        disabled=holdings_backup_upload is None,
-    )
-
-    st.divider()
-    st.header("Multi-user universe workflow")
-    st.caption(
-        "Master holdings act as one shared stock universe. Each user should reset "
-        "quantities to 1 first, then import their own broker holdings statement so "
-        "the merged quantities/average prices reflect only that user's portfolio."
-    )
-    confirm_reset_universe = st.checkbox(
-        "I understand this sets Quantity = 1 and clears Average Price for every holding",
-        key="confirm_reset_universe",
-    )
-    reset_universe_btn = st.button(
-        "Reset all holdings to universe (qty = 1)",
-        width="stretch",
-        key="reset_universe_btn",
-        disabled=not confirm_reset_universe or get_unique_holdings_count() == 0,
-    )
-
-    st.divider()
-    st.header("Import broker holdings statement (Excel)")
-
-    broker_holdings_upload = st.file_uploader(
-        "Upload broker holdings .xlsx",
-        type=["xlsx", "xls"],
-        key="broker_holdings_upload",
-        help=(
-            "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
-            "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
-            "(row 11 by default). Stocks are matched to symbols by ISIN. Reset to "
-            "universe first so only your holdings' quantities are personalized."
-        ),
-    )
-    broker_holdings_mode = st.radio(
-        "Import behaviour",
-        options=["Merge/update current holdings", "Replace current holdings"],
-        index=0,
-        key="broker_holdings_import_mode",
-        help=(
-            "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
-            "deletes the current holdings first."
-        ),
-    )
-    import_broker_holdings_btn = st.button(
-        "Import broker holdings",
-        width="stretch",
-        key="import_broker_holdings_btn",
-        disabled=broker_holdings_upload is None,
-    )
-
-    st.divider()
-    st.header("Analysis results backup")
-
-    existing_analysis_backup = latest_analysis_backup_bytes()
-    if existing_analysis_backup is not None:
-        latest_saved_payload = load_latest_analysis() or {}
-        latest_saved_date = (
-            str(latest_saved_payload.get("saved_at", ""))[:10] or "latest"
-        )
+    with st.expander("📦 Holdings backup and restore", expanded=False):
+        holdings_csv = holdings_backup_bytes()
+        holdings_backup_date = datetime.now().strftime("%Y-%m-%d")
         st.download_button(
-            "Download latest analysis JSON",
-            data=existing_analysis_backup,
-            file_name=f"portfolio_analysis_backup_{latest_saved_date}.json",
-            mime="application/json",
+            "Download holdings backup CSV",
+            data=holdings_csv,
+            file_name=f"portfolio_holdings_backup_{holdings_backup_date}.csv",
+            mime="text/csv",
             width="stretch",
-            key="download_saved_analysis_sidebar",
+            key="download_holdings_backup_sidebar",
+            disabled=get_unique_holdings_count() == 0,
+            help="Download this before a Streamlit Cloud restart or redeployment.",
         )
-    else:
-        st.caption("Run analysis once before downloading a result backup.")
 
-    analysis_backup_upload = st.file_uploader(
-        "Upload analysis backup JSON",
-        type=["json"],
-        key="analysis_backup_upload",
-        help="Restores a previously downloaded complete analysis result.",
-    )
-    restore_analysis_btn = st.button(
-        "Restore uploaded analysis",
-        width="stretch",
-        key="restore_analysis_btn",
-        disabled=analysis_backup_upload is None,
-    )
+        holdings_backup_upload = st.file_uploader(
+            "Upload holdings backup CSV",
+            type=["csv"],
+            key="holdings_backup_upload",
+            help="Restore Symbol, Yahoo Ticker, Exchange, Currency, Quantity, Average Price and timestamps. Old NSE-only backups are still accepted.",
+        )
+        holdings_restore_choice = st.radio(
+            "Restore behaviour",
+            options=["Merge/update current holdings", "Replace current holdings"],
+            index=0,
+            key="holdings_restore_choice",
+            help=(
+                "Merge updates matching symbols and keeps other rows. Replace deletes the "
+                "current holdings first."
+            ),
+        )
+        restore_holdings_btn = st.button(
+            "Restore uploaded holdings",
+            width="stretch",
+            key="restore_holdings_btn",
+            disabled=holdings_backup_upload is None,
+        )
+
+    st.divider()
+    with st.expander("🌐 Multi-user universe workflow", expanded=False):
+        st.caption(
+            "Master holdings act as one shared stock universe. Each user should reset "
+            "quantities to 1 first, then import their own broker holdings statement so "
+            "the merged quantities/average prices reflect only that user's portfolio."
+        )
+        confirm_reset_universe = st.checkbox(
+            "I understand this sets Quantity = 1 and clears Average Price for every holding",
+            key="confirm_reset_universe",
+        )
+        reset_universe_btn = st.button(
+            "Reset all holdings to universe (qty = 1)",
+            width="stretch",
+            key="reset_universe_btn",
+            disabled=not confirm_reset_universe or get_unique_holdings_count() == 0,
+        )
+
+    st.divider()
+    with st.expander("📥 Import broker holdings statement (Excel)", expanded=False):
+        broker_holdings_upload = st.file_uploader(
+            "Upload broker holdings .xlsx",
+            type=["xlsx", "xls"],
+            key="broker_holdings_upload",
+            help=(
+                "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
+                "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
+                "(row 11 by default). Stocks are matched to symbols by ISIN. Reset to "
+                "universe first so only your holdings' quantities are personalized."
+            ),
+        )
+        broker_holdings_mode = st.radio(
+            "Import behaviour",
+            options=["Merge/update current holdings", "Replace current holdings"],
+            index=0,
+            key="broker_holdings_import_mode",
+            help=(
+                "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
+                "deletes the current holdings first."
+            ),
+        )
+        import_broker_holdings_btn = st.button(
+            "Import broker holdings",
+            width="stretch",
+            key="import_broker_holdings_btn",
+            disabled=broker_holdings_upload is None,
+        )
+
+    st.divider()
+    with st.expander("💾 Analysis results backup", expanded=False):
+        existing_analysis_backup = latest_analysis_backup_bytes()
+        if existing_analysis_backup is not None:
+            latest_saved_payload = load_latest_analysis() or {}
+            latest_saved_date = (
+                str(latest_saved_payload.get("saved_at", ""))[:10] or "latest"
+            )
+            st.download_button(
+                "Download latest analysis JSON",
+                data=existing_analysis_backup,
+                file_name=f"portfolio_analysis_backup_{latest_saved_date}.json",
+                mime="application/json",
+                width="stretch",
+                key="download_saved_analysis_sidebar",
+            )
+        else:
+            st.caption("Run analysis once before downloading a result backup.")
+
+        analysis_backup_upload = st.file_uploader(
+            "Upload analysis backup JSON",
+            type=["json"],
+            key="analysis_backup_upload",
+            help="Restores a previously downloaded complete analysis result.",
+        )
+        restore_analysis_btn = st.button(
+            "Restore uploaded analysis",
+            width="stretch",
+            key="restore_analysis_btn",
+            disabled=analysis_backup_upload is None,
+        )
 
     st.divider()
     st.header("Analysis inputs")
