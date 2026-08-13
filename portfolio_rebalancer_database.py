@@ -433,7 +433,8 @@ DB_PATH = Path(os.getenv("PORTFOLIO_DB_PATH", str(DEFAULT_DB_PATH))).expanduser(
 
 MASTER_HOLDINGS_DDL = """
 CREATE TABLE IF NOT EXISTS master_holdings (
-    symbol TEXT PRIMARY KEY,
+    owner TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL,
     stock_name TEXT NOT NULL,
     yahoo_ticker TEXT,
     exchange TEXT,
@@ -441,13 +442,14 @@ CREATE TABLE IF NOT EXISTS master_holdings (
     quantity REAL NOT NULL DEFAULT 1,
     average_price REAL,
     added_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (owner, symbol)
 )
 """
 
 LATEST_ANALYSIS_DDL = """
 CREATE TABLE IF NOT EXISTS latest_analysis (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
+    owner TEXT PRIMARY KEY,
     saved_at TEXT NOT NULL,
     payload_json TEXT NOT NULL
 )
@@ -471,12 +473,13 @@ def _ensure_master_holdings_schema(conn):
     """Create the table and repair older compatible schemas in place."""
     conn.execute(MASTER_HOLDINGS_DDL)
     conn.execute(LATEST_ANALYSIS_DDL)
+    now = datetime.now().isoformat(timespec="seconds")
 
     latest_columns = {
         str(row["name"]).lower()
         for row in conn.execute("PRAGMA table_info(latest_analysis)").fetchall()
     }
-    required_latest_columns = {"id", "saved_at", "payload_json"}
+    required_latest_columns = {"owner", "saved_at", "payload_json"}
     if not required_latest_columns.issubset(latest_columns):
         legacy_latest_name = (
             "latest_analysis_legacy_" + datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -499,6 +502,8 @@ def _ensure_master_holdings_schema(conn):
                 else None
             )
             if time_column is not None:
+                # Pre-multi-user installs had a single shared analysis row. Preserve
+                # it under owner='' (an orphaned/legacy bucket) instead of deleting it.
                 legacy_row = conn.execute(
                     f'SELECT "{time_column}", payload_json '
                     f'FROM "{legacy_latest_name}" LIMIT 1'
@@ -506,8 +511,9 @@ def _ensure_master_holdings_schema(conn):
                 if legacy_row is not None:
                     conn.execute(
                         """
-                        INSERT INTO latest_analysis (id, saved_at, payload_json)
-                        VALUES (1, ?, ?)
+                        INSERT INTO latest_analysis (owner, saved_at, payload_json)
+                        VALUES ('', ?, ?)
+                        ON CONFLICT(owner) DO NOTHING
                         """,
                         (str(legacy_row[0]), legacy_row[1]),
                     )
@@ -519,6 +525,45 @@ def _ensure_master_holdings_schema(conn):
         legacy_name = "master_holdings_legacy_" + datetime.now().strftime("%Y%m%d_%H%M%S")
         conn.execute(f'ALTER TABLE master_holdings RENAME TO "{legacy_name}"')
         conn.execute(MASTER_HOLDINGS_DDL)
+        columns = {
+            str(row["name"]).lower()
+            for row in conn.execute("PRAGMA table_info(master_holdings)").fetchall()
+        }
+    elif "owner" not in columns:
+        # Pre-multi-user schema used `symbol` as the sole primary key. Rebuild the
+        # table with a composite (owner, symbol) key and preserve the old rows under
+        # owner='' (an orphaned/legacy bucket) rather than losing them.
+        legacy_name = "master_holdings_pre_owner_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        conn.execute(f'ALTER TABLE master_holdings RENAME TO "{legacy_name}"')
+        conn.execute(MASTER_HOLDINGS_DDL)
+
+        legacy_columns = {
+            str(row["name"]).lower()
+            for row in conn.execute(f'PRAGMA table_info("{legacy_name}")').fetchall()
+        }
+        column_defaults = {
+            "stock_name": "symbol",
+            "yahoo_ticker": "NULL",
+            "exchange": "NULL",
+            "currency": "NULL",
+            "quantity": "1",
+            "average_price": "NULL",
+            "added_at": f"'{now}'",
+            "updated_at": f"'{now}'",
+        }
+        select_exprs = [
+            column if column in legacy_columns else default
+            for column, default in column_defaults.items()
+        ]
+        conn.execute(
+            f"""
+            INSERT INTO master_holdings
+                (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
+                 quantity, average_price, added_at, updated_at)
+            SELECT '', symbol, {", ".join(select_exprs)}
+            FROM "{legacy_name}"
+            """
+        )
         columns = {
             str(row["name"]).lower()
             for row in conn.execute("PRAGMA table_info(master_holdings)").fetchall()
@@ -538,7 +583,6 @@ def _ensure_master_holdings_schema(conn):
         if column not in columns:
             conn.execute(sql)
 
-    now = datetime.now().isoformat(timespec="seconds")
     # Preserve old holdings without guessing their market. Missing metadata is
     # resolved later using the current NSE reference + Yahoo validation. This avoids
     # turning a legacy global symbol such as VT into VT.NS/NSE/INR.
@@ -634,7 +678,7 @@ def get_nse_company_lookup():
     return dict(zip(equity_map["Symbol"], equity_map["Company Name"]))
 
 
-def load_master_holdings():
+def load_master_holdings(owner):
     with get_db_connection() as conn:
         df = pd.read_sql_query(
             """
@@ -649,13 +693,15 @@ def load_master_holdings():
                 added_at AS "Added At",
                 updated_at AS "Updated At"
             FROM master_holdings
+            WHERE owner = ?
             ORDER BY symbol
             """,
             conn,
+            params=(owner,),
         )
     return df
 
-def repair_master_holdings_metadata():
+def repair_master_holdings_metadata(owner):
     """Repair missing or obviously misclassified market metadata in-place.
 
     The first multi-market build could migrate every legacy plain symbol to
@@ -676,7 +722,9 @@ def repair_master_holdings_metadata():
             """
             SELECT symbol, stock_name, yahoo_ticker, exchange, currency
             FROM master_holdings
-            """
+            WHERE owner = ?
+            """,
+            (owner,),
         ).fetchall()
 
     repaired = []
@@ -724,9 +772,9 @@ def repair_master_holdings_metadata():
                 """
                 UPDATE master_holdings
                 SET stock_name = ?, yahoo_ticker = ?, exchange = ?, currency = ?, updated_at = ?
-                WHERE symbol = ?
+                WHERE owner = ? AND symbol = ?
                 """,
-                (new_name, new_ticker, new_exchange, new_currency, now, row["symbol"]),
+                (new_name, new_ticker, new_exchange, new_currency, now, owner, row["symbol"]),
             )
             repaired.append(symbol)
 
@@ -735,13 +783,13 @@ def repair_master_holdings_metadata():
     return repaired
 
 
-def holdings_backup_bytes():
+def holdings_backup_bytes(owner):
     """Export the complete holdings master table as a UTF-8 CSV backup."""
-    holdings = load_master_holdings()
+    holdings = load_master_holdings(owner)
     return holdings.to_csv(index=False).encode("utf-8-sig")
 
 
-def reset_master_holdings_to_universe():
+def reset_master_holdings_to_universe(owner):
     """Reset every holding to a neutral 1-share/no-cost-basis universe row.
 
     This lets multiple users share one symbol universe: reset first, then merge in
@@ -750,8 +798,8 @@ def reset_master_holdings_to_universe():
     now = datetime.now().isoformat(timespec="seconds")
     with get_db_connection() as conn:
         cursor = conn.execute(
-            "UPDATE master_holdings SET quantity = 1, average_price = NULL, updated_at = ?",
-            (now,),
+            "UPDATE master_holdings SET quantity = 1, average_price = NULL, updated_at = ? WHERE owner = ?",
+            (now, owner),
         )
         conn.commit()
         return cursor.rowcount
@@ -874,7 +922,7 @@ def _read_broker_holdings_excel(uploaded_file):
     return df[["ISIN", "Stock Name", "Quantity", "Average Buy Price"]]
 
 
-def import_broker_holdings_excel(uploaded_file, mode="merge"):
+def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
     """Resolve broker holdings by ISIN and upsert them into master_holdings.
 
     Returns (imported_row_count, unresolved_isins).
@@ -940,7 +988,7 @@ def import_broker_holdings_excel(uploaded_file, mode="merge"):
     now = datetime.now().isoformat(timespec="seconds")
     records = [
         (
-            row["Symbol"], row["Stock Name"], row["Yahoo Ticker"], row["Exchange"],
+            owner, row["Symbol"], row["Stock Name"], row["Yahoo Ticker"], row["Exchange"],
             row["Currency"], float(row["Quantity"]), float(row["Average Price"]), now, now,
         )
         for _, row in resolved_df.iterrows()
@@ -950,15 +998,15 @@ def import_broker_holdings_excel(uploaded_file, mode="merge"):
         try:
             conn.execute("BEGIN IMMEDIATE")
             if normalized_mode == "replace":
-                conn.execute("DELETE FROM master_holdings")
+                conn.execute("DELETE FROM master_holdings WHERE owner = ?", (owner,))
 
             conn.executemany(
                 """
                 INSERT INTO master_holdings
-                    (symbol, stock_name, yahoo_ticker, exchange, currency,
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
                      quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner, symbol) DO UPDATE SET
                     stock_name = excluded.stock_name,
                     yahoo_ticker = excluded.yahoo_ticker,
                     exchange = excluded.exchange,
@@ -1109,7 +1157,7 @@ def _read_holdings_backup(uploaded_file):
     )
     return cleaned
 
-def restore_holdings_backup(uploaded_file, mode="merge"):
+def restore_holdings_backup(uploaded_file, owner, mode="merge"):
     """Restore holdings from CSV using replace or merge/update semantics."""
     cleaned = _read_holdings_backup(uploaded_file)
     normalized_mode = str(mode or "merge").strip().lower()
@@ -1123,7 +1171,7 @@ def restore_holdings_backup(uploaded_file, mode="merge"):
         updated_at = str(row["Updated At"]).strip() if pd.notna(row["Updated At"]) else now
         records.append(
             (
-                row["Symbol"], row["Stock Name"], row["Yahoo Ticker"],
+                owner, row["Symbol"], row["Stock Name"], row["Yahoo Ticker"],
                 row["Exchange"], row["Currency"], float(row["Quantity"]),
                 float(row["Average Price"]) if pd.notna(row["Average Price"]) else None,
                 added_at or now, updated_at or now,
@@ -1134,15 +1182,15 @@ def restore_holdings_backup(uploaded_file, mode="merge"):
         try:
             conn.execute("BEGIN IMMEDIATE")
             if normalized_mode == "replace":
-                conn.execute("DELETE FROM master_holdings")
+                conn.execute("DELETE FROM master_holdings WHERE owner = ?", (owner,))
 
             conn.executemany(
                 """
                 INSERT INTO master_holdings
-                    (symbol, stock_name, yahoo_ticker, exchange, currency,
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
                      quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner, symbol) DO UPDATE SET
                     stock_name = excluded.stock_name,
                     yahoo_ticker = excluded.yahoo_ticker,
                     exchange = excluded.exchange,
@@ -1161,24 +1209,26 @@ def restore_holdings_backup(uploaded_file, mode="merge"):
 
     return len(records)
 
-def get_unique_holdings_count():
+def get_unique_holdings_count(owner):
     """Return the current distinct holding count directly from SQLite."""
     with get_db_connection() as conn:
         row = conn.execute(
             """
             SELECT COUNT(DISTINCT UPPER(TRIM(symbol))) AS unique_count
             FROM master_holdings
-            WHERE symbol IS NOT NULL
+            WHERE owner = ?
+              AND symbol IS NOT NULL
               AND TRIM(symbol) <> ''
-            """
+            """,
+            (owner,),
         ).fetchone()
     return int(row["unique_count"] or 0)
 
 
-def render_live_holdings_banner(placeholder):
+def render_live_holdings_banner(placeholder, owner):
     """Render the live count without taking down the whole app on a DB error."""
     try:
-        unique_count = get_unique_holdings_count()
+        unique_count = get_unique_holdings_count(owner)
     except sqlite3.Error as exc:
         placeholder.error(
             "Holdings database is unavailable. "
@@ -1230,8 +1280,8 @@ def make_json_safe(value):
     return value
 
 
-def save_latest_analysis(payload):
-    """Persist the latest successful analysis as one singleton SQLite record."""
+def save_latest_analysis(payload, owner):
+    """Persist the latest successful analysis as one row per owner."""
     if not isinstance(payload, dict):
         raise ValueError("Analysis payload must be a dictionary.")
 
@@ -1252,26 +1302,26 @@ def save_latest_analysis(payload):
         conn.execute(LATEST_ANALYSIS_DDL)
         conn.execute(
             """
-            INSERT INTO latest_analysis (id, saved_at, payload_json)
-            VALUES (1, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
+            INSERT INTO latest_analysis (owner, saved_at, payload_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(owner) DO UPDATE SET
                 saved_at = excluded.saved_at,
                 payload_json = excluded.payload_json
             """,
-            (saved_at, payload_json),
+            (owner, saved_at, payload_json),
         )
         conn.commit()
 
     return safe_payload
 
 
-def load_latest_analysis():
+def load_latest_analysis(owner):
     """Load the latest saved analysis without preventing the app from opening."""
     try:
         with get_db_connection() as conn:
             conn.execute(LATEST_ANALYSIS_DDL)
             row = conn.execute(
-                "SELECT payload_json FROM latest_analysis WHERE id = 1"
+                "SELECT payload_json FROM latest_analysis WHERE owner = ?", (owner,)
             ).fetchone()
     except sqlite3.DatabaseError:
         return None
@@ -1287,9 +1337,9 @@ def load_latest_analysis():
     return payload if isinstance(payload, dict) else None
 
 
-def latest_analysis_backup_bytes():
+def latest_analysis_backup_bytes(owner):
     """Return the latest saved analysis as UTF-8 JSON bytes, when available."""
-    payload = load_latest_analysis()
+    payload = load_latest_analysis(owner)
     if payload is None:
         return None
 
@@ -1301,7 +1351,7 @@ def latest_analysis_backup_bytes():
     ).encode("utf-8")
 
 
-def restore_latest_analysis_backup(uploaded_file):
+def restore_latest_analysis_backup(uploaded_file, owner):
     """Validate and restore a previously exported analysis-result JSON backup."""
     if uploaded_file is None:
         raise ValueError("Choose an analysis backup JSON file first.")
@@ -1333,7 +1383,7 @@ def restore_latest_analysis_backup(uploaded_file):
             + ", ".join(missing)
         )
 
-    return save_latest_analysis(payload)
+    return save_latest_analysis(payload, owner)
 
 
 def _format_saved_metric(metric_name, value):
@@ -1350,12 +1400,12 @@ def _format_saved_metric(metric_name, value):
     return f"{numeric:.2%}"
 
 
-def render_saved_analysis(placeholder):
+def render_saved_analysis(placeholder, owner):
     """Display the latest saved analysis immediately below the live banner."""
     placeholder.empty()
 
     with placeholder.container():
-        payload = load_latest_analysis()
+        payload = load_latest_analysis(owner)
 
         if payload is None:
             st.info(
@@ -1641,7 +1691,7 @@ def convert_price_history_to_inr(prices, ticker_currency_pairs):
     return converted
 
 
-def add_symbols_to_master(symbols):
+def add_symbols_to_master(symbols, owner):
     if not symbols:
         return [], [], [], []
 
@@ -1665,10 +1715,10 @@ def add_symbols_to_master(symbols):
         existing = {
             row["symbol"]
             for row in conn.execute(
-                "SELECT symbol FROM master_holdings WHERE symbol IN ({})".format(
+                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
                     ",".join("?" for _ in valid_symbols)
                 ),
-                valid_symbols,
+                [owner, *valid_symbols],
             ).fetchall()
         } if valid_symbols else set()
 
@@ -1699,12 +1749,12 @@ def add_symbols_to_master(symbols):
             conn.execute(
                 """
                 INSERT INTO master_holdings
-                    (symbol, stock_name, yahoo_ticker, exchange, currency,
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
                      quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    item["symbol"], item["stock_name"], ticker,
+                    owner, item["symbol"], item["stock_name"], ticker,
                     item["exchange"], _normalize_currency_code(item["currency"]),
                     1.0, initial_price, now, now,
                 ),
@@ -1714,13 +1764,13 @@ def add_symbols_to_master(symbols):
 
     return added, duplicates, invalid_symbols, missing_initial_price
 
-def remove_symbols_from_master(symbols):
+def remove_symbols_from_master(symbols, owner):
     if not symbols:
         return [], []
 
     with get_db_connection() as conn:
         rows = conn.execute(
-            "SELECT symbol, yahoo_ticker FROM master_holdings"
+            "SELECT symbol, yahoo_ticker FROM master_holdings WHERE owner = ?", (owner,)
         ).fetchall()
 
         by_symbol = {str(row["symbol"]).upper(): row["symbol"] for row in rows}
@@ -1751,17 +1801,17 @@ def remove_symbols_from_master(symbols):
 
         if resolved_to_remove:
             conn.execute(
-                "DELETE FROM master_holdings WHERE symbol IN ({})".format(
+                "DELETE FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
                     ",".join("?" for _ in resolved_to_remove)
                 ),
-                resolved_to_remove,
+                [owner, *resolved_to_remove],
             )
             conn.commit()
 
     return resolved_to_remove, missing
 
 
-def save_holding_values(edited_df):
+def save_holding_values(edited_df, owner):
     """Persist every editable holding atomically and verify that each row exists."""
     required = ["Symbol", "Quantity", "Average Price"]
     missing_columns = [c for c in required if c not in edited_df.columns]
@@ -1794,8 +1844,8 @@ def save_holding_values(edited_df):
             existing = {
                 row["symbol"]
                 for row in conn.execute(
-                    f"SELECT symbol FROM master_holdings WHERE symbol IN ({placeholders})",
-                    symbols,
+                    f"SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({placeholders})",
+                    [owner, *symbols],
                 ).fetchall()
             }
             missing_symbols = sorted(set(symbols) - existing)
@@ -1811,12 +1861,13 @@ def save_holding_values(edited_df):
                     """
                     UPDATE master_holdings
                     SET quantity = ?, average_price = ?, updated_at = ?
-                    WHERE symbol = ?
+                    WHERE owner = ? AND symbol = ?
                     """,
                     (
                         float(row["Quantity"]),
                         float(row["Average Price"]),
                         now,
+                        owner,
                         row["Symbol"],
                     ),
                 )
@@ -1838,8 +1889,8 @@ def save_holding_values(edited_df):
     return updated_count
 
 
-def build_current_allocation_from_db():
-    df = load_master_holdings()
+def build_current_allocation_from_db(owner):
+    df = load_master_holdings(owner)
     if df.empty:
         return pd.DataFrame(), []
 
@@ -1878,16 +1929,16 @@ def build_current_allocation_from_db():
                     """
                     UPDATE master_holdings
                     SET stock_name = ?, yahoo_ticker = ?, exchange = ?, currency = ?, updated_at = ?
-                    WHERE symbol = ?
+                    WHERE owner = ? AND symbol = ?
                     """,
                     (
                         instrument["stock_name"], instrument["yahoo_ticker"],
                         instrument["exchange"], _normalize_currency_code(instrument["currency"]),
-                        datetime.now().isoformat(timespec="seconds"), symbol,
+                        datetime.now().isoformat(timespec="seconds"), owner, symbol,
                     ),
                 )
             conn.commit()
-        df = normalize_frame(load_master_holdings())
+        df = normalize_frame(load_master_holdings(owner))
 
     # Fetch current native-market prices for all holdings. This is used for current
     # portfolio weights; Average Price remains the editable cost-basis field.
@@ -1909,12 +1960,12 @@ def build_current_allocation_from_db():
                         """
                         UPDATE master_holdings
                         SET average_price = ?, updated_at = ?
-                        WHERE symbol = ?
+                        WHERE owner = ? AND symbol = ?
                         """,
-                        (float(price), now, row["Symbol"]),
+                        (float(price), now, owner, row["Symbol"]),
                     )
             conn.commit()
-        df = normalize_frame(load_master_holdings())
+        df = normalize_frame(load_master_holdings(owner))
 
     df["Latest Price"] = df["Yahoo Ticker"].map(latest_price_map)
 
@@ -2539,13 +2590,13 @@ def metrics_df(stats_dict):
     })
 
 
-def calculate_drop_bottom_pct_recommendation():
+def calculate_drop_bottom_pct_recommendation(owner):
     """Calculate a display-only recommendation using INR-adjusted return history."""
     st.session_state.pop("drop_bottom_auto_result", None)
     st.session_state.pop("drop_bottom_auto_error", None)
 
     try:
-        portfolio_df, _ = build_current_allocation_from_db()
+        portfolio_df, _ = build_current_allocation_from_db(owner)
         if portfolio_df.empty:
             raise ValueError("No usable holdings are available.")
 
@@ -2652,9 +2703,9 @@ def find_drop_bottom_pct_by_return_gap(
     )
 
 
-def calculate_drop_bottom_coverage_preview(drop_bottom_pct):
+def calculate_drop_bottom_coverage_preview(drop_bottom_pct, owner):
     """Estimate coverage using available Yahoo histories; do not run optimization."""
-    portfolio_df, invalid_rows = build_current_allocation_from_db()
+    portfolio_df, invalid_rows = build_current_allocation_from_db(owner)
     if portfolio_df.empty:
         raise ValueError("No usable holdings are available.")
 
@@ -2725,6 +2776,35 @@ if recovered_db_path is not None:
         f"`{recovered_db_path.name}`. A new holdings database was created."
     )
 
+st.divider()
+st.subheader("👤 Your profile")
+st.caption(
+    "Each nickname keeps its holdings and saved analysis completely separate from "
+    "every other person using this app — nobody can see or overwrite your data."
+)
+entered_user = st.text_input(
+    "Enter your name/nickname",
+    value=st.session_state.get("current_user", ""),
+    key="current_user_input",
+    placeholder="e.g. Pranay",
+).strip()
+
+if entered_user != st.session_state.get("current_user", ""):
+    st.session_state["current_user"] = entered_user
+    clear_drop_bottom_coverage_preview()
+    st.session_state.pop("drop_bottom_auto_result", None)
+    st.session_state.pop("drop_bottom_auto_error", None)
+    st.rerun()
+
+CURRENT_USER = st.session_state.get("current_user", "").strip()
+
+if not CURRENT_USER:
+    st.info("Enter your name above to load your personal holdings and continue.")
+    st.stop()
+
+st.caption(f"Signed in as: **{CURRENT_USER}**")
+st.divider()
+
 # Filled after every add/remove operation using a fresh SQLite query.
 live_count_banner_placeholder = st.empty()
 
@@ -2750,7 +2830,7 @@ for flash_key, target in (
 # Self-heal market metadata created by older/NSE-only builds. In particular, the
 # first multi-market build could leave VT stored as VT.NS/NSE/INR.
 try:
-    repaired_market_symbols = repair_master_holdings_metadata()
+    repaired_market_symbols = repair_master_holdings_metadata(CURRENT_USER)
 except Exception:
     repaired_market_symbols = []
 
@@ -2783,7 +2863,7 @@ with st.sidebar:
 
     st.divider()
     with st.expander("📦 Holdings backup and restore", expanded=False):
-        holdings_csv = holdings_backup_bytes()
+        holdings_csv = holdings_backup_bytes(CURRENT_USER)
         holdings_backup_date = datetime.now().strftime("%Y-%m-%d")
         st.download_button(
             "Download holdings backup CSV",
@@ -2792,7 +2872,7 @@ with st.sidebar:
             mime="text/csv",
             width="stretch",
             key="download_holdings_backup_sidebar",
-            disabled=get_unique_holdings_count() == 0,
+            disabled=get_unique_holdings_count(CURRENT_USER) == 0,
             help="Download this before a Streamlit Cloud restart or redeployment.",
         )
 
@@ -2820,58 +2900,10 @@ with st.sidebar:
         )
 
     st.divider()
-    with st.expander("🌐 Multi-user universe workflow", expanded=False):
-        st.caption(
-            "Master holdings act as one shared stock universe. Each user should reset "
-            "quantities to 1 first, then import their own broker holdings statement so "
-            "the merged quantities/average prices reflect only that user's portfolio."
-        )
-        confirm_reset_universe = st.checkbox(
-            "I understand this sets Quantity = 1 and clears Average Price for every holding",
-            key="confirm_reset_universe",
-        )
-        reset_universe_btn = st.button(
-            "Reset all holdings to universe (qty = 1)",
-            width="stretch",
-            key="reset_universe_btn",
-            disabled=not confirm_reset_universe or get_unique_holdings_count() == 0,
-        )
-
-    st.divider()
-    with st.expander("📥 Import broker holdings statement (Excel)", expanded=False):
-        broker_holdings_upload = st.file_uploader(
-            "Upload broker holdings .xlsx",
-            type=["xlsx", "xls"],
-            key="broker_holdings_upload",
-            help=(
-                "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
-                "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
-                "(row 11 by default). Stocks are matched to symbols by ISIN. Reset to "
-                "universe first so only your holdings' quantities are personalized."
-            ),
-        )
-        broker_holdings_mode = st.radio(
-            "Import behaviour",
-            options=["Merge/update current holdings", "Replace current holdings"],
-            index=0,
-            key="broker_holdings_import_mode",
-            help=(
-                "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
-                "deletes the current holdings first."
-            ),
-        )
-        import_broker_holdings_btn = st.button(
-            "Import broker holdings",
-            width="stretch",
-            key="import_broker_holdings_btn",
-            disabled=broker_holdings_upload is None,
-        )
-
-    st.divider()
     with st.expander("💾 Analysis results backup", expanded=False):
-        existing_analysis_backup = latest_analysis_backup_bytes()
+        existing_analysis_backup = latest_analysis_backup_bytes(CURRENT_USER)
         if existing_analysis_backup is not None:
-            latest_saved_payload = load_latest_analysis() or {}
+            latest_saved_payload = load_latest_analysis(CURRENT_USER) or {}
             latest_saved_date = (
                 str(latest_saved_payload.get("saved_at", ""))[:10] or "latest"
             )
@@ -2912,14 +2944,6 @@ with st.sidebar:
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
 
-    run_btn = st.button(
-        "Run optimization",
-        width="stretch",
-        type="primary",
-        key="run_optimization_btn_top",
-        help="Runs immediately with the drop-bottom/target-volatility settings below.",
-    )
-
     drop_bottom_pct = float(
         st.number_input(
             "Drop bottom fraction of tickers by history length",
@@ -2956,7 +2980,7 @@ with st.sidebar:
         try:
             with st.spinner("Calculating history coverage only..."):
                 st.session_state["drop_bottom_coverage_preview"] = (
-                    calculate_drop_bottom_coverage_preview(drop_bottom_pct)
+                    calculate_drop_bottom_coverage_preview(drop_bottom_pct, CURRENT_USER)
                 )
         except Exception as exc:
             st.session_state["drop_bottom_coverage_preview"] = None
@@ -2988,6 +3012,7 @@ with st.sidebar:
         "Find drop_bottom_pct in 0.10–0.99 for higher optimized return",
         width="stretch",
         on_click=calculate_drop_bottom_pct_recommendation,
+        args=(CURRENT_USER,),
         help=(
             "Searches drop_bottom_pct values by history length from 0.10 to 0.99 so the "
             "optimized portfolio's annual return is strictly higher than the current portfolio's."
@@ -3023,6 +3048,71 @@ with st.sidebar:
         else None
     )
 
+st.divider()
+st.subheader("✅ Required steps for every user")
+st.caption(
+    "These three steps are mandatory for a personalized analysis: reset the shared "
+    "universe, upload your own broker holdings, then run optimization."
+)
+
+step_col1, step_col2, step_col3 = st.columns(3)
+
+with step_col1:
+    st.markdown("**1️⃣ Reset to universe**")
+    st.caption("Clears Quantity/Average Price for every holding (shared universe).")
+    confirm_reset_universe = st.checkbox(
+        "I understand this sets Quantity = 1 and clears Average Price for every holding",
+        key="confirm_reset_universe",
+    )
+    reset_universe_btn = st.button(
+        "Reset all holdings to universe (qty = 1)",
+        width="stretch",
+        key="reset_universe_btn",
+        disabled=not confirm_reset_universe or get_unique_holdings_count(CURRENT_USER) == 0,
+    )
+
+with step_col2:
+    st.markdown("**2️⃣ Upload your broker holdings**")
+    broker_holdings_upload = st.file_uploader(
+        "Upload broker holdings .xlsx",
+        type=["xlsx", "xls"],
+        key="broker_holdings_upload",
+        help=(
+            "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
+            "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
+            "(row 11 by default). Stocks are matched to symbols by ISIN. Reset to "
+            "universe first so only your holdings' quantities are personalized."
+        ),
+    )
+    broker_holdings_mode = st.radio(
+        "Import behaviour",
+        options=["Merge/update current holdings", "Replace current holdings"],
+        index=0,
+        key="broker_holdings_import_mode",
+        help=(
+            "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
+            "deletes the current holdings first."
+        ),
+    )
+    import_broker_holdings_btn = st.button(
+        "Import broker holdings",
+        width="stretch",
+        key="import_broker_holdings_btn",
+        disabled=broker_holdings_upload is None,
+    )
+
+with step_col3:
+    st.markdown("**3️⃣ Run optimization**")
+    st.caption("Uses the days-to-flip/drawdown/drop_bottom_pct/target-volatility settings from the sidebar.")
+    run_btn = st.button(
+        "Run optimization",
+        width="stretch",
+        type="primary",
+        key="run_optimization_btn_main",
+    )
+
+st.divider()
+
 if restore_holdings_btn:
     try:
         restore_mode = (
@@ -3032,6 +3122,7 @@ if restore_holdings_btn:
         )
         restored_count = restore_holdings_backup(
             holdings_backup_upload,
+            CURRENT_USER,
             mode=restore_mode,
         )
         st.session_state["holdings_editor_version"] += 1
@@ -3055,6 +3146,7 @@ if import_broker_holdings_btn:
         )
         imported_count, unresolved_isins = import_broker_holdings_excel(
             broker_holdings_upload,
+            CURRENT_USER,
             mode=broker_import_mode,
         )
         st.session_state["holdings_editor_version"] += 1
@@ -3076,7 +3168,7 @@ if import_broker_holdings_btn:
 
 if reset_universe_btn:
     try:
-        reset_count = reset_master_holdings_to_universe()
+        reset_count = reset_master_holdings_to_universe(CURRENT_USER)
         st.session_state["holdings_editor_version"] += 1
         clear_drop_bottom_coverage_preview()
         st.session_state.pop("drop_bottom_auto_result", None)
@@ -3092,7 +3184,7 @@ if reset_universe_btn:
 
 if restore_analysis_btn:
     try:
-        restored_payload = restore_latest_analysis_backup(analysis_backup_upload)
+        restored_payload = restore_latest_analysis_backup(analysis_backup_upload, CURRENT_USER)
         update_messages.append(
             "Analysis backup restored successfully. Saved at: "
             + str(restored_payload.get("saved_at", "Unknown"))
@@ -3114,8 +3206,8 @@ if update_holdings_btn:
     elif not buy_symbols and not sell_symbols:
         update_warnings.append("Enter at least one symbol in Buy or Sell.")
     else:
-        removed, not_held = remove_symbols_from_master(sell_symbols)
-        added, duplicates, invalid, missing_initial_price = add_symbols_to_master(buy_symbols)
+        removed, not_held = remove_symbols_from_master(sell_symbols, CURRENT_USER)
+        added, duplicates, invalid, missing_initial_price = add_symbols_to_master(buy_symbols, CURRENT_USER)
 
         if added:
             update_messages.append("Added: " + ", ".join(added))
@@ -3149,12 +3241,12 @@ for message in update_errors:
     st.error(message)
 
 # Fresh, uncached database count on every Streamlit rerun.
-live_unique_count = render_live_holdings_banner(live_count_banner_placeholder)
+live_unique_count = render_live_holdings_banner(live_count_banner_placeholder, CURRENT_USER)
 sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
-render_saved_analysis(saved_analysis_placeholder)
+render_saved_analysis(saved_analysis_placeholder, CURRENT_USER)
 
 st.subheader("Master Holdings")
-master_df = load_master_holdings()
+master_df = load_master_holdings(CURRENT_USER)
 
 if master_df.empty:
     st.info("The master holdings table is empty. Add symbols from the sidebar.")
@@ -3220,7 +3312,7 @@ else:
 
         if save_holdings_btn:
             try:
-                updated_count = save_holding_values(edited_df)
+                updated_count = save_holding_values(edited_df, CURRENT_USER)
                 # A new key forces Streamlit to discard the old editor snapshot.
                 st.session_state["holdings_editor_version"] += 1
                 clear_drop_bottom_coverage_preview()
@@ -3241,7 +3333,7 @@ if run_btn:
             st.stop()
 
         with st.spinner("Loading holdings from the database..."):
-            portfolio_df, invalid_holding_rows = build_current_allocation_from_db()
+            portfolio_df, invalid_holding_rows = build_current_allocation_from_db(CURRENT_USER)
 
         if portfolio_df.empty:
             st.error(
@@ -3453,8 +3545,8 @@ if run_btn:
             },
         }
 
-        save_latest_analysis(analysis_payload)
-        render_saved_analysis(saved_analysis_placeholder)
+        save_latest_analysis(analysis_payload, CURRENT_USER)
+        render_saved_analysis(saved_analysis_placeholder, CURRENT_USER)
         st.success(
             "Analysis completed and saved. You can now download the complete "
             "analysis backup as JSON."
