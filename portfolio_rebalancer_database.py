@@ -3267,6 +3267,43 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             disabled=universal_df.empty,
         )
 
+    st.divider()
+    st.caption(
+        "Download this before a redeploy/reboot that might reset the app's disk, "
+        "and restore it afterwards to bring the shared universe back."
+    )
+    universal_backup_col1, universal_backup_col2 = st.columns(2, gap="medium")
+    with universal_backup_col1:
+        universal_csv = universal_df.to_csv(index=False).encode("utf-8-sig")
+        universal_backup_date = datetime.now().strftime("%Y-%m-%d")
+        st.download_button(
+            "Download universal portfolio CSV",
+            data=universal_csv,
+            file_name=f"universal_portfolio_backup_{universal_backup_date}.csv",
+            mime="text/csv",
+            width="stretch",
+            key="download_universal_backup",
+            disabled=universal_df.empty,
+        )
+    with universal_backup_col2:
+        universal_backup_upload = st.file_uploader(
+            "Upload universal portfolio backup CSV",
+            type=["csv"],
+            key="universal_backup_upload",
+        )
+        universal_restore_choice = st.radio(
+            "Restore behaviour",
+            options=["Merge/update universal portfolio", "Replace universal portfolio"],
+            index=0,
+            key="universal_restore_choice",
+        )
+        restore_universal_backup_btn = st.button(
+            "Restore uploaded universal portfolio",
+            width="stretch",
+            key="restore_universal_backup_btn",
+            disabled=universal_backup_upload is None,
+        )
+
 st.divider()
 
 if restore_holdings_btn:
@@ -3421,6 +3458,25 @@ if copy_universal_btn:
         )
     if not copied and not copy_duplicates:
         update_warnings.append("The universal portfolio is empty — nothing to copy.")
+
+if restore_universal_backup_btn:
+    try:
+        universal_restore_mode = (
+            "replace"
+            if universal_restore_choice == "Replace universal portfolio"
+            else "merge"
+        )
+        restored_universal_count = restore_holdings_backup(
+            universal_backup_upload,
+            UNIVERSAL_OWNER,
+            mode=universal_restore_mode,
+        )
+        update_messages.append(
+            f"Restored {restored_universal_count} symbols into the universal portfolio "
+            f"using {universal_restore_mode} mode."
+        )
+    except Exception as exc:
+        update_errors.append(f"Could not restore universal portfolio backup: {exc}")
 
 for message in update_messages:
     st.success(message)
