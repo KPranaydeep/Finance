@@ -3264,8 +3264,8 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
         with st.container(border=True):
             st.markdown("**Copy into my holdings**")
             st.caption(
-                "Copies every symbol currently in the universal portfolio into your own "
-                "holdings at quantity 1, so you can personalize it with a broker import."
+                "Adds the shared watchlist to your personal holdings as quantity 1 so you can "
+                "adjust or replace entries with your own broker import."
             )
             copy_universal_btn = st.button(
                 "Copy universal portfolio into my holdings",
