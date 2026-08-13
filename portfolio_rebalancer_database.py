@@ -2911,6 +2911,15 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
+
+    run_btn = st.button(
+        "Run optimization",
+        width="stretch",
+        type="primary",
+        key="run_optimization_btn_top",
+        help="Runs immediately with the drop-bottom/target-volatility settings below.",
+    )
+
     drop_bottom_pct = float(
         st.number_input(
             "Drop bottom fraction of tickers by history length",
@@ -3012,12 +3021,6 @@ with st.sidebar:
         )
         if use_target_vol
         else None
-    )
-
-    run_btn = st.button(
-        "Run optimization",
-        width="stretch",
-        type="primary",
     )
 
 if restore_holdings_btn:
