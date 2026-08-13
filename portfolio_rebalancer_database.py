@@ -3229,68 +3229,76 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
         "considers these as additional buy candidates alongside your own holdings."
     )
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
-    if universal_df.empty:
-        st.info("The universal portfolio is empty. Add symbols below.")
-    else:
-        st.dataframe(
-            universal_df[["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency"]],
-            width="stretch",
-            hide_index=True,
-        )
+
+    with st.container(border=True):
+        st.markdown("**Shared symbols**")
+        if universal_df.empty:
+            st.info("The universal portfolio is empty. Add symbols below.")
+        else:
+            st.dataframe(
+                universal_df[["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency"]],
+                width="stretch",
+                hide_index=True,
+            )
 
     universal_col1, universal_col2 = st.columns(2, gap="medium")
     with universal_col1:
-        universal_buy_input = st.text_area(
-            "Add symbols to universal portfolio",
-            key="universal_buy_input",
-            placeholder="RELIANCE, TCS, VOO",
-        )
-        universal_sell_input = st.text_area(
-            "Remove symbols from universal portfolio",
-            key="universal_sell_input",
-            placeholder="HDFCBANK, SBIN",
-        )
-        update_universal_btn = st.button(
-            "Update universal portfolio",
-            width="stretch",
-            key="update_universal_btn",
-        )
+        with st.container(border=True):
+            st.markdown("**Add / remove symbols**")
+            universal_buy_input = st.text_area(
+                "Add symbols to universal portfolio",
+                key="universal_buy_input",
+                placeholder="RELIANCE, TCS, VOO",
+            )
+            universal_sell_input = st.text_area(
+                "Remove symbols from universal portfolio",
+                key="universal_sell_input",
+                placeholder="HDFCBANK, SBIN",
+            )
+            update_universal_btn = st.button(
+                "Update universal portfolio",
+                width="stretch",
+                key="update_universal_btn",
+            )
     with universal_col2:
-        st.caption(
-            "Copies every symbol currently in the universal portfolio into your own "
-            "holdings at quantity 1, so you can personalize it with a broker import."
-        )
-        copy_universal_btn = st.button(
-            "Copy universal portfolio into my holdings",
-            width="stretch",
-            key="copy_universal_btn",
-            disabled=universal_df.empty,
-        )
+        with st.container(border=True):
+            st.markdown("**Copy into my holdings**")
+            st.caption(
+                "Copies every symbol currently in the universal portfolio into your own "
+                "holdings at quantity 1, so you can personalize it with a broker import."
+            )
+            copy_universal_btn = st.button(
+                "Copy universal portfolio into my holdings",
+                width="stretch",
+                key="copy_universal_btn",
+                disabled=universal_df.empty,
+            )
 
-    st.divider()
-    st.caption(
-        "Download this before a redeploy/reboot that might reset the app's disk, "
-        "and restore it afterwards to bring the shared universe back."
-    )
-    universal_backup_col1, universal_backup_col2 = st.columns(2, gap="medium")
-    with universal_backup_col1:
-        universal_csv = universal_df.to_csv(index=False).encode("utf-8-sig")
-        universal_backup_date = datetime.now().strftime("%Y-%m-%d")
-        st.download_button(
-            "Download universal portfolio CSV",
-            data=universal_csv,
-            file_name=f"universal_portfolio_backup_{universal_backup_date}.csv",
-            mime="text/csv",
-            width="stretch",
-            key="download_universal_backup",
-            disabled=universal_df.empty,
+    with st.container(border=True):
+        st.markdown("**Backup and restore**")
+        st.caption(
+            "Download this before a redeploy/reboot that might reset the app's disk, "
+            "and restore it afterwards to bring the shared universe back."
         )
-    with universal_backup_col2:
-        universal_backup_upload = st.file_uploader(
-            "Upload universal portfolio backup CSV",
-            type=["csv"],
-            key="universal_backup_upload",
-        )
+        universal_backup_col1, universal_backup_col2 = st.columns(2, gap="medium")
+        with universal_backup_col1:
+            universal_csv = universal_df.to_csv(index=False).encode("utf-8-sig")
+            universal_backup_date = datetime.now().strftime("%Y-%m-%d")
+            st.download_button(
+                "Download universal portfolio CSV",
+                data=universal_csv,
+                file_name=f"universal_portfolio_backup_{universal_backup_date}.csv",
+                mime="text/csv",
+                width="stretch",
+                key="download_universal_backup",
+                disabled=universal_df.empty,
+            )
+        with universal_backup_col2:
+            universal_backup_upload = st.file_uploader(
+                "Upload universal portfolio backup CSV",
+                type=["csv"],
+                key="universal_backup_upload",
+            )
         universal_restore_choice = st.radio(
             "Restore behaviour",
             options=["Merge/update universal portfolio", "Replace universal portfolio"],
