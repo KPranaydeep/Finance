@@ -3348,7 +3348,7 @@ with step_col3:
             key="run_optimization_btn_main",
         )
 
-lumpsum_download_placeholder = st.sidebar.empty()
+lumpsum_download_placeholder = st.empty()
 
 st.divider()
 with st.expander("🌐 Universal Portfolio", expanded=False):
