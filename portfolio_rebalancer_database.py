@@ -3179,16 +3179,6 @@ with st.sidebar:
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
 
-    lumpsum_inr = st.number_input(
-        "Lumpsum to allocate (INR)",
-        min_value=0.0,
-        value=0.0,
-        step=1000.0,
-        format="%.2f",
-        help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
-    )
-    lumpsum_download_placeholder = st.empty()
-
     drop_bottom_pct = float(
         st.number_input(
             "Drop bottom fraction of tickers by history length",
@@ -3300,7 +3290,7 @@ st.caption(
     "considers both your holdings and the shared Universal Portfolio as candidates."
 )
 
-step_col1, step_col2 = st.columns(2, gap="medium")
+step_col1, step_col2, step_col3 = st.columns(3, gap="medium")
 
 with step_col1:
     with st.container(border=True):
@@ -3334,7 +3324,19 @@ with step_col1:
 
 with step_col2:
     with st.container(border=True):
-        st.markdown("**2️⃣ Run optimization**")
+        st.markdown("**2️⃣ Enter lumpsum (optional)**")
+        lumpsum_inr = st.number_input(
+            "Lumpsum to allocate (INR)",
+            min_value=0.0,
+            value=0.0,
+            step=1000.0,
+            format="%.2f",
+            help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
+        )
+
+with step_col3:
+    with st.container(border=True):
+        st.markdown("**3️⃣ Run optimization**")
         st.caption(
             "Uses the days-to-flip/drawdown/drop_bottom_pct/target-volatility settings "
             "from the sidebar, and includes Universal Portfolio symbols as buy candidates."
@@ -3345,6 +3347,8 @@ with step_col2:
             type="primary",
             key="run_optimization_btn_main",
         )
+
+lumpsum_download_placeholder = st.sidebar.empty()
 
 st.divider()
 with st.expander("🌐 Universal Portfolio", expanded=False):
