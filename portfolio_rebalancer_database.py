@@ -1,4 +1,5 @@
 import io
+import html
 import json
 import os
 import re
@@ -2532,6 +2533,97 @@ def run_portfolio_analysis_multi(
 # REBALANCING
 # =========================================================
 
+def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices, lumpsum_inr):
+    """Allocate an INR lumpsum to optimized weights using whole-share quantities."""
+    if lumpsum_inr <= 0:
+        return pd.DataFrame(), float(lumpsum_inr), [], []
+
+    alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
+    lr_tickers = list(log_returns.columns)
+    common_tickers = [ticker for ticker in lr_tickers if ticker in alloc_df.index and ticker in prices]
+    missing_prices = [ticker for ticker in lr_tickers if ticker not in prices]
+    missing_alloc = [ticker for ticker in lr_tickers if ticker not in alloc_df.index]
+
+    if not common_tickers:
+        raise ValueError("No common tickers between returns, allocation, and latest prices.")
+
+    positions = [lr_tickers.index(ticker) for ticker in common_tickers]
+    aligned_weights = np.array(optimal_weights, dtype=float)[positions]
+    aligned_weights = aligned_weights / aligned_weights.sum()
+    price_inr = np.array(
+        [prices[ticker] * alloc_df.loc[ticker, "FX to INR"] for ticker in common_tickers],
+        dtype=float,
+    )
+    target_amounts = float(lumpsum_inr) * aligned_weights
+    quantities = np.floor(target_amounts / price_inr).astype(int)
+    invested_amounts = quantities * price_inr
+
+    plan = pd.DataFrame({
+        "Symbol": alloc_df.loc[common_tickers, "Symbol"].values,
+        "Yahoo Ticker": common_tickers,
+        "Optimal Weight": aligned_weights,
+        "Target Amount INR": target_amounts,
+        "Latest Price INR": price_inr,
+        "Suggested Quantity": quantities,
+        "Estimated Investment INR": invested_amounts,
+    }).sort_values("Optimal Weight", ascending=False).reset_index(drop=True)
+
+    unallocated_cash = float(lumpsum_inr) - float(invested_amounts.sum())
+    return plan, unallocated_cash, missing_prices, missing_alloc
+
+
+def lumpsum_execution_sheet_html(lumpsum_df, lumpsum_inr, unallocated_cash):
+    """Build a compact shareable buy-order sheet without portfolio analysis details."""
+    orders = lumpsum_df[lumpsum_df["Suggested Quantity"] > 0].copy()
+    rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(row['Symbol']))}</td>"
+        f"<td>{html.escape(str(row['Yahoo Ticker']))}</td>"
+        f"<td>{int(row['Suggested Quantity']):,}</td>"
+        f"<td>INR {float(row['Estimated Investment INR']):,.2f}</td>"
+        "</tr>"
+        for _, row in orders.iterrows()
+    )
+    if not rows:
+        rows = '<tr><td colspan="4">No whole-share buy orders for this amount.</td></tr>'
+
+    estimated_investment = float(orders["Estimated Investment INR"].sum())
+    generated_at = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumpsum Buy Orders</title>
+<style>
+body {{ font-family: Arial, sans-serif; color: #17212b; margin: 32px; max-width: 760px; }}
+h1 {{ margin: 0 0 6px; font-size: 24px; }}
+p {{ margin: 4px 0; }}
+.summary {{ margin: 24px 0; padding: 14px; background: #f2f6f4; border-left: 4px solid #1f7a5b; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ border-bottom: 1px solid #d7dce0; padding: 10px 8px; text-align: left; }}
+th {{ background: #17212b; color: white; }}
+.footnote {{ margin-top: 20px; color: #5d6872; font-size: 12px; }}
+@media print {{ body {{ margin: 16px; }} }}
+</style>
+</head>
+<body>
+<h1>Lumpsum Buy Orders</h1>
+<p>Generated {generated_at}</p>
+<div class="summary">
+<p><strong>Lumpsum:</strong> INR {float(lumpsum_inr):,.2f}</p>
+<p><strong>Estimated order value:</strong> INR {estimated_investment:,.2f}</p>
+<p><strong>Cash remaining:</strong> INR {float(unallocated_cash):,.2f}</p>
+</div>
+<table>
+<thead><tr><th>Symbol</th><th>Yahoo Ticker</th><th>Buy Quantity</th><th>Estimated Value</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>
+<p class="footnote">Whole-share quantities only. Verify live price, exchange, and order limits with your broker before placing orders.</p>
+</body>
+</html>"""
+
+
 def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip):
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
@@ -3063,6 +3155,15 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
+
+    lumpsum_inr = st.number_input(
+        "Lumpsum to allocate (INR)",
+        min_value=0.0,
+        value=0.0,
+        step=1000.0,
+        format="%.2f",
+        help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
+    )
 
     drop_bottom_pct = float(
         st.number_input(
@@ -3701,6 +3802,62 @@ if run_btn:
             st.warning(f"Skipped symbols with missing latest price: {', '.join(missing_prices)}")
         if missing_alloc:
             st.warning(f"Skipped symbols missing in allocation: {', '.join(missing_alloc)}")
+
+        if lumpsum_inr > 0:
+            lumpsum_df, unallocated_cash, lumpsum_missing_prices, lumpsum_missing_alloc = (
+                lumpsum_allocation_plan(
+                    portfolio_df.copy(),
+                    optimal_weights,
+                    log_returns,
+                    price_map,
+                    lumpsum_inr,
+                )
+            )
+            st.subheader("Lumpsum Optimal Allocation")
+            st.caption(
+                f"Lumpsum: ₹{lumpsum_inr:,.2f} | "
+                f"Estimated investment: ₹{lumpsum_df['Estimated Investment INR'].sum():,.2f} | "
+                f"Unallocated cash: ₹{unallocated_cash:,.2f}"
+            )
+            if lumpsum_missing_prices:
+                st.warning(
+                    "Lumpsum plan skipped symbols with missing latest price: "
+                    + ", ".join(lumpsum_missing_prices)
+                )
+            if lumpsum_missing_alloc:
+                st.warning(
+                    "Lumpsum plan skipped symbols missing in allocation: "
+                    + ", ".join(lumpsum_missing_alloc)
+                )
+            st.dataframe(
+                lumpsum_df.style.format({
+                    "Optimal Weight": "{:.2%}",
+                    "Target Amount INR": "₹{:,.2f}",
+                    "Latest Price INR": "₹{:,.2f}",
+                    "Suggested Quantity": "{:,.0f}",
+                    "Estimated Investment INR": "₹{:,.2f}",
+                }),
+                width="stretch",
+                hide_index=True,
+            )
+            st.download_button(
+                "Download lumpsum allocation CSV",
+                data=lumpsum_df.to_csv(index=False).encode("utf-8"),
+                file_name="lumpsum_optimal_allocation.csv",
+                mime="text/csv",
+                width="stretch",
+            )
+            st.download_button(
+                "Download compact execution sheet (HTML)",
+                data=lumpsum_execution_sheet_html(
+                    lumpsum_df,
+                    lumpsum_inr,
+                    unallocated_cash,
+                ).encode("utf-8"),
+                file_name="lumpsum_buy_orders.html",
+                mime="text/html",
+                width="stretch",
+            )
 
         st.subheader("Rebalancing Plan")
 
