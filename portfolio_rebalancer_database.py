@@ -3164,6 +3164,7 @@ with st.sidebar:
         format="%.2f",
         help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
     )
+    lumpsum_download_placeholder = st.empty()
 
     drop_bottom_pct = float(
         st.number_input(
@@ -3828,6 +3829,21 @@ if run_btn:
                 st.warning(
                     "Lumpsum plan skipped symbols missing in allocation: "
                     + ", ".join(lumpsum_missing_alloc)
+                )
+            with lumpsum_download_placeholder.container():
+                st.divider()
+                st.subheader("Lumpsum order download")
+                st.download_button(
+                    "Download compact execution sheet (HTML)",
+                    data=lumpsum_execution_sheet_html(
+                        lumpsum_df,
+                        lumpsum_inr,
+                        unallocated_cash,
+                    ).encode("utf-8"),
+                    file_name="lumpsum_buy_orders.html",
+                    mime="text/html",
+                    width="stretch",
+                    key="download_lumpsum_execution_sheet_sidebar",
                 )
             st.dataframe(
                 lumpsum_df.style.format({
