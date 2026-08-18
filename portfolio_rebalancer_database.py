@@ -2558,6 +2558,29 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
     quantities = np.floor(target_amounts / price_inr).astype(int)
     invested_amounts = quantities * price_inr
 
+    # Initial whole-share rounding leaves the target slices of higher-priced
+    # assets unspent. Reinvest the residual one share at a time where it most
+    # reduces the gap from the optimizer's target amount.
+    remaining_cash = float(lumpsum_inr) - float(invested_amounts.sum())
+    while True:
+        affordable = np.flatnonzero(price_inr <= remaining_cash + 1e-9)
+        if len(affordable) == 0:
+            break
+
+        current_amounts = quantities * price_inr
+        gap_reduction = (
+            np.abs(current_amounts[affordable] - target_amounts[affordable])
+            - np.abs(
+                current_amounts[affordable]
+                + price_inr[affordable]
+                - target_amounts[affordable]
+            )
+        )
+        best_position = affordable[np.argmax(gap_reduction)]
+        quantities[best_position] += 1
+        invested_amounts[best_position] += price_inr[best_position]
+        remaining_cash -= price_inr[best_position]
+
     plan = pd.DataFrame({
         "Symbol": alloc_df.loc[common_tickers, "Symbol"].values,
         "Yahoo Ticker": common_tickers,
@@ -2568,7 +2591,7 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
         "Estimated Investment INR": invested_amounts,
     }).sort_values("Optimal Weight", ascending=False).reset_index(drop=True)
 
-    unallocated_cash = float(lumpsum_inr) - float(invested_amounts.sum())
+    unallocated_cash = max(0.0, remaining_cash)
     return plan, unallocated_cash, missing_prices, missing_alloc
 
 
