@@ -2600,10 +2600,10 @@ def lumpsum_execution_sheet_html(lumpsum_df, lumpsum_inr, unallocated_cash):
     orders = lumpsum_df[lumpsum_df["Suggested Quantity"] > 0].copy()
     rows = "".join(
         "<tr>"
-        f"<td>{html.escape(str(row['Symbol']))}</td>"
-        f"<td>{html.escape(str(row['Yahoo Ticker']))}</td>"
-        f"<td>{int(row['Suggested Quantity']):,}</td>"
-        f"<td>INR {float(row['Estimated Investment INR']):,.2f}</td>"
+        f"<td data-label=\"Symbol\">{html.escape(str(row['Symbol']))}</td>"
+        f"<td data-label=\"Yahoo Ticker\">{html.escape(str(row['Yahoo Ticker']))}</td>"
+        f"<td data-label=\"Buy Quantity\">{int(row['Suggested Quantity']):,}</td>"
+        f"<td data-label=\"Estimated Value\">INR {float(row['Estimated Investment INR']):,.2f}</td>"
         "</tr>"
         for _, row in orders.iterrows()
     )
@@ -2619,7 +2619,7 @@ def lumpsum_execution_sheet_html(lumpsum_df, lumpsum_inr, unallocated_cash):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lumpsum Buy Orders</title>
 <style>
-body {{ font-family: Arial, sans-serif; color: #17212b; margin: 32px; max-width: 760px; }}
+body {{ font-family: Arial, sans-serif; color: #17212b; margin: 32px auto; max-width: 760px; padding: 0 16px; }}
 h1 {{ margin: 0 0 6px; font-size: 24px; }}
 p {{ margin: 4px 0; }}
 .summary {{ margin: 24px 0; padding: 14px; background: #f2f6f4; border-left: 4px solid #1f7a5b; }}
@@ -2627,6 +2627,16 @@ table {{ border-collapse: collapse; width: 100%; }}
 th, td {{ border-bottom: 1px solid #d7dce0; padding: 10px 8px; text-align: left; }}
 th {{ background: #17212b; color: white; }}
 .footnote {{ margin-top: 20px; color: #5d6872; font-size: 12px; }}
+@media (max-width: 600px) {{
+body {{ margin: 16px auto; padding: 0 12px; }}
+h1 {{ font-size: 21px; }}
+.summary {{ margin: 16px 0; }}
+table, tbody, tr, td {{ display: block; }}
+thead {{ display: none; }}
+tr {{ border: 1px solid #d7dce0; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; }}
+td {{ border: 0; display: flex; gap: 12px; justify-content: space-between; padding: 7px 0; }}
+td::before {{ content: attr(data-label); color: #5d6872; font-weight: bold; }}
+}}
 @media print {{ body {{ margin: 16px; }} }}
 </style>
 </head>
