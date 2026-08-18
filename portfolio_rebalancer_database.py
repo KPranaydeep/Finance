@@ -97,6 +97,10 @@ def normalize_portfolio_symbol(value):
     symbol = str(value or "").strip().upper()
     if symbol.endswith(".NS") or symbol.endswith(".BO"):
         symbol = symbol[:-3]
+    # NSE uses the -SM series marker for SME listings, while Yahoo history is
+    # generally published under the base NSE symbol (for example, UCL.NS).
+    if symbol.endswith("-SM"):
+        symbol = symbol[:-3]
     return symbol
 
 
@@ -369,7 +373,11 @@ def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
         or raw.startswith("^")
     )
 
-    if explicit:
+    if raw.endswith("-SM.NS"):
+        # Yahoo's -SM alias can resolve but returns only a stale placeholder row.
+        # Prefer the regular NSE ticker, retaining the alias as a last resort.
+        candidates = [f"{base}.NS", raw]
+    elif explicit:
         candidates = [raw]
     elif base.isdigit():
         # Numeric Indian security codes are overwhelmingly BSE identifiers.
@@ -751,8 +759,13 @@ def repair_master_holdings_metadata(owner):
                 and exchange in {"", "NSE", "NSI"}
                 and currency in {"", "INR"}
             )
+            looks_like_sme_alias = ticker.endswith("-SM.NS")
 
-            if not metadata_missing and not looks_like_bad_legacy_nse_guess:
+            if (
+                not metadata_missing
+                and not looks_like_bad_legacy_nse_guess
+                and not looks_like_sme_alias
+            ):
                 continue
 
             instrument = resolve_yahoo_instrument(symbol, lookup)
@@ -764,7 +777,12 @@ def repair_master_holdings_metadata(owner):
             new_currency = _normalize_currency_code(instrument["currency"])
             old_name = str(row["stock_name"] or "").strip()
             new_name = str(instrument["stock_name"] or symbol).strip()
-            if old_name and old_name.upper() != symbol.upper() and not looks_like_bad_legacy_nse_guess:
+            if (
+                old_name
+                and old_name.upper() != symbol.upper()
+                and not looks_like_bad_legacy_nse_guess
+                and not looks_like_sme_alias
+            ):
                 new_name = old_name
 
             if (
@@ -3338,7 +3356,7 @@ with step_col2:
         lumpsum_inr = st.number_input(
             "Lumpsum to allocate (INR)",
             min_value=0.0,
-            value=10000.0,
+            value=0.0,
             step=1000.0,
             format="%.2f",
             help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
