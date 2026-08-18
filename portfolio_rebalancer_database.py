@@ -1,3 +1,5 @@
+import base64
+import base64
 import io
 import html
 import json
@@ -2619,14 +2621,13 @@ def lumpsum_execution_sheet_html(lumpsum_df, lumpsum_inr, unallocated_cash):
     rows = "".join(
         "<tr>"
         f"<td data-label=\"Symbol\">{html.escape(str(row['Symbol']))}</td>"
-        f"<td data-label=\"Yahoo Ticker\">{html.escape(str(row['Yahoo Ticker']))}</td>"
         f"<td data-label=\"Buy Quantity\">{int(row['Suggested Quantity']):,}</td>"
         f"<td data-label=\"Estimated Value\">INR {float(row['Estimated Investment INR']):,.2f}</td>"
         "</tr>"
         for _, row in orders.iterrows()
     )
     if not rows:
-        rows = '<tr><td colspan="4">No whole-share buy orders for this amount.</td></tr>'
+        rows = '<tr><td colspan="3">No whole-share buy orders for this amount.</td></tr>'
 
     estimated_investment = float(orders["Estimated Investment INR"].sum())
     generated_at = datetime.now().strftime("%d %b %Y, %I:%M %p")
@@ -2637,42 +2638,58 @@ def lumpsum_execution_sheet_html(lumpsum_df, lumpsum_inr, unallocated_cash):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lumpsum Buy Orders</title>
 <style>
-body {{ font-family: Arial, sans-serif; color: #17212b; margin: 32px auto; max-width: 760px; padding: 0 16px; }}
-h1 {{ margin: 0 0 6px; font-size: 24px; }}
-p {{ margin: 4px 0; }}
-.summary {{ margin: 24px 0; padding: 14px; background: #f2f6f4; border-left: 4px solid #1f7a5b; }}
+body {{ font-family: Arial, sans-serif; color: #17212b; margin: 20px auto; max-width: 760px; padding: 0 16px; font-size: 14px; }}
+h1 {{ margin: 0; font-size: 22px; }}
+.generated {{ margin: 2px 0 10px; color: #5d6872; font-size: 12px; }}
+.summary {{ display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0; padding: 9px 12px; background: #f2f6f4; border-left: 4px solid #1f7a5b; }}
+.summary p {{ margin: 0; white-space: nowrap; }}
 table {{ border-collapse: collapse; width: 100%; }}
-th, td {{ border-bottom: 1px solid #d7dce0; padding: 10px 8px; text-align: left; }}
+th, td {{ border-bottom: 1px solid #d7dce0; padding: 7px 8px; text-align: left; }}
 th {{ background: #17212b; color: white; }}
-.footnote {{ margin-top: 20px; color: #5d6872; font-size: 12px; }}
+.footnote {{ margin: 10px 0 0; color: #5d6872; font-size: 11px; }}
 @media (max-width: 600px) {{
-body {{ margin: 16px auto; padding: 0 12px; }}
-h1 {{ font-size: 21px; }}
-.summary {{ margin: 16px 0; }}
-table, tbody, tr, td {{ display: block; }}
-thead {{ display: none; }}
-tr {{ border: 1px solid #d7dce0; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; }}
-td {{ border: 0; display: flex; gap: 12px; justify-content: space-between; padding: 7px 0; }}
-td::before {{ content: attr(data-label); color: #5d6872; font-weight: bold; }}
+body {{ margin: 12px auto; padding: 0 10px; font-size: 12px; }}
+h1 {{ font-size: 19px; }}
+.summary {{ gap: 4px 10px; margin: 8px 0; padding: 7px 9px; }}
+.summary p {{ white-space: normal; }}
+th, td {{ padding: 6px 4px; }}
 }}
-@media print {{ body {{ margin: 16px; }} }}
+@media print {{ body {{ margin: 12px; max-width: none; }} .summary {{ margin: 8px 0; }} th, td {{ padding: 5px 6px; }} }}
 </style>
 </head>
 <body>
 <h1>Lumpsum Buy Orders</h1>
-<p>Generated {generated_at}</p>
+<p class="generated">Generated {generated_at}</p>
 <div class="summary">
 <p><strong>Lumpsum:</strong> INR {float(lumpsum_inr):,.2f}</p>
 <p><strong>Estimated order value:</strong> INR {estimated_investment:,.2f}</p>
 <p><strong>Cash remaining:</strong> INR {float(unallocated_cash):,.2f}</p>
 </div>
 <table>
-<thead><tr><th>Symbol</th><th>Yahoo Ticker</th><th>Buy Quantity</th><th>Estimated Value</th></tr></thead>
+<thead><tr><th>Symbol</th><th>Buy Quantity</th><th>Estimated Value</th></tr></thead>
 <tbody>{rows}</tbody>
 </table>
 <p class="footnote">Whole-share quantities only. Verify live price, exchange, and order limits with your broker before placing orders.</p>
 </body>
 </html>"""
+
+
+def auto_download_html(html_content, file_name):
+    """Trigger a browser download after a newly generated lumpsum plan."""
+    encoded_content = base64.b64encode(html_content.encode("utf-8")).decode("ascii")
+    st.components.v1.html(
+        f"""
+        <script>
+        const link = document.createElement("a");
+        link.href = "data:text/html;charset=utf-8;base64,{encoded_content}";
+        link.download = {json.dumps(file_name)};
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip):
@@ -3356,7 +3373,7 @@ with step_col2:
         lumpsum_inr = st.number_input(
             "Lumpsum to allocate (INR)",
             min_value=0.0,
-            value=0.0,
+            value=10000.0,
             step=1000.0,
             format="%.2f",
             help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
@@ -3375,8 +3392,6 @@ with step_col3:
             type="primary",
             key="run_optimization_btn_main",
         )
-
-lumpsum_download_placeholder = st.empty()
 
 st.divider()
 with st.expander("🌐 Universal Portfolio", expanded=False):
@@ -3885,21 +3900,12 @@ if run_btn:
                     "Lumpsum plan skipped symbols missing in allocation: "
                     + ", ".join(lumpsum_missing_alloc)
                 )
-            with lumpsum_download_placeholder.container():
-                st.divider()
-                st.subheader("Lumpsum order download")
-                st.download_button(
-                    "Download compact execution sheet (HTML)",
-                    data=lumpsum_execution_sheet_html(
-                        lumpsum_df,
-                        lumpsum_inr,
-                        unallocated_cash,
-                    ).encode("utf-8"),
-                    file_name="lumpsum_buy_orders.html",
-                    mime="text/html",
-                    width="stretch",
-                    key="download_lumpsum_execution_sheet_sidebar",
-                )
+            execution_sheet_html = lumpsum_execution_sheet_html(
+                lumpsum_df,
+                lumpsum_inr,
+                unallocated_cash,
+            )
+            auto_download_html(execution_sheet_html, "lumpsum_buy_orders.html")
             st.dataframe(
                 lumpsum_df.style.format({
                     "Optimal Weight": "{:.2%}",
@@ -3920,11 +3926,7 @@ if run_btn:
             )
             st.download_button(
                 "Download compact execution sheet (HTML)",
-                data=lumpsum_execution_sheet_html(
-                    lumpsum_df,
-                    lumpsum_inr,
-                    unallocated_cash,
-                ).encode("utf-8"),
+                data=execution_sheet_html.encode("utf-8"),
                 file_name="lumpsum_buy_orders.html",
                 mime="text/html",
                 width="stretch",
