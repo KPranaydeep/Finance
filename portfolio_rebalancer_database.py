@@ -3338,7 +3338,7 @@ with step_col2:
         lumpsum_inr = st.number_input(
             "Lumpsum to allocate (INR)",
             min_value=0.0,
-            value=0.0,
+            value=10000.0,
             step=1000.0,
             format="%.2f",
             help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
