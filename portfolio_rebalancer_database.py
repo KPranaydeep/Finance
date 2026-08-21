@@ -1,4 +1,5 @@
 import base64
+import importlib.util
 import io
 import html
 import json
@@ -16,7 +17,32 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from drop_logic import select_drop_bottom_tickers
+
+def _load_drop_logic_module():
+    """Load the sibling module from the app directory, not just sys.path."""
+    candidates = [
+        Path(__file__).resolve().with_name("drop_logic.py"),
+        Path.cwd() / "drop_logic.py",
+        Path(__file__).resolve().parent.parent / "drop_logic.py",
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            spec = importlib.util.spec_from_file_location("drop_logic", candidate)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+    raise ModuleNotFoundError(
+        "Could not locate drop_logic.py next to the Streamlit app. "
+        "Ensure the file is included in the deployment bundle."
+    )
+
+
+drop_logic = _load_drop_logic_module()
+select_drop_bottom_tickers = drop_logic.select_drop_bottom_tickers
 
 warnings.filterwarnings("ignore")
 
