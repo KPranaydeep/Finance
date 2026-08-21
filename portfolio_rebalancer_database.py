@@ -11,6 +11,7 @@ import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -144,27 +145,30 @@ APP_BUILD = "2026-08-13-yf-resilient-downloads-v1"
 # =========================================================
 
 def trigger_download(data, file_name, mime_type):
-    """Start a browser download from the active Streamlit run."""
+    """Start a browser download using the supported iframe-based Streamlit API."""
     encoded_data = base64.b64encode(data).decode("utf-8")
-    components.html(
-        f"""
-        <script>
-        const bytes = Uint8Array.from(
-            atob("{encoded_data}"),
-            character => character.charCodeAt(0)
-        );
-        const blob = new Blob([bytes], {{ type: {json.dumps(mime_type)} }});
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = {json.dumps(file_name)};
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(link.href);
-        </script>
-        """,
+    html_payload = f"""
+    <html><body>
+    <script>
+    const bytes = Uint8Array.from(
+        atob("{encoded_data}"),
+        character => character.charCodeAt(0)
+    );
+    const blob = new Blob([bytes], {{ type: {json.dumps(mime_type)} }});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = {json.dumps(file_name)};
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    </script>
+    </body></html>
+    """
+    st.components.v1.iframe(
+        src="data:text/html;charset=utf-8," + quote(html_payload),
         height=0,
-        width=0,
+        scrolling=False,
     )
 
 @st.cache_data(show_spinner=False)
