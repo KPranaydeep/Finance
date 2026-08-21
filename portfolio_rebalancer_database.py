@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 warnings.filterwarnings("ignore")
 
@@ -56,6 +57,24 @@ APP_BUILD = "2026-08-13-yf-resilient-downloads-v1"
 # =========================================================
 # HELPERS
 # =========================================================
+
+def trigger_download(data, file_name, mime_type):
+    """Start a browser download from the active Streamlit run."""
+    encoded_data = base64.b64encode(data).decode("utf-8")
+    components.html(
+        f"""
+        <script>
+        const link = document.createElement("a");
+        link.href = "data:{mime_type};base64,{encoded_data}";
+        link.download = {json.dumps(file_name)};
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 @st.cache_data(show_spinner=False)
 def load_equity_mapping():
@@ -2674,24 +2693,6 @@ th, td {{ padding: 6px 4px; }}
 </html>"""
 
 
-def auto_download_html(html_content, file_name):
-    """Trigger a browser download after a newly generated lumpsum plan."""
-    encoded_content = base64.b64encode(html_content.encode("utf-8")).decode("ascii")
-    st.components.v1.html(
-        f"""
-        <script>
-        const link = document.createElement("a");
-        link.href = "data:text/html;charset=utf-8;base64,{encoded_content}";
-        link.download = {json.dumps(file_name)};
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        </script>
-        """,
-        height=0,
-    )
-
-
 def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip):
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
@@ -3905,7 +3906,11 @@ if run_btn:
                 lumpsum_inr,
                 unallocated_cash,
             )
-            auto_download_html(execution_sheet_html, "lumpsum_buy_orders.html")
+            trigger_download(
+                execution_sheet_html.encode("utf-8"),
+                "lumpsum_buy_orders.html",
+                "text/html",
+            )
             st.dataframe(
                 lumpsum_df.style.format({
                     "Optimal Weight": "{:.2%}",
@@ -3917,20 +3922,25 @@ if run_btn:
                 width="stretch",
                 hide_index=True,
             )
-            st.download_button(
-                "Download lumpsum allocation CSV",
-                data=lumpsum_df.to_csv(index=False).encode("utf-8"),
-                file_name="lumpsum_optimal_allocation.csv",
-                mime="text/csv",
-                width="stretch",
-            )
-            st.download_button(
-                "Download compact execution sheet (HTML)",
-                data=execution_sheet_html.encode("utf-8"),
-                file_name="lumpsum_buy_orders.html",
-                mime="text/html",
-                width="stretch",
-            )
+            csv_download_col, execution_sheet_download_col, _ = st.columns([1, 1, 5])
+            with csv_download_col:
+                st.download_button(
+                    "Download CSV",
+                    data=lumpsum_df.to_csv(index=False).encode("utf-8"),
+                    file_name="lumpsum_optimal_allocation.csv",
+                    mime="text/csv",
+                    width="content",
+                    key="download_lumpsum_allocation_csv",
+                )
+            with execution_sheet_download_col:
+                st.download_button(
+                    "Download buy sheet",
+                    data=execution_sheet_html.encode("utf-8"),
+                    file_name="lumpsum_buy_orders.html",
+                    mime="text/html",
+                    width="content",
+                    key="download_lumpsum_execution_sheet_html",
+                )
 
         st.subheader("Rebalancing Plan")
 
