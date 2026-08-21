@@ -18,6 +18,65 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 
+def _percent_drop_count(total_tickers, drop_bottom_pct=0.2, min_tickers_to_keep=1):
+    """Return the number to remove under a percentage rule while keeping at least one ticker when possible."""
+    if total_tickers <= max(int(min_tickers_to_keep), 1):
+        return 0
+
+    count = int(np.floor(float(drop_bottom_pct) * total_tickers))
+    if count == 0:
+        return 1
+    return min(count, max(total_tickers - max(int(min_tickers_to_keep), 1), 0))
+
+
+def _select_drop_bottom_tickers_fallback(history, drop_bottom_pct=0.2, min_tickers_to_keep=1, volume_history=None):
+    """Fallback selection logic used when the sibling helper file is not packaged in deployment."""
+    if history is None or history.empty:
+        return pd.Series(dtype=int), pd.Series(dtype=int), 0
+
+    if not isinstance(history, pd.DataFrame):
+        raise TypeError("history must be a pandas DataFrame")
+
+    valid_days = history.count().sort_values(ascending=False, kind="mergesort")
+    if valid_days.empty:
+        return pd.Series(dtype=int), pd.Series(dtype=int), 0
+
+    if drop_bottom_pct <= 0:
+        return valid_days, pd.Series(dtype=int), 0
+
+    if volume_history is None:
+        day_drop_count = _percent_drop_count(len(valid_days), drop_bottom_pct, min_tickers_to_keep)
+        sorted_days = valid_days.sort_values(ascending=False, kind="mergesort")
+        kept = sorted_days.head(len(valid_days) - day_drop_count)
+        dropped = sorted_days.tail(day_drop_count)
+        return kept, dropped, int(day_drop_count)
+
+    if not isinstance(volume_history, pd.DataFrame):
+        raise TypeError("volume_history must be a pandas DataFrame")
+
+    avg_volume = volume_history.mean().sort_values(ascending=True, kind="mergesort")
+    liquidity_drop_count = _percent_drop_count(len(avg_volume), drop_bottom_pct, min_tickers_to_keep)
+    liquidity_dropped = avg_volume.head(liquidity_drop_count)
+    liquidity_kept = valid_days.loc[avg_volume.index[liquidity_drop_count:]]
+
+    remaining = len(liquidity_kept)
+    day_drop_count = _percent_drop_count(remaining, drop_bottom_pct, min_tickers_to_keep)
+    ranked_history = liquidity_kept.to_frame("valid_days").join(
+        volume_history.mean().rename("avg_volume"),
+        how="left",
+    )
+    ranked_history = ranked_history.sort_values(
+        ["valid_days", "avg_volume"],
+        ascending=[False, False],
+        kind="mergesort",
+    )
+    kept = ranked_history.head(remaining - day_drop_count)
+    dropped = ranked_history.tail(day_drop_count)
+
+    dropped_all = pd.concat([liquidity_dropped, dropped["valid_days"]]).sort_values(ascending=True, kind="mergesort")
+    return kept["valid_days"], dropped_all, int(liquidity_drop_count + day_drop_count)
+
+
 def _load_drop_logic_module():
     """Load the sibling module from the app directory, not just sys.path."""
     candidates = [
@@ -35,14 +94,13 @@ def _load_drop_logic_module():
             spec.loader.exec_module(module)
             return module
 
-    raise ModuleNotFoundError(
-        "Could not locate drop_logic.py next to the Streamlit app. "
-        "Ensure the file is included in the deployment bundle."
-    )
+    return None
 
 
 drop_logic = _load_drop_logic_module()
-select_drop_bottom_tickers = drop_logic.select_drop_bottom_tickers
+select_drop_bottom_tickers = (
+    drop_logic.select_drop_bottom_tickers if drop_logic is not None else _select_drop_bottom_tickers_fallback
+)
 
 warnings.filterwarnings("ignore")
 
