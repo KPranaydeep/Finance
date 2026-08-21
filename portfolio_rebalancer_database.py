@@ -1529,42 +1529,42 @@ def render_saved_analysis(placeholder, owner):
                 saved_lumpsum_amount,
                 saved_unallocated_cash,
             )
-            st.subheader("Saved Lumpsum Allocation")
-            st.caption(
-                f"Lumpsum: ₹{saved_lumpsum_amount:,.2f} | "
-                f"Estimated investment: ₹{saved_lumpsum_df['Estimated Investment INR'].sum():,.2f} | "
-                f"Unallocated cash: ₹{saved_unallocated_cash:,.2f}"
-            )
-            st.dataframe(
-                saved_lumpsum_df.style.format({
-                    "Optimal Weight": "{:.2%}",
-                    "Target Amount INR": "₹{:,.2f}",
-                    "Latest Price INR": "₹{:,.2f}",
-                    "Suggested Quantity": "{:,.0f}",
-                    "Estimated Investment INR": "₹{:,.2f}",
-                }),
-                width="stretch",
-                hide_index=True,
-            )
-            saved_csv_col, saved_sheet_col, _ = st.columns([1, 1, 5])
-            with saved_csv_col:
-                st.download_button(
-                    "Download CSV",
-                    data=saved_lumpsum_df.to_csv(index=False).encode("utf-8"),
-                    file_name="lumpsum_optimal_allocation.csv",
-                    mime="text/csv",
-                    width="content",
-                    key="download_saved_lumpsum_allocation_csv_" + saved_at,
+            with st.expander("Saved Lumpsum Allocation", expanded=False):
+                st.caption(
+                    f"Lumpsum: ₹{saved_lumpsum_amount:,.2f} | "
+                    f"Estimated investment: ₹{saved_lumpsum_df['Estimated Investment INR'].sum():,.2f} | "
+                    f"Unallocated cash: ₹{saved_unallocated_cash:,.2f}"
                 )
-            with saved_sheet_col:
-                st.download_button(
-                    "Download buy sheet",
-                    data=saved_execution_sheet_html.encode("utf-8"),
-                    file_name="lumpsum_buy_orders.html",
-                    mime="text/html",
-                    width="content",
-                    key="download_saved_lumpsum_execution_sheet_" + saved_at,
+                st.dataframe(
+                    saved_lumpsum_df.style.format({
+                        "Optimal Weight": "{:.2%}",
+                        "Target Amount INR": "₹{:,.2f}",
+                        "Latest Price INR": "₹{:,.2f}",
+                        "Suggested Quantity": "{:,.0f}",
+                        "Estimated Investment INR": "₹{:,.2f}",
+                    }),
+                    width="stretch",
+                    hide_index=True,
                 )
+                saved_csv_col, saved_sheet_col, _ = st.columns([1, 1, 5])
+                with saved_csv_col:
+                    st.download_button(
+                        "Download CSV",
+                        data=saved_lumpsum_df.to_csv(index=False).encode("utf-8"),
+                        file_name="lumpsum_optimal_allocation.csv",
+                        mime="text/csv",
+                        width="content",
+                        key="download_saved_lumpsum_allocation_csv_" + saved_at,
+                    )
+                with saved_sheet_col:
+                    st.download_button(
+                        "Download buy sheet",
+                        data=saved_execution_sheet_html.encode("utf-8"),
+                        file_name="lumpsum_buy_orders.html",
+                        mime="text/html",
+                        width="content",
+                        key="download_saved_lumpsum_execution_sheet_" + saved_at,
+                    )
 
         current_stats = payload.get("current_stats") or {}
         optimal_stats = payload.get("optimal_stats") or {}
@@ -3939,22 +3939,6 @@ if run_btn:
                     lumpsum_inr,
                 )
             )
-            st.subheader("Lumpsum Optimal Allocation")
-            st.caption(
-                f"Lumpsum: ₹{lumpsum_inr:,.2f} | "
-                f"Estimated investment: ₹{lumpsum_df['Estimated Investment INR'].sum():,.2f} | "
-                f"Unallocated cash: ₹{unallocated_cash:,.2f}"
-            )
-            if lumpsum_missing_prices:
-                st.warning(
-                    "Lumpsum plan skipped symbols with missing latest price: "
-                    + ", ".join(lumpsum_missing_prices)
-                )
-            if lumpsum_missing_alloc:
-                st.warning(
-                    "Lumpsum plan skipped symbols missing in allocation: "
-                    + ", ".join(lumpsum_missing_alloc)
-                )
             execution_sheet_html = lumpsum_execution_sheet_html(
                 lumpsum_df,
                 lumpsum_inr,
@@ -3970,36 +3954,6 @@ if run_btn:
                 "lumpsum_buy_orders.html",
                 "text/html",
             )
-            st.dataframe(
-                lumpsum_df.style.format({
-                    "Optimal Weight": "{:.2%}",
-                    "Target Amount INR": "₹{:,.2f}",
-                    "Latest Price INR": "₹{:,.2f}",
-                    "Suggested Quantity": "{:,.0f}",
-                    "Estimated Investment INR": "₹{:,.2f}",
-                }),
-                width="stretch",
-                hide_index=True,
-            )
-            csv_download_col, execution_sheet_download_col, _ = st.columns([1, 1, 5])
-            with csv_download_col:
-                st.download_button(
-                    "Download CSV",
-                    data=lumpsum_df.to_csv(index=False).encode("utf-8"),
-                    file_name="lumpsum_optimal_allocation.csv",
-                    mime="text/csv",
-                    width="content",
-                    key="download_lumpsum_allocation_csv",
-                )
-            with execution_sheet_download_col:
-                st.download_button(
-                    "Download buy sheet",
-                    data=execution_sheet_html.encode("utf-8"),
-                    file_name="lumpsum_buy_orders.html",
-                    mime="text/html",
-                    width="content",
-                    key="download_lumpsum_execution_sheet_html",
-                )
 
         st.subheader("Rebalancing Plan")
 
