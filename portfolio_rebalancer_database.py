@@ -16,6 +16,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from drop_logic import select_drop_bottom_tickers
+
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
@@ -2216,6 +2218,118 @@ def extend_allocation_with_universal_candidates(portfolio_df):
 # RETURNS / OPTIMIZATION
 # =========================================================
 
+def _download_volume_history_resilient(
+    tickers,
+    *,
+    start=None,
+    end=None,
+    period=None,
+    batch_size=12,
+):
+    """Download volume history with the same resilient-per-ticker logic as price data."""
+    unique_tickers = [
+        str(t).strip().upper()
+        for t in dict.fromkeys(tickers)
+        if str(t).strip()
+    ]
+    if not unique_tickers:
+        return pd.DataFrame(), {}
+
+    failures = {}
+    collected_frames = []
+
+    for batch in _chunked(unique_tickers, batch_size):
+        batch_frame = pd.DataFrame()
+        try:
+            kwargs = {
+                "progress": False,
+                "auto_adjust": True,
+                "threads": False,
+            }
+            if period is not None:
+                kwargs["period"] = period
+            else:
+                kwargs["start"] = start
+                kwargs["end"] = end
+
+            downloaded = _yf_download_quiet(batch, **kwargs)
+            batch_frame = _extract_volume_frame(downloaded, batch)
+        except Exception as exc:
+            batch_frame = pd.DataFrame()
+            batch_error = str(exc) or exc.__class__.__name__
+            for ticker in batch:
+                failures.setdefault(ticker, batch_error)
+
+        recovered = set(batch_frame.columns)
+        for ticker in batch:
+            if ticker in recovered:
+                continue
+            try:
+                kwargs = {
+                    "progress": False,
+                    "auto_adjust": True,
+                    "threads": False,
+                }
+                if period is not None:
+                    kwargs["period"] = period
+                else:
+                    kwargs["start"] = start
+                    kwargs["end"] = end
+
+                single_download = _yf_download_quiet(ticker, **kwargs)
+                single_frame = _extract_volume_frame(single_download, [ticker])
+                if single_frame.empty:
+                    failures.setdefault(ticker, "No usable volume history returned by Yahoo Finance.")
+                    continue
+
+                batch_frame = pd.concat([batch_frame, single_frame], axis=1)
+                failures.pop(ticker, None)
+            except Exception as exc:
+                failures[ticker] = str(exc) or exc.__class__.__name__
+
+        if not batch_frame.empty:
+            collected_frames.append(batch_frame)
+
+    if not collected_frames:
+        return pd.DataFrame(), failures
+
+    merged = pd.concat(collected_frames, axis=1)
+    merged = merged.loc[:, ~merged.columns.duplicated()].sort_index()
+    return merged, failures
+
+
+def _extract_volume_frame(data, expected_tickers):
+    """Normalize yfinance output into a Volume DataFrame keyed by ticker."""
+    if data is None:
+        return pd.DataFrame()
+
+    if isinstance(data, pd.Series):
+        if len(expected_tickers) == 1:
+            return data.to_frame(name=expected_tickers[0]).astype(float)
+        return pd.DataFrame()
+
+    if getattr(data, "empty", True):
+        return pd.DataFrame()
+
+    frame = data
+    if isinstance(frame.columns, pd.MultiIndex):
+        if "Volume" in frame.columns.get_level_values(0):
+            frame = frame["Volume"]
+        else:
+            return pd.DataFrame()
+    else:
+        if "Volume" not in frame.columns:
+            return pd.DataFrame()
+        if len(expected_tickers) == 1:
+            frame = frame[["Volume"]].rename(columns={"Volume": expected_tickers[0]})
+        else:
+            frame = frame[["Volume"] * 0]
+            return pd.DataFrame()
+
+    frame = frame.apply(pd.to_numeric, errors="coerce")
+    return frame
+
+
 @st.cache_data(show_spinner=False)
 def download_close_history(
     symbols,
@@ -2250,6 +2364,40 @@ def download_close_history(
         )
 
     return prices
+
+
+@st.cache_data(show_spinner=False)
+def download_volume_history(
+    symbols,
+    start_date="2000-01-01",
+    end_date=None,
+    buffer_days=7,
+):
+    """Download daily volume history so low-liquidity names can be dropped first."""
+    if end_date is None:
+        end_date = datetime.today()
+    else:
+        end_date = pd.to_datetime(end_date)
+
+    effective_end = (end_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
+    volumes, failures = _download_volume_history_resilient(
+        list(symbols),
+        start=start_date,
+        end=effective_end,
+        batch_size=12,
+    )
+
+    volumes = volumes.dropna(axis=1, how="all")
+    if volumes.empty:
+        raise ValueError(
+            _format_download_failure_message(
+                [str(symbol).strip().upper() for symbol in symbols],
+                failures,
+                context="historical volume history",
+            )
+        )
+
+    return volumes
 
 
 @st.cache_data(show_spinner=False)
@@ -2370,7 +2518,7 @@ def get_daily_log_returns(
     start_date=None,
     end_date=None,
     buffer_days=7,
-    drop_bottom_pct=0.1,
+    drop_bottom_pct=0.2,
     ticker_currency_pairs=(),
 ):
     if end_date is None:
@@ -2401,12 +2549,15 @@ def get_daily_log_returns(
         df = convert_price_history_to_inr(df, ticker_currency_pairs)
 
     lengths = df.count().sort_values(ascending=False)
-    num_to_drop = int(np.floor(drop_bottom_pct * len(lengths)))
+    volume_df = download_volume_history(tuple(symbols), start_date=start_date, end_date=end_date, buffer_days=buffer_days)
+    kept, dropped, num_to_drop = select_drop_bottom_tickers(
+        df,
+        drop_bottom_pct=drop_bottom_pct,
+        volume_history=volume_df,
+    )
 
     dropped_df = pd.DataFrame()
     if num_to_drop > 0:
-        dropped = lengths.tail(num_to_drop)
-        kept = lengths.head(len(lengths) - num_to_drop)
         df = df[kept.index]
         dropped_df = pd.DataFrame({
             "Ticker": dropped.index,
@@ -2585,7 +2736,7 @@ def run_portfolio_analysis_multi(
     current_alloc,
     max_dd=0.05,
     target_volatility=None,
-    drop_bottom_pct=0.1,
+    drop_bottom_pct=0.2,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -3042,10 +3193,6 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct, owner):
     if not yahoo_tickers:
         raise ValueError("No Yahoo Finance tickers could be resolved.")
 
-    total_tickers = len(yahoo_tickers)
-    num_to_drop = int(np.floor(float(drop_bottom_pct) * total_tickers))
-    tickers_kept = max(total_tickers - num_to_drop, 0)
-
     history, failures = _download_close_prices_resilient(
         list(yahoo_tickers),
         period="5y",
@@ -3061,12 +3208,25 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct, owner):
             )
         )
 
-    lengths = history.count().sort_values(ascending=False)
-    available_tickers = len(lengths)
+    volume_history, _ = _download_volume_history_resilient(
+        list(yahoo_tickers),
+        period="5y",
+        batch_size=12,
+    )
+    volume_history = volume_history.dropna(axis=1, how="all")
+
+    kept, dropped, num_to_drop = select_drop_bottom_tickers(
+        history,
+        drop_bottom_pct=float(drop_bottom_pct),
+        volume_history=volume_history,
+    )
+    total_tickers = len(yahoo_tickers)
+    tickers_kept = max(total_tickers - num_to_drop, 0)
+    available_tickers = len(kept)
     actual_kept = max(min(tickers_kept, available_tickers), 0)
-    filtered_tickers = lengths.head(actual_kept).index.tolist()
-    available_days = int(lengths.head(actual_kept).min()) if actual_kept > 0 else 0
-    dropped_tickers = lengths.tail(num_to_drop).index.tolist() if num_to_drop > 0 else []
+    filtered_tickers = kept.head(actual_kept).index.tolist()
+    available_days = int(kept.head(actual_kept).min()) if actual_kept > 0 else 0
+    dropped_tickers = dropped.index.tolist() if num_to_drop > 0 else []
 
     return {
         "drop_bottom_pct": float(drop_bottom_pct),
@@ -3280,7 +3440,7 @@ with st.sidebar:
 
     drop_bottom_pct = float(
         st.number_input(
-            "Drop bottom fraction of tickers by history length",
+            "Drop bottom fraction of tickers by liquidity then history length",
             min_value=0.0,
             max_value=0.95,
             value=0.20,
