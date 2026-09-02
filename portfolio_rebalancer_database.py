@@ -9,7 +9,7 @@ import sqlite3
 import time
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime, timedelta
+from datetime import datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from pandas.tseries.offsets import BDay
 
 
 def _percent_drop_count(total_tickers, drop_bottom_pct=0.2, min_tickers_to_keep=1):
@@ -2418,20 +2419,73 @@ def _extract_volume_frame(data, expected_tickers):
     return frame
 
 
+def effective_history_end(end_date=None, buffer_days=0):
+    """Return (anchor, last included date), counting the buffer in business days.
+
+    A calendar-day buffer would collapse (Mon-1, Mon-2, Mon-3 all land on Friday)
+    and could display a Saturday or Sunday that has no market data. Exchange
+    holidays are still not modelled, so treat the result as "on or before".
+    """
+    anchor = pd.Timestamp.today() if end_date is None else pd.to_datetime(end_date)
+    anchor = anchor.normalize()
+
+    business_day = BDay()
+    steps = max(int(buffer_days), 0)
+    target = anchor if steps == 0 else anchor - steps * business_day
+    return anchor, business_day.rollback(target)
+
+
+def _resolve_history_window_end(end_date, buffer_days):
+    """Return the anchor plus the exclusive `end` string yfinance expects.
+
+    The anchor is returned unadjusted so callers can pass it back down together
+    with buffer_days without applying the buffer twice.
+    """
+    anchor, last_included = effective_history_end(end_date, buffer_days)
+    return anchor, (last_included + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+MARKET_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+MARKET_CLOSE = clock_time(15, 30)
+# Yahoo needs a little time after the close before the daily bar stops moving.
+BAR_SETTLE_MINUTES = 30
+
+
+def auto_history_buffer_days(now=None):
+    """Return (trading days to skip, reason) so the last bar is always a closed session.
+
+    Weekends need no buffer because `effective_history_end` already rolls back to
+    Friday. A holiday needs none either: Yahoo simply returns no row for it, and the
+    intersection logic then ends on the previous real session.
+    """
+    now = datetime.now(MARKET_TIMEZONE) if now is None else now
+
+    if now.weekday() >= 5:
+        return 0, f"{now:%A} is not a trading day — the previous session is used."
+
+    settled_at = (
+        datetime.combine(now.date(), MARKET_CLOSE)
+        + timedelta(minutes=BAR_SETTLE_MINUTES)
+    ).time()
+
+    if now.time() < settled_at:
+        return 1, (
+            f"The {now:%A} session has not settled yet "
+            f"(NSE closes {MARKET_CLOSE:%H:%M} IST) — today is skipped."
+        )
+
+    return 0, f"The {now:%A} session has closed — today is included."
+
+
 @st.cache_data(show_spinner=False)
 def download_close_history(
     symbols,
     start_date="2000-01-01",
     end_date=None,
-    buffer_days=7,
+    buffer_days=0,
 ):
     """Download closing-price history once and reuse it during the same analysis."""
-    if end_date is None:
-        end_date = datetime.today()
-    else:
-        end_date = pd.to_datetime(end_date)
-
-    effective_end = (end_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
+    _, effective_end = _resolve_history_window_end(end_date, buffer_days)
 
     prices, failures = _download_close_prices_resilient(
         list(symbols),
@@ -2459,15 +2513,10 @@ def download_volume_history(
     symbols,
     start_date="2000-01-01",
     end_date=None,
-    buffer_days=7,
+    buffer_days=0,
 ):
     """Download daily volume history so low-liquidity names can be dropped first."""
-    if end_date is None:
-        end_date = datetime.today()
-    else:
-        end_date = pd.to_datetime(end_date)
-
-    effective_end = (end_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
+    _, effective_end = _resolve_history_window_end(end_date, buffer_days)
     volumes, failures = _download_volume_history_resilient(
         list(symbols),
         start=start_date,
@@ -2494,7 +2543,7 @@ def find_drop_bottom_pct_nearest_target(
     target_trading_days=252,
     start_date="2000-01-01",
     end_date=None,
-    buffer_days=7,
+    buffer_days=0,
 ):
     """Return the 0.01 drop fraction producing trading days nearest to 252+.
 
@@ -2605,14 +2654,11 @@ def get_daily_log_returns(
     symbols,
     start_date=None,
     end_date=None,
-    buffer_days=7,
+    buffer_days=0,
     drop_bottom_pct=0.2,
     ticker_currency_pairs=(),
 ):
-    if end_date is None:
-        end_date = datetime.today()
-    else:
-        end_date = pd.to_datetime(end_date)
+    end_date, _ = _resolve_history_window_end(end_date, buffer_days)
 
     if start_date is None:
         start_date = "2000-01-01"
@@ -2628,7 +2674,6 @@ def get_daily_log_returns(
 
     if df.empty:
         raise ValueError("No data available for the given tickers.")
-
     available_tickers = {str(col).strip().upper() for col in df.columns}
     missing_history_tickers = sorted(set(requested_tickers) - available_tickers)
 
@@ -2866,6 +2911,7 @@ def run_portfolio_analysis_multi(
     max_dd=0.05,
     target_volatility=None,
     drop_bottom_pct=0.2,
+    buffer_days=0,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -2877,6 +2923,7 @@ def run_portfolio_analysis_multi(
     log_returns, meta = get_daily_log_returns(
         tuple(symbols),
         drop_bottom_pct=drop_bottom_pct,
+        buffer_days=buffer_days,
         ticker_currency_pairs=ticker_currency_pairs,
     )
 
@@ -3567,6 +3614,43 @@ with st.sidebar:
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
 
+    auto_history_end = st.checkbox(
+        "Choose the history end date automatically",
+        value=True,
+        key="auto_history_end",
+        help=(
+            "Uses the day of week and the NSE close time: weekends roll back to Friday, "
+            "and today is skipped only while its session is still open."
+        ),
+    )
+
+    if auto_history_end:
+        history_buffer_days, history_buffer_reason = auto_history_buffer_days()
+    else:
+        history_buffer_reason = ""
+        history_buffer_days = int(
+            st.number_input(
+                "Exclude last N trading days of history",
+                min_value=0,
+                max_value=30,
+                value=0,
+                step=1,
+                key="history_buffer_days",
+                help=(
+                    "Counted in trading days, not calendar days. 0 uses history up to and "
+                    "including today."
+                ),
+            )
+        )
+
+    history_end_date = effective_history_end(None, history_buffer_days)[1]
+    st.caption(
+        f"History ends on or before: {history_end_date:%a, %d %b %Y} "
+        "(exchange holidays may pull it earlier)"
+    )
+    if history_buffer_reason:
+        st.caption(history_buffer_reason)
+
     drop_bottom_pct = float(
         st.number_input(
             "Drop bottom fraction of tickers by liquidity then history length",
@@ -4126,6 +4210,7 @@ if run_btn:
                 max_dd=max_dd,
                 target_volatility=target_volatility,
                 drop_bottom_pct=drop_bottom_pct,
+                buffer_days=history_buffer_days,
             )
 
         if optimal_weights is None:
@@ -4271,6 +4356,7 @@ if run_btn:
                 "max_drawdown_input_pct": float(max_dd_pct),
                 "internal_max_dd": float(max_dd),
                 "drop_bottom_fraction": float(drop_bottom_pct),
+                "history_buffer_days": int(history_buffer_days),
                 "use_target_volatility": bool(use_target_vol),
                 "target_volatility": (
                     float(target_volatility)
