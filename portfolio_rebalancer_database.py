@@ -3234,6 +3234,141 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     )
     return rebal_df, missing_prices, missing_alloc
 
+
+def build_holdings_action_summary(
+    portfolio_df,
+    rebal_df,
+    optimal_weight_by_ticker,
+    price_map,
+    meta,
+    invalid_holding_rows=(),
+    missing_price_tickers=(),
+):
+    """Report one row per owned holding, including the ones no trade was produced for.
+
+    The rebalancing plan lists executable trades only, so a holding removed by a
+    filter looks exactly like one that needs no action. This states which it was.
+    """
+    columns = [
+        "Symbol", "Action", "Quantity", "Price INR", "Trade Value INR",
+        "Current Weight", "Optimal Weight", "Status",
+    ]
+
+    quantity = pd.to_numeric(portfolio_df.get("Quantity"), errors="coerce").fillna(0)
+    owned = portfolio_df[quantity > 0].copy()
+    if owned.empty:
+        return pd.DataFrame(columns=columns)
+
+    trades = {}
+    if rebal_df is not None and not rebal_df.empty:
+        trades = {str(row["Yahoo Ticker"]): row for _, row in rebal_df.iterrows()}
+
+    redundant_df = meta.get("redundant_df")
+    merged_into = (
+        dict(zip(redundant_df["Dropped"].astype(str), redundant_df["Kept Instead"].astype(str)))
+        if redundant_df is not None and not redundant_df.empty
+        else {}
+    )
+
+    dropped_df = meta.get("dropped_df")
+    short_history = (
+        set(dropped_df["Ticker"].astype(str))
+        if dropped_df is not None and not dropped_df.empty
+        else set()
+    )
+
+    missing_history = {str(t) for t in (meta.get("missing_history_tickers") or [])}
+    missing_price = {str(t) for t in (missing_price_tickers or [])}
+    invalid_symbols = {str(s) for s in (invalid_holding_rows or [])}
+    analysed = {str(t) for t in optimal_weight_by_ticker}
+
+    rows = []
+    for _, holding in owned.iterrows():
+        ticker = str(holding["Yahoo Ticker"])
+        symbol = str(holding["Symbol"])
+        trade = trades.get(ticker)
+
+        if trade is not None:
+            rows.append({
+                "Symbol": symbol,
+                "Action": str(trade["Action"]),
+                "Quantity": int(trade["Executable Quantity"]),
+                "Price INR": float(trade["Native Price"]) * float(trade["FX to INR"]),
+                "Trade Value INR": float(trade["Executable Value"]),
+                "Current Weight": float(trade["Current Weight"]),
+                "Optimal Weight": float(trade["Optimal Weight"]),
+                "Status": "Listed in the rebalancing plan",
+            })
+            continue
+
+        native_price = price_map.get(ticker)
+        price_inr = (
+            float(native_price) * float(holding["FX to INR"])
+            if native_price is not None
+            else float(holding["Latest Price INR"])
+        )
+
+        if ticker in analysed:
+            action = "Hold"
+            status = "Optimal weight is less than one whole share away"
+        elif ticker in merged_into:
+            action = "Not analysed"
+            status = f"Near-duplicate of {merged_into[ticker]}, which carries this exposure"
+        elif ticker in short_history:
+            action = "Not analysed"
+            status = "Removed by the liquidity / history-length filter"
+        elif ticker in missing_history:
+            action = "Not analysed"
+            status = "Yahoo Finance returned no usable price history"
+        elif ticker in missing_price:
+            action = "Not analysed"
+            status = "No latest price was available for sizing"
+        elif symbol in invalid_symbols:
+            action = "Not analysed"
+            status = "Quantity or average price is missing or invalid"
+        else:
+            action = "Not analysed"
+            status = "No overlapping history with the rest of the portfolio"
+
+        rows.append({
+            "Symbol": symbol,
+            "Action": action,
+            "Quantity": 0,
+            "Price INR": price_inr,
+            "Trade Value INR": 0.0,
+            "Current Weight": float(holding.get("Weight", 0.0)),
+            "Optimal Weight": float(optimal_weight_by_ticker.get(ticker, 0.0)),
+            "Status": status,
+        })
+
+    action_order = {"Sell": 0, "Buy": 1, "Hold": 2, "Not analysed": 3}
+    summary = pd.DataFrame(rows, columns=columns)
+    summary["_order"] = summary["Action"].map(action_order).fillna(4)
+    return (
+        summary.sort_values(["_order", "Trade Value INR"], ascending=[True, False], kind="stable")
+        .drop(columns="_order")
+        .reset_index(drop=True)
+    )
+
+
+def style_holdings_action_summary(df):
+    def color_action_row(row):
+        colors = {
+            "Buy": "background-color: #d4edda; color: #155724;",
+            "Sell": "background-color: #f8d7da; color: #721c24;",
+            "Hold": "background-color: #e2e3e5; color: #383d41;",
+        }
+        return [colors.get(row["Action"], "background-color: #fff3cd; color: #856404;")] * len(row)
+
+    formatters = {
+        "Quantity": "{:,.0f}",
+        "Price INR": "₹{:,.2f}",
+        "Trade Value INR": "₹{:,.0f}",
+        "Current Weight": "{:.2%}",
+        "Optimal Weight": "{:.2%}",
+    }
+    return df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
+
 @st.cache_data(show_spinner=False)
 def get_latest_price_map(latest_prices):
     tickers = tuple(dict.fromkeys(str(t).strip().upper() for t in latest_prices if str(t).strip()))
@@ -4415,6 +4550,36 @@ if run_btn:
         if missing_alloc:
             st.warning(f"Skipped symbols missing in allocation: {', '.join(missing_alloc)}")
 
+        holdings_action_df = build_holdings_action_summary(
+            portfolio_df,
+            rebal_df,
+            dict(zip(log_returns.columns, optimal_weights)),
+            price_map,
+            meta,
+            invalid_holding_rows=invalid_holding_rows,
+            missing_price_tickers=missing_prices,
+        )
+
+        if not holdings_action_df.empty:
+            st.subheader("Action for Every Holding You Own")
+            st.caption(
+                "The rebalancing plan below lists executable trades only. This table also "
+                "covers holdings that produced no trade, and says why."
+            )
+            st.dataframe(
+                style_holdings_action_summary(holdings_action_df),
+                width="stretch",
+                hide_index=True,
+            )
+            st.download_button(
+                "Download holdings action summary CSV",
+                data=holdings_action_df.to_csv(index=False).encode("utf-8"),
+                file_name="holdings_action_summary.csv",
+                mime="text/csv",
+                width="stretch",
+                key="download_holdings_action_summary",
+            )
+
         lumpsum_plan_payload = None
         if lumpsum_inr > 0:
             lumpsum_df, unallocated_cash, lumpsum_missing_prices, lumpsum_missing_alloc = (
@@ -4507,6 +4672,7 @@ if run_btn:
                 else []
             ),
             "current_allocation": portfolio_df.to_dict(orient="records"),
+            "holdings_action_summary": holdings_action_df.to_dict(orient="records"),
             "rebalancing_plan": rebal_df.to_dict(orient="records"),
             "lumpsum_plan": lumpsum_plan_payload,
             "warnings": {
