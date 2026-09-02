@@ -2693,10 +2693,51 @@ def get_daily_log_returns(
     }
     return log_returns, meta
 
+# Cap on any single asset's optimized weight. Sample-estimate mean-variance
+# optimization concentrates into whichever names had the luckiest realized mean,
+# so an explicit cap is what keeps the result diversified.
+MAX_WEIGHT_PER_ASSET = 0.10
+
+
+def shrunk_covariance(log_returns):
+    """Ledoit-Wolf (2004) shrinkage of the sample covariance toward a scaled identity.
+
+    With roughly as many assets as trading days the sample covariance is
+    near-singular, and optimizers amplify that estimation error. Shrinkage keeps
+    the matrix well-conditioned without adding a scikit-learn dependency.
+    """
+    returns = np.asarray(log_returns, dtype=float)
+    num_days, num_assets = returns.shape
+    if num_days < 2 or num_assets == 0:
+        return np.atleast_2d(np.cov(returns, rowvar=False))
+
+    centered = returns - returns.mean(axis=0)
+    sample = centered.T @ centered / num_days
+
+    average_variance = np.trace(sample) / num_assets
+    target = average_variance * np.eye(num_assets)
+
+    dispersion = np.sum((sample - target) ** 2) / num_assets
+    if dispersion <= 0:
+        return sample
+
+    squared = centered ** 2
+    noise = (squared.T @ squared / num_days - sample ** 2).sum() / (num_assets * num_days)
+    shrinkage = float(np.clip(noise / dispersion, 0.0, 1.0))
+
+    return shrinkage * target + (1.0 - shrinkage) * sample
+
+
+def weight_bounds(num_assets):
+    """Per-asset bounds, relaxed when the cap alone could not sum to one."""
+    cap = max(MAX_WEIGHT_PER_ASSET, 1.0 / num_assets) if num_assets else 1.0
+    return tuple((0.0, min(cap, 1.0)) for _ in range(num_assets))
+
+
 def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1):
     from scipy.optimize import minimize
     mean_returns = log_returns.mean()
-    cov_matrix = log_returns.cov()
+    cov_matrix = shrunk_covariance(log_returns)
     num_assets = len(mean_returns)
 
     def negative_sharpe(weights):
@@ -2720,7 +2761,7 @@ def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1
         {"type": "eq", "fun": lambda x: np.sum(x) - 1},
         {"type": "ineq", "fun": lambda x: max_drawdown - portfolio_drawdown(x)}
     ]
-    bounds = tuple((0, 1) for _ in range(num_assets))
+    bounds = weight_bounds(num_assets)
     initial = np.ones(num_assets) / num_assets
 
     result = minimize(negative_sharpe, initial, method="SLSQP", bounds=bounds, constraints=constraints)
@@ -2730,7 +2771,7 @@ def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1
 def optimize_max_sharpe_ratio(log_returns):
     from scipy.optimize import minimize
     mean_returns = log_returns.mean()
-    cov_matrix = log_returns.cov()
+    cov_matrix = shrunk_covariance(log_returns)
     num_assets = len(mean_returns)
 
     def negative_sharpe(weights):
@@ -2741,7 +2782,7 @@ def optimize_max_sharpe_ratio(log_returns):
         return -excess_return / port_volatility if port_volatility != 0 else np.inf
 
     constraints = [{"type": "eq", "fun": lambda x: np.sum(x) - 1}]
-    bounds = tuple((0, 1) for _ in range(num_assets))
+    bounds = weight_bounds(num_assets)
     initial = np.ones(num_assets) / num_assets
 
     result = minimize(negative_sharpe, initial, method="SLSQP", bounds=bounds, constraints=constraints)
@@ -2751,7 +2792,7 @@ def optimize_max_sharpe_ratio(log_returns):
 def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
     from scipy.optimize import minimize
     mean_returns = log_returns.mean()
-    cov_matrix = log_returns.cov()
+    cov_matrix = shrunk_covariance(log_returns)
     num_assets = len(mean_returns)
 
     def objective(weights):
@@ -2768,7 +2809,7 @@ def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
         {"type": "eq", "fun": constraint_sum},
         {"type": "ineq", "fun": constraint_volatility}
     ]
-    bounds = tuple((0, 1) for _ in range(num_assets))
+    bounds = weight_bounds(num_assets)
     initial = np.ones(num_assets) / num_assets
 
     result = minimize(objective, initial, method="SLSQP", bounds=bounds, constraints=constraints)
