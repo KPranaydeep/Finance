@@ -2649,7 +2649,12 @@ def find_drop_bottom_pct_nearest_target(
     return selected
 
 
-def select_redundant_tickers(log_returns, avg_volume=None, correlation_threshold=0.95):
+def select_redundant_tickers(
+    log_returns,
+    avg_volume=None,
+    correlation_threshold=0.80,
+    aggregation_days=5,
+):
     """Keep one representative per near-duplicate cluster, preferring the most liquid.
 
     Eight gold ETFs are one bet, not eight, but a per-ticker weight cap cannot see
@@ -2661,7 +2666,15 @@ def select_redundant_tickers(log_returns, avg_volume=None, correlation_threshold
     if len(tickers) < 2 or not 0.0 < correlation_threshold < 1.0:
         return tickers, empty_report
 
-    correlation = log_returns.corr().abs()
+    # A thinly traded ETF repeats its previous close, so its daily returns are full
+    # of artificial zeros that hide a duplicate. Non-overlapping multi-day sums let
+    # the shared underlying factor show through.
+    aggregated = log_returns
+    if aggregation_days > 1 and len(log_returns) >= aggregation_days * 10:
+        buckets = np.arange(len(log_returns)) // int(aggregation_days)
+        aggregated = log_returns.groupby(buckets).sum()
+
+    correlation = aggregated.corr().abs()
 
     if avg_volume is None:
         liquidity = pd.Series(0.0, index=tickers)
@@ -2706,7 +2719,7 @@ def get_daily_log_returns(
     buffer_days=0,
     drop_bottom_pct=0.2,
     ticker_currency_pairs=(),
-    redundancy_corr_threshold=0.95,
+    redundancy_corr_threshold=0.80,
 ):
     end_date, _ = _resolve_history_window_end(end_date, buffer_days)
 
@@ -2970,7 +2983,7 @@ def run_portfolio_analysis_multi(
     target_volatility=None,
     drop_bottom_pct=0.2,
     buffer_days=0,
-    redundancy_corr_threshold=0.95,
+    redundancy_corr_threshold=0.80,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -3037,32 +3050,33 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
     quantities = np.floor(target_amounts / price_inr).astype(int)
     invested_amounts = quantities * price_inr
 
-    # Initial whole-share rounding leaves the target slices of higher-priced
-    # assets unspent. Reinvest the residual one share at a time where it most
-    # reduces the gap from the optimizer's target amount.
+    # Whole-share rounding strands cash whenever an asset's target is below one
+    # share. Spending it is only safe while no asset exceeds the same cap the
+    # optimizer used, so that bounds the distortion instead of the target doing it.
+    ceiling_amounts = np.maximum(
+        target_amounts, float(lumpsum_inr) * MAX_WEIGHT_PER_ASSET
+    )
     remaining_cash = float(lumpsum_inr) - float(invested_amounts.sum())
     while True:
-        affordable = np.flatnonzero(price_inr <= remaining_cash + 1e-9)
+        headroom = ceiling_amounts - invested_amounts
+        affordable = np.flatnonzero(
+            (price_inr <= remaining_cash + 1e-9) & (price_inr <= headroom + 1e-9)
+        )
         if len(affordable) == 0:
             break
 
-        current_amounts = quantities * price_inr
         gap_reduction = (
-            np.abs(current_amounts[affordable] - target_amounts[affordable])
+            np.abs(invested_amounts[affordable] - target_amounts[affordable])
             - np.abs(
-                current_amounts[affordable]
+                invested_amounts[affordable]
                 + price_inr[affordable]
                 - target_amounts[affordable]
             )
         )
 
-        # argmax still returns the least-bad candidate once every share would
-        # overshoot, which would spend the residual on whatever is cheapest.
-        best_offset = int(np.argmax(gap_reduction))
-        if gap_reduction[best_offset] <= 0:
-            break
-
-        best_position = affordable[best_offset]
+        # Buy where the target is missed by most; the cap above stops this from
+        # turning into a dump on whatever share happens to be cheapest.
+        best_position = affordable[int(np.argmax(gap_reduction))]
         quantities[best_position] += 1
         invested_amounts[best_position] += price_inr[best_position]
         remaining_cash -= price_inr[best_position]
@@ -3740,14 +3754,15 @@ with st.sidebar:
             "Merge assets correlated above",
             min_value=0.50,
             max_value=1.00,
-            value=0.95,
+            value=0.80,
             step=0.01,
             format="%.2f",
             key="redundancy_corr_threshold",
             help=(
                 "Near-duplicate holdings such as eight gold ETFs are collapsed to the "
                 "most liquid one, so the per-asset weight cap limits real exposure "
-                "instead of one ticker. Set 1.00 to disable."
+                "instead of one ticker. Correlation is measured on 5-day returns because "
+                "stale daily closes hide duplicates. Set 1.00 to disable."
             ),
         )
     )
