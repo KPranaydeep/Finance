@@ -2649,6 +2649,55 @@ def find_drop_bottom_pct_nearest_target(
     return selected
 
 
+def select_redundant_tickers(log_returns, avg_volume=None, correlation_threshold=0.95):
+    """Keep one representative per near-duplicate cluster, preferring the most liquid.
+
+    Eight gold ETFs are one bet, not eight, but a per-ticker weight cap cannot see
+    that: blocked at the cap on one ticker, the optimizer simply rebuilds the same
+    exposure out of clones. Collapsing them first is what makes the cap meaningful.
+    """
+    empty_report = pd.DataFrame(columns=["Dropped", "Kept Instead", "Correlation"])
+    tickers = list(log_returns.columns)
+    if len(tickers) < 2 or not 0.0 < correlation_threshold < 1.0:
+        return tickers, empty_report
+
+    correlation = log_returns.corr().abs()
+
+    if avg_volume is None:
+        liquidity = pd.Series(0.0, index=tickers)
+    else:
+        liquidity = pd.to_numeric(avg_volume, errors="coerce").reindex(tickers).fillna(0.0)
+
+    # Most liquid first, so the survivor of each cluster is the tradable one.
+    ordered = liquidity.sort_values(ascending=False, kind="mergesort").index.tolist()
+
+    removed = set()
+    rows = []
+    for position, ticker in enumerate(ordered):
+        if ticker in removed:
+            continue
+        for other in ordered[position + 1:]:
+            if other in removed:
+                continue
+            pair_correlation = correlation.at[ticker, other]
+            if pd.notna(pair_correlation) and pair_correlation >= correlation_threshold:
+                removed.add(other)
+                rows.append({
+                    "Dropped": other,
+                    "Kept Instead": ticker,
+                    "Correlation": float(pair_correlation),
+                })
+
+    kept = [ticker for ticker in tickers if ticker not in removed]
+    if len(kept) < 2:
+        return tickers, empty_report
+
+    report = pd.DataFrame(rows, columns=["Dropped", "Kept Instead", "Correlation"])
+    if not report.empty:
+        report = report.sort_values("Correlation", ascending=False).reset_index(drop=True)
+    return kept, report
+
+
 @st.cache_data(show_spinner=False)
 def get_daily_log_returns(
     symbols,
@@ -2657,6 +2706,7 @@ def get_daily_log_returns(
     buffer_days=0,
     drop_bottom_pct=0.2,
     ticker_currency_pairs=(),
+    redundancy_corr_threshold=0.95,
 ):
     end_date, _ = _resolve_history_window_end(end_date, buffer_days)
 
@@ -2711,6 +2761,13 @@ def get_daily_log_returns(
     df_aligned = df.loc[valid_start:valid_end].ffill().dropna(axis=0, how="any")
     log_returns = np.log(df_aligned / df_aligned.shift(1)).dropna()
 
+    kept_tickers, redundant_df = select_redundant_tickers(
+        log_returns,
+        volume_df.mean() if not volume_df.empty else None,
+        redundancy_corr_threshold,
+    )
+    log_returns = log_returns[kept_tickers]
+
     lengths = df[kept.index].count()
     min_len_ticker = lengths.idxmin()
 
@@ -2735,6 +2792,7 @@ def get_daily_log_returns(
         "dropped_df": dropped_df,
         "min_len_df": min_len_df,
         "missing_history_tickers": missing_history_tickers,
+        "redundant_df": redundant_df,
     }
     return log_returns, meta
 
@@ -2912,6 +2970,7 @@ def run_portfolio_analysis_multi(
     target_volatility=None,
     drop_bottom_pct=0.2,
     buffer_days=0,
+    redundancy_corr_threshold=0.95,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -2925,6 +2984,7 @@ def run_portfolio_analysis_multi(
         drop_bottom_pct=drop_bottom_pct,
         buffer_days=buffer_days,
         ticker_currency_pairs=ticker_currency_pairs,
+        redundancy_corr_threshold=redundancy_corr_threshold,
     )
 
     if target_volatility is not None:
@@ -2995,7 +3055,14 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
                 - target_amounts[affordable]
             )
         )
-        best_position = affordable[np.argmax(gap_reduction)]
+
+        # argmax still returns the least-bad candidate once every share would
+        # overshoot, which would spend the residual on whatever is cheapest.
+        best_offset = int(np.argmax(gap_reduction))
+        if gap_reduction[best_offset] <= 0:
+            break
+
+        best_position = affordable[best_offset]
         quantities[best_position] += 1
         invested_amounts[best_position] += price_inr[best_position]
         remaining_cash -= price_inr[best_position]
@@ -3668,6 +3735,23 @@ with st.sidebar:
         )
     )
 
+    redundancy_corr_threshold = float(
+        st.number_input(
+            "Merge assets correlated above",
+            min_value=0.50,
+            max_value=1.00,
+            value=0.95,
+            step=0.01,
+            format="%.2f",
+            key="redundancy_corr_threshold",
+            help=(
+                "Near-duplicate holdings such as eight gold ETFs are collapsed to the "
+                "most liquid one, so the per-asset weight cap limits real exposure "
+                "instead of one ticker. Set 1.00 to disable."
+            ),
+        )
+    )
+
     preview_coverage_btn = st.button(
         "Preview history coverage",
         width="stretch",
@@ -4211,6 +4295,7 @@ if run_btn:
                 target_volatility=target_volatility,
                 drop_bottom_pct=drop_bottom_pct,
                 buffer_days=history_buffer_days,
+                redundancy_corr_threshold=redundancy_corr_threshold,
             )
 
         if optimal_weights is None:
@@ -4220,6 +4305,19 @@ if run_btn:
         if not meta["dropped_df"].empty:
             st.subheader("Dropped Tickers")
             st.dataframe(meta["dropped_df"], width="stretch")
+
+        redundant_df = meta.get("redundant_df")
+        if redundant_df is not None and not redundant_df.empty:
+            st.subheader("Merged Near-Duplicate Assets")
+            st.caption(
+                f"Correlated at or above {redundancy_corr_threshold:.2f}; the most liquid "
+                "asset of each group was kept so the weight cap limits real exposure."
+            )
+            st.dataframe(
+                redundant_df.style.format({"Correlation": "{:.3f}"}),
+                width="stretch",
+                hide_index=True,
+            )
 
         st.subheader("History Coverage")
         st.dataframe(meta["min_len_df"], width="stretch")
@@ -4357,6 +4455,7 @@ if run_btn:
                 "internal_max_dd": float(max_dd),
                 "drop_bottom_fraction": float(drop_bottom_pct),
                 "history_buffer_days": int(history_buffer_days),
+                "redundancy_corr_threshold": float(redundancy_corr_threshold),
                 "use_target_volatility": bool(use_target_vol),
                 "target_volatility": (
                     float(target_volatility)
@@ -4377,6 +4476,11 @@ if run_btn:
                 "dropped_tickers": (
                     meta["dropped_df"].to_dict(orient="records")
                     if not meta["dropped_df"].empty
+                    else []
+                ),
+                "merged_redundant_assets": (
+                    redundant_df.to_dict(orient="records")
+                    if redundant_df is not None and not redundant_df.empty
                     else []
                 ),
             },
