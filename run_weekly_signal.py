@@ -8,11 +8,17 @@ Usage:
     export PUBLIC_BASKET_INPUT_PATH="/path/to/todays_input.json"
     python run_weekly_signal.py
 
-IMPORTANT: this file assumes public_basket_postgres.py exposes a
-record_weekly_signal() with the same signature as the one in
-public_basket_ledger.py (the SQLite version). Confirm that in your repo --
-the postgres module's source was long enough that I could not see that far
-into it -- and adjust the call below if the name or arguments differ.
+IMPORTANT - two unverified assumptions, please confirm against your real
+public_basket_postgres.py:
+1. rebalance_gate() is the function that actually computes MISSED (inferred
+   from the Public_Basket_Status page's behavior, not from source I've read).
+   If MISSED is computed elsewhere, or under a different status string,
+   this script's branching below won't catch it and could silently no-op
+   on a missed week -- exactly the bug this script previously had.
+2. record_weekly_signal()'s exact signature. I mirrored the SQLite ledger
+   version since I could not see far enough into the Postgres file.
+Confirm both once, e.g. by running this with a print(gate) added, before
+trusting it unattended on a real scheduled morning.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ def main() -> int:
     conn = pb.connect_public_basket_db()
     try:
         today = date.today()
-        gate = pb.resolve_first_trading_day(conn, pb.DEFAULT_BASKET_ID, today)
+        gate = pb.rebalance_gate(conn, pb.DEFAULT_BASKET_ID, today)
 
         if gate["status"] == "MISSED":
             # By design this system never catches up. This is not a
@@ -44,13 +50,19 @@ def main() -> int:
             )
             return 1
 
-        if gate["status"] != "RESOLVED":
+        if gate["status"] in ("NOT_DUE", "ALREADY_EVALUATED"):
             print(f"Gate status={gate['status']}; nothing to do today.")
             return 0
 
-        if gate["first_trading_day"] != today:
-            print(f"Not due today. First open session this week is {gate['first_trading_day']}.")
-            return 0
+        if gate["status"] in ("CALENDAR_INCOMPLETE", "NO_OPEN_SESSION"):
+            print(f"Gate status={gate['status']}; calendar issue, not a miss. Investigate.")
+            return 1
+
+        if gate["status"] != "DUE":
+            print(f"Unrecognized gate status={gate['status']!r}. Treating as failure "
+                  "so this doesn't fail silently -- confirm the actual status values "
+                  "rebalance_gate() can return in public_basket_postgres.py.")
+            return 1
 
         print(f"Today ({today}) is the scheduled session. Building signal...")
         signal = adapter.build_public_signal(scheduled_session_date=today)
