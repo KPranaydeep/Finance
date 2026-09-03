@@ -31,6 +31,19 @@ def main() -> int:
         today = date.today()
         gate = pb.resolve_first_trading_day(conn, pb.DEFAULT_BASKET_ID, today)
 
+        if gate["status"] == "MISSED":
+            # By design this system never catches up. This is not a
+            # transient "try again" state -- it means this calendar week's
+            # public record has a permanent gap. Exit non-zero so CI
+            # failure notifications actually fire; do not retry.
+            print(
+                f"GATE STATUS = MISSED for week starting {gate.get('week_start')}. "
+                "This week's signal will NOT be recorded -- the scheduler must "
+                "not catch up later. Investigate why the runner didn't fire on "
+                f"{gate.get('first_trading_day')}."
+            )
+            return 1
+
         if gate["status"] != "RESOLVED":
             print(f"Gate status={gate['status']}; nothing to do today.")
             return 0
