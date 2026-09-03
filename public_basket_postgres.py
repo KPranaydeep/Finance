@@ -21,7 +21,7 @@ from nse_market_calendar import (
 
 PUBLIC_BASKET_SCHEMA_VERSION = 1
 
-DEFAULT_BASKET_ID = "PRASHANTH-PUBLIC-01"
+DEFAULT_BASKET_ID = "PRANAYDEEP-PUBLIC-01"
 DEFAULT_BASKET_NAME = "Public Dynamic Portfolio"
 
 DEFAULT_STRATEGY_VERSION = "portfolio-rebalancer-v1"
