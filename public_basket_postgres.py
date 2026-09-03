@@ -31,6 +31,10 @@ REBALANCE_RULE = "FIRST_OPEN_SESSION_OF_CALENDAR_WEEK"
 # Used only to serialize creation of chained audit hashes.
 AUDIT_ADVISORY_LOCK = 9485217
 
+# Opt-in: allow the weekly signal to be authored on any day of the week.
+# When true, the first run in the week will be allowed on any day (but only once).
+PUBLIC_BASKET_ALLOW_ANY_DAY = os.getenv("PUBLIC_BASKET_ALLOW_ANY_DAY", "false").lower() in ("1", "true", "yes")
+
 
 # =====================================================================
 # DATABASE CONFIGURATION
@@ -1135,10 +1139,24 @@ def rebalance_gate(
     if schedule["status"] != "RESOLVED":
         return schedule
 
-    scheduled = schedule[
-        "first_trading_day"
-    ]
+    # Normal scheduled-day behaviour: the scheduled session is the first open
+    # trading day of the week as determined by resolve_first_trading_day().
+    scheduled = schedule["first_trading_day"]
 
+    if PUBLIC_BASKET_ALLOW_ANY_DAY:
+        # Opt-in mode: allow a single run any day of the week when a cycle
+        # does not yet exist. Record_weekly_signal will then persist the run
+        # so follow-ups become ALREADY_EVALUATED.
+        return {
+            **schedule,
+            # Use today's date as the effective scheduled_day so adapter
+            # validation (which expects the frozen input's scheduled_session_date
+            # to match the scheduler) succeeds when running today.
+            "first_trading_day": today,
+            "status": "DUE",
+        }
+
+    # Default behaviour: require exact match with the first open trading day.
     if today < scheduled:
 
         return {
