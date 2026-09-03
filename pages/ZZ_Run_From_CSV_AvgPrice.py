@@ -107,46 +107,56 @@ st.markdown("## Build frozen input JSON (using CSV prices)")
 
 if st.button("Build frozen input from CSV prices"):
     try:
-        # Build a minimal portfolio list matching expected input structure
-        portfolio = []
-        for _, r in df.iterrows():
-            # If Quantity column is named differently, try to coerce common names
-            qty = None
+        # Normalize and extract quantity column
+        def extract_qty(row):
             for qname in ("Quantity", "quantity", "Qty", "QTY"):
-                if qname in r.index and pd.notna(r.get(qname)):
+                if qname in df.columns and pd.notna(row.get(qname)):
                     try:
-                        qty = float(r.get(qname))
-                        break
+                        return float(row.get(qname))
                     except Exception:
-                        qty = 0.0
-            if qty is None:
-                qty = 0.0
+                        return 0.0
+            return 0.0
 
-            portfolio.append(
-                {
-                    "symbol": r.get("Symbol") or "",
-                    "yahoo_ticker": r["Yahoo Ticker"],
-                    "quantity": float(qty),
-                    "price": float(r[avg_price_col]),
-                }
-            )
+        portfolio_rows = []
+        # compute market values to derive weights
+        total_value = 0.0
+        for _, r in df.iterrows():
+            qty = extract_qty(r)
+            price = float(r[avg_price_col])
+            mv = price * qty
+            total_value += mv
 
-        # Create a simple payload structure compatible with the adapter's frozen input reader.
+            row = {
+                "Symbol": r.get("Symbol") or "",
+                "Yahoo Ticker": r["Yahoo Ticker"],
+                "Quantity": qty,
+                "Average Price": price,
+                "Currency": "INR",
+                "FX to INR": 1.0,
+                # Weight will be filled after total_value known
+                "Weight": None,
+            }
+            portfolio_rows.append((row, mv))
+
+        # compute weights (safe against zero total)
+        if total_value > 0:
+            for i, (row, mv) in enumerate(portfolio_rows):
+                row["Weight"] = float(mv / total_value)
+                portfolio_rows[i] = row
+        else:
+            # fall back to equal weights if total value is zero (avoid division by zero)
+            n = len(portfolio_rows) or 1
+            for i, (row, mv) in enumerate(portfolio_rows):
+                row["Weight"] = float(1.0 / n)
+                portfolio_rows[i] = row
+
+        # Final payload: adapter expects a "portfolio" list of objects with those exact keys
         payload = {
             "market": "NSE_EQ",
             "scheduled_session_date": scheduled_iso,
             "market_data_cutoff": scheduled_iso,
             "input_created_at": str(pd.Timestamp.now(tz="UTC")),
-            # adapter expects a "portfolio" list; columns used by adapter vary — this minimal set often suffices for dry-run.
-            "portfolio": [
-                {
-                    "symbol": p["symbol"],
-                    "yahoo_ticker": p["yahoo_ticker"],
-                    "quantity": p["quantity"],
-                    "price": p["price"],
-                }
-                for p in portfolio
-            ],
+            "portfolio": portfolio_rows,
         }
 
         # Write the payload to a controlled file and set env var so adapter.reading works
