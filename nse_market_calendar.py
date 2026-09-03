@@ -132,10 +132,28 @@ def build_nse_equity_sessions_2026() -> list[dict]:
                 }
             )
 
-        current += timedelta(days=1)
+                current += timedelta(days=1)
 
     return rows
 
+
+def get_nse_equity_session(target_date: date) -> dict:
+    """
+    Return the NSE equity session record for target_date.
+    """
+    if target_date.year != CALENDAR_YEAR:
+        raise ValueError(
+            f"No verified NSE equity calendar snapshot is bundled "
+            f"for {target_date.year}."
+        )
+
+    session_map = {
+        row["session_date"]: row
+        for row in build_nse_equity_sessions_2026()
+    }
+
+    return session_map[target_date.isoformat()]
+        
 
 def nse_session_for_date(target_date: date) -> dict:
     """
