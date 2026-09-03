@@ -1,0 +1,34 @@
+{
+  "scheduled_session_date": "2026-09-07",
+  "market_data_cutoff": "2026-09-04T15:30:00+05:30",
+  "input_created_at": "2026-09-04T16:00:00+05:30",
+  "portfolio": [
+    {
+      "Symbol": "RELIANCE",
+      "Yahoo Ticker": "RELIANCE.NS",
+      "Currency": "INR",
+      "Quantity": 10,
+      "Average Price": 2450.50,
+      "FX to INR": 1.0,
+      "Weight": 0.25
+    },
+    {
+      "Symbol": "TCS",
+      "Yahoo Ticker": "TCS.NS",
+      "Currency": "INR",
+      "Quantity": 5,
+      "Average Price": 3600.00,
+      "FX to INR": 1.0,
+      "Weight": 0.20
+    }
+  ],
+  "settings": {
+    "days_to_flip": 10,
+    "max_drawdown_input_pct": 20.0,
+    "drop_bottom_fraction": 0.2,
+    "history_buffer_days": 30,
+    "redundancy_corr_threshold": 0.95,
+    "use_target_volatility": false,
+    "target_volatility": null
+  }
+}
