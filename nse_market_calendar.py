@@ -132,7 +132,7 @@ def build_nse_equity_sessions_2026() -> list[dict]:
                 }
             )
 
-                current += timedelta(days=1)
+    current += timedelta(days=1)
 
     return rows
 
