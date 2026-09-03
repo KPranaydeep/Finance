@@ -1177,6 +1177,143 @@ def rebalance_gate(
     }
 
 
+def record_weekly_signal(
+    conn,
+    basket_id: str,
+    today: date,
+    strategy_version: str,
+    git_commit_sha: str | None,
+    settings: dict,
+    portfolio_before: dict | list,
+    optimizer_output: dict | list,
+    signal_output: dict | list,
+    decision_status: str,
+) -> str:
+    """
+    Record the official weekly signal into Postgres.
+
+    Behavior mirrors the SQLite ledger's record_weekly_signal:
+    - Validates the gate (ALREADY_EVALUATED, DUE, etc.)
+    - Creates signal_runs and weekly_rebalance_cycles records atomically
+    - Appends an audit entry
+
+    Returns the persisted signal_run_id. If the week is already evaluated
+    it returns the existing signal_run_id.
+    """
+
+    if decision_status not in {"REBALANCED", "NO_CHANGE"}:
+        raise ValueError("decision_status must be REBALANCED or NO_CHANGE")
+
+    gate = rebalance_gate(conn, basket_id, today)
+
+    if gate["status"] == "ALREADY_EVALUATED":
+        return gate["signal_run_id"]
+
+    if gate["status"] != "DUE":
+        raise RuntimeError(f"Weekly signal cannot run: {gate['status']}")
+
+    week = gate["week_start"]
+
+    payload = {
+        "basket_id": basket_id,
+        "week_start_date": week.isoformat(),
+        "scheduled_session_date": gate["first_trading_day"].isoformat(),
+        "strategy_version": strategy_version,
+        "git_commit_sha": git_commit_sha,
+        "settings": settings,
+        "portfolio_before": portfolio_before,
+        "optimizer_output": optimizer_output,
+        "signal_output": signal_output,
+    }
+
+    payload_hash = sha256_text(canonical_json(payload))
+
+    signal_run_id = f"SIG-{week:%Y%m%d}-{payload_hash[:12]}"
+
+    generated_at = utc_now()
+
+    cycle_id = f"CYCLE-{basket_id}-{week:%Y%m%d}"
+
+    try:
+        with conn.transaction():
+
+            conn.execute(
+                """
+                INSERT INTO signal_runs (
+                    signal_run_id,
+                    basket_id,
+                    week_start_date,
+                    scheduled_session_date,
+                    generated_at,
+                    strategy_version,
+                    git_commit_sha,
+                    settings_json,
+                    portfolio_before_json,
+                    optimizer_output_json,
+                    signal_output_json,
+                    payload_sha256
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    signal_run_id,
+                    basket_id,
+                    week,
+                    gate["first_trading_day"],
+                    generated_at,
+                    strategy_version,
+                    git_commit_sha,
+                    Jsonb(settings),
+                    Jsonb(portfolio_before),
+                    Jsonb(optimizer_output),
+                    Jsonb(signal_output),
+                    payload_hash,
+                ),
+            )
+
+            conn.execute(
+                """
+                INSERT INTO weekly_rebalance_cycles (
+                    cycle_id,
+                    basket_id,
+                    week_start_date,
+                    calendar_snapshot_id,
+                    scheduled_session_date,
+                    evaluated_at,
+                    status,
+                    signal_run_id,
+                    details_json
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    cycle_id,
+                    basket_id,
+                    week,
+                    gate.get("snapshot_id"),
+                    gate["first_trading_day"],
+                    generated_at,
+                    decision_status,
+                    signal_run_id,
+                    Jsonb({"payload_sha256": payload_hash}),
+                ),
+            )
+
+            append_audit(
+                conn,
+                "signal_run",
+                signal_run_id,
+                decision_status,
+                payload,
+            )
+
+    except Exception:
+        # Let the caller see the exception after the transaction context rolls back.
+        raise
+
+    return signal_run_id
+
+
 # =====================================================================
 # STATUS / UI HELPERS
 # =====================================================================
