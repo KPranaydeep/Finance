@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+
 from public_basket_postgres import (
     DEFAULT_BASKET_ID,
     connect_public_basket_db,
