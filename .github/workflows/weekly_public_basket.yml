@@ -33,12 +33,8 @@ jobs:
             --out today_input.json
 
       - name: Run weekly signal
-        id: run-weekly
         env:
           PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
           PUBLIC_BASKET_INPUT_PATH: ${{ github.workspace }}/today_input.json
-          # Opt-in: allow the Action to write the week's official signal on any day,
-          # but only once per calendar week (subsequent runs that week will be
-          # ALREADY_EVALUATED by the ledger).
           PUBLIC_BASKET_ALLOW_ANY_DAY: 'true'
         run: python run_weekly_signal.py
