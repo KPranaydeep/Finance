@@ -56,6 +56,7 @@ if "Yahoo Ticker" not in df.columns:
 
 # Normalize tickers
 df["Yahoo Ticker"] = df["Yahoo Ticker"].astype(str).str.strip()
+
 # Use 'Average Price' as numeric, try several column names
 avg_price_col = None
 for candidate in ("Average Price", "Average_Price", "AveragePrice", "Average Price."):
@@ -81,7 +82,7 @@ if not missing_price_rows.empty:
         for i, row in missing_price_rows.iterrows():
             t = row["Yahoo Ticker"]
             fallback = st.text_input(f"Fallback price for {t} (leave blank to drop)", key=f"fp_{i}")
-            if fallback.strip():
+            if fallback and fallback.strip():
                 try:
                     df.at[i, avg_price_col] = float(fallback.strip())
                 except Exception:
@@ -100,7 +101,7 @@ if df.empty:
     st.stop()
 
 # ---------------------------------------------------------------------
-# Build frozen input: we'll construct minimal fields the adapter expects
+# Build frozen input: construct minimal payload for adapter
 # ---------------------------------------------------------------------
 st.markdown("## Build frozen input JSON (using CSV prices)")
 
@@ -109,29 +110,40 @@ if st.button("Build frozen input from CSV prices"):
         # Build a minimal portfolio list matching expected input structure
         portfolio = []
         for _, r in df.iterrows():
+            # If Quantity column is named differently, try to coerce common names
+            qty = None
+            for qname in ("Quantity", "quantity", "Qty", "QTY"):
+                if qname in r.index and pd.notna(r.get(qname)):
+                    try:
+                        qty = float(r.get(qname))
+                        break
+                    except Exception:
+                        qty = 0.0
+            if qty is None:
+                qty = 0.0
+
             portfolio.append(
                 {
                     "symbol": r.get("Symbol") or "",
                     "yahoo_ticker": r["Yahoo Ticker"],
-                    "quantity": float(r.get("Quantity") or 0),
-                    "average_price": float(r[avg_price_col]),
-                    # other fields the generator/adapter expects can be added here
+                    "quantity": float(qty),
+                    "price": float(r[avg_price_col]),
                 }
             )
 
-        # Create a simple payload structure compatible with adapter._read_frozen_input expectations.
-        # Use the project's canonical payload shape where possible; if your adapter expects different keys, adjust below.
+        # Create a simple payload structure compatible with the adapter's frozen input reader.
         payload = {
             "market": "NSE_EQ",
             "scheduled_session_date": scheduled_iso,
             "market_data_cutoff": scheduled_iso,
             "input_created_at": str(pd.Timestamp.now(tz="UTC")),
+            # adapter expects a "portfolio" list; columns used by adapter vary — this minimal set often suffices for dry-run.
             "portfolio": [
                 {
                     "symbol": p["symbol"],
                     "yahoo_ticker": p["yahoo_ticker"],
                     "quantity": p["quantity"],
-                    "price": p["average_price"],
+                    "price": p["price"],
                 }
                 for p in portfolio
             ],
@@ -145,9 +157,77 @@ if st.button("Build frozen input from CSV prices"):
         st.success(f"Wrote frozen input to {tmp.name}")
         st.session_state["csv_generated_input_path"] = tmp.name
         st.session_state["csv_generated_payload"] = payload
+
+        # ensure adapter reads the file
+        os.environ[adapter.INPUT_PATH_ENV] = tmp.name
+
     except Exception as exc:
         st.error("Failed to build frozen input: " + str(exc))
         st.exception(exc)
 
-# ----------------------------------------------------------------
-
+# ---------------------------------------------------------------------
+# Dry-run optimizer (no DB writes)
+# ---------------------------------------------------------------------
+if st.session_state.get("csv_generated_input_path"):
+    st.markdown("## Dry-run optimizer (no DB writes)")
+
+    if st.button("Run dry-run optimizer using CSV prices"):
+        try:
+            # build_public_signal reads the controlled input file via adapter.INPUT_PATH_ENV
+            signal = adapter.build_public_signal(scheduled_session_date=scheduled_date)
+        except Exception as exc:
+            st.error("Dry-run failed: " + str(exc))
+            st.exception(exc)
+        else:
+            st.success(f"Dry-run succeeded — decision_status: {signal.get('decision_status')}")
+            st.json(
+                {
+                    "strategy_version": signal.get("strategy_version"),
+                    "decision_status": signal.get("decision_status"),
+                    "optimizer_rows": len(signal.get("optimizer_output", {}).get("target_allocation", [])),
+                }
+            )
+            st.subheader("Preview signal_output (first 200 rows)")
+            st.write(signal.get("signal_output"))
+            st.session_state["csv_last_signal"] = signal
+
+# ---------------------------------------------------------------------
+# Publish (writes to Postgres)
+# ---------------------------------------------------------------------
+st.markdown("## Publish official signal to public ledger (writes to Postgres)")
+if st.button("Publish signal now (writes to Postgres)"):
+    signal = st.session_state.get("csv_last_signal")
+    if not signal:
+        st.error("Run Dry-run first.")
+        st.stop()
+    conn = pb.connect_public_basket_db(database_url)
+    try:
+        try:
+            signal_run_id = pb.record_weekly_signal(
+                conn=conn,
+                basket_id=pb.DEFAULT_BASKET_ID,
+                today=scheduled_date,
+                strategy_version=signal["strategy_version"],
+                git_commit_sha=None,
+                settings=signal["settings"],
+                portfolio_before=signal["portfolio_before"],
+                optimizer_output=signal["optimizer_output"],
+                signal_output=signal["signal_output"],
+                decision_status=signal["decision_status"],
+            )
+        except Exception as exc:
+            st.error("Publishing failed: " + str(exc))
+            st.exception(exc)
+            raise
+        st.success(f"Published signal_run_id={signal_run_id}")
+    finally:
+        conn.close()
+
+st.markdown(
+    """
+Notes:
+- This uses CSV Average Price (or fallbacks you provided). These prices may differ from live market prices.
+- This is intended as a temporary/testing tool so you can run the optimizer without Yahoo data. Remove after use.
+- The performance page displays NAV from daily_nav rows; publishing a signal does not create NAVs. You still need to run the NAV pipeline or insert daily_nav rows for the performance page to show charts.
+"""
+)
