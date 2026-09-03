@@ -53,32 +53,96 @@ def load_holdings(csv_path: str) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+import time
+import math
+import pandas as pd
+import yfinance as yf
+
+# Choose a chunk size that balances parallelism vs rate limits.
+YF_CHUNK_SIZE = 100
+YF_MAX_RETRIES = 5
+YF_RETRY_BASE_DELAY = 1.0  # seconds
+
+def _yf_download_with_retries(tickers: list[str], period: str = "5d") -> pd.DataFrame:
+    """Call yf.download with retries and exponential backoff."""
+    last_exc = None
+    for attempt in range(1, YF_MAX_RETRIES + 1):
+        try:
+            # threads=True and progress=False speeds downloads and avoids output spam.
+            df = yf.download(tickers, period=period, group_by="ticker", threads=True, progress=False, timeout=30)
+            return df
+        except Exception as exc:
+            last_exc = exc
+            # If rate-limited, back off exponentially and retry.
+            delay = YF_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            time.sleep(delay)
+    # All retries failed: raise the last exception
+    raise last_exc
+
 def fetch_fx_rates(currencies: set[str]) -> dict[str, float]:
     rates = {"INR": 1.0}
+    # Build FX tickers we need (skip INR)
+    fx_map = {}
+    todo = []
     for ccy in currencies:
         if ccy == "INR" or ccy in rates:
             continue
         ticker = FX_TICKER_TEMPLATE.format(ccy=ccy)
-        hist = yf.Ticker(ticker).history(period="5d")
-        if hist.empty:
-            raise RuntimeError(f"Could not fetch FX rate for {ccy} via {ticker}")
-        rates[ccy] = float(hist["Close"].iloc[-1])
-    return rates
+        fx_map[ticker] = ccy
+        todo.append(ticker)
 
+    # Download in chunks
+    for i in range(0, len(todo), YF_CHUNK_SIZE):
+        chunk = todo[i : i + YF_CHUNK_SIZE]
+        df = _yf_download_with_retries(chunk, period="5d")
+        for t in chunk:
+            try:
+                # df can be multi-indexed per ticker when len(chunk) > 1
+                if len(chunk) == 1:
+                    series = df["Close"].dropna() if "Close" in df else pd.Series()
+                else:
+                    # Try the two common shapes
+                    if ("Close", t) in df.columns:
+                        series = df[("Close", t)].dropna()
+                    elif "Close" in df.columns and t in df["Close"].columns:
+                        series = df["Close"][t].dropna()
+                    else:
+                        series = pd.Series()
+                if not series.empty:
+                    rates[fx_map[t]] = float(series.iloc[-1])
+                else:
+                    raise RuntimeError(f"No FX price found for {t}")
+            except Exception:
+                raise RuntimeError(f"Could not fetch FX rate for {fx_map[t]} via {t}")
+    return rates
 
 def fetch_latest_prices(tickers: list[str]) -> dict[str, float]:
     prices: dict[str, float] = {}
     missing = []
-    for ticker in tickers:
-        hist = yf.Ticker(ticker).history(period="5d")
-        if hist.empty:
-            missing.append(ticker)
-            continue
-        prices[ticker] = float(hist["Close"].iloc[-1])
+    # Chunk tickers to reduce per-request overhead
+    for i in range(0, len(tickers), YF_CHUNK_SIZE):
+        chunk = tickers[i : i + YF_CHUNK_SIZE]
+        df = _yf_download_with_retries(chunk, period="5d")
+        for t in chunk:
+            try:
+                if len(chunk) == 1:
+                    series = df["Close"].dropna() if "Close" in df else pd.Series()
+                else:
+                    if ("Close", t) in df.columns:
+                        series = df[("Close", t)].dropna()
+                    elif "Close" in df.columns and t in df["Close"].columns:
+                        series = df["Close"][t].dropna()
+                    else:
+                        series = pd.Series()
+                if not series.empty:
+                    prices[t] = float(series.iloc[-1])
+                else:
+                    missing.append(t)
+            except Exception:
+                missing.append(t)
     if missing:
-        raise RuntimeError(f"Could not fetch live prices for: {', '.join(missing)}")
+        raise RuntimeError(f"Could not fetch live prices for: {', '.join(sorted(missing))}")
     return prices
-
 
 def build_payload(df: pd.DataFrame, scheduled_session_date: str) -> dict:
     currencies = set(df["Currency"].astype(str).str.upper())
