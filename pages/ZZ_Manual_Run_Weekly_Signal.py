@@ -1,4 +1,7 @@
+# pages/ZZ_Manual_Run_Weekly_Signal.py
 import json
+import os
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -64,6 +67,20 @@ else:
         st.stop()
 
 # ---------------------------------------------------------------------
+# Ensure adapter sees the frozen input via PUBLIC_BASKET_INPUT_PATH
+# ---------------------------------------------------------------------
+# If we already have a repo path use that; otherwise create a temp file.
+if input_path is None:
+    tmp = tempfile.NamedTemporaryFile(prefix="public-basket-input-", suffix=".json", delete=False)
+    tmp.write(json.dumps(input_payload, default=str, indent=2).encode("utf-8"))
+    tmp.flush()
+    tmp.close()
+    input_path = tmp.name
+
+# Set the env var the adapter expects (in-process)
+os.environ[adapter.INPUT_PATH_ENV] = input_path
+
+# ---------------------------------------------------------------------
 # Show basic info from input
 # ---------------------------------------------------------------------
 st.subheader("Input preview")
@@ -106,6 +123,7 @@ try:
     if force_any_day:
         pb.PUBLIC_BASKET_ALLOW_ANY_DAY = True
 
+    # The adapter reads the frozen input from PUBLIC_BASKET_INPUT_PATH which we set above.
     signal = adapter.build_public_signal(scheduled_session_date=scheduled_date)
 except Exception as exc:
     st.error("Dry-run failed: " + str(exc))
@@ -135,7 +153,6 @@ if publish:
     conn = pb.connect_public_basket_db(database_url)
     try:
         try:
-            # If forcing, ensure module flag is set (again) before calling record_weekly_signal
             if force_any_day:
                 pb.PUBLIC_BASKET_ALLOW_ANY_DAY = True
 
