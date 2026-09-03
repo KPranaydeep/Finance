@@ -135,5 +135,21 @@ st.dataframe(filtered.head(50), use_container_width=True)
 # Allow download
 buf = io.StringIO()
 filtered.to_csv(buf, index=False, encoding="utf-8-sig")
-csv_bytes = buf.getvalue().
-
+csv_bytes = buf.getvalue().encode("utf-8-sig")
+
+st.download_button(
+    "Download filtered universal_portfolio_backup_filtered.csv",
+    data=csv_bytes,
+    file_name="universal_portfolio_backup_filtered.csv",
+    mime="text/csv",
+)
+
+st.markdown(
+    """
+Next steps:
+1. Download the filtered CSV above.
+2. In the app's Universal Portfolio panel, upload the filtered CSV and choose **Replace universal portfolio**.
+3. Return to the CSV-run page and rebuild the frozen input, then run the dry-run optimizer.
+4. Download the analysis JSON and share it here if you want me to parse the results.
+"""
+)
