@@ -11,7 +11,7 @@ Behavior:
       show something.
 
 - connect_public_basket_db(database_url)
-    * If database_url starts with "file://", returns a LocalConnector with .execute(...).
+    * If database_url starts with "file://", returns a LocalConnector object used for file fallback.
     * Otherwise, tries to create a SQLAlchemy Engine and return engine.connect().
       (SQLAlchemy is optional — if unavailable a helpful error is raised.)
 
