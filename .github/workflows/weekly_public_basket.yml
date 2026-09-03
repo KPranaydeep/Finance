@@ -32,9 +32,22 @@ jobs:
             --scheduled-session-date "${{ steps.session_date.outputs.date }}" \
             --out today_input.json
 
+      # DEBUG: show the generated input file and confirm repo file presence on the runner
+      - name: Show generated input and repo checks
+        run: |
+          echo "=== workspace list ==="
+          ls -la "${{ github.workspace }}"
+          echo "=== today_input.json (first 2000 chars) ==="
+          head -c 2000 "${{ github.workspace }}/today_input.json" || true
+          echo "=== grep for PUBLIC_BASKET_ALLOW_ANY_DAY in repo copy ==="
+          grep -n "PUBLIC_BASKET_ALLOW_ANY_DAY" public_basket_postgres.py || true
+          echo "=== grep for record_weekly_signal in repo copy ==="
+          grep -n "def record_weekly_signal" public_basket_postgres.py || true
+
       - name: Run weekly signal
         env:
           PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
           PUBLIC_BASKET_INPUT_PATH: ${{ github.workspace }}/today_input.json
+          # TEMPORARY opt-in so we can run once this week even if it's not the first open session
           PUBLIC_BASKET_ALLOW_ANY_DAY: 'true'
         run: python run_weekly_signal.py
