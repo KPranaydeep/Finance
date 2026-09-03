@@ -1,4 +1,5 @@
-# pages/ZZ_Run_From_CSV_AvgPrice.py
+from __future__ import annotations
+
 import json
 import os
 import tempfile
@@ -130,7 +131,7 @@ def _download_with_retries(tickers: List[str], period: str = "180d") -> Tuple[pd
     last_exc = None
     for attempt in range(1, int(yf_retries) + 1):
         try:
-            dfp = yf.download(tickers, period=period, group_by="ticker", threads=True, progress=False, timeout=30)
+            dfp = yf.download(tickers, period=period, group_by="ticker", threads=False, progress=False, timeout=30)
             return dfp, None
         except Exception as exc:
             last_exc = exc
@@ -246,7 +247,9 @@ if payload:
             st.progress(min(100, int((i + len(chunk)) / max(1, total) * 100)))
         st.session_state["yf_check_info"] = info
         st.session_state["yf_missing"] = missing
-        st.experimental_rerun()
+        # Instead of experimental_rerun (may be unavailable), toggle a session_state flag and stop
+        st.session_state["_rerun_toggle"] = not st.session_state.get("_rerun_toggle", False)
+        st.stop()
 
     info = st.session_state.get("yf_check_info")
     missing = st.session_state.get("yf_missing", [])
@@ -279,7 +282,8 @@ if payload:
             st.session_state["csv_generated_payload"] = payload
             os.environ[adapter.INPUT_PATH_ENV] = tmp.name
             st.success("Applied replacements; please press 'Check ticker history' again.")
-            st.experimental_rerun()
+            st.session_state["_rerun_toggle"] = not st.session_state.get("_rerun_toggle", False)
+            st.stop()
 
         if st.button("Drop missing tickers and rebuild payload (I accept data loss)"):
             kept = [r for r in payload["portfolio"] if normalize_ticker(r["Yahoo Ticker"]) not in set(missing)]
@@ -295,7 +299,8 @@ if payload:
                 st.session_state["csv_generated_payload"] = payload
                 os.environ[adapter.INPUT_PATH_ENV] = tmp.name
                 st.success(f"Rebuilt input without missing tickers: {tmp.name}")
-                st.experimental_rerun()
+                st.session_state["_rerun_toggle"] = not st.session_state.get("_rerun_toggle", False)
+                st.stop()
 
 # --------------------------
 # Show current payload path and allow dry-run
