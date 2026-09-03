@@ -21,16 +21,16 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      # TODO: replace this step with whatever actually generates today's
-      # live portfolio snapshot (holdings, prices, FX) as JSON -- the
-      # adapter deliberately does NOT fetch live data itself, it only
-      # reads a pre-built "frozen" input file. A static secret works for
-      # testing but will go stale for real weekly use; wire this up to
-      # your actual portfolio source before relying on it in production.
-      - name: Write today's frozen input
-        env:
-          PUBLIC_BASKET_INPUT_JSON: ${{ secrets.PUBLIC_BASKET_INPUT_JSON }}
-        run: echo "$PUBLIC_BASKET_INPUT_JSON" > today_input.json
+      - name: Compute today's scheduled session date
+        id: session_date
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate today's frozen input from live holdings + prices
+        run: |
+          python generate_public_basket_input.py \
+            --csv universal_portfolio_backup.csv \
+            --scheduled-session-date "${{ steps.session_date.outputs.date }}" \
+            --out today_input.json
 
       - name: Run weekly signal
         env:
