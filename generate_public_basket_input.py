@@ -13,7 +13,7 @@ import pandas as pd
 import yfinance as yf
 
 FX_TICKER_TEMPLATE = "{ccy}INR=X"  # e.g. USDINR=X, EURINR=X
-DEFAULT_BATCH_SIZE = 20
+DEFAULT_BATCH_SIZE = 25
 DEFAULT_RETRIES = 3
 
 # Old portfolio exports can contain Axis Mutual Fund iNAV identifiers instead
@@ -302,6 +302,7 @@ def build_payload(
                 "Currency": ccy,
                 "Quantity": float(row["Quantity"]),
                 "Average Price": float(row["Average Price"]),
+                "Latest Price": float(prices[ticker]),
                 "FX to INR": fx_rates[ccy],
                 "Weight": value / total_value,
             }
