@@ -12,7 +12,7 @@ import generate_public_basket_input as generator
 
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
 PAGE_VERSION = "event-input-generator-r2"
-PAGE_VERSION = "event-input-generator-r3"
+PAGE_VERSION = "event-input-generator-r4"
 MINIMUM_TICKER_COVERAGE = 0.80
 
 
@@ -24,6 +24,9 @@ st.set_page_config(
 
 st.title("📦 Prepare Public Basket Input")
 st.caption(f"{PAGE_VERSION} · Generates JSON only · No PostgreSQL writes")
+st.caption(
+    f"JSON generation threshold: {MINIMUM_TICKER_COVERAGE:.0%} of open-position tickers"
+)
 st.info(
     "This page fetches current prices and creates the input JSON used by Public "
     "Basket Publisher. It does not run the optimizer and cannot publish ledger records."
@@ -79,10 +82,17 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
 
         progress_bar.empty()
         if missing:
+        total_tickers = len(set(tickers))
+        coverage = len(prices) / total_tickers if total_tickers else 0.0
+        if missing and coverage < MINIMUM_TICKER_COVERAGE:
             st.session_state.pop("prepared_public_basket_json", None)
+            st.session_state.pop("prepared_public_basket_summary", None)
             st.error(
                 f"Prices were found for {len(prices):,} of {len(set(tickers)):,} tickers. "
                 f"The JSON was not created because {len(missing):,} open positions remain unresolved."
+                f"Prices were found for {len(prices):,} of {total_tickers:,} tickers "
+                f"({coverage:.1%}). The JSON requires at least "
+                f"{MINIMUM_TICKER_COVERAGE:.0%} coverage."
             )
             missing_frame = pd.DataFrame({"Yahoo Ticker": missing})
             st.dataframe(missing_frame, use_container_width=True, hide_index=True)
@@ -93,8 +103,39 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
                 mime="text/csv",
             )
         else:
+            excluded_positions: list[dict[str, str]] = []
+            build_frame = frame
+            if missing:
+                missing_set = set(missing)
+                excluded = frame[frame["Yahoo Ticker"].isin(missing_set)]
+                excluded_positions = [
+                    {
+                        "symbol": str(row["Symbol"]).strip(),
+                        "yahoo_ticker": str(row["Yahoo Ticker"]).strip().upper(),
+                        "reason": "price_unavailable",
+                    }
+                    for _, row in excluded.iterrows()
+                ]
+                build_frame = frame[~frame["Yahoo Ticker"].isin(missing_set)].copy()
+                build_frame.attrs = frame.attrs.copy()
+                st.warning(
+                    f"Coverage is {coverage:.1%}, above the "
+                    f"{MINIMUM_TICKER_COVERAGE:.0%} minimum. "
+                    f"The {len(excluded_positions):,} unresolved positions are excluded "
+                    "and the included weights will be recalculated to 100%."
+                )
+                st.dataframe(
+                    pd.DataFrame(excluded_positions),
+                    use_container_width=True,
+                    hide_index=True,
+                )
             with st.spinner("Building immutable input snapshot…"):
                 payload = generator.build_payload(frame, prices=prices)
+                payload = generator.build_payload(
+                    build_frame,
+                    prices=prices,
+                    excluded_positions=excluded_positions,
+                )
             encoded = json.dumps(
                 payload,
                 indent=2,
@@ -105,6 +146,7 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
             st.session_state.prepared_public_basket_json = encoded
             st.session_state.prepared_public_basket_summary = {
                 "positions": len(payload["portfolio"]),
+                "excluded_positions": len(payload["excluded_positions"]),
                 "market_data_cutoff": payload["market_data_cutoff"],
                 "source": source_label,
                 "ticker_aliases_applied": payload.get("ticker_aliases_applied", []),
@@ -122,6 +164,11 @@ if prepared and summary:
     c1.metric("Open positions", summary["positions"])
     c2.write("Market data cutoff (UTC)")
     c2.code(summary["market_data_cutoff"], language="text")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Included positions", summary["positions"])
+    c2.metric("Excluded positions", summary.get("excluded_positions", 0))
+    c3.write("Market data cutoff (UTC)")
+    c3.code(summary["market_data_cutoff"], language="text")
     st.download_button(
         "Download public basket input JSON",
         data=prepared,
