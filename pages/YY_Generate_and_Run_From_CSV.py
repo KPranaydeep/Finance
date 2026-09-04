@@ -11,7 +11,7 @@ import generate_public_basket_input as generator
 
 
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
-PAGE_VERSION = "event-input-generator-r1"
+PAGE_VERSION = "event-input-generator-r2"
 
 
 st.set_page_config(
@@ -52,6 +52,18 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
             frame = generator.load_holdings(str(DEFAULT_CSV))
 
         tickers = frame["Yahoo Ticker"].astype(str).str.strip().str.upper().tolist()
+        applied_aliases = frame.attrs.get("ticker_aliases_applied", [])
+        if applied_aliases:
+            st.info(
+                "Corrected verified legacy ticker aliases before fetching prices."
+            )
+            st.dataframe(
+                pd.DataFrame(applied_aliases).rename(
+                    columns={"from": "CSV ticker", "to": "ETF ticker"}
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
         progress_bar = st.progress(0, text="Preparing price batches…")
 
         def update_progress(done: int, total: int) -> None:
@@ -93,6 +105,7 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
                 "positions": len(payload["portfolio"]),
                 "market_data_cutoff": payload["market_data_cutoff"],
                 "source": source_label,
+                "ticker_aliases_applied": payload.get("ticker_aliases_applied", []),
             }
             st.success("The public-basket input JSON is ready.")
     except Exception as exc:
@@ -118,4 +131,3 @@ if prepared and summary:
         "Next: open **Public Basket Publisher**, upload `public_basket_input.json`, "
         "and build the read-only preview. Do not publish until the preview is reviewed."
     )
-
