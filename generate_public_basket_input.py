@@ -135,6 +135,66 @@ def _close_frame(data: pd.DataFrame, requested: list[str]) -> pd.DataFrame:
     return frame.apply(pd.to_numeric, errors="coerce")
 
 
+def _market_field_frame(
+    data: pd.DataFrame,
+    requested: list[str],
+    field: str,
+) -> pd.DataFrame:
+    if data is None or data.empty:
+        return pd.DataFrame()
+    if isinstance(data.columns, pd.MultiIndex):
+        if field in data.columns.get_level_values(0):
+            frame = data[field]
+        elif field in data.columns.get_level_values(1):
+            frame = data.xs(field, axis=1, level=1)
+        else:
+            return pd.DataFrame()
+    elif field in data.columns and len(requested) == 1:
+        frame = data[[field]].rename(columns={field: requested[0]})
+    else:
+        return pd.DataFrame()
+    if isinstance(frame, pd.Series):
+        frame = frame.to_frame(name=requested[0])
+    frame.columns = [str(column).strip().upper() for column in frame.columns]
+    return frame.apply(pd.to_numeric, errors="coerce")
+
+
+def fetch_liquidity_metrics(
+    tickers: list[str],
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    retries: int = DEFAULT_RETRIES,
+    progress: Callable[[int, int], None] | None = None,
+) -> tuple[dict[str, dict[str, float | int]], list[str]]:
+    """Return 3-month median daily traded value and observed sessions."""
+    unique = list(dict.fromkeys(str(t).strip().upper() for t in tickers if str(t).strip()))
+    metrics: dict[str, dict[str, float | int]] = {}
+    total_batches = max((len(unique) + batch_size - 1) // batch_size, 1)
+    for batch_number, start in enumerate(range(0, len(unique), batch_size), start=1):
+        batch = unique[start : start + batch_size]
+        try:
+            data = _download_with_retries(batch, retries, period="3mo")
+            closes = _market_field_frame(data, batch, "Close")
+            volumes = _market_field_frame(data, batch, "Volume")
+        except Exception:
+            closes, volumes = pd.DataFrame(), pd.DataFrame()
+        for ticker in batch:
+            if ticker not in closes.columns or ticker not in volumes.columns:
+                continue
+            traded_value = (closes[ticker] * volumes[ticker]).replace([math.inf, -math.inf], pd.NA).dropna()
+            traded_value = traded_value[traded_value > 0]
+            if traded_value.empty:
+                continue
+            metrics[ticker] = {
+                "median_daily_traded_value": float(traded_value.median()),
+                "observed_sessions": int(traded_value.count()),
+            }
+        if progress:
+            progress(batch_number, total_batches)
+    missing = [ticker for ticker in unique if ticker not in metrics]
+    return metrics, missing
+
+
 def fetch_latest_prices_with_missing(
     tickers: list[str],
     *,
