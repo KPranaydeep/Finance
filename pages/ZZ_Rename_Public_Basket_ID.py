@@ -16,6 +16,7 @@ from public_basket_postgres import (
 
 TARGET_BASKET_ID = "PUBLIC-01"
 CONFIRMATION_PHRASE = "RENAME BASKET TO PUBLIC-01"
+PAGE_VERSION = "public-id-rename-r2"
 
 
 st.set_page_config(
@@ -37,13 +38,20 @@ def fetch_baskets(conn: Any) -> list[dict[str, Any]]:
     return list(
         conn.execute(
             """
-            SELECT basket_id, basket_name, strategy_version, schema_version,
-                   base_currency, status, created_at, updated_at
+            SELECT *
             FROM public_baskets
             ORDER BY created_at, basket_id
             """
         ).fetchall()
     )
+
+
+def safe_error_message(exc: Exception, *secrets: str) -> str:
+    message = str(exc)
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    return f"{type(exc).__name__}: {message}"
 
 
 def basket_tables(conn: Any) -> list[str]:
@@ -161,6 +169,7 @@ def rename_basket(conn: Any, source_id: str, target_id: str, tables: list[str]) 
 
 
 st.title("🔐 Rename Public Basket ID")
+st.caption(f"Page version: {PAGE_VERSION}")
 st.warning(
     "Temporary operator-only page. Delete this file from the repository after the "
     "rename succeeds. This page never runs the optimizer or creates trades."
@@ -184,8 +193,10 @@ try:
     with connect_public_basket_db(database_url) as conn:
         baskets = fetch_baskets(conn)
         tables = basket_tables(conn)
-except Exception:
+except Exception as exc:
     st.error("Could not inspect the public basket database. No changes were made.")
+    with st.expander("Technical details"):
+        st.code(safe_error_message(exc, configured_token, database_url), language="text")
     st.stop()
 
 if not baskets:
@@ -268,5 +279,7 @@ if st.button("Rename basket to PUBLIC-01", type="primary", disabled=not ready):
         )
         st.cache_data.clear()
         st.cache_resource.clear()
-    except Exception:
+    except Exception as exc:
         st.error("The rename failed and was rolled back. No partial rename was committed.")
+        with st.expander("Technical details"):
+            st.code(safe_error_message(exc, configured_token, database_url), language="text")
