@@ -1,53 +1,21 @@
-name: Public basket weekly signal
+name: Public basket publisher retired
 
+# The scheduled weekly publisher was permanently retired when the public basket
+# moved to the event-driven PostgreSQL ledger. This workflow has no schedule,
+# receives no database secret, and cannot run the optimizer or write ledger data.
 on:
-  schedule:
-    # Runs every weekday at 10:00 IST (04:30 UTC), after market open.
-    # run_weekly_signal.py is a no-op except on the actual first open
-    # session of the week, so running it daily is intentional and safe.
-    - cron: "30 4 * * 1-5"
-  workflow_dispatch: {}
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  run-weekly-signal:
+  retired:
+    name: Confirm publisher is retired
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Compute today's scheduled session date
-        id: session_date
-        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
-
-      - name: Generate today's frozen input from live holdings + prices
+      - name: Retirement notice
         run: |
-          python generate_public_basket_input.py \
-            --csv universal_portfolio_backup.csv \
-            --scheduled-session-date "${{ steps.session_date.outputs.date }}" \
-            --out today_input.json
+          echo "The weekly public-basket publisher is retired."
+          echo "No signal, rebalance, order, execution, cash, position, or NAV record was created."
 
-      # DEBUG: show the generated input file and confirm repo file presence on the runner
-      - name: Show generated input and repo checks
-        run: |
-          echo "=== workspace list ==="
-          ls -la "${{ github.workspace }}"
-          echo "=== today_input.json (first 2000 chars) ==="
-          head -c 2000 "${{ github.workspace }}/today_input.json" || true
-          echo "=== grep for PUBLIC_BASKET_ALLOW_ANY_DAY in repo copy ==="
-          grep -n "PUBLIC_BASKET_ALLOW_ANY_DAY" public_basket_postgres.py || true
-          echo "=== grep for record_weekly_signal in repo copy ==="
-          grep -n "def record_weekly_signal" public_basket_postgres.py || true
-
-      - name: Run weekly signal
-        env:
-          PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
-          PUBLIC_BASKET_INPUT_PATH: ${{ github.workspace }}/today_input.json
-          # TEMPORARY opt-in so we can run once this week even if it's not the first open session
-          PUBLIC_BASKET_ALLOW_ANY_DAY: 'true'
-        run: python run_weekly_signal.py
