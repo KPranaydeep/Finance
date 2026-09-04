@@ -6,7 +6,11 @@ from dataclasses import asdict
 
 import streamlit as st
 
-from migrate_public_basket_v1_to_v2 import apply_migration, inspect_migration
+from migrate_public_basket_v1_to_v2 import (
+    MIGRATION_SCRIPT_VERSION,
+    apply_migration,
+    inspect_migration,
+)
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 
 
@@ -21,6 +25,7 @@ st.set_page_config(
 )
 
 st.title("🔐 Public Basket Schema Migration")
+st.caption(f"Migration script: {MIGRATION_SCRIPT_VERSION}")
 st.warning(
     "Temporary operator-only page. Remove this file from the repository immediately "
     "after the migration succeeds."
