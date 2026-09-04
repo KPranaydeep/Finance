@@ -12,7 +12,7 @@ import generate_public_basket_input as generator
 
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
 PAGE_VERSION = "event-input-generator-r8"
-MINIMUM_PRICE_COVERAGE = 0.20
+MINIMUM_PRICE_COVERAGE = 0.80
 
 st.set_page_config(page_title="Prepare Public Basket Input", page_icon="📦", layout="wide")
 st.title("📦 Prepare Public Basket Input")
@@ -27,7 +27,7 @@ if uploaded_csv is None and not DEFAULT_CSV.is_file():
     st.stop()
 
 exclude_percent = st.slider(
-    "Exclude the least-liquid positions before optimization", 0, 90, 80, 5,
+    "Exclude the least-liquid positions before optimization", 0, 90, 20, 5,
     format="%d%%", help="Ranks positions by 3-month median daily traded value in INR."
 )
 max_optimizer_positions = st.number_input(
