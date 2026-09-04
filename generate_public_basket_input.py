@@ -272,6 +272,7 @@ def build_payload(
     prices: dict[str, float] | None = None,
     fx_rates: dict[str, float] | None = None,
     excluded_positions: list[dict[str, str]] | None = None,
+    zero_investment_start: bool = False,
 ) -> dict:
     currencies = set(df["Currency"].astype(str).str.upper())
     fx_rates = fx_rates or fetch_fx_rates(currencies)
@@ -300,7 +301,7 @@ def build_payload(
                 "Symbol": str(row["Symbol"]).strip(),
                 "Yahoo Ticker": ticker,
                 "Currency": ccy,
-                "Quantity": float(row["Quantity"]),
+                "Quantity": 0.0 if zero_investment_start else float(row["Quantity"]),
                 "Average Price": float(row["Average Price"]),
                 "Latest Price": float(prices[ticker]),
                 "FX to INR": fx_rates[ccy],
@@ -313,6 +314,9 @@ def build_payload(
         "market_data_cutoff": now,
         "input_created_at": now,
         "portfolio": portfolio_rows,
+        "basket_start_mode": (
+            "zero_investment" if zero_investment_start else "existing_holdings"
+        ),
         "ticker_aliases_applied": df.attrs.get("ticker_aliases_applied", []),
         "excluded_positions": excluded_positions or [],
         "portfolio_coverage": {
