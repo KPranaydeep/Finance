@@ -1,283 +1,182 @@
-"""Build an event-driven public-basket input snapshot from a holdings CSV."""
-
 from __future__ import annotations
 
-import argparse
+import io
 import json
-import math
-import time
-from datetime import datetime, timezone
-from typing import Callable
+from pathlib import Path
 
 import pandas as pd
-import yfinance as yf
+import streamlit as st
 
-FX_TICKER_TEMPLATE = "{ccy}INR=X"  # e.g. USDINR=X, EURINR=X
-DEFAULT_BATCH_SIZE = 25
-DEFAULT_RETRIES = 3
-
-# Old portfolio exports can contain Axis Mutual Fund iNAV identifiers instead
-# of the exchange-traded ETF symbols.  Normalize only the exact, verified
-# aliases below and preserve the changes in DataFrame.attrs for the UI/audit.
-YAHOO_TICKER_ALIASES = {
-    "AXISCEINAV.NS": "AXISCETF.NS",
-    "AXISHCINAV.NS": "AXISHCETF.NS",
-    "AXISNIINAV.NS": "AXISNIFTY.NS",
-}
+import generate_public_basket_input as generator
 
 
-def validate_holdings(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    required = {"Symbol", "Yahoo Ticker", "Currency", "Quantity", "Average Price"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"CSV is missing expected columns: {sorted(missing)}")
-
-    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
-    df["Average Price"] = pd.to_numeric(df["Average Price"], errors="coerce")
-
-    # Drop exited positions / bad rows. Adjust this filter if your backup
-    # encodes "closed" differently (e.g. a Status column).
-    df = df.dropna(subset=["Quantity", "Average Price"])
-    df = df[df["Quantity"] > 0]
-
-    if df.empty:
-        raise ValueError("No open positions found in the CSV after filtering.")
-
-    df["Symbol"] = df["Symbol"].astype(str).str.strip()
-    df["Yahoo Ticker"] = df["Yahoo Ticker"].astype(str).str.strip().str.upper()
-    original_tickers = df["Yahoo Ticker"].copy()
-    df["Yahoo Ticker"] = df["Yahoo Ticker"].replace(YAHOO_TICKER_ALIASES)
-    applied_aliases = [
-        {"from": old, "to": new}
-        for old, new in zip(original_tickers, df["Yahoo Ticker"])
-        if old != new
-    ]
-    df["Currency"] = df["Currency"].astype(str).str.strip().str.upper()
-    invalid = df[
-        df["Symbol"].eq("")
-        | df["Yahoo Ticker"].eq("")
-        | df["Currency"].eq("")
-        | df["Average Price"].le(0)
-    ]
-    if not invalid.empty:
-        raise ValueError("Open-position rows contain blank identifiers or invalid prices.")
-    if df["Yahoo Ticker"].duplicated().any():
-        duplicates = sorted(df.loc[df["Yahoo Ticker"].duplicated(False), "Yahoo Ticker"].unique())
-        raise ValueError("Duplicate Yahoo tickers: " + ", ".join(duplicates))
-    df = df.reset_index(drop=True)
-    df.attrs["ticker_aliases_applied"] = applied_aliases
-    return df
+DEFAULT_CSV = Path("universal_portfolio_backup.csv")
+PAGE_VERSION = "event-input-generator-r2"
+PAGE_VERSION = "event-input-generator-r5"
+MINIMUM_TICKER_COVERAGE = 0.80
 
 
-def load_holdings(csv_path: str) -> pd.DataFrame:
-    return validate_holdings(pd.read_csv(csv_path))
+st.set_page_config(
+    page_title="Prepare Public Basket Input",
+    page_icon="📦",
+    layout="wide",
+)
 
+st.title("📦 Prepare Public Basket Input")
+st.caption(f"{PAGE_VERSION} · Generates JSON only · No PostgreSQL writes")
+st.caption(
+    f"JSON generation threshold: {MINIMUM_TICKER_COVERAGE:.0%} of open-position tickers"
+)
+st.info(
+    "This page fetches current prices and creates the input JSON used by Public "
+    "Basket Publisher. It does not run the optimizer and cannot publish ledger records."
+)
 
-def fetch_fx_rates(currencies: set[str]) -> dict[str, float]:
-    rates = {"INR": 1.0}
-    for ccy in currencies:
-        if ccy == "INR" or ccy in rates:
-            continue
-        ticker = FX_TICKER_TEMPLATE.format(ccy=ccy)
-        hist = yf.Ticker(ticker).history(period="5d")
-        if hist.empty:
-            raise RuntimeError(f"Could not fetch FX rate for {ccy} via {ticker}")
-        rates[ccy] = float(hist["Close"].iloc[-1])
-    return rates
+uploaded_csv = st.file_uploader(
+    "Holdings CSV (optional)",
+    type=["csv"],
+    help=(
+        "Leave empty to use universal_portfolio_backup.csv from the repository, "
+        "or upload a newer holdings CSV."
+    ),
+)
 
+source_label = uploaded_csv.name if uploaded_csv is not None else str(DEFAULT_CSV)
+st.write("Selected source:", f"`{source_label}`")
 
-def _download_with_retries(
-    tickers: list[str],
-    retries: int,
-    *,
-    period: str = "5d",
-) -> pd.DataFrame:
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        try:
-            return yf.download(
-                tickers,
-                period=period,
-                interval="1d",
-                auto_adjust=True,
-                progress=False,
-                threads=False,
-                group_by="column",
-                timeout=30,
-            )
-        except Exception as exc:
-            last_error = exc
-            if attempt + 1 < retries:
-                time.sleep(1.5 * (attempt + 1))
-    if last_error is not None:
-        raise last_error
-    return pd.DataFrame()
+if uploaded_csv is None and not DEFAULT_CSV.is_file():
+    st.error("universal_portfolio_backup.csv is missing. Upload a holdings CSV above.")
+    st.stop()
 
-
-def _close_frame(data: pd.DataFrame, requested: list[str]) -> pd.DataFrame:
-    if data is None or data.empty:
-        return pd.DataFrame()
-    if isinstance(data.columns, pd.MultiIndex):
-        if "Close" in data.columns.get_level_values(0):
-            frame = data["Close"]
-        elif "Close" in data.columns.get_level_values(1):
-            frame = data.xs("Close", axis=1, level=1)
+if st.button("Fetch prices and prepare JSON", type="primary"):
+    try:
+        if uploaded_csv is not None:
+            raw_csv = uploaded_csv.getvalue()
+            frame = generator.validate_holdings(pd.read_csv(io.BytesIO(raw_csv)))
         else:
-            return pd.DataFrame()
-    elif "Close" in data.columns and len(requested) == 1:
-        frame = data[["Close"]].rename(columns={"Close": requested[0]})
-    else:
-        return pd.DataFrame()
-    if isinstance(frame, pd.Series):
-        frame = frame.to_frame(name=requested[0])
-    frame.columns = [str(column).strip().upper() for column in frame.columns]
-    return frame.apply(pd.to_numeric, errors="coerce")
+            frame = generator.load_holdings(str(DEFAULT_CSV))
 
+        tickers = frame["Yahoo Ticker"].astype(str).str.strip().str.upper().tolist()
+        applied_aliases = frame.attrs.get("ticker_aliases_applied", [])
+        if applied_aliases:
+            st.info(
+                "Corrected verified legacy ticker aliases before fetching prices."
+            )
+            st.dataframe(
+                pd.DataFrame(applied_aliases).rename(
+                    columns={"from": "CSV ticker", "to": "ETF ticker"}
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+        progress_bar = st.progress(0, text="Preparing price batches…")
 
-def fetch_latest_prices_with_missing(
-    tickers: list[str],
-    *,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    retries: int = DEFAULT_RETRIES,
-    progress: Callable[[int, int], None] | None = None,
-) -> tuple[dict[str, float], list[str]]:
-    """Fetch in bounded batches and report unresolved tickers without mislabelling all."""
-    unique = [
-        ticker
-        for ticker in dict.fromkeys(str(value).strip().upper() for value in tickers)
-        if ticker
-    ]
-    prices: dict[str, float] = {}
-    total_batches = max((len(unique) + batch_size - 1) // batch_size, 1)
+        def update_progress(done: int, total: int) -> None:
+            progress_bar.progress(done / total, text=f"Price batch {done} of {total}")
 
-    for batch_number, start in enumerate(range(0, len(unique), batch_size), start=1):
-        batch = unique[start : start + batch_size]
-        try:
-            frame = _close_frame(_download_with_retries(batch, retries), batch)
-        except Exception:
-            frame = pd.DataFrame()
+        with st.spinner("Fetching current prices from Yahoo Finance…"):
+            prices, missing = generator.fetch_latest_prices_with_missing(
+                tickers,
+                progress=update_progress,
+            )
 
-        for ticker in batch:
-            if ticker not in frame.columns:
-                continue
-            valid = frame[ticker].dropna()
-            if valid.empty:
-                continue
-            price = float(valid.iloc[-1])
-            if math.isfinite(price) and price > 0:
-                prices[ticker] = price
-        if progress:
-            progress(batch_number, total_batches)
-
-    # A valid but thinly traded ETF can have no usable close in a five-day
-    # window. Retry only unresolved symbols with progressively longer windows.
-    for ticker in [value for value in unique if value not in prices]:
-        for period in ("1mo", "3mo"):
-            try:
-                frame = _close_frame(
-                    _download_with_retries([ticker], retries, period=period),
-                    [ticker],
+        progress_bar.empty()
+        if missing:
+        total_tickers = len(set(tickers))
+        coverage = len(prices) / total_tickers if total_tickers else 0.0
+        if missing and coverage < MINIMUM_TICKER_COVERAGE:
+            st.session_state.pop("prepared_public_basket_json", None)
+            st.session_state.pop("prepared_public_basket_summary", None)
+            st.error(
+                f"Prices were found for {len(prices):,} of {len(set(tickers)):,} tickers. "
+                f"The JSON was not created because {len(missing):,} open positions remain unresolved."
+                f"Prices were found for {len(prices):,} of {total_tickers:,} tickers "
+                f"({coverage:.1%}). The JSON requires at least "
+                f"{MINIMUM_TICKER_COVERAGE:.0%} coverage."
+            )
+            missing_frame = pd.DataFrame({"Yahoo Ticker": missing})
+            st.dataframe(missing_frame, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download unresolved tickers CSV",
+                data=missing_frame.to_csv(index=False).encode("utf-8"),
+                file_name="public_basket_unresolved_tickers.csv",
+                mime="text/csv",
+            )
+        else:
+            excluded_positions: list[dict[str, str]] = []
+            build_frame = frame
+            if missing:
+                missing_set = set(missing)
+                excluded = frame[frame["Yahoo Ticker"].isin(missing_set)]
+                excluded_positions = [
+                    {
+                        "symbol": str(row["Symbol"]).strip(),
+                        "yahoo_ticker": str(row["Yahoo Ticker"]).strip().upper(),
+                        "reason": "price_unavailable",
+                    }
+                    for _, row in excluded.iterrows()
+                ]
+                build_frame = frame[~frame["Yahoo Ticker"].isin(missing_set)].copy()
+                build_frame.attrs = frame.attrs.copy()
+                st.warning(
+                    f"Coverage is {coverage:.1%}, above the "
+                    f"{MINIMUM_TICKER_COVERAGE:.0%} minimum. "
+                    f"The {len(excluded_positions):,} unresolved positions are excluded "
+                    "and the included weights will be recalculated to 100%."
                 )
-            except Exception:
-                frame = pd.DataFrame()
-            if ticker not in frame.columns:
-                continue
-            valid = frame[ticker].dropna()
-            if valid.empty:
-                continue
-            price = float(valid.iloc[-1])
-            if math.isfinite(price) and price > 0:
-                prices[ticker] = price
-                break
-
-    missing = [ticker for ticker in unique if ticker not in prices]
-    return prices, missing
-
-
-def fetch_latest_prices(tickers: list[str]) -> dict[str, float]:
-    prices, missing = fetch_latest_prices_with_missing(tickers)
-    if missing:
-        sample = ", ".join(missing[:25])
-        suffix = f" (+{len(missing) - 25} more)" if len(missing) > 25 else ""
-        raise RuntimeError(
-            f"Could not fetch valid prices for {len(missing)} tickers: {sample}{suffix}"
-        )
-    return prices
-
-
-def build_payload(
-    df: pd.DataFrame,
-    *,
-    prices: dict[str, float] | None = None,
-    fx_rates: dict[str, float] | None = None,
-    excluded_positions: list[dict[str, str]] | None = None,
-) -> dict:
-    currencies = set(df["Currency"].astype(str).str.upper())
-    fx_rates = fx_rates or fetch_fx_rates(currencies)
-
-    tickers = df["Yahoo Ticker"].astype(str).str.strip().str.upper().tolist()
-    prices = prices or fetch_latest_prices(tickers)
-
-    market_values = []
-    for _, row in df.iterrows():
-        ticker = str(row["Yahoo Ticker"]).strip().upper()
-        ccy = str(row["Currency"]).upper()
-        price = prices[ticker]
-        fx = fx_rates[ccy]
-        market_values.append(row["Quantity"] * price * fx)
-
-    total_value = sum(market_values)
-    if total_value <= 0:
-        raise RuntimeError("Total portfolio market value is zero or negative.")
-
-    portfolio_rows = []
-    for (_, row), value in zip(df.iterrows(), market_values):
-        ticker = str(row["Yahoo Ticker"]).strip().upper()
-        ccy = str(row["Currency"]).upper()
-        portfolio_rows.append(
-            {
-                "Symbol": str(row["Symbol"]).strip(),
-                "Yahoo Ticker": ticker,
-                "Currency": ccy,
-                "Quantity": float(row["Quantity"]),
-                "Average Price": float(row["Average Price"]),
-                "FX to INR": fx_rates[ccy],
-                "Weight": value / total_value,
+                st.dataframe(
+                    pd.DataFrame(excluded_positions),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            with st.spinner("Building immutable input snapshot…"):
+                payload = generator.build_payload(frame, prices=prices)
+                payload = generator.build_payload(
+                    build_frame,
+                    prices=prices,
+                    excluded_positions=excluded_positions,
+                )
+            encoded = json.dumps(
+                payload,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+            st.session_state.prepared_public_basket_json = encoded
+            st.session_state.prepared_public_basket_summary = {
+                "positions": len(payload["portfolio"]),
+                "excluded_positions": len(payload["excluded_positions"]),
+                "market_data_cutoff": payload["market_data_cutoff"],
+                "source": source_label,
+                "ticker_aliases_applied": payload.get("ticker_aliases_applied", []),
             }
-        )
+            st.success("The public-basket input JSON is ready.")
+    except Exception as exc:
+        st.session_state.pop("prepared_public_basket_json", None)
+        st.error(f"Could not prepare the input JSON: {exc}")
 
-    now = datetime.now(timezone.utc).isoformat()
-    return {
-        "market_data_cutoff": now,
-        "input_created_at": now,
-        "portfolio": portfolio_rows,
-        "ticker_aliases_applied": df.attrs.get("ticker_aliases_applied", []),
-        "excluded_positions": excluded_positions or [],
-        "portfolio_coverage": {
-            "included_positions": len(portfolio_rows),
-            "excluded_positions": len(excluded_positions or []),
-            "basis": "open_position_count",
-        },
-        # "settings" intentionally omitted -> adapter applies DEFAULT_SETTINGS.
-        # Override here if you want different optimizer parameters.
-    }
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", default="universal_portfolio_backup.csv")
-    parser.add_argument("--out", default="today_input.json")
-    args = parser.parse_args()
-
-    df = load_holdings(args.csv)
-    payload = build_payload(df)
-
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-
-    print(f"Wrote {args.out}: {len(payload['portfolio'])} positions")
-
-
-if __name__ == "__main__":
-    main()
+prepared = st.session_state.get("prepared_public_basket_json")
+summary = st.session_state.get("prepared_public_basket_summary")
+if prepared and summary:
+    st.subheader("Prepared snapshot")
+    c1, c2 = st.columns(2)
+    c1.metric("Open positions", summary["positions"])
+    c2.write("Market data cutoff (UTC)")
+    c2.code(summary["market_data_cutoff"], language="text")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Included positions", summary["positions"])
+    c2.metric("Excluded positions", summary.get("excluded_positions", 0))
+    c3.write("Market data cutoff (UTC)")
+    c3.code(summary["market_data_cutoff"], language="text")
+    st.download_button(
+        "Download public basket input JSON",
+        data=prepared,
+        file_name="public_basket_input.json",
+        mime="application/json",
+        type="primary",
+    )
+    st.markdown(
+        "Next: open **Public Basket Publisher**, upload `public_basket_input.json`, "
+        "and build the read-only preview. Do not publish until the preview is reviewed."
+    )
