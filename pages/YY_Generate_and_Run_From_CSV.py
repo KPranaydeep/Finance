@@ -12,7 +12,7 @@ import generate_public_basket_input as generator
 
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
 PAGE_VERSION = "event-input-generator-r8"
-MINIMUM_PRICE_COVERAGE = 0.80
+MINIMUM_PRICE_COVERAGE = 0.20
 
 st.set_page_config(page_title="Prepare Public Basket Input", page_icon="📦", layout="wide")
 st.title("📦 Prepare Public Basket Input")
