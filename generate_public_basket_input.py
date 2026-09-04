@@ -211,6 +211,7 @@ def build_payload(
     *,
     prices: dict[str, float] | None = None,
     fx_rates: dict[str, float] | None = None,
+    excluded_positions: list[dict[str, str]] | None = None,
 ) -> dict:
     currencies = set(df["Currency"].astype(str).str.upper())
     fx_rates = fx_rates or fetch_fx_rates(currencies)
@@ -252,6 +253,12 @@ def build_payload(
         "input_created_at": now,
         "portfolio": portfolio_rows,
         "ticker_aliases_applied": df.attrs.get("ticker_aliases_applied", []),
+        "excluded_positions": excluded_positions or [],
+        "portfolio_coverage": {
+            "included_positions": len(portfolio_rows),
+            "excluded_positions": len(excluded_positions or []),
+            "basis": "open_position_count",
+        },
         # "settings" intentionally omitted -> adapter applies DEFAULT_SETTINGS.
         # Override here if you want different optimizer parameters.
     }
