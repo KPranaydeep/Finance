@@ -128,6 +128,7 @@ if st.button(
         with st.spinner("Applying and verifying the atomic migration…"):
             result = apply_migration(connection)
         st.session_state.migration_plan = asdict(result)
+        st.cache_data.clear()
         st.success("Schema version 2 was committed successfully.")
         st.error(
             "Required cleanup: remove pages/ZZ_Migrate_Public_Basket_V1_to_V2.py "
