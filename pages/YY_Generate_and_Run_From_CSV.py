@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -9,165 +10,119 @@ import streamlit as st
 
 import generate_public_basket_input as generator
 
-
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
-PAGE_VERSION = "event-input-generator-r5"
-MINIMUM_TICKER_COVERAGE = 0.80
+PAGE_VERSION = "event-input-generator-r6"
+MINIMUM_PRICE_COVERAGE = 0.80
 
-
-st.set_page_config(
-    page_title="Prepare Public Basket Input",
-    page_icon="📦",
-    layout="wide",
-)
-
+st.set_page_config(page_title="Prepare Public Basket Input", page_icon="📦", layout="wide")
 st.title("📦 Prepare Public Basket Input")
-st.caption(f"{PAGE_VERSION} · Generates JSON only · No PostgreSQL writes")
-st.caption(
-    f"JSON generation threshold: {MINIMUM_TICKER_COVERAGE:.0%} of open-position tickers"
-)
-st.info(
-    "This page fetches current prices and creates the input JSON used by Public "
-    "Basket Publisher. It does not run the optimizer and cannot publish ledger records."
-)
+st.caption(f"{PAGE_VERSION} · Two-stage read-only preparation · No PostgreSQL writes")
+st.info("Stage 1 shows liquidity exclusions. Stage 2 creates JSON after confirmation. The optimizer runs later in Public Basket Publisher.")
 
-uploaded_csv = st.file_uploader(
-    "Holdings CSV (optional)",
-    type=["csv"],
-    help=(
-        "Leave empty to use universal_portfolio_backup.csv from the repository, "
-        "or upload a newer holdings CSV."
-    ),
-)
-
+uploaded_csv = st.file_uploader("Holdings CSV (optional)", type=["csv"])
 source_label = uploaded_csv.name if uploaded_csv is not None else str(DEFAULT_CSV)
 st.write("Selected source:", f"`{source_label}`")
-
 if uploaded_csv is None and not DEFAULT_CSV.is_file():
     st.error("universal_portfolio_backup.csv is missing. Upload a holdings CSV above.")
     st.stop()
 
-if st.button("Fetch prices and prepare JSON", type="primary"):
+exclude_percent = st.slider(
+    "Exclude the least-liquid positions before optimization", 0, 90, 80, 5,
+    format="%d%%", help="Ranks positions by 3-month median daily traded value in INR."
+)
+
+st.subheader("Stage 1 — Build read-only liquidity preview")
+if st.button("Fetch data and build preview", type="primary"):
     try:
+        st.session_state.pop("prepared_public_basket_json", None)
         if uploaded_csv is not None:
-            raw_csv = uploaded_csv.getvalue()
-            frame = generator.validate_holdings(pd.read_csv(io.BytesIO(raw_csv)))
+            frame = generator.validate_holdings(pd.read_csv(io.BytesIO(uploaded_csv.getvalue())))
         else:
             frame = generator.load_holdings(str(DEFAULT_CSV))
 
-        tickers = frame["Yahoo Ticker"].astype(str).str.strip().str.upper().tolist()
-        applied_aliases = frame.attrs.get("ticker_aliases_applied", [])
-        if applied_aliases:
-            st.info(
-                "Corrected verified legacy ticker aliases before fetching prices."
-            )
-            st.dataframe(
-                pd.DataFrame(applied_aliases).rename(
-                    columns={"from": "CSV ticker", "to": "ETF ticker"}
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
-        progress_bar = st.progress(0, text="Preparing price batches…")
+        tickers = frame["Yahoo Ticker"].tolist()
+        bar = st.progress(0, text="Fetching current prices…")
+        prices, price_missing = generator.fetch_latest_prices_with_missing(
+            tickers,
+            progress=lambda done, total: bar.progress(done / total, text=f"Price batch {done} of {total}"),
+        )
+        bar.empty()
+        price_coverage = len(prices) / len(set(tickers)) if tickers else 0.0
+        if price_coverage < MINIMUM_PRICE_COVERAGE:
+            raise RuntimeError(f"Price coverage is {price_coverage:.1%}; at least {MINIMUM_PRICE_COVERAGE:.0%} is required.")
 
-        def update_progress(done: int, total: int) -> None:
-            progress_bar.progress(done / total, text=f"Price batch {done} of {total}")
+        priced = frame[frame["Yahoo Ticker"].isin(prices)].copy()
+        priced.attrs = frame.attrs.copy()
+        fx_rates = generator.fetch_fx_rates(set(priced["Currency"]))
+        bar = st.progress(0, text="Measuring liquidity…")
+        liquidity, liquidity_missing = generator.fetch_liquidity_metrics(
+            priced["Yahoo Ticker"].tolist(),
+            progress=lambda done, total: bar.progress(done / total, text=f"Liquidity batch {done} of {total}"),
+        )
+        bar.empty()
 
-        with st.spinner("Fetching current prices from Yahoo Finance…"):
-            prices, missing = generator.fetch_latest_prices_with_missing(
-                tickers,
-                progress=update_progress,
-            )
+        ranked = priced[priced["Yahoo Ticker"].isin(liquidity)].copy()
+        ranked["Latest Price"] = ranked["Yahoo Ticker"].map(prices)
+        ranked["Median Daily Traded Value (INR)"] = ranked.apply(
+            lambda row: float(liquidity[row["Yahoo Ticker"]]["median_daily_traded_value"])
+            * fx_rates[str(row["Currency"]).upper()], axis=1
+        )
+        ranked["Observed Sessions"] = ranked["Yahoo Ticker"].map(
+            lambda ticker: int(liquidity[ticker]["observed_sessions"])
+        )
+        ranked = ranked.sort_values("Median Daily Traded Value (INR)")
+        remove_count = min(math.floor(len(ranked) * exclude_percent / 100), max(len(ranked) - 1, 0))
+        illiquid = ranked.iloc[:remove_count].copy()
+        retained = ranked.iloc[remove_count:].copy()
+        retained.attrs = frame.attrs.copy()
 
-        progress_bar.empty()
-        total_tickers = len(set(tickers))
-        coverage = len(prices) / total_tickers if total_tickers else 0.0
-        if missing and coverage < MINIMUM_TICKER_COVERAGE:
-            st.session_state.pop("prepared_public_basket_json", None)
-            st.session_state.pop("prepared_public_basket_summary", None)
-            st.error(
-                f"Prices were found for {len(prices):,} of {total_tickers:,} tickers "
-                f"({coverage:.1%}). The JSON requires at least "
-                f"{MINIMUM_TICKER_COVERAGE:.0%} coverage."
-            )
-            missing_frame = pd.DataFrame({"Yahoo Ticker": missing})
-            st.dataframe(missing_frame, use_container_width=True, hide_index=True)
-            st.download_button(
-                "Download unresolved tickers CSV",
-                data=missing_frame.to_csv(index=False).encode("utf-8"),
-                file_name="public_basket_unresolved_tickers.csv",
-                mime="text/csv",
-            )
-        else:
-            excluded_positions: list[dict[str, str]] = []
-            build_frame = frame
-            if missing:
-                missing_set = set(missing)
-                excluded = frame[frame["Yahoo Ticker"].isin(missing_set)]
-                excluded_positions = [
-                    {
-                        "symbol": str(row["Symbol"]).strip(),
-                        "yahoo_ticker": str(row["Yahoo Ticker"]).strip().upper(),
-                        "reason": "price_unavailable",
-                    }
-                    for _, row in excluded.iterrows()
-                ]
-                build_frame = frame[~frame["Yahoo Ticker"].isin(missing_set)].copy()
-                build_frame.attrs = frame.attrs.copy()
-                st.warning(
-                    f"Coverage is {coverage:.1%}, above the "
-                    f"{MINIMUM_TICKER_COVERAGE:.0%} minimum. "
-                    f"The {len(excluded_positions):,} unresolved positions are excluded "
-                    "and the included weights will be recalculated to 100%."
-                )
-                st.dataframe(
-                    pd.DataFrame(excluded_positions),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            with st.spinner("Building immutable input snapshot…"):
-                payload = generator.build_payload(
-                    build_frame,
-                    prices=prices,
-                    excluded_positions=excluded_positions,
-                )
-            encoded = json.dumps(
-                payload,
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8")
-            st.session_state.prepared_public_basket_json = encoded
-            st.session_state.prepared_public_basket_summary = {
-                "positions": len(payload["portfolio"]),
-                "excluded_positions": len(payload["excluded_positions"]),
-                "market_data_cutoff": payload["market_data_cutoff"],
-                "source": source_label,
-                "ticker_aliases_applied": payload.get("ticker_aliases_applied", []),
-            }
-            st.success("The public-basket input JSON is ready.")
+        exclusions = []
+        reasons = [(t, "price_unavailable") for t in price_missing]
+        reasons += [(t, "liquidity_data_unavailable") for t in liquidity_missing]
+        reasons += [(str(r["Yahoo Ticker"]), "bottom_liquidity_percentile") for _, r in illiquid.iterrows()]
+        for ticker, reason in reasons:
+            for _, row in frame[frame["Yahoo Ticker"].eq(ticker)].iterrows():
+                exclusions.append({"symbol": str(row["Symbol"]), "yahoo_ticker": ticker, "reason": reason})
+
+        st.session_state.liquidity_preview = {
+            "retained": retained, "excluded": pd.DataFrame(exclusions), "prices": prices,
+            "fx_rates": fx_rates, "exclude_percent": exclude_percent, "original_count": len(frame),
+        }
     except Exception as exc:
-        st.session_state.pop("prepared_public_basket_json", None)
-        st.error(f"Could not prepare the input JSON: {exc}")
+        st.session_state.pop("liquidity_preview", None)
+        st.error(f"Could not build the preview: {exc}")
+
+preview = st.session_state.get("liquidity_preview")
+if preview:
+    retained, excluded = preview["retained"], preview["excluded"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Original positions", preview["original_count"])
+    c2.metric("Retained for optimizer", len(retained))
+    c3.metric("Excluded", len(excluded))
+    c4.metric("Retained", f"{len(retained) / preview['original_count']:.1%}")
+    st.success(f"Read-only preview ready. Bottom {preview['exclude_percent']}% by liquidity is selected for exclusion.")
+    st.markdown("**Retained positions — most liquid first**")
+    st.dataframe(retained.sort_values("Median Daily Traded Value (INR)", ascending=False), use_container_width=True, hide_index=True)
+    st.markdown("**Excluded positions and reasons**")
+    st.dataframe(excluded, use_container_width=True, hide_index=True)
+
+    st.subheader("Stage 2 — Confirm and create JSON")
+    confirmed = st.checkbox(f"I reviewed the preview and approve sending {len(retained)} positions to the optimizer.")
+    if st.button("Create public basket input JSON", disabled=not confirmed, type="primary"):
+        payload = generator.build_payload(
+            retained, prices=preview["prices"], fx_rates=preview["fx_rates"],
+            excluded_positions=excluded.to_dict(orient="records"),
+        )
+        payload["liquidity_filter"] = {
+            "method": "bottom_percent_by_3_month_median_daily_traded_value_inr",
+            "excluded_percent": preview["exclude_percent"],
+        }
+        st.session_state.prepared_public_basket_json = json.dumps(
+            payload, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False
+        ).encode("utf-8")
+        st.success("JSON created. No optimizer or database write has occurred.")
 
 prepared = st.session_state.get("prepared_public_basket_json")
-summary = st.session_state.get("prepared_public_basket_summary")
-if prepared and summary:
-    st.subheader("Prepared snapshot")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Included positions", summary["positions"])
-    c2.metric("Excluded positions", summary.get("excluded_positions", 0))
-    c3.write("Market data cutoff (UTC)")
-    c3.code(summary["market_data_cutoff"], language="text")
-    st.download_button(
-        "Download public basket input JSON",
-        data=prepared,
-        file_name="public_basket_input.json",
-        mime="application/json",
-        type="primary",
-    )
-    st.markdown(
-        "Next: open **Public Basket Publisher**, upload `public_basket_input.json`, "
-        "and build the read-only preview. Do not publish until the preview is reviewed."
-    )
+if prepared:
+    st.download_button("Download public_basket_input.json", prepared, "public_basket_input.json", "application/json", type="primary")
+    st.markdown("Next: upload the JSON to **Public Basket Publisher**, build its read-only optimizer preview, review it, and publish only after digest confirmation.")
