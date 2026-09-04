@@ -18,7 +18,7 @@ from psycopg.types.json import Jsonb
 
 PUBLIC_BASKET_SCHEMA_VERSION = 2
 
-DEFAULT_BASKET_ID = "PRASHANTH-PUBLIC-01"
+DEFAULT_BASKET_ID = "PUBLIC-01"
 DEFAULT_BASKET_NAME = "Public Dynamic Portfolio"
 DEFAULT_STRATEGY_VERSION = "portfolio-rebalancer-v1"
 
