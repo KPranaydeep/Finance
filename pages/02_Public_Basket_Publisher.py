@@ -30,7 +30,7 @@ from public_basket_rebalance_service import (
 
 IST = ZoneInfo("Asia/Kolkata")
 PUBLISH_LOCK = 7_104_202_601
-PAGE_VERSION = "event-publisher-r1"
+PAGE_VERSION = "event-publisher-r2"
 
 
 st.set_page_config(
@@ -75,6 +75,16 @@ def safe_error(exc: Exception, *secrets: str) -> str:
 def clear_preview() -> None:
     for key in ("publisher_preview", "publisher_receipt"):
         st.session_state.pop(key, None)
+
+
+@st.cache_data(ttl=3600, max_entries=8, show_spinner=False)
+def cached_signal_preview(payload_json: str, data_as_of_iso: str) -> dict[str, Any]:
+    """Reuse an identical read-only optimizer result for one hour."""
+    payload = json.loads(payload_json)
+    return build_public_signal(
+        payload=payload,
+        data_as_of=datetime.fromisoformat(data_as_of_iso),
+    )
 
 
 st.title("🧾 Public Basket Publisher")
@@ -149,7 +159,10 @@ st.write("Input fingerprint:", f"`{digest}`")
 if st.button("Build read-only preview", type="primary"):
     try:
         with st.spinner("Running the optimizer without writing to the database…"):
-            contract = build_public_signal(payload=input_payload, data_as_of=data_as_of)
+            contract = cached_signal_preview(
+                canonical_json(input_payload),
+                data_as_of.isoformat(),
+            )
             rows = contract.get("signal_output", [])
             if not isinstance(rows, list):
                 raise TypeError("Optimizer signal_output must be a list of rows")
@@ -291,4 +304,3 @@ if st.button(
         st.error("Publish failed. The transaction was rolled back.")
         with st.expander("Technical details"):
             st.code(safe_error(exc, publisher_token, database_url), language="text")
-
