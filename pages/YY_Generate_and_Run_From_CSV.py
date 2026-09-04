@@ -33,8 +33,8 @@ exclude_percent = st.slider(
 max_optimizer_positions = st.number_input(
     "Maximum positions sent to the optimizer",
     min_value=10,
-    max_value=150,
-    value=50,
+    max_value=650,
+    value=450,
     step=10,
     help="If the percentage filter retains more positions, only the most liquid are kept.",
 )
