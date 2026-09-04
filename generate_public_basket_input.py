@@ -16,6 +16,15 @@ FX_TICKER_TEMPLATE = "{ccy}INR=X"  # e.g. USDINR=X, EURINR=X
 DEFAULT_BATCH_SIZE = 25
 DEFAULT_RETRIES = 3
 
+# Old portfolio exports can contain Axis Mutual Fund iNAV identifiers instead
+# of the exchange-traded ETF symbols.  Normalize only the exact, verified
+# aliases below and preserve the changes in DataFrame.attrs for the UI/audit.
+YAHOO_TICKER_ALIASES = {
+    "AXISCEINAV.NS": "AXISCETF.NS",
+    "AXISHCINAV.NS": "AXISHCETF.NS",
+    "AXISNIINAV.NS": "AXISNIFTY.NS",
+}
+
 
 def validate_holdings(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -37,6 +46,13 @@ def validate_holdings(df: pd.DataFrame) -> pd.DataFrame:
 
     df["Symbol"] = df["Symbol"].astype(str).str.strip()
     df["Yahoo Ticker"] = df["Yahoo Ticker"].astype(str).str.strip().str.upper()
+    original_tickers = df["Yahoo Ticker"].copy()
+    df["Yahoo Ticker"] = df["Yahoo Ticker"].replace(YAHOO_TICKER_ALIASES)
+    applied_aliases = [
+        {"from": old, "to": new}
+        for old, new in zip(original_tickers, df["Yahoo Ticker"])
+        if old != new
+    ]
     df["Currency"] = df["Currency"].astype(str).str.strip().str.upper()
     invalid = df[
         df["Symbol"].eq("")
@@ -49,7 +65,9 @@ def validate_holdings(df: pd.DataFrame) -> pd.DataFrame:
     if df["Yahoo Ticker"].duplicated().any():
         duplicates = sorted(df.loc[df["Yahoo Ticker"].duplicated(False), "Yahoo Ticker"].unique())
         raise ValueError("Duplicate Yahoo tickers: " + ", ".join(duplicates))
-    return df.reset_index(drop=True)
+    df = df.reset_index(drop=True)
+    df.attrs["ticker_aliases_applied"] = applied_aliases
+    return df
 
 
 def load_holdings(csv_path: str) -> pd.DataFrame:
@@ -69,13 +87,18 @@ def fetch_fx_rates(currencies: set[str]) -> dict[str, float]:
     return rates
 
 
-def _download_with_retries(tickers: list[str], retries: int) -> pd.DataFrame:
+def _download_with_retries(
+    tickers: list[str],
+    retries: int,
+    *,
+    period: str = "5d",
+) -> pd.DataFrame:
     last_error: Exception | None = None
     for attempt in range(retries):
         try:
             return yf.download(
                 tickers,
-                period="5d",
+                period=period,
                 interval="1d",
                 auto_adjust=True,
                 progress=False,
@@ -147,6 +170,27 @@ def fetch_latest_prices_with_missing(
         if progress:
             progress(batch_number, total_batches)
 
+    # A valid but thinly traded ETF can have no usable close in a five-day
+    # window. Retry only unresolved symbols with progressively longer windows.
+    for ticker in [value for value in unique if value not in prices]:
+        for period in ("1mo", "3mo"):
+            try:
+                frame = _close_frame(
+                    _download_with_retries([ticker], retries, period=period),
+                    [ticker],
+                )
+            except Exception:
+                frame = pd.DataFrame()
+            if ticker not in frame.columns:
+                continue
+            valid = frame[ticker].dropna()
+            if valid.empty:
+                continue
+            price = float(valid.iloc[-1])
+            if math.isfinite(price) and price > 0:
+                prices[ticker] = price
+                break
+
     missing = [ticker for ticker in unique if ticker not in prices]
     return prices, missing
 
@@ -207,6 +251,7 @@ def build_payload(
         "market_data_cutoff": now,
         "input_created_at": now,
         "portfolio": portfolio_rows,
+        "ticker_aliases_applied": df.attrs.get("ticker_aliases_applied", []),
         # "settings" intentionally omitted -> adapter applies DEFAULT_SETTINGS.
         # Override here if you want different optimizer parameters.
     }
