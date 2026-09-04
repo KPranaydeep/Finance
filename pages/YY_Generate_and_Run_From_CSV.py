@@ -11,8 +11,7 @@ import generate_public_basket_input as generator
 
 
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
-PAGE_VERSION = "event-input-generator-r2"
-PAGE_VERSION = "event-input-generator-r4"
+PAGE_VERSION = "event-input-generator-r5"
 MINIMUM_TICKER_COVERAGE = 0.80
 
 
@@ -81,15 +80,12 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
             )
 
         progress_bar.empty()
-        if missing:
         total_tickers = len(set(tickers))
         coverage = len(prices) / total_tickers if total_tickers else 0.0
         if missing and coverage < MINIMUM_TICKER_COVERAGE:
             st.session_state.pop("prepared_public_basket_json", None)
             st.session_state.pop("prepared_public_basket_summary", None)
             st.error(
-                f"Prices were found for {len(prices):,} of {len(set(tickers)):,} tickers. "
-                f"The JSON was not created because {len(missing):,} open positions remain unresolved."
                 f"Prices were found for {len(prices):,} of {total_tickers:,} tickers "
                 f"({coverage:.1%}). The JSON requires at least "
                 f"{MINIMUM_TICKER_COVERAGE:.0%} coverage."
@@ -130,7 +126,6 @@ if st.button("Fetch prices and prepare JSON", type="primary"):
                     hide_index=True,
                 )
             with st.spinner("Building immutable input snapshot…"):
-                payload = generator.build_payload(frame, prices=prices)
                 payload = generator.build_payload(
                     build_frame,
                     prices=prices,
@@ -160,10 +155,6 @@ prepared = st.session_state.get("prepared_public_basket_json")
 summary = st.session_state.get("prepared_public_basket_summary")
 if prepared and summary:
     st.subheader("Prepared snapshot")
-    c1, c2 = st.columns(2)
-    c1.metric("Open positions", summary["positions"])
-    c2.write("Market data cutoff (UTC)")
-    c2.code(summary["market_data_cutoff"], language="text")
     c1, c2, c3 = st.columns(3)
     c1.metric("Included positions", summary["positions"])
     c2.metric("Excluded positions", summary.get("excluded_positions", 0))
