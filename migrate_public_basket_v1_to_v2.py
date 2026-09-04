@@ -14,6 +14,7 @@ from public_basket_postgres import (
 
 
 MIGRATION_ADVISORY_LOCK = 9485218
+MIGRATION_SCRIPT_VERSION = "v1-to-v2-r2"
 
 V1_TABLES = (
     "market_sessions",
@@ -163,7 +164,7 @@ def inspect_migration(conn: Any) -> MigrationPlan:
 def _drop_archive_triggers(conn: Any, archive_table: str) -> None:
     rows = conn.execute(
         """
-        SELECT trigger_name
+        SELECT DISTINCT trigger_name
         FROM information_schema.triggers
         WHERE event_object_schema = current_schema()
           AND event_object_table = %s
