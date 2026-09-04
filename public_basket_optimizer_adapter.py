@@ -128,6 +128,8 @@ def _validate_and_build_portfolio(payload: dict[str, Any]) -> pd.DataFrame:
     frame["Symbol"] = frame["Symbol"].astype(str).str.strip()
     frame["Quantity"] = pd.to_numeric(frame["Quantity"], errors="coerce")
     frame["Average Price"] = pd.to_numeric(frame["Average Price"], errors="coerce")
+    if "Latest Price" in frame.columns:
+        frame["Latest Price"] = pd.to_numeric(frame["Latest Price"], errors="coerce")
     frame["FX to INR"] = pd.to_numeric(frame["FX to INR"], errors="coerce")
     frame["Weight"] = pd.to_numeric(frame["Weight"], errors="coerce")
 
@@ -253,7 +255,19 @@ def build_public_signal(
     if len(optimized_tickers) != len(optimal_weights):
         raise RuntimeError("Optimizer returned different ticker and weight counts")
 
-    price_map = get_latest_price_map(optimized_tickers)
+    embedded_prices = {}
+    if "Latest Price" in portfolio_df.columns:
+        embedded_prices = {
+            str(row["Yahoo Ticker"]): float(row["Latest Price"])
+            for _, row in portfolio_df.iterrows()
+            if pd.notna(row["Latest Price"])
+            and math.isfinite(float(row["Latest Price"]))
+            and float(row["Latest Price"]) > 0
+        }
+    if all(ticker in embedded_prices for ticker in optimized_tickers):
+        price_map = {ticker: embedded_prices[ticker] for ticker in optimized_tickers}
+    else:
+        price_map = get_latest_price_map(optimized_tickers)
     missing_price_tickers = sorted(
         ticker
         for ticker in optimized_tickers
