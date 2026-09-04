@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from datetime import date, datetime
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -28,6 +29,7 @@ from public_basket_postgres import (
 
 INDIA_TZ = ZoneInfo("Asia/Kolkata")
 RECENT_LIMIT = 25
+LOGGER = logging.getLogger(__name__)
 
 
 def display_value(value: Any) -> Any:
@@ -82,6 +84,10 @@ def call_ledger_reader(
     return reader(conn, **kwargs)
 
 
+def reader_accepts(reader: Callable[..., Any], parameter_name: str) -> bool:
+    return parameter_name in inspect.signature(reader).parameters
+
+
 def show_table(title: str, rows: list[dict[str, Any]], empty_message: str) -> None:
     st.subheader(title)
     if rows:
@@ -98,8 +104,9 @@ st.set_page_config(
 
 st.title("📊 Public Basket Status")
 st.caption(
-    "Read-only inspection of the durable event ledger. This page does not run "
-    "the optimizer, create signals or rebalances, place orders, or execute trades."
+    "Inspection of the durable event ledger with idempotent schema and basket "
+    "initialization. This page never runs the optimizer, creates portfolio events, "
+    "places orders, or executes trades."
 )
 
 database_url = get_public_basket_database_url()
@@ -165,22 +172,50 @@ try:
         rebalance_id=latest_rebalance_id,
         limit=RECENT_LIMIT,
     ) or [])
-    latest_order_id = (
-        dict(trade_orders_raw[0]).get("order_id")
-        if trade_orders_raw
-        else None
-    )
-    trade_executions_raw = list(call_ledger_reader(
-        list_trade_executions,
-        connection,
-        basket_id=DEFAULT_BASKET_ID,
-        order_id=latest_order_id,
-        limit=RECENT_LIMIT,
-    ) or [])
+    latest_order_ids = [
+        dict(row).get("order_id")
+        for row in trade_orders_raw
+        if dict(row).get("order_id")
+    ]
 
-except Exception as exc:
+    if reader_accepts(list_trade_executions, "order_id"):
+        execution_rows: list[Any] = []
+        for order_id in latest_order_ids:
+            execution_rows.extend(
+                call_ledger_reader(
+                    list_trade_executions,
+                    connection,
+                    basket_id=DEFAULT_BASKET_ID,
+                    order_id=order_id,
+                    limit=RECENT_LIMIT,
+                )
+                or []
+            )
+
+        executions_by_id = {
+            dict(row).get("execution_id", f"row-{index}"): row
+            for index, row in enumerate(execution_rows)
+        }
+        trade_executions_raw = sorted(
+            executions_by_id.values(),
+            key=lambda row: str(dict(row).get("executed_at", "")),
+            reverse=True,
+        )[:RECENT_LIMIT]
+    else:
+        trade_executions_raw = list(
+            call_ledger_reader(
+                list_trade_executions,
+                connection,
+                basket_id=DEFAULT_BASKET_ID,
+                limit=RECENT_LIMIT,
+            )
+            or []
+        )
+
+except Exception:
+    LOGGER.exception("Public-basket status query failed")
     st.error("The public-basket database could not be initialized or queried.")
-    st.exception(exc)
+    st.info("Please try again later or ask the application operator to check the logs.")
     st.stop()
 finally:
     if connection is not None:
@@ -235,8 +270,10 @@ with st.expander("Latest orders and executions", expanded=False):
         display_rows(trade_orders_raw),
         "No trade orders are available.",
     )
-    if latest_order_id:
-        st.caption(f"Executions for latest order: {latest_order_id}")
+    if latest_order_ids:
+        st.caption(
+            f"Executions across {len(latest_order_ids)} order(s) in the latest rebalance."
+        )
     show_table(
         "Trade executions",
         display_rows(trade_executions_raw),
