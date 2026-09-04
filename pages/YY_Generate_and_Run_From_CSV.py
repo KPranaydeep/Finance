@@ -12,6 +12,8 @@ import generate_public_basket_input as generator
 
 DEFAULT_CSV = Path("universal_portfolio_backup.csv")
 PAGE_VERSION = "event-input-generator-r2"
+PAGE_VERSION = "event-input-generator-r3"
+MINIMUM_TICKER_COVERAGE = 0.80
 
 
 st.set_page_config(
