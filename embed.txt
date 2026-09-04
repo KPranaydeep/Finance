@@ -1,0 +1,1 @@
+<blockquote class="trendlyne-widgets" data-get-url="https://starfolio.trendlyne.com/web-widget/basket/118dbb55919f418f82d41e862e10ad9b/" data-theme="light"></blockquote><script async src="https://cdn-static.trendlyne.com/static/js/webwidgets/tl-widgets.js" charset="utf-8"> </script>
