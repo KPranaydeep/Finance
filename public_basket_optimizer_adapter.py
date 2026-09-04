@@ -221,6 +221,9 @@ def build_public_signal(
         raise TypeError("payload must be a JSON object")
     data_as_of = _validated_data_as_of(data_as_of)
     portfolio_df = _validate_and_build_portfolio(payload)
+    start_mode = str(payload.get("basket_start_mode", "existing_holdings"))
+    if start_mode not in {"existing_holdings", "zero_investment"}:
+        raise ValueError("basket_start_mode must be existing_holdings or zero_investment")
     settings = _validated_settings(payload)
 
     (
@@ -282,13 +285,16 @@ def build_public_signal(
             + ", ".join(missing_price_tickers)
         )
 
-    rebalance_df, missing_prices, missing_alloc = rebalance_plan_multi(
-        portfolio_df.copy(),
-        optimal_weights,
-        log_returns,
-        price_map,
-        settings["days_to_flip"],
-    )
+    if start_mode == "zero_investment":
+        rebalance_df, missing_prices, missing_alloc = pd.DataFrame(), [], []
+    else:
+        rebalance_df, missing_prices, missing_alloc = rebalance_plan_multi(
+            portfolio_df.copy(),
+            optimal_weights,
+            log_returns,
+            price_map,
+            settings["days_to_flip"],
+        )
     if missing_prices or missing_alloc:
         raise RuntimeError(
             "Rebalance output is incomplete. Missing prices: "
@@ -317,7 +323,11 @@ def build_public_signal(
             "strategy_version": STRATEGY_VERSION,
             "data_as_of": data_as_of.isoformat(),
             "settings": frozen_settings,
-            "portfolio_before": portfolio_df,
+            "portfolio_before": (
+                portfolio_df.assign(Quantity=0.0, Weight=0.0)
+                if start_mode == "zero_investment"
+                else portfolio_df
+            ),
             "optimizer_output": {
                 "target_allocation": allocation,
                 "current_stats": current_stats or {},
@@ -331,6 +341,7 @@ def build_public_signal(
                     "redundant_df", pd.DataFrame()
                 ),
                 "latest_prices": price_map,
+                "basket_start_mode": start_mode,
             },
             "signal_output": signal_rows,
             "decision_status": decision_status,
