@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,6 @@ import pandas as pd
 
 
 STRATEGY_VERSION = "portfolio-rebalancer-v1"
-INPUT_PATH_ENV = "PUBLIC_BASKET_INPUT_PATH"
 
 DEFAULT_SETTINGS = {
     "days_to_flip": 10,
@@ -40,7 +38,7 @@ def _load_core_functions():
     Import only the UI-free optimizer module.
 
     Never import portfolio_rebalancer_database.py here: that file contains
-    top-level Streamlit page code and is unsafe inside a scheduled worker.
+    top-level Streamlit page code and is unsafe inside an event-driven run.
     """
     try:
         from portfolio_optimizer_core import (
@@ -104,33 +102,15 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _read_frozen_input() -> dict[str, Any]:
-    """
-    Read an operator-prepared input snapshot.
-
-    This is not an end-user upload. The scheduled deployment points to a controlled
-    JSON file using PUBLIC_BASKET_INPUT_PATH. The complete input is copied into the
-    immutable signal record by the scheduler.
-    """
-    configured_path = os.getenv(INPUT_PATH_ENV)
-    if not configured_path:
-        raise RuntimeError(
-            f"{INPUT_PATH_ENV} is not configured. It must point to the controlled "
-            "public-basket input JSON file."
-        )
-
-    path = Path(configured_path).expanduser().resolve()
-    if not path.is_file():
-        raise RuntimeError(f"Public-basket input file was not found: {path}")
-
+def parse_public_basket_input(raw: bytes | str) -> dict[str, Any]:
+    """Parse one operator-supplied immutable JSON input snapshot."""
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Could not read valid public-basket input JSON: {path}") from exc
-
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        payload = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("The uploaded public-basket input is not valid UTF-8 JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("The public-basket input must be a JSON object")
-
     return payload
 
 
@@ -221,27 +201,23 @@ def _validated_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
-def _validate_effective_date(
-    payload: dict[str, Any], scheduled_session_date: date
-) -> None:
-    declared = payload.get("scheduled_session_date")
-    if declared is None:
-        raise ValueError(
-            "Input must declare scheduled_session_date so stale inputs cannot be reused"
-        )
-
-    declared_date = date.fromisoformat(str(declared))
-    if declared_date != scheduled_session_date:
-        raise ValueError(
-            "Input scheduled_session_date does not match the scheduler gate: "
-            f"{declared_date} != {scheduled_session_date}"
-        )
+def _validated_data_as_of(value: datetime) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError("data_as_of must be a datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("data_as_of must include a timezone")
+    return value.astimezone(timezone.utc)
 
 
-def build_public_signal(*, scheduled_session_date: date) -> dict[str, Any]:
-    """Run the unchanged optimizer and return the scheduler's immutable contract."""
-    payload = _read_frozen_input()
-    _validate_effective_date(payload, scheduled_session_date)
+def build_public_signal(
+    *,
+    payload: dict[str, Any],
+    data_as_of: datetime,
+) -> dict[str, Any]:
+    """Run the existing optimizer for one explicit event-driven input snapshot."""
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a JSON object")
+    data_as_of = _validated_data_as_of(data_as_of)
     portfolio_df = _validate_and_build_portfolio(payload)
     settings = _validated_settings(payload)
 
@@ -288,7 +264,7 @@ def build_public_signal(*, scheduled_session_date: date) -> dict[str, Any]:
     )
     if missing_price_tickers:
         raise RuntimeError(
-            "Missing valid scheduled-session prices: "
+            "Missing valid market prices: "
             + ", ".join(missing_price_tickers)
         )
 
@@ -316,7 +292,7 @@ def build_public_signal(*, scheduled_session_date: date) -> dict[str, Any]:
 
     frozen_settings = {
         **settings,
-        "scheduled_session_date": scheduled_session_date.isoformat(),
+        "data_as_of": data_as_of.isoformat(),
         "market_data_cutoff": payload.get("market_data_cutoff"),
         "input_created_at": payload.get("input_created_at"),
         "adapter_generated_at": datetime.now(timezone.utc).isoformat(),
@@ -325,6 +301,7 @@ def build_public_signal(*, scheduled_session_date: date) -> dict[str, Any]:
     return _json_safe(
         {
             "strategy_version": STRATEGY_VERSION,
+            "data_as_of": data_as_of.isoformat(),
             "settings": frozen_settings,
             "portfolio_before": portfolio_df,
             "optimizer_output": {
