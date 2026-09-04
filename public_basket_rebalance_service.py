@@ -87,6 +87,55 @@ def _json_safe(value: Any) -> Any:
     raise TypeError(f"Value is not JSON serializable: {type(value).__name__}")
 
 
+def _aware_utc(value: datetime | None, *, field_name: str) -> datetime | None:
+    """Require an unambiguous instant and normalize it to UTC."""
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be a datetime or None")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must include a timezone")
+    return value.astimezone(timezone.utc)
+
+
+def _finite_float(
+    value: Any,
+    *,
+    field_name: str,
+    optional: bool = True,
+) -> float | None:
+    """Convert Python/NumPy numeric scalars to finite built-in floats."""
+    if value is None:
+        if optional:
+            return None
+        raise ValueError(f"{field_name} is required")
+    if isinstance(value, bool):
+        raise TypeError(f"{field_name} must be numeric")
+    try:
+        converted = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TypeError(f"{field_name} must be numeric") from exc
+    if not math.isfinite(converted):
+        raise ValueError(f"{field_name} must be finite")
+    return converted
+
+
+def _recorded_signal_output(decision: RebalanceDecision) -> Any:
+    """Retain optional adapter metadata instead of silently discarding it."""
+    signal_output = _json_safe(decision.signal_output)
+    rebalance_metadata = _json_safe(decision.rebalance_payload)
+    order_metadata = [_json_safe(order.payload) for order in decision.orders]
+    if not rebalance_metadata and not any(order_metadata):
+        return signal_output
+    return {
+        "decision": signal_output,
+        "ledger_metadata": {
+            "rebalance": rebalance_metadata,
+            "orders": order_metadata,
+        },
+    }
+
+
 def _call_backend(function: Callable[..., Any], conn: Any, **values: Any) -> Any:
     """Call a backend function without coupling to optional argument additions."""
     parameters = inspect.signature(function).parameters
@@ -139,8 +188,23 @@ def _validate_decision(decision: RebalanceDecision) -> RebalanceDecision:
             raise ValueError("Every order requires a symbol")
         if side not in VALID_SIDES:
             raise ValueError(f"Invalid side for {symbol}: {side}")
-        if not math.isfinite(order.requested_quantity) or order.requested_quantity <= 0:
+        quantity = _finite_float(
+            order.requested_quantity,
+            field_name=f"requested_quantity for {symbol}",
+            optional=False,
+        )
+        if quantity is None or quantity <= 0:
             raise ValueError(f"Requested quantity must be positive for {symbol}")
+        for field_name in (
+            "current_weight",
+            "target_weight",
+            "theoretical_quantity",
+            "reference_price",
+        ):
+            _finite_float(
+                getattr(order, field_name),
+                field_name=f"{field_name} for {symbol}",
+            )
         key = (symbol, side)
         if key in seen:
             raise ValueError(f"Duplicate {side} order for {symbol}")
@@ -151,7 +215,7 @@ def _validate_decision(decision: RebalanceDecision) -> RebalanceDecision:
         signal_output=decision.signal_output,
         orders=decision.orders,
         rationale=decision.rationale,
-        effective_at=decision.effective_at,
+        effective_at=_aware_utc(decision.effective_at, field_name="effective_at"),
         rebalance_payload=decision.rebalance_payload,
     )
 
@@ -182,10 +246,10 @@ def run_public_basket_rebalance(
     decision = _validate_decision(decision_adapter(optimizer_output_raw))
 
     optimizer_output = _json_safe(optimizer_output_raw)
-    signal_output = _json_safe(decision.signal_output)
+    signal_output = _recorded_signal_output(decision)
     portfolio_snapshot = _json_safe(portfolio_before)
     settings_snapshot = _json_safe(settings)
-    generated_for = data_as_of or datetime.now(timezone.utc)
+    generated_for = _aware_utc(data_as_of, field_name="data_as_of") or datetime.now(timezone.utc)
     effective_at = decision.effective_at or generated_for
 
     with conn.transaction():
@@ -215,13 +279,10 @@ def run_public_basket_rebalance(
             effective_at=effective_at,
             status="CREATED",
             rationale=decision.rationale,
-            payload=_json_safe(decision.rebalance_payload),
-            payload_json=_json_safe(decision.rebalance_payload),
         )
 
         order_ids: list[str] = []
         for draft in decision.orders:
-            order_payload = _json_safe(draft.payload)
             order_ids.append(
                 _call_backend(
                     create_trade_order,
@@ -231,14 +292,24 @@ def run_public_basket_rebalance(
                     yahoo_ticker=draft.yahoo_ticker,
                     isin=draft.isin,
                     side=draft.side.strip().upper(),
-                    current_weight=draft.current_weight,
-                    target_weight=draft.target_weight,
-                    theoretical_quantity=draft.theoretical_quantity,
-                    requested_quantity=float(draft.requested_quantity),
-                    reference_price=draft.reference_price,
+                    current_weight=_finite_float(
+                        draft.current_weight, field_name="current_weight"
+                    ),
+                    target_weight=_finite_float(
+                        draft.target_weight, field_name="target_weight"
+                    ),
+                    theoretical_quantity=_finite_float(
+                        draft.theoretical_quantity, field_name="theoretical_quantity"
+                    ),
+                    requested_quantity=_finite_float(
+                        draft.requested_quantity,
+                        field_name="requested_quantity",
+                        optional=False,
+                    ),
+                    reference_price=_finite_float(
+                        draft.reference_price, field_name="reference_price"
+                    ),
                     execution_rule=draft.execution_rule,
-                    payload=order_payload,
-                    payload_json=order_payload,
                 )
             )
 
