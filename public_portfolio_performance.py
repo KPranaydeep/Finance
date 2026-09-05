@@ -422,22 +422,29 @@ if price_dates:
     st.caption(f"Prices: latest available unadjusted close from Yahoo Finance · through {price_dates[-1]}")
 if entry_estimate:
     minimum_1,minimum_2=st.columns(2)
-    minimum_1.metric("Bare minimum to begin",f"₹{entry_estimate['bare_minimum_capital_inr']:,.0f}","One affordable target share")
-    minimum_2.metric("Practical portfolio entry",f"₹{entry_estimate['minimum_capital_inr']:,.0f}","Full target representation")
-    st.info(
-        f"The practical estimate covers all {entry_estimate['constituent_count']} target securities with whole shares while keeping "
-        f"estimated execution drag below {entry_estimate['assumptions']['maximum_execution_drag']:.2%}."
+    starter=entry_estimate["starter"]
+    minimum_1.metric(
+        "Minimum viable starter",f"₹{entry_estimate['minimum_viable_starter_inr']:,.0f}",
+        f"{starter['coverage']}+ securities · {starter['invested_ratio']:.0%} invested",
     )
-    with st.expander("How minimum practical entry is calculated"):
+    minimum_2.metric("Practical full-portfolio entry",f"₹{entry_estimate['minimum_capital_inr']:,.0f}","All target securities")
+    st.info(
+        f"The starter is the lowest tested amount that forms a diversified, investable basket: at least "
+        f"{entry_estimate['assumptions']['starter_required_coverage']} securities, at least "
+        f"{entry_estimate['assumptions']['starter_minimum_invested_ratio']:.0%} invested, no position above "
+        f"{entry_estimate['assumptions']['starter_maximum_position_weight']:.0%}, and estimated execution drag below "
+        f"{entry_estimate['assumptions']['maximum_execution_drag']:.2%}."
+    )
+    with st.expander("How the entry amounts are calculated"):
         e1,e2,e3,e4=st.columns(4)
         e1.metric("Mean price",f"₹{entry_estimate['mean_price']:,.0f}")
         e2.metric("Price deviation",f"₹{entry_estimate['price_standard_deviation']:,.0f}")
         e3.metric("Lowest price",f"₹{entry_estimate['minimum_price']:,.2f}")
         e4.metric("Highest price",f"₹{entry_estimate['maximum_price']:,.2f}")
         st.caption(
-            "The estimate combines one-share affordability, target weights, number of securities, price dispersion, "
-            "whole-share tracking error, residual cash, statutory costs, a conservative per-order allowance and slippage. "
-            "It is a practicality estimate, not a required minimum or return forecast."
+            "The starter is found by testing deterministic whole-share allocations until diversification, concentration, "
+            "cash-use, target-coverage and execution-drag conditions all pass. The full-portfolio estimate additionally "
+            "covers every target security with low tracking error. These are planning estimates, not return forecasts."
         )
 st.caption(f"Strategy {current['strategy_version']} · Published {current['published_at'].astimezone(IST):%d %b %Y %H:%M IST}")
 
@@ -449,10 +456,10 @@ st.write(
 execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCENARIOS))
 calculated_plan = None
 if execution_scenario == "Start fresh with cash":
-    default_amount=float(entry_estimate["minimum_capital_inr"]) if entry_estimate else 1000.0
-    bare_amount=float(entry_estimate["bare_minimum_capital_inr"]) if entry_estimate else 100.0
+    default_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 1000.0
+    starter_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 100.0
     investment_amount = st.number_input(
-        "Amount to invest (₹)", min_value=bare_amount, value=default_amount, step=1000.0, format="%.0f"
+        "Amount to invest (₹)", min_value=starter_amount, value=default_amount, step=1000.0, format="%.0f"
     )
     try:
         calculated_plan = allocate_public_lumpsum(
@@ -484,7 +491,7 @@ if execution_scenario == "Start fresh with cash":
         if calculated_plan["missing_prices"]:
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
         if entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
-            st.warning("Below the estimated practical entry, this is a partial starter allocation with higher tracking and cost impact.")
+            st.info("Starter allocation: diversified and cost-aware, but it will not contain every target security.")
         else:
             st.success("This amount meets the estimated practical-entry conditions for the published portfolio.")
         st.caption("Starter mode" if calculated_plan["mode"]=="STARTER" else "Target-weight mode")

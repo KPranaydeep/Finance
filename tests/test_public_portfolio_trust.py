@@ -167,11 +167,21 @@ def test_lumpsum_reports_missing_prices_and_rejects_invalid_amount():
 
 
 def test_minimum_entry_uses_prices_costs_coverage_and_tracking():
-    target=[{"ticker":"A","target_weight":.5},{"ticker":"B","target_weight":.3},{"ticker":"C","target_weight":.2}]
-    estimate=estimate_minimum_entry_capital(target,{"A":800,"B":240,"C":60})
-    assert estimate["constituent_count"] == 3
+    target=[{"ticker":"A","target_weight":.25},{"ticker":"B","target_weight":.25},
+            {"ticker":"C","target_weight":.25},{"ticker":"D","target_weight":.25}]
+    estimate=estimate_minimum_entry_capital(target,{"A":800,"B":240,"C":60,"D":120})
+    assert estimate["constituent_count"] == 4
     assert estimate["minimum_price"] == 60 and estimate["maximum_price"] == 800
-    assert estimate["coverage"] == 3
+    assert estimate["coverage"] == 4
     assert estimate["estimated_execution_drag"] <= estimate["assumptions"]["maximum_execution_drag"]
     assert estimate["tracking_error_pp"] <= estimate["assumptions"]["maximum_tracking_error_pp"]
     assert estimate["minimum_capital_inr"] >= estimate["weighted_affordability_floor"]
+    assert estimate["minimum_viable_starter_inr"] < estimate["minimum_capital_inr"]
+    starter=estimate["starter"]
+    assumptions=estimate["assumptions"]
+    assert starter["coverage"] >= assumptions["starter_required_coverage"]
+    assert starter["invested_ratio"] >= assumptions["starter_minimum_invested_ratio"]
+    assert starter["maximum_position_weight"] <= assumptions["starter_maximum_position_weight"]
+    assert starter["target_weight_coverage"] >= assumptions["starter_minimum_target_coverage"]
+    assert starter["estimated_execution_drag"] <= assumptions["maximum_execution_drag"]
+    assert "bare_minimum_capital_inr" not in estimate

@@ -18,8 +18,11 @@ def estimate_minimum_entry_capital(
     maximum_execution_drag: float = 0.0050,
     maximum_tracking_error_pp: float = 2.0,
     maximum_residual_ratio: float = 0.01,
+    starter_minimum_invested_ratio: float = 0.95,
+    starter_maximum_position_weight: float = 0.30,
+    starter_minimum_target_coverage: float = 0.40,
 ) -> dict:
-    """Estimate capital where the complete target is practical as whole shares."""
+    """Estimate viable-starter and full-target entry capital from actual allocations."""
     target = [{"ticker":str(row["ticker"]).strip().upper(),"target_weight":float(row["target_weight"])} for row in constituents]
     usable=[]
     for row in target:
@@ -57,9 +60,59 @@ def estimate_minimum_entry_capital(
     assert plan is not None
     estimated_cost=plan["invested_inr"]*statutory_cost_rate+count*fixed_cost_per_order
     estimated_slippage=plan["invested_inr"]*slippage_rate
+
+    # Find the smallest rounded amount that produces a genuinely usable starter
+    # allocation.  A cheapest-share figure is technically affordable but is not
+    # a portfolio, so it is retained only as an internal diagnostic.
+    starter_required_coverage=max(1,math.ceil(math.sqrt(count)))
+    technical_floor=math.ceil(
+        (float(price_values.min())*(1+variable_drag)+fixed_cost_per_order)/10.0
+    )*10.0
+    starter_candidate=max(100.0,technical_floor)
+    starter_plan=None
+    starter_metrics=None
+    while starter_candidate<=candidate:
+        trial=allocate_public_lumpsum(usable,price_map,starter_candidate)
+        order_tickers={row["ticker"] for row in trial["orders"]}
+        target_coverage=sum(row["target_weight"] for row in usable if row["ticker"] in order_tickers)
+        invested_ratio=trial["invested_inr"]/starter_candidate
+        maximum_position=max((row["post_trade_weight"] for row in trial["orders"]),default=0.0)
+        execution_drag=(
+            trial["invested_inr"]*variable_drag+trial["coverage"]*fixed_cost_per_order
+        )/starter_candidate
+        starter_metrics={
+            "coverage":trial["coverage"],"invested_ratio":invested_ratio,
+            "residual_ratio":trial["residual_cash_inr"]/starter_candidate,
+            "maximum_position_weight":maximum_position,
+            "target_weight_coverage":target_coverage,"estimated_execution_drag":execution_drag,
+        }
+        if (trial["coverage"]>=starter_required_coverage
+                and invested_ratio>=starter_minimum_invested_ratio
+                and maximum_position<=starter_maximum_position_weight+1e-12
+                and target_coverage>=starter_minimum_target_coverage
+                and execution_drag<=maximum_execution_drag):
+            starter_plan=trial
+            break
+        starter_candidate=math.ceil(starter_candidate*1.05/100.0)*100.0
+    if starter_plan is None or starter_metrics is None:
+        starter_candidate=candidate
+        starter_plan=plan
+        order_tickers={row["ticker"] for row in starter_plan["orders"]}
+        starter_metrics={
+            "coverage":starter_plan["coverage"],
+            "invested_ratio":starter_plan["invested_inr"]/starter_candidate,
+            "residual_ratio":starter_plan["residual_cash_inr"]/starter_candidate,
+            "maximum_position_weight":max((row["post_trade_weight"] for row in starter_plan["orders"]),default=0.0),
+            "target_weight_coverage":sum(row["target_weight"] for row in usable if row["ticker"] in order_tickers),
+            "estimated_execution_drag":(
+                starter_plan["invested_inr"]*variable_drag+starter_plan["coverage"]*fixed_cost_per_order
+            )/starter_candidate,
+        }
     return {
         "minimum_capital_inr":candidate,"constituent_count":count,"mean_price":mean_price,
-        "bare_minimum_capital_inr":math.ceil((float(price_values.min())*(1+statutory_cost_rate+slippage_rate)+fixed_cost_per_order)/10.0)*10.0,
+        "minimum_viable_starter_inr":starter_candidate,
+        "starter":starter_metrics,
+        "technical_affordability_floor_inr":technical_floor,
         "price_standard_deviation":std_price,"minimum_price":float(price_values.min()),
         "maximum_price":float(price_values.max()),"one_share_floor":one_share_floor,
         "weighted_affordability_floor":weighted_affordability_floor,"dispersion_floor":dispersion_floor,
@@ -70,6 +123,10 @@ def estimate_minimum_entry_capital(
             "fixed_cost_per_order":fixed_cost_per_order,"statutory_cost_rate":statutory_cost_rate,
             "slippage_rate":slippage_rate,"maximum_execution_drag":maximum_execution_drag,
             "maximum_tracking_error_pp":maximum_tracking_error_pp,"maximum_residual_ratio":maximum_residual_ratio,
+            "starter_required_coverage":starter_required_coverage,
+            "starter_minimum_invested_ratio":starter_minimum_invested_ratio,
+            "starter_maximum_position_weight":starter_maximum_position_weight,
+            "starter_minimum_target_coverage":starter_minimum_target_coverage,
         },
     }
 
