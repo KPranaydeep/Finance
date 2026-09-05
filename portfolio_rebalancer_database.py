@@ -2818,7 +2818,7 @@ def get_daily_log_returns(
 # Cap on any single asset's optimized weight. Sample-estimate mean-variance
 # optimization concentrates into whichever names had the luckiest realized mean,
 # so an explicit cap is what keeps the result diversified.
-MAX_WEIGHT_PER_ASSET = 0.10
+MAX_WEIGHT_PER_ASSET = 0.50
 
 
 def shrunk_covariance(log_returns):
