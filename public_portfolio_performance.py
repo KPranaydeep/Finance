@@ -28,8 +28,9 @@ EXECUTION_SCENARIOS = {
     "Start fresh with cash": (
         "I am starting without existing holdings. Ask me only for the total amount available to invest. "
         "Do not ask about a cash reserve and do not request a broker report. Allocate as much as practical "
-        "to the public target using whole shares, leaving only unavoidable rounding residue. Do not apply "
-        "the 6 percentage-point rebalance gate."
+        "to the public target using whole shares, leaving only unavoidable rounding residue. For a small amount, "
+        "build the closest feasible starter allocation from affordable target securities; partial target coverage "
+        "is valid. Do not apply the 6 percentage-point rebalance gate or a minimum-trade-value rule."
     ),
     "Rebalance existing holdings": (
         "I have an existing portfolio. Read my attached broker report, compare it with the public target, "
@@ -301,25 +302,36 @@ WORKING RULES
 5. Estimate both portfolios consistently. Use adjusted price history over the longest common period up to three years, requiring at least one year. Calculate each portfolio's annualized geometric return using its weights. Deduct estimated one-time taxes, brokerage, spread, and slippage from the proposed portfolio benefit. Label this a historical return-based estimate, not a guarantee.
 6. Only for "Rebalance existing holdings": DECISION = REBALANCE when proposed net annualized return minus current annualized return is at least {threshold_pct:.0f} percentage points; otherwise DECISION = HOLD. Do not use this gate for fresh deployment, adding fresh cash, or raising cash. If required market-history tools are unavailable, ask only for permission to fetch prices/history or for a price-history file; do not produce a long refusal table.
 7. When REBALANCE applies, calculate practical whole-share trades. Sell non-target holdings and overweight holdings first; use those proceeds for buys. Never require additional cash unless the user explicitly requests investment of new money.
-8. Reduce churn: ignore a position within 1 percentage point of target; suppress a trade below the greater of INR 100 or 0.5% of portfolio value; do not sell and rebuy equivalent exposure; do not exceed available proceeds; flag illiquid securities and large tax impact.
-9. Allocate rounding residue to the largest underweight affordable target. Show residual cash. Never place orders automatically.
+8. For an existing-portfolio rebalance or cash withdrawal, reduce churn: ignore a position within 1 percentage point of target and suppress a trade below the greater of INR 100 or 0.5% of portfolio value. Do not apply that minimum to fresh deployment or BUY-only deployment of new cash.
+9. For fresh or added cash, solve a whole-share integer allocation under the available budget. Repeatedly choose affordable target shares that most reduce total target-weight error, recalculate weights after each share, include estimated charges, and stop only when no additional target share fits. Do not calculate each target independently as amount × target weight and round all of them to zero.
+10. A small amount may hold only a subset of the target. Prefer useful diversification and closeness to target over forcing all 21 securities. Allocate rounding residue to the most underweight affordable target. Never recommend increasing the investment amount merely because every target cannot be purchased.
+11. Never include a BUY or SELL row with zero shares. Omit unavailable trades entirely. Show residual cash and never place orders automatically.
 
 OUTPUT — KEEP IT SHORT
-Start with exactly these five lines:
-DECISION: DEPLOY, ADD CASH, RAISE CASH, REBALANCE, HOLD, or NEEDS DATA
+For "Start fresh with cash", begin with exactly:
+DECISION: DEPLOY
+AMOUNT: ₹x
+PLANNED INVESTMENT: ₹x
+RESIDUAL CASH: ₹x
+STARTER COVERAGE: x target securities
+
+For "Add fresh cash to existing holdings", begin with DECISION: ADD CASH and the same amount, planned-investment, residual-cash, and coverage lines.
+
+Only for "Rebalance existing holdings", begin with:
+DECISION: REBALANCE, HOLD, or NEEDS DATA
 CURRENT ESTIMATED ANNUAL RETURN: x%
 TARGET ESTIMATED ANNUAL RETURN: x%
 NET ESTIMATED IMPROVEMENT: x percentage points
 WHY: one sentence
 
-For fresh deployment, use N/A for the three return-comparison lines because the user has no current portfolio and the 6 percentage-point gate does not apply.
+For "Raise cash from existing holdings", begin with DECISION: RAISE CASH, requested amount, planned proceeds, estimated costs, and expected net proceeds.
 
 If DECISION is DEPLOY, ADD CASH, RAISE CASH, or REBALANCE, show one execution table containing only actual trades:
 Sequence | Ticker | BUY/SELL | Whole shares | Planning price | Approx. value | Reason
 
 Then show only:
 - Total sales, total purchases, estimated costs/slippage, turnover, and residual cash.
-- "Execute sells first, wait for proceeds, then execute buys in sequence. Recheck live prices before every order."
+- Give an execution sentence matching the scenario. Mention sells first only when the plan actually contains sells; for fresh deployment say to execute the listed buys in sequence and recheck live prices.
 - At most three warnings that could materially change execution.
 
 If DECISION is HOLD, do not print every target row. Show a maximum of five largest allocation differences and the next review trigger.
@@ -433,8 +445,8 @@ with st.expander("Copy execution-plan prompt"):
     st.code(execution_prompt, language=None)
 st.caption(
     "Fresh deployment and new-cash scenarios follow the public target directly. The 6 percentage-point gate "
-    "applies only when replacing an existing allocation. Every scenario uses whole shares, tolerance bands, "
-    "minimum trade values, costs and slippage to reduce churn."
+    "applies only when replacing an existing allocation. Fresh cash uses whole-share integer allocation even "
+    "for small amounts; churn thresholds apply only when selling or replacing existing holdings."
 )
 
 st.subheader("Performance — historical, observed")
