@@ -3,7 +3,7 @@ from datetime import date
 import numpy as np
 import pytest
 
-from public_portfolio_trust import bootstrap_outlook, performance_metrics, versioned_model_nav, xirr
+from public_portfolio_trust import bootstrap_outlook, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
 from public_portfolio_publications import validate_constituents, verify_trust_audit
 
 
@@ -73,6 +73,22 @@ def test_weights_and_duplicates():
     assert len(validate_constituents([{"ticker":"a.ns","target_weight":.9}],.1)) == 1
     with pytest.raises(ValueError): validate_constituents([{"ticker":"A","target_weight":.5},{"ticker":"a","target_weight":.5}],0)
     with pytest.raises(ValueError): validate_constituents([{"ticker":"A","target_weight":.8}],0)
+
+
+def test_whole_percent_rounding_is_exact_and_deterministic():
+    source=[{"ticker":"B","target_weight":.3333},{"ticker":"A","target_weight":.3333},{"ticker":"C","target_weight":.3334}]
+    rounded=round_weights_to_whole_percent(source)
+    assert rounded == [
+        {"ticker":"C","target_weight":.34},
+        {"ticker":"A","target_weight":.33},
+        {"ticker":"B","target_weight":.33},
+    ]
+    assert sum(row["target_weight"] for row in rounded) == pytest.approx(1.0)
+
+
+def test_zero_percent_positions_are_removed():
+    source=[{"ticker":"BIG","target_weight":.999},{"ticker":"TINY","target_weight":.001}]
+    assert round_weights_to_whole_percent(source) == [{"ticker":"BIG","target_weight":1.0}]
 
 
 def test_versioned_nav_switches_immutable_portfolio_versions():
