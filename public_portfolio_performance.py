@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from datetime import datetime
@@ -25,17 +26,18 @@ HORIZONS = {"14D":14,"30D":30,"3M":91,"6M":183,"1Y":365,"3Y":1096,"5Y":1826,"MAX
 REBALANCE_MIN_EXPECTED_IMPROVEMENT = 0.06
 EXECUTION_SCENARIOS = {
     "Start fresh with cash": (
-        "I am starting without existing holdings. Ask me only for the amount available to invest and any "
-        "cash reserve I want to retain. Do not request a broker report. Allocate fresh cash to the public "
-        "target using whole shares, minimize residual cash and do not apply the 6 percentage-point rebalance gate."
+        "I am starting without existing holdings. Ask me only for the total amount available to invest. "
+        "Do not ask about a cash reserve and do not request a broker report. Allocate as much as practical "
+        "to the public target using whole shares, leaving only unavoidable rounding residue. Do not apply "
+        "the 6 percentage-point rebalance gate."
     ),
     "Rebalance existing holdings": (
         "I have an existing portfolio. Read my attached broker report, compare it with the public target, "
         "and apply the 6 percentage-point net annualized-improvement gate before suggesting any trades."
     ),
     "Add fresh cash to existing holdings": (
-        "I will attach my existing holdings report and provide new cash. Ask only for the new cash amount and "
-        "desired reserve. Prefer BUY-only trades that reduce underweights; do not sell existing holdings and "
+        "I will attach my existing holdings report and provide new cash. Ask only for the new cash amount; "
+        "do not ask about a cash reserve. Prefer BUY-only trades that reduce underweights; do not sell existing holdings and "
         "do not apply the 6 percentage-point gate to deployment of new cash."
     ),
     "Raise cash from existing holdings": (
@@ -66,10 +68,45 @@ st.markdown(
     .metric-label {color:#94a3b8; font-size:.78rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;}
     .metric-value {color:#f8fafc; font-size:1.75rem; font-weight:750; margin-top:.4rem;}
     .metric-note {color:#94a3b8; font-size:.75rem; margin-top:.28rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+    .metric-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin:.5rem 0 1.35rem;}
     div[data-testid="stDownloadButton"] button {border-radius:12px; min-height:3rem; font-weight:700;}
     div[data-testid="stSelectbox"] > div {border-radius:12px;}
     h2 {padding-top:1.25rem !important; letter-spacing:-.025em;}
     [data-testid="stDataFrame"] {border:1px solid rgba(148,163,184,.16); border-radius:16px; overflow:hidden;}
+    .allocation-wrap {overflow-x:auto; border:1px solid rgba(148,163,184,.18); border-radius:16px;
+        background:rgba(15,23,42,.22); -webkit-overflow-scrolling:touch;}
+    .allocation-table {width:100%; border-collapse:collapse; min-width:540px;}
+    .allocation-table th {padding:.8rem 1rem; text-align:left; color:#94a3b8; font-size:.75rem;
+        letter-spacing:.06em; text-transform:uppercase; background:rgba(30,41,59,.68);}
+    .allocation-table td {padding:.72rem 1rem; border-top:1px solid rgba(148,163,184,.13); color:#e2e8f0;}
+    .allocation-table tr:hover td {background:rgba(45,212,191,.045);}
+    .ticker-cell {font-weight:700; color:#f8fafc !important; white-space:nowrap;}
+    .weight-line {display:flex; align-items:center; gap:.7rem; min-width:180px;}
+    .weight-track {width:110px; height:7px; overflow:hidden; border-radius:99px; background:rgba(148,163,184,.18);}
+    .weight-fill {height:100%; border-radius:99px; background:linear-gradient(90deg,#14b8a6,#5eead4);}
+    .price-cell {font-variant-numeric:tabular-nums; white-space:nowrap;}
+    @media (max-width:640px) {
+      .block-container {padding-left:.85rem; padding-right:.85rem; padding-top:.75rem;}
+      .trust-hero {padding:1.15rem 1rem; margin-bottom:1rem; border-radius:16px;}
+      .trust-kicker {font-size:.62rem; letter-spacing:.12em;}
+      .trust-title {font-size:1.72rem; line-height:1.08; margin:.4rem 0 .55rem;}
+      .trust-subtitle {font-size:.88rem; line-height:1.45;}
+      .trust-badge {font-size:.68rem; margin-top:.8rem; padding:.3rem .55rem;}
+      .metric-grid {grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem; margin:.35rem 0 1rem;}
+      .metric-card {padding:.75rem .8rem; border-radius:13px; min-height:86px; box-shadow:none;}
+      .metric-label {font-size:.62rem; letter-spacing:.045em;}
+      .metric-value {font-size:1.18rem; margin-top:.22rem;}
+      .metric-note {font-size:.64rem; margin-top:.18rem;}
+      h2 {font-size:1.32rem !important; padding-top:.7rem !important;}
+      .allocation-table {min-width:0; table-layout:fixed;}
+      .allocation-table th,.allocation-table td {padding:.65rem .62rem; font-size:.82rem;}
+      .allocation-table th:nth-child(1),.allocation-table td:nth-child(1) {width:38%;}
+      .allocation-table th:nth-child(2),.allocation-table td:nth-child(2) {width:38%;}
+      .allocation-table th:nth-child(3),.allocation-table td:nth-child(3) {width:24%; text-align:right;}
+      .weight-track {width:58px;}
+      .weight-line {min-width:0; gap:.4rem;}
+      .ticker-cell {overflow:hidden; text-overflow:ellipsis;}
+    }
     </style>""",
     unsafe_allow_html=True,
 )
@@ -257,7 +294,7 @@ PUBLIC TARGET SNAPSHOT
 {target_json}
 
 WORKING RULES
-1. Follow only the selected scenario. Ask for at most the missing amount/reserve described there, then proceed. Parse a broker report only when that scenario requires one. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
+1. Follow only the selected scenario. Ask only for the missing investment or withdrawal amount described there, then proceed. Never ask the user to choose a cash reserve. Parse a broker report only when that scenario requires one. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
 2. Do not repeat personal identifiers. Give only one short redaction warning if the report contains them.
 3. Treat the broker report as the complete stock portfolio unless it explicitly says otherwise. If cash is absent, assume opening cash is zero and fund buys from sale proceeds. State this assumption once; do not stop.
 4. Use the embedded target planning prices when dated within five calendar days. Broker closing prices within the same limit are acceptable for current holdings. Prefer newer reliable prices when tools permit. State the price dates once. Do not block the plan merely because prices were not independently verified.
@@ -311,18 +348,22 @@ st.markdown(
     f"""<section class="trust-hero">
       <div class="trust-kicker">PUBLIC-01 · VERIFIED MODEL PORTFOLIO</div>
       <div class="trust-title">Invest with a clear target.</div>
-      <p class="trust-subtitle">A transparent, versioned portfolio with observable performance, accountable forecasts, and a private path from your broker report to an execution plan.</p>
+      <p class="trust-subtitle">Transparent allocation, observed performance, and private execution planning.</p>
       <span class="trust-badge">✓ Immutable publication · P{int(current['portfolio_version']):03d}</span>
     </section>""",
     unsafe_allow_html=True,
 )
 
 st.subheader("Portfolio at a glance")
-c1,c2,c3,c4=st.columns(4)
-with c1: metric_card("Version",f"P{int(current['portfolio_version']):03d}","Immutable snapshot")
-with c2: metric_card("Constituents",str(len(record["constituents"])),"Target holdings")
-with c3: metric_card("Invested target",f"{(1-float(current['cash_weight'])):.0%}","Across securities")
-with c4: metric_card("Data as of",current["as_of"].astimezone(IST).strftime("%d %b %Y"),"Asia/Kolkata")
+st.markdown(
+    '<div class="metric-grid">'
+    f'<div class="metric-card"><div class="metric-label">Version</div><div class="metric-value">P{int(current["portfolio_version"]):03d}</div><div class="metric-note">Immutable snapshot</div></div>'
+    f'<div class="metric-card"><div class="metric-label">Constituents</div><div class="metric-value">{len(record["constituents"])}</div><div class="metric-note">Target holdings</div></div>'
+    f'<div class="metric-card"><div class="metric-label">Invested target</div><div class="metric-value">{(1-float(current["cash_weight"])):.0%}</div><div class="metric-note">Across securities</div></div>'
+    f'<div class="metric-card"><div class="metric-label">Data as of</div><div class="metric-value">{current["as_of"].astimezone(IST):%d %b %Y}</div><div class="metric-note">Asia/Kolkata</div></div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 st.subheader("Target allocation")
 allocation=pd.DataFrame(record["constituents"])
@@ -332,13 +373,22 @@ if float(current["cash_weight"])>0:
 allocation["Allocation"]=allocation["target_weight"].astype(float)*100
 allocation["Price"]=allocation["ticker"].map(lambda ticker: price_snapshot.get(ticker,{}).get("price"))
 allocation=allocation.rename(columns={"ticker":"Security"})
-st.dataframe(
-    allocation[["Security","Allocation","Price"]], use_container_width=True, hide_index=True, height=520,
-    column_config={
-        "Security": st.column_config.TextColumn("Security", width="medium"),
-        "Allocation": st.column_config.ProgressColumn("Target weight", min_value=0, max_value=100, format="%.0f%%"),
-        "Price": st.column_config.NumberColumn("Latest close", format="₹%.2f"),
-    },
+allocation_rows=[]
+for item in allocation[["Security","Allocation","Price"]].to_dict("records"):
+    security=html.escape(str(item["Security"]))
+    weight=float(item["Allocation"])
+    price="N/A" if pd.isna(item["Price"]) else f"₹{float(item['Price']):,.2f}"
+    allocation_rows.append(
+        f'<tr><td class="ticker-cell" title="{security}">{security}</td>'
+        f'<td><div class="weight-line"><span>{weight:.0f}%</span><span class="weight-track">'
+        f'<span class="weight-fill" style="display:block;width:{min(max(weight,0),100):.2f}%"></span>'
+        f'</span></div></td><td class="price-cell">{price}</td></tr>'
+    )
+st.markdown(
+    '<div class="allocation-wrap"><table class="allocation-table"><thead><tr>'
+    '<th>Security</th><th>Target weight</th><th>Latest close</th></tr></thead><tbody>'
+    + ''.join(allocation_rows) + '</tbody></table></div>',
+    unsafe_allow_html=True,
 )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
