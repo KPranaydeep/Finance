@@ -16,6 +16,7 @@ import streamlit.components.v1 as components
 import yfinance as yf
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
+from public_lumpsum_allocator import allocate_public_lumpsum
 from public_portfolio_publications import load_trust_records, verify_trust_audit
 from public_portfolio_trust import CALCULATION_VERSION, forecast_calibration, performance_metrics, select_horizon, xirr
 from public_release_checks import inspect_public_data
@@ -260,7 +261,8 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
         return {}
 
 
-def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str) -> tuple[str, dict]:
+def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str,
+                                calculated_plan: dict | None = None) -> tuple[str, dict]:
     """Build a version-bound prompt containing public data only."""
     public_target = {
         "basket_id": current["basket_id"],
@@ -284,6 +286,11 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict], prices:
         "price_source": "Yahoo Finance latest available unadjusted close; reference data, not part of the immutable portfolio fingerprint",
     }
     target_json = json.dumps(public_target, sort_keys=True, indent=2, default=str)
+    plan_block = ""
+    if calculated_plan:
+        plan_block = "\nPRECALCULATED DETERMINISTIC PLAN — use these exact quantities; do not recalculate them\n" + json.dumps(
+            calculated_plan, sort_keys=True, indent=2, default=str
+        ) + "\n"
     threshold_pct = REBALANCE_MIN_EXPECTED_IMPROVEMENT * 100
     scenario_instruction = EXECUTION_SCENARIOS[scenario]
     prompt = f"""Create a short, actionable, user-reviewed portfolio execution plan using the immutable public target below. Do not rerun or modify the public optimizer.
@@ -293,6 +300,7 @@ SELECTED SCENARIO: {scenario}
 
 PUBLIC TARGET SNAPSHOT
 {target_json}
+{plan_block}
 
 WORKING RULES
 1. Follow only the selected scenario. Ask only for the missing investment or withdrawal amount described there, then proceed. Never ask the user to choose a cash reserve. Parse a broker report only when that scenario requires one. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
@@ -303,9 +311,10 @@ WORKING RULES
 6. Only for "Rebalance existing holdings": DECISION = REBALANCE when proposed net annualized return minus current annualized return is at least {threshold_pct:.0f} percentage points; otherwise DECISION = HOLD. Do not use this gate for fresh deployment, adding fresh cash, or raising cash. If required market-history tools are unavailable, ask only for permission to fetch prices/history or for a price-history file; do not produce a long refusal table.
 7. When REBALANCE applies, calculate practical whole-share trades. Sell non-target holdings and overweight holdings first; use those proceeds for buys. Never require additional cash unless the user explicitly requests investment of new money.
 8. For an existing-portfolio rebalance or cash withdrawal, reduce churn: ignore a position within 1 percentage point of target and suppress a trade below the greater of INR 100 or 0.5% of portfolio value. Do not apply that minimum to fresh deployment or BUY-only deployment of new cash.
-9. For fresh or added cash, solve a whole-share integer allocation under the available budget. Repeatedly choose affordable target shares that most reduce total target-weight error, recalculate weights after each share, include estimated charges, and stop only when no additional target share fits. Do not calculate each target independently as amount × target weight and round all of them to zero.
-10. A small amount may hold only a subset of the target. Prefer useful diversification and closeness to target over forcing all 21 securities. Allocate rounding residue to the most underweight affordable target. Never recommend increasing the investment amount merely because every target cannot be purchased.
+9. For fresh or added cash, solve a whole-share integer allocation under the available budget. Compare feasible combinations and minimize the sum of squared percentage-point differences between post-trade weights and target weights, while applying a small penalty to residual cash. Do not call a plan "best" unless this comparison was actually performed.
+10. Recalculate portfolio weights from the chosen whole-share quantities and values. A small amount may hold only a subset of the target. Prefer useful diversification and closeness to target over forcing all 21 securities. Use remaining cash only when another share improves the allocation score; do not concentrate the portfolio merely to spend the last rupee. Never recommend increasing the investment amount merely because every target cannot be purchased.
 11. Never include a BUY or SELL row with zero shares. Omit unavailable trades entirely. Show residual cash and never place orders automatically.
+12. Before answering, run a final consistency audit: each row value must equal whole shares × planning price; planned investment must equal the sum of row values; residual cash must equal amount minus purchases and estimated charges; all totals must reconcile within ₹1; and the tickers and quantities named in the explanation and execution sentence must exactly match the table. Correct the plan silently if any check fails.
 
 OUTPUT — KEEP IT SHORT
 For "Start fresh with cash", begin with exactly:
@@ -333,6 +342,8 @@ Then show only:
 - Total sales, total purchases, estimated costs/slippage, turnover, and residual cash.
 - Give an execution sentence matching the scenario. Mention sells first only when the plan actually contains sells; for fresh deployment say to execute the listed buys in sequence and recheck live prices.
 - At most three warnings that could materially change execution.
+
+Do not include a separate alternative-allocation discussion after selecting the final plan. Do not mention or recommend any ticker that is absent from the final execution table.
 
 If DECISION is HOLD, do not print every target row. Show a maximum of five largest allocation differences and the next review trigger.
 
@@ -413,12 +424,49 @@ st.write(
     "For an existing portfolio, attach your broker report there—not on this website."
 )
 execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCENARIOS))
+calculated_plan = None
+if execution_scenario == "Start fresh with cash":
+    investment_amount = st.number_input(
+        "Amount to invest (₹)", min_value=100.0, value=1000.0, step=500.0, format="%.0f"
+    )
+    try:
+        calculated_plan = allocate_public_lumpsum(
+            record["constituents"], price_snapshot, float(investment_amount)
+        )
+        p1,p2,p3=st.columns(3)
+        p1.metric("Planned investment",f"₹{calculated_plan['invested_inr']:,.2f}")
+        p2.metric("Residual cash",f"₹{calculated_plan['residual_cash_inr']:,.2f}")
+        p3.metric("Securities",calculated_plan["coverage"])
+        if calculated_plan["orders"]:
+            plan_frame=pd.DataFrame(calculated_plan["orders"])
+            plan_frame["Action"]="BUY"
+            plan_frame=plan_frame.rename(columns={"ticker":"Ticker","quantity":"Shares",
+                "planning_price":"Price","estimated_value":"Approx. value"})
+            st.dataframe(
+                plan_frame[["Action","Ticker","Shares","Price","Approx. value"]],
+                use_container_width=True,hide_index=True,
+                column_config={
+                    "Price":st.column_config.NumberColumn(format="₹%.2f"),
+                    "Approx. value":st.column_config.NumberColumn(format="₹%.2f"),
+                },
+            )
+            st.download_button(
+                "Download calculated buy plan CSV",
+                plan_frame[["Action","Ticker","Shares","Price","Approx. value"]].to_csv(index=False).encode("utf-8"),
+                file_name=f"{DEFAULT_BASKET_ID.lower()}-fresh-cash-buy-plan.csv",
+                mime="text/csv",use_container_width=True,
+            )
+        if calculated_plan["missing_prices"]:
+            st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
+        st.caption("Starter mode" if calculated_plan["mode"]=="STARTER" else "Target-weight mode")
+    except Exception as exc:
+        st.info(f"A fresh-cash plan cannot be calculated until prices are available: {exc}")
 st.warning(
     "If you share a broker report, first remove your name, PAN, demat/account number, email, phone, "
     "address, and any credentials. Review the AI provider's privacy policy."
 )
 execution_prompt, public_target = build_execution_plan_prompt(
-    current, record["constituents"], price_snapshot, execution_scenario
+    current, record["constituents"], price_snapshot, execution_scenario, calculated_plan
 )
 version_label = f"p{int(current['portfolio_version']):03d}"
 action_1, action_2, action_3, action_4 = st.columns(4)

@@ -21,6 +21,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
+from public_lumpsum_allocator import allocate_public_lumpsum
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 
@@ -3051,40 +3052,15 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
         [prices[ticker] * alloc_df.loc[ticker, "FX to INR"] for ticker in common_tickers],
         dtype=float,
     )
-    target_amounts = float(lumpsum_inr) * aligned_weights
-    quantities = np.floor(target_amounts / price_inr).astype(int)
-    invested_amounts = quantities * price_inr
-
-    # Whole-share rounding strands cash whenever an asset's target is below one
-    # share. Spending it is only safe while no asset exceeds the same cap the
-    # optimizer used, so that bounds the distortion instead of the target doing it.
-    ceiling_amounts = np.maximum(
-        target_amounts, float(lumpsum_inr) * MAX_WEIGHT_PER_ASSET
+    allocation_result = allocate_public_lumpsum(
+        [{"ticker":ticker,"target_weight":float(weight)} for ticker,weight in zip(common_tickers,aligned_weights)],
+        {ticker:float(price) for ticker,price in zip(common_tickers,price_inr)},
+        float(lumpsum_inr),max_weight_per_asset=MAX_WEIGHT_PER_ASSET,
     )
-    remaining_cash = float(lumpsum_inr) - float(invested_amounts.sum())
-    while True:
-        headroom = ceiling_amounts - invested_amounts
-        affordable = np.flatnonzero(
-            (price_inr <= remaining_cash + 1e-9) & (price_inr <= headroom + 1e-9)
-        )
-        if len(affordable) == 0:
-            break
-
-        gap_reduction = (
-            np.abs(invested_amounts[affordable] - target_amounts[affordable])
-            - np.abs(
-                invested_amounts[affordable]
-                + price_inr[affordable]
-                - target_amounts[affordable]
-            )
-        )
-
-        # Buy where the target is missed by most; the cap above stops this from
-        # turning into a dump on whatever share happens to be cheapest.
-        best_position = affordable[int(np.argmax(gap_reduction))]
-        quantities[best_position] += 1
-        invested_amounts[best_position] += price_inr[best_position]
-        remaining_cash -= price_inr[best_position]
+    order_by_ticker={row["ticker"]:row for row in allocation_result["orders"]}
+    target_amounts = float(lumpsum_inr) * aligned_weights
+    quantities=np.array([order_by_ticker.get(ticker,{}).get("quantity",0) for ticker in common_tickers],dtype=int)
+    invested_amounts=quantities*price_inr
 
     plan = pd.DataFrame({
         "Symbol": alloc_df.loc[common_tickers, "Symbol"].values,
@@ -3096,7 +3072,7 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
         "Estimated Investment INR": invested_amounts,
     }).sort_values("Optimal Weight", ascending=False).reset_index(drop=True)
 
-    unallocated_cash = max(0.0, remaining_cash)
+    unallocated_cash = float(allocation_result["residual_cash_inr"])
     return plan, unallocated_cash, missing_prices, missing_alloc
 
 
