@@ -14,7 +14,8 @@ import streamlit as st
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import load_trust_records, verify_trust_audit
-from public_portfolio_trust import CALCULATION_VERSION, performance_metrics, select_horizon, xirr
+from public_portfolio_trust import CALCULATION_VERSION, forecast_calibration, performance_metrics, select_horizon, xirr
+from public_release_checks import inspect_public_data
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger(__name__)
@@ -132,10 +133,13 @@ else:
     st.warning("Statistical scenario — not a guaranteed prediction.")
     st.caption(f"14-day {values.get('method')} of observed daily returns · sample {values.get('sample_start')} to {values.get('sample_end')} · {values.get('observation_count')} observations · {forecast['calculation_version']}")
 
-evaluated=[f for f in forecasts if f.get("actual_return") is not None]
-if len(evaluated)>=20:
-    actual=np.array([float(f["actual_return"]) for f in evaluated]); predicted=np.array([float(f["forecast_json"]["median_return"]) for f in evaluated])
-    st.caption(f"Forecast validation ({len(evaluated)} completed forecasts): mean error {np.mean(predicted-actual):.2%}; directional accuracy {np.mean(np.sign(predicted)==np.sign(actual)):.1%}.")
+calibration=forecast_calibration(forecasts,record["forecast_realizations"])
+if calibration["sufficient"]:
+    st.caption(
+        f"Forecast validation ({calibration['sample_size']} completed): 50% coverage {calibration['coverage_50']:.1%}; "
+        f"90% coverage {calibration['coverage_90']:.1%}; directional accuracy {calibration['directional_accuracy']:.1%}; "
+        f"mean error {calibration['mean_forecast_error']:.2%}; median error {calibration['median_forecast_error']:.2%}."
+    )
 
 st.subheader("History")
 tabs=st.tabs(["Portfolio versions","Rebalances","Actual executions","NAV history"])
@@ -148,7 +152,14 @@ st.subheader("Verification")
 audit_ok,audit_message=verify_trust_audit(record["audit"],DEFAULT_BASKET_ID)
 (st.success if audit_ok else st.warning)(audit_message)
 st.write("Portfolio versions and forecasts are append-only, fingerprinted, and verified within this basket.")
-evidence=json.dumps(record,sort_keys=True,indent=2,default=str).encode()
+evidence_state={**record,"performance_metrics":all_metrics,"historical_xirr":xirr_value,
+                "xirr_cash_flows":[(str(day),amount) for day,amount in flows],"forecast_calibration":calibration,
+                "methodology":{"performance":CALCULATION_VERSION,"forecast":"bootstrap historical daily portfolio returns"}}
+security_findings=inspect_public_data(evidence_state,production=True)
+if security_findings:
+    st.error("Evidence export is unavailable because the public-data inspection did not pass.")
+    st.stop()
+evidence=json.dumps(evidence_state,sort_keys=True,indent=2,default=str).encode()
 st.download_button("Download evidence bundle",evidence,f"{DEFAULT_BASKET_ID.lower()}-evidence.json","application/json",use_container_width=True)
 st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
 st.info("Historical performance and statistical scenarios are not investment advice and do not guarantee future results.")

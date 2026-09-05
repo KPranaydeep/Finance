@@ -10,7 +10,7 @@ from psycopg.types.json import Jsonb
 from public_portfolio_trust import canonical_json, fingerprint
 
 SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS portfolio_publications (
+    """CREATE TABLE IF NOT EXISTS public_portfolio_versions (
         publication_id TEXT PRIMARY KEY, basket_id TEXT NOT NULL REFERENCES public_baskets(basket_id),
         run_id TEXT NOT NULL, portfolio_version INTEGER NOT NULL, as_of TIMESTAMPTZ NOT NULL,
         calculation_version TEXT NOT NULL, strategy_version TEXT NOT NULL,
@@ -20,19 +20,30 @@ SCHEMA = (
         UNIQUE (basket_id, portfolio_version), UNIQUE (basket_id, run_id),
         UNIQUE (basket_id, portfolio_fingerprint)
     )""",
-    """CREATE TABLE IF NOT EXISTS portfolio_constituents (
-        publication_id TEXT NOT NULL REFERENCES portfolio_publications(publication_id),
+    """CREATE TABLE IF NOT EXISTS public_portfolio_positions (
+        publication_id TEXT NOT NULL REFERENCES public_portfolio_versions(publication_id),
         ticker TEXT NOT NULL, target_weight DOUBLE PRECISION NOT NULL CHECK (target_weight >= 0 AND target_weight <= 1),
         PRIMARY KEY (publication_id, ticker)
     )""",
-    """CREATE TABLE IF NOT EXISTS portfolio_forecasts (
+    """CREATE TABLE IF NOT EXISTS public_forecasts (
         forecast_id TEXT PRIMARY KEY, basket_id TEXT NOT NULL REFERENCES public_baskets(basket_id),
-        publication_id TEXT NOT NULL REFERENCES portfolio_publications(publication_id),
-        forecast_date DATE NOT NULL, horizon_days INTEGER NOT NULL CHECK (horizon_days > 0),
+        publication_id TEXT NOT NULL REFERENCES public_portfolio_versions(publication_id),
+        forecast_timestamp TIMESTAMPTZ NOT NULL, forecast_date DATE NOT NULL, horizon_days INTEGER NOT NULL CHECK (horizon_days > 0),
         calculation_version TEXT NOT NULL, sample_start DATE NOT NULL, sample_end DATE NOT NULL,
-        observation_count INTEGER NOT NULL, forecast_json JSONB NOT NULL,
-        actual_end_date DATE, actual_return DOUBLE PRECISION, evaluated_at TIMESTAMPTZ,
+        observation_count INTEGER NOT NULL, methodology TEXT NOT NULL,
+        median_return DOUBLE PRECISION NOT NULL, lower_50 DOUBLE PRECISION NOT NULL, upper_50 DOUBLE PRECISION NOT NULL,
+        lower_90 DOUBLE PRECISION NOT NULL, upper_90 DOUBLE PRECISION NOT NULL,
+        probability_positive DOUBLE PRECISION NOT NULL, probability_negative DOUBLE PRECISION NOT NULL,
+        probability_loss_gt_threshold DOUBLE PRECISION NOT NULL, loss_threshold DOUBLE PRECISION NOT NULL,
+        forecast_json JSONB NOT NULL,
         payload_sha256 TEXT NOT NULL, UNIQUE (basket_id, publication_id, forecast_date, horizon_days, calculation_version)
+    )""",
+    """CREATE TABLE IF NOT EXISTS public_forecast_realizations (
+        realization_id TEXT PRIMARY KEY, forecast_id TEXT NOT NULL UNIQUE REFERENCES public_forecasts(forecast_id),
+        actual_start_value DOUBLE PRECISION NOT NULL, actual_end_value DOUBLE PRECISION NOT NULL,
+        actual_return DOUBLE PRECISION NOT NULL, realization_date DATE NOT NULL,
+        comparison_status TEXT NOT NULL CHECK (comparison_status IN ('COMPLETE','INVALID')),
+        created_at TIMESTAMPTZ NOT NULL, payload_sha256 TEXT NOT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS portfolio_trust_audit (
         audit_id BIGSERIAL PRIMARY KEY, basket_id TEXT NOT NULL REFERENCES public_baskets(basket_id),
@@ -41,25 +52,28 @@ SCHEMA = (
         previous_hash TEXT, event_hash TEXT NOT NULL, UNIQUE (basket_id, sequence_number),
         UNIQUE (basket_id, event_hash)
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_publications_current ON portfolio_publications (basket_id, portfolio_version DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_forecasts_basket_date ON portfolio_forecasts (basket_id, forecast_date DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_publications_current ON public_portfolio_versions (basket_id, portfolio_version DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_forecasts_basket_date ON public_forecasts (basket_id, forecast_date DESC)",
+    """DO $$ BEGIN
+       IF to_regclass('public.portfolio_publications') IS NOT NULL THEN
+         INSERT INTO public_portfolio_versions
+           (publication_id,basket_id,run_id,portfolio_version,as_of,calculation_version,strategy_version,
+            cash_weight,published_at,publication_status,portfolio_fingerprint,payload_json)
+         SELECT publication_id,basket_id,run_id,portfolio_version,as_of,calculation_version,strategy_version,
+                cash_weight,published_at,publication_status,portfolio_fingerprint,payload_json
+         FROM portfolio_publications ON CONFLICT DO NOTHING;
+       END IF;
+       IF to_regclass('public.portfolio_constituents') IS NOT NULL THEN
+         INSERT INTO public_portfolio_positions (publication_id,ticker,target_weight)
+         SELECT publication_id,ticker,target_weight FROM portfolio_constituents ON CONFLICT DO NOTHING;
+       END IF;
+       END $$""",
     """CREATE OR REPLACE FUNCTION reject_trust_record_mutation() RETURNS TRIGGER AS $$
        BEGIN RAISE EXCEPTION 'Trust record % is immutable', TG_TABLE_NAME; END; $$ LANGUAGE plpgsql""",
-    """DO $$ DECLARE t TEXT; BEGIN FOREACH t IN ARRAY ARRAY['portfolio_publications','portfolio_constituents','portfolio_trust_audit'] LOOP
+    """DO $$ DECLARE t TEXT; BEGIN FOREACH t IN ARRAY ARRAY['public_portfolio_versions','public_portfolio_positions','public_forecasts','public_forecast_realizations','portfolio_trust_audit'] LOOP
        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='immutable_trust_'||t) THEN
        EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION reject_trust_record_mutation()', 'immutable_trust_'||t,t);
        END IF; END LOOP; END $$""",
-    """CREATE OR REPLACE FUNCTION protect_forecast_record() RETURNS TRIGGER AS $$ BEGIN
-       IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Forecasts are immutable'; END IF;
-       IF OLD.forecast_id<>NEW.forecast_id OR OLD.basket_id<>NEW.basket_id OR OLD.publication_id<>NEW.publication_id
-          OR OLD.forecast_date<>NEW.forecast_date OR OLD.horizon_days<>NEW.horizon_days
-          OR OLD.calculation_version<>NEW.calculation_version OR OLD.forecast_json<>NEW.forecast_json
-          OR OLD.payload_sha256<>NEW.payload_sha256 OR OLD.actual_return IS NOT NULL
-       THEN RAISE EXCEPTION 'Original forecast content is immutable'; END IF;
-       RETURN NEW; END; $$ LANGUAGE plpgsql""",
-    """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='protect_portfolio_forecasts') THEN
-       CREATE TRIGGER protect_portfolio_forecasts BEFORE UPDATE OR DELETE ON portfolio_forecasts
-       FOR EACH ROW EXECUTE FUNCTION protect_forecast_record(); END IF; END $$""",
 )
 
 
@@ -120,16 +134,16 @@ def publish_approved_portfolio(conn: Any, *, basket_id: str, run_id: str, as_of:
     with conn.transaction():
         init_trust_schema(conn)
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"publication:{basket_id}",))
-        existing = conn.execute("SELECT * FROM portfolio_publications WHERE basket_id=%s AND run_id=%s", (basket_id, run_id)).fetchone()
+        existing = conn.execute("SELECT * FROM public_portfolio_versions WHERE basket_id=%s AND run_id=%s", (basket_id, run_id)).fetchone()
         if existing:
             if existing["portfolio_fingerprint"] != digest:
                 raise ValueError("run_id already exists with different portfolio content")
             return dict(existing)
-        row = conn.execute("SELECT COALESCE(MAX(portfolio_version),0)+1 AS next_version FROM portfolio_publications WHERE basket_id=%s", (basket_id,)).fetchone()
+        row = conn.execute("SELECT COALESCE(MAX(portfolio_version),0)+1 AS next_version FROM public_portfolio_versions WHERE basket_id=%s", (basket_id,)).fetchone()
         version = int(row["next_version"])
         now = datetime.now(timezone.utc)
         conn.execute(
-            """INSERT INTO portfolio_publications
+            """INSERT INTO public_portfolio_versions
             (publication_id,basket_id,run_id,portfolio_version,as_of,calculation_version,strategy_version,
              cash_weight,published_at,publication_status,portfolio_fingerprint,payload_json)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'PUBLISHED',%s,%s)""",
@@ -137,27 +151,34 @@ def publish_approved_portfolio(conn: Any, *, basket_id: str, run_id: str, as_of:
              cash_weight,now,digest,Jsonb(material)),
         )
         for item in normalized:
-            conn.execute("INSERT INTO portfolio_constituents (publication_id,ticker,target_weight) VALUES (%s,%s,%s)",
+            conn.execute("INSERT INTO public_portfolio_positions (publication_id,ticker,target_weight) VALUES (%s,%s,%s)",
                          (publication_id,item["ticker"],item["target_weight"]))
         _audit(conn,basket_id,"portfolio_publication",publication_id,"PORTFOLIO_PUBLISHED",
                {"portfolio_version":version,"portfolio_fingerprint":digest,"run_id":run_id})
     return {"publication_id":publication_id,"basket_id":basket_id,"run_id":run_id,
-            "portfolio_version":version,"portfolio_fingerprint":digest,"published_at":now}
+            "portfolio_version":version,"strategy_version":strategy_version,
+            "calculation_version":calculation_version,"as_of":as_of,
+            "constituents":normalized,"cash_weight":float(cash_weight),
+            "publication_fingerprint":digest,"portfolio_fingerprint":digest,
+            "published_at":now,"publication_status":"PUBLISHED"}
 
 
 def load_trust_records(conn: Any, basket_id: str) -> dict:
     init_trust_schema(conn)
-    publications = conn.execute("SELECT * FROM portfolio_publications WHERE basket_id=%s ORDER BY portfolio_version DESC", (basket_id,)).fetchall()
+    publications = conn.execute("SELECT * FROM public_portfolio_versions WHERE basket_id=%s ORDER BY portfolio_version DESC", (basket_id,)).fetchall()
     current = dict(publications[0]) if publications else None
     constituents = [] if not current else conn.execute(
-        "SELECT ticker,target_weight FROM portfolio_constituents WHERE publication_id=%s ORDER BY target_weight DESC,ticker",
+        "SELECT ticker,target_weight FROM public_portfolio_positions WHERE publication_id=%s ORDER BY target_weight DESC,ticker",
         (current["publication_id"],),
     ).fetchall()
-    forecasts = conn.execute("SELECT * FROM portfolio_forecasts WHERE basket_id=%s ORDER BY forecast_date DESC", (basket_id,)).fetchall()
+    forecasts = conn.execute("SELECT * FROM public_forecasts WHERE basket_id=%s ORDER BY forecast_date DESC", (basket_id,)).fetchall()
+    realizations = conn.execute("""SELECT r.* FROM public_forecast_realizations r JOIN public_forecasts f ON f.forecast_id=r.forecast_id
+        WHERE f.basket_id=%s ORDER BY r.realization_date DESC""", (basket_id,)).fetchall()
     audit = conn.execute("SELECT * FROM portfolio_trust_audit WHERE basket_id=%s ORDER BY sequence_number", (basket_id,)).fetchall()
     cash = conn.execute("SELECT event_at,event_type,amount_inr FROM cash_ledger WHERE basket_id=%s ORDER BY event_at", (basket_id,)).fetchall()
     return {"publications":[dict(r) for r in publications],"current":current,
             "constituents":[dict(r) for r in constituents],"forecasts":[dict(r) for r in forecasts],
+            "forecast_realizations":[dict(r) for r in realizations],
             "audit":[dict(r) for r in audit],"cash_flows":[dict(r) for r in cash]}
 
 
@@ -168,23 +189,29 @@ def record_forecast(conn: Any, *, basket_id: str, publication_id: str, forecast_
     digest=fingerprint(material); forecast_id=f"FCST-{digest[:24].upper()}"
     with conn.transaction():
         init_trust_schema(conn)
-        existing=conn.execute("""SELECT * FROM portfolio_forecasts WHERE basket_id=%s AND publication_id=%s
+        existing=conn.execute("""SELECT * FROM public_forecasts WHERE basket_id=%s AND publication_id=%s
             AND forecast_date=%s AND horizon_days=%s AND calculation_version=%s""",
             (basket_id,publication_id,forecast_date,forecast["horizon_days"],calculation_version)).fetchone()
         if existing: return dict(existing)
-        conn.execute("""INSERT INTO portfolio_forecasts
-            (forecast_id,basket_id,publication_id,forecast_date,horizon_days,calculation_version,sample_start,
-             sample_end,observation_count,forecast_json,payload_sha256)
-             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (forecast_id,basket_id,publication_id,forecast_date,forecast["horizon_days"],calculation_version,
-             forecast["sample_start"],forecast["sample_end"],forecast["observation_count"],Jsonb(forecast),digest))
+        now=datetime.now(timezone.utc)
+        conn.execute("""INSERT INTO public_forecasts
+            (forecast_id,basket_id,publication_id,forecast_timestamp,forecast_date,horizon_days,calculation_version,
+             sample_start,sample_end,observation_count,methodology,median_return,lower_50,upper_50,lower_90,upper_90,
+             probability_positive,probability_negative,probability_loss_gt_threshold,loss_threshold,forecast_json,payload_sha256)
+             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (forecast_id,basket_id,publication_id,now,forecast_date,forecast["horizon_days"],calculation_version,
+             forecast["sample_start"],forecast["sample_end"],forecast["observation_count"],forecast["method"],
+             forecast["median_return"],forecast["lower_50"],forecast["upper_50"],forecast["lower_90"],forecast["upper_90"],
+             forecast["probability_positive"],forecast["probability_negative"],forecast["probability_loss_gt_threshold"],
+             forecast["loss_threshold"],Jsonb(forecast),digest))
         _audit(conn,basket_id,"forecast",forecast_id,"FORECAST_RECORDED",{"payload_sha256":digest,"forecast_date":str(forecast_date)})
     return {"forecast_id":forecast_id,"payload_sha256":digest}
 
 
 def evaluate_due_forecasts(conn: Any, basket_id: str) -> int:
     """Attach outcomes after the requested number of subsequent NAV observations."""
-    pending=conn.execute("SELECT * FROM portfolio_forecasts WHERE basket_id=%s AND actual_return IS NULL",(basket_id,)).fetchall()
+    pending=conn.execute("""SELECT f.* FROM public_forecasts f LEFT JOIN public_forecast_realizations r ON r.forecast_id=f.forecast_id
+        WHERE f.basket_id=%s AND r.forecast_id IS NULL""",(basket_id,)).fetchall()
     updated=0
     for row in pending:
         observations=conn.execute("""SELECT nav_date,nav FROM daily_nav WHERE basket_id=%s AND nav_date >= %s
@@ -194,10 +221,15 @@ def evaluate_due_forecasts(conn: Any, basket_id: str) -> int:
         if len(ordered)<=int(row["horizon_days"]): continue
         start,end=ordered[0],ordered[int(row["horizon_days"])]
         actual=end[1]/start[1]-1
+        realization_material={"forecast_id":row["forecast_id"],"actual_start_value":start[1],"actual_end_value":end[1],
+                              "actual_return":actual,"realization_date":str(end[0]),"comparison_status":"COMPLETE"}
+        realization_id=f"REAL-{fingerprint(realization_material)[:24].upper()}"
         with conn.transaction():
-            conn.execute("UPDATE portfolio_forecasts SET actual_end_date=%s,actual_return=%s,evaluated_at=%s WHERE forecast_id=%s AND actual_return IS NULL",
-                         (end[0],actual,datetime.now(timezone.utc),row["forecast_id"]))
-            _audit(conn,basket_id,"forecast",row["forecast_id"],"FORECAST_EVALUATED",{"actual_end_date":str(end[0]),"actual_return":actual})
+            conn.execute("""INSERT INTO public_forecast_realizations
+                (realization_id,forecast_id,actual_start_value,actual_end_value,actual_return,realization_date,
+                 comparison_status,created_at,payload_sha256) VALUES (%s,%s,%s,%s,%s,%s,'COMPLETE',%s,%s)""",
+                (realization_id,row["forecast_id"],start[1],end[1],actual,end[0],datetime.now(timezone.utc),fingerprint(realization_material)))
+            _audit(conn,basket_id,"forecast_realization",realization_id,"FORECAST_REALIZED",realization_material)
         updated+=1
     return updated
 

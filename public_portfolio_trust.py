@@ -208,3 +208,18 @@ def bootstrap_outlook(
 
 def forecast_payload(result: ForecastResult) -> dict:
     return {"calculation_version": CALCULATION_VERSION, **asdict(result)}
+
+
+def forecast_calibration(forecasts: Sequence[dict], realizations: Sequence[dict], *, minimum_sample: int = 20) -> dict:
+    realized={row["forecast_id"]:float(row["actual_return"]) for row in realizations if row.get("actual_return") is not None}
+    matched=[(row,realized[row["forecast_id"]]) for row in forecasts if row.get("forecast_id") in realized]
+    if len(matched)<minimum_sample:
+        return {"sufficient":False,"sample_size":len(matched),"minimum_sample":minimum_sample}
+    actual=np.array([actual for _,actual in matched]); median=np.array([float(row["median_return"]) for row,_ in matched])
+    errors=median-actual
+    return {"sufficient":True,"sample_size":len(matched),"minimum_sample":minimum_sample,
+            "coverage_50":float(np.mean([(float(row["lower_50"])<=actual<=float(row["upper_50"])) for row,actual in matched])),
+            "coverage_90":float(np.mean([(float(row["lower_90"])<=actual<=float(row["upper_90"])) for row,actual in matched])),
+            "directional_accuracy":float(np.mean(np.sign(median)==np.sign(actual))),
+            "mean_forecast_error":float(np.mean(errors)),"median_forecast_error":float(np.median(errors)),
+            "forecast_bias":float(np.mean(errors))}

@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import yfinance as yf
 
-from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
+from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
+from public_portfolio_config import load_public_portfolio_config
 from public_portfolio_publications import load_trust_records
 from public_portfolio_trust import fingerprint, versioned_model_nav
 
@@ -15,14 +16,16 @@ CALCULATION_VERSION=3
 
 
 def main() -> int:
+    config=load_public_portfolio_config()
+    basket_id=config.basket_id
     url=get_public_basket_database_url()
     if not url: raise RuntimeError("Public PostgreSQL is not configured")
     with connect_public_basket_db(url) as conn:
-        trust=load_trust_records(conn,DEFAULT_BASKET_ID)
+        trust=load_trust_records(conn,basket_id)
         if not trust["publications"]: return 0
         versions=[]; tickers=set()
         for publication in reversed(trust["publications"]):
-            rows=conn.execute("SELECT ticker,target_weight FROM portfolio_constituents WHERE publication_id=%s",(publication["publication_id"],)).fetchall()
+            rows=conn.execute("SELECT ticker,target_weight FROM public_portfolio_positions WHERE publication_id=%s",(publication["publication_id"],)).fetchall()
             weights={row["ticker"]:float(row["target_weight"]) for row in rows}; tickers.update(weights)
             versions.append({"publication_id":publication["publication_id"],"as_of":publication["as_of"],"weights":weights})
         start=min(item["as_of"] for item in versions).date()-timedelta(days=7)
@@ -32,11 +35,11 @@ def main() -> int:
         nav=versioned_model_nav(closes,versions)
         now=datetime.now(timezone.utc)
         for row in nav.to_dict("records"):
-            material={"basket_id":DEFAULT_BASKET_ID,**row,"calculation_version":CALCULATION_VERSION}
+            material={"basket_id":basket_id,**row,"calculation_version":CALCULATION_VERSION}
             conn.execute("""INSERT INTO daily_nav (basket_id,nav_date,calculation_version,nav,portfolio_value,cash_value,total_value,
                 daily_return,drawdown,input_sha256,calculated_at) VALUES (%s,%s,%s,%s,0,0,0,%s,%s,%s,%s)
                 ON CONFLICT (basket_id,nav_date,calculation_version) DO NOTHING""",
-                (DEFAULT_BASKET_ID,row["nav_date"],CALCULATION_VERSION,row["nav"],row["daily_return"],row["drawdown"],fingerprint(material),now))
+                (basket_id,row["nav_date"],CALCULATION_VERSION,row["nav"],row["daily_return"],row["drawdown"],fingerprint(material),now))
     return 0
 
 

@@ -1,4 +1,5 @@
 import base64
+import hmac
 import importlib.util
 import io
 import html
@@ -20,6 +21,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
+from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
+from public_portfolio_publications import publish_approved_portfolio
 
 
 def _percent_drop_count(total_tickers, drop_bottom_pct=0.2, min_tickers_to_keep=1):
@@ -4709,5 +4712,51 @@ if run_btn:
             "analysis backup as JSON."
         )
 
+        st.session_state["approved_publication_candidate"] = analysis_payload["publication_candidate"]
+
     except Exception as e:
         st.error(f"Error: {e}")
+
+
+candidate = st.session_state.get("approved_publication_candidate")
+if candidate:
+    st.subheader("Approve public publication")
+    st.caption(
+        "This publishes the already calculated allocation. It does not run the optimizer again. "
+        "Repeating the same run is idempotent."
+    )
+    try:
+        configured_publisher_token = str(st.secrets["public_basket"]["publisher_token"]).strip()
+    except Exception:
+        configured_publisher_token = ""
+    if len(configured_publisher_token) < 32:
+        st.warning("Configure public_basket.publisher_token (at least 32 characters) to enable publication.")
+    else:
+        with st.form(f"publish_approved_{candidate['run_id']}"):
+            supplied_token = st.text_input("Publisher token", type="password")
+            approval_phrase = st.text_input("Type PUBLISH PUBLIC-01 to approve")
+            approval_checked = st.checkbox("I reviewed the final whole-percent allocation")
+            publish_now = st.form_submit_button("Publish approved portfolio", type="primary")
+        if publish_now:
+            if not hmac.compare_digest(supplied_token, configured_publisher_token):
+                st.error("Publisher token is invalid.")
+            elif approval_phrase.strip().upper() != "PUBLISH PUBLIC-01" or not approval_checked:
+                st.error("Complete both approval confirmations before publishing.")
+            else:
+                try:
+                    with connect_public_basket_db(get_public_basket_database_url()) as conn:
+                        published = publish_approved_portfolio(
+                            conn,
+                            basket_id=candidate["basket_id"], run_id=candidate["run_id"],
+                            as_of=datetime.fromisoformat(candidate["as_of"]),
+                            calculation_version=candidate["calculation_version"],
+                            strategy_version=candidate["strategy_version"],
+                            constituents=candidate["constituents"], cash_weight=candidate["cash_weight"],
+                        )
+                    st.success(
+                        f"Published immutable portfolio version {published['portfolio_version']} "
+                        f"as {published['publication_id']}."
+                    )
+                    st.json(published)
+                except Exception as exc:
+                    st.error(f"Publication failed without changing the approved allocation: {exc}")
