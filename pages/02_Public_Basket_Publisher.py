@@ -12,7 +12,7 @@ import streamlit as st
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio, validate_constituents
-from public_portfolio_trust import canonical_json
+from public_portfolio_trust import canonical_json, round_weights_to_whole_percent
 
 IST=ZoneInfo("Asia/Kolkata")
 PAGE_VERSION="approved-snapshot-publisher-v1"
@@ -43,6 +43,7 @@ try:
         weight=row.get("target_weight",row.get("Optimal Weight"))
         constituents.append({"ticker":ticker,"target_weight":weight})
     cash_weight=float(approved.get("cash_weight",0.0))
+    constituents=round_weights_to_whole_percent(constituents,cash_weight=cash_weight)
     constituents=validate_constituents(constituents,cash_weight)
     as_of=datetime.fromisoformat(str(approved.get("as_of") or source.get("saved_at")))
     if as_of.tzinfo is None: as_of=as_of.replace(tzinfo=IST)
@@ -57,8 +58,10 @@ material={"basket_id":DEFAULT_BASKET_ID,"run_id":run_id,"as_of":as_of.isoformat(
           "cash_weight":cash_weight,"constituents":constituents}
 digest=hashlib.sha256(canonical_json(material).encode()).hexdigest()
 st.subheader("Read-only publication preview")
-c1,c2,c3=st.columns(3); c1.metric("Constituents",len(constituents)); c2.metric("Cash weight",f"{cash_weight:.2%}"); c3.metric("Fingerprint",digest[:12])
-st.dataframe(constituents,use_container_width=True,hide_index=True)
+c1,c2=st.columns(2); c1.metric("Constituents",len(constituents)); c2.metric("Fingerprint",digest[:12])
+display_rows=[{"Ticker":row["ticker"],"Weight":f"{row['target_weight']:.0%}"} for row in constituents]
+display_rows.append({"Ticker":"TOTAL","Weight":f"{sum(row['target_weight'] for row in constituents)+cash_weight:.0%}"})
+st.dataframe(display_rows,use_container_width=True,hide_index=True)
 st.caption(f"As of {as_of.astimezone(IST):%d %b %Y %H:%M IST} · Strategy {strategy_version} · Calculation {calculation_version}")
 
 phrase=f"PUBLISH {digest[:12].upper()}"
