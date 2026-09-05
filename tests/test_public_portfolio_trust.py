@@ -6,6 +6,7 @@ import pytest
 from public_portfolio_trust import bootstrap_outlook, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
 from public_portfolio_publications import validate_constituents, verify_trust_audit
 from public_release_checks import inspect_public_data
+from public_lumpsum_allocator import allocate_public_lumpsum
 
 
 def test_xirr_single_investment():
@@ -144,3 +145,22 @@ def test_public_data_security_inspection():
     assert inspect_public_data({"database_url":"postgresql://secret"})
     assert inspect_public_data({"path":"C:\\Users\\Someone\\private.csv"})
     assert inspect_public_data({"portfolio_version":"P001","weights":[.4,.6]}) == []
+
+
+def test_small_lumpsum_uses_deterministic_starter_plan_without_zero_orders():
+    target=[{"ticker":"A","target_weight":.5},{"ticker":"B","target_weight":.3},{"ticker":"C","target_weight":.2}]
+    prices={"A":{"price":800},"B":{"price":240},"C":{"price":60}}
+    first=allocate_public_lumpsum(target,prices,1000)
+    second=allocate_public_lumpsum(target,prices,1000)
+    assert first == second
+    assert first["mode"] == "STARTER"
+    assert first["orders"] and all(row["quantity"] > 0 for row in first["orders"])
+    assert first["invested_inr"] + first["residual_cash_inr"] == pytest.approx(1000)
+    assert first["invested_inr"] <= 1000
+
+
+def test_lumpsum_reports_missing_prices_and_rejects_invalid_amount():
+    target=[{"ticker":"A","target_weight":.5},{"ticker":"B","target_weight":.5}]
+    result=allocate_public_lumpsum(target,{"A":100},1000)
+    assert result["missing_prices"] == ["B"]
+    with pytest.raises(ValueError): allocate_public_lumpsum(target,{"A":100},0)
