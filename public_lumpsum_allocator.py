@@ -3,8 +3,74 @@
 from __future__ import annotations
 
 from typing import Iterable
+import math
 
 import numpy as np
+
+
+def estimate_minimum_entry_capital(
+    constituents: Iterable[dict],
+    prices: dict[str, dict | float],
+    *,
+    fixed_cost_per_order: float = 20.0,
+    statutory_cost_rate: float = 0.0012,
+    slippage_rate: float = 0.0010,
+    maximum_execution_drag: float = 0.0050,
+    maximum_tracking_error_pp: float = 2.0,
+    maximum_residual_ratio: float = 0.01,
+) -> dict:
+    """Estimate capital where the complete target is practical as whole shares."""
+    target = [{"ticker":str(row["ticker"]).strip().upper(),"target_weight":float(row["target_weight"])} for row in constituents]
+    usable=[]
+    for row in target:
+        raw=prices.get(row["ticker"])
+        price=float(raw.get("price")) if isinstance(raw,dict) and raw.get("price") else (float(raw) if raw is not None else np.nan)
+        if np.isfinite(price) and price>0 and row["target_weight"]>0:
+            usable.append({**row,"price":price})
+    if len(usable)!=len(target) or not usable:
+        raise ValueError("A current price is required for every target security")
+    weight_total=sum(row["target_weight"] for row in usable)
+    for row in usable: row["target_weight"]/=weight_total
+    price_values=np.array([row["price"] for row in usable],dtype=float)
+    count=len(usable); mean_price=float(price_values.mean()); std_price=float(price_values.std(ddof=0))
+    one_share_floor=float(price_values.sum())
+    weighted_affordability_floor=max(row["price"]/row["target_weight"] for row in usable)
+    dispersion_floor=count*(mean_price+std_price)
+    variable_drag=statutory_cost_rate+slippage_rate
+    if maximum_execution_drag<=variable_drag:
+        raise ValueError("Maximum execution drag must exceed variable cost and slippage")
+    cost_floor=count*fixed_cost_per_order/(maximum_execution_drag-variable_drag)
+    candidate=max(one_share_floor,weighted_affordability_floor,dispersion_floor,cost_floor)
+    candidate=math.ceil(candidate/1000.0)*1000.0
+
+    price_map={row["ticker"]:row["price"] for row in usable}
+    plan=None; tracking_error=float("inf")
+    for _ in range(240):
+        plan=allocate_public_lumpsum(usable,price_map,candidate)
+        actual={row["ticker"]:row["estimated_value"]/candidate for row in plan["orders"]}
+        tracking_error=100*math.sqrt(sum((actual.get(row["ticker"],0)-row["target_weight"])**2 for row in usable)/count)
+        estimated_drag=(plan["invested_inr"]*variable_drag+count*fixed_cost_per_order)/candidate
+        if (plan["coverage"]==count and plan["residual_cash_inr"]/candidate<=maximum_residual_ratio
+                and tracking_error<=maximum_tracking_error_pp and estimated_drag<=maximum_execution_drag):
+            break
+        candidate=math.ceil(candidate*1.025/1000.0)*1000.0
+    assert plan is not None
+    estimated_cost=plan["invested_inr"]*statutory_cost_rate+count*fixed_cost_per_order
+    estimated_slippage=plan["invested_inr"]*slippage_rate
+    return {
+        "minimum_capital_inr":candidate,"constituent_count":count,"mean_price":mean_price,
+        "price_standard_deviation":std_price,"minimum_price":float(price_values.min()),
+        "maximum_price":float(price_values.max()),"one_share_floor":one_share_floor,
+        "weighted_affordability_floor":weighted_affordability_floor,"dispersion_floor":dispersion_floor,
+        "cost_floor":cost_floor,"estimated_cost_inr":estimated_cost,"estimated_slippage_inr":estimated_slippage,
+        "estimated_execution_drag":(estimated_cost+estimated_slippage)/candidate,
+        "tracking_error_pp":tracking_error,"residual_ratio":plan["residual_cash_inr"]/candidate,
+        "coverage":plan["coverage"],"assumptions":{
+            "fixed_cost_per_order":fixed_cost_per_order,"statutory_cost_rate":statutory_cost_rate,
+            "slippage_rate":slippage_rate,"maximum_execution_drag":maximum_execution_drag,
+            "maximum_tracking_error_pp":maximum_tracking_error_pp,"maximum_residual_ratio":maximum_residual_ratio,
+        },
+    }
 
 
 def allocate_public_lumpsum(

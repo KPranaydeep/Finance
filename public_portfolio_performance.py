@@ -16,7 +16,7 @@ import streamlit.components.v1 as components
 import yfinance as yf
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
-from public_lumpsum_allocator import allocate_public_lumpsum
+from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
 from public_portfolio_publications import load_trust_records, verify_trust_audit
 from public_portfolio_trust import CALCULATION_VERSION, forecast_calibration, performance_metrics, select_horizon, xirr
 from public_release_checks import inspect_public_data
@@ -261,7 +261,8 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
 
 
 def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str,
-                                calculated_plan: dict | None = None) -> tuple[str, dict]:
+                                calculated_plan: dict | None = None,
+                                entry_estimate: dict | None = None) -> tuple[str, dict]:
     """Build a version-bound prompt containing public data only."""
     public_target = {
         "basket_id": current["basket_id"],
@@ -283,6 +284,7 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict], prices:
         ],
         "cash_weight_pct": round(float(current["cash_weight"]) * 100),
         "price_source": "Yahoo Finance latest available unadjusted close; reference data, not part of the immutable portfolio fingerprint",
+        "estimated_minimum_practical_entry": entry_estimate,
     }
     target_json = json.dumps(public_target, sort_keys=True, indent=2, default=str)
     plan_block = ""
@@ -389,6 +391,10 @@ st.markdown(
 st.subheader("Target allocation")
 allocation=pd.DataFrame(record["constituents"])
 price_snapshot=load_latest_prices(tuple(allocation["ticker"].astype(str)))
+try:
+    entry_estimate=estimate_minimum_entry_capital(record["constituents"],price_snapshot)
+except Exception:
+    entry_estimate=None
 if float(current["cash_weight"])>0:
     allocation=pd.concat([allocation,pd.DataFrame([{"ticker":"CASH","target_weight":current["cash_weight"]}])],ignore_index=True)
 allocation["Allocation"]=allocation["target_weight"].astype(float)*100
@@ -414,6 +420,23 @@ st.markdown(
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
     st.caption(f"Prices: latest available unadjusted close from Yahoo Finance · through {price_dates[-1]}")
+if entry_estimate:
+    st.info(
+        f"Estimated minimum practical entry: **₹{entry_estimate['minimum_capital_inr']:,.0f}** — "
+        f"covers all {entry_estimate['constituent_count']} target securities with whole shares while keeping "
+        f"estimated execution drag below {entry_estimate['assumptions']['maximum_execution_drag']:.2%}."
+    )
+    with st.expander("How minimum practical entry is calculated"):
+        e1,e2,e3,e4=st.columns(4)
+        e1.metric("Mean price",f"₹{entry_estimate['mean_price']:,.0f}")
+        e2.metric("Price deviation",f"₹{entry_estimate['price_standard_deviation']:,.0f}")
+        e3.metric("Lowest price",f"₹{entry_estimate['minimum_price']:,.2f}")
+        e4.metric("Highest price",f"₹{entry_estimate['maximum_price']:,.2f}")
+        st.caption(
+            "The estimate combines one-share affordability, target weights, number of securities, price dispersion, "
+            "whole-share tracking error, residual cash, statutory costs, a conservative per-order allowance and slippage. "
+            "It is a practicality estimate, not a required minimum or return forecast."
+        )
 st.caption(f"Strategy {current['strategy_version']} · Published {current['published_at'].astimezone(IST):%d %b %Y %H:%M IST}")
 
 st.subheader("Build your private execution plan")
@@ -424,8 +447,9 @@ st.write(
 execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCENARIOS))
 calculated_plan = None
 if execution_scenario == "Start fresh with cash":
+    default_amount=float(entry_estimate["minimum_capital_inr"]) if entry_estimate else 1000.0
     investment_amount = st.number_input(
-        "Amount to invest (₹)", min_value=100.0, value=1000.0, step=500.0, format="%.0f"
+        "Amount to invest (₹)", min_value=100.0, value=default_amount, step=1000.0, format="%.0f"
     )
     try:
         calculated_plan = allocate_public_lumpsum(
@@ -456,6 +480,10 @@ if execution_scenario == "Start fresh with cash":
             )
         if calculated_plan["missing_prices"]:
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
+        if entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
+            st.warning("Below the estimated practical entry, this is a partial starter allocation with higher tracking and cost impact.")
+        else:
+            st.success("This amount meets the estimated practical-entry conditions for the published portfolio.")
         st.caption("Starter mode" if calculated_plan["mode"]=="STARTER" else "Target-weight mode")
     except Exception as exc:
         st.info(f"A fresh-cash plan cannot be calculated until prices are available: {exc}")
@@ -464,7 +492,7 @@ st.warning(
     "address, and any credentials. Review the AI provider's privacy policy."
 )
 execution_prompt, public_target = build_execution_plan_prompt(
-    current, record["constituents"], price_snapshot, execution_scenario, calculated_plan
+    current, record["constituents"], price_snapshot, execution_scenario, calculated_plan, entry_estimate
 )
 version_label = f"p{int(current['portfolio_version']):03d}"
 action_1, action_2, action_3, action_4 = st.columns(4)

@@ -6,7 +6,7 @@ import pytest
 from public_portfolio_trust import bootstrap_outlook, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
 from public_portfolio_publications import validate_constituents, verify_trust_audit
 from public_release_checks import inspect_public_data
-from public_lumpsum_allocator import allocate_public_lumpsum
+from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
 
 
 def test_xirr_single_investment():
@@ -164,3 +164,14 @@ def test_lumpsum_reports_missing_prices_and_rejects_invalid_amount():
     result=allocate_public_lumpsum(target,{"A":100},1000)
     assert result["missing_prices"] == ["B"]
     with pytest.raises(ValueError): allocate_public_lumpsum(target,{"A":100},0)
+
+
+def test_minimum_entry_uses_prices_costs_coverage_and_tracking():
+    target=[{"ticker":"A","target_weight":.5},{"ticker":"B","target_weight":.3},{"ticker":"C","target_weight":.2}]
+    estimate=estimate_minimum_entry_capital(target,{"A":800,"B":240,"C":60})
+    assert estimate["constituent_count"] == 3
+    assert estimate["minimum_price"] == 60 and estimate["maximum_price"] == 800
+    assert estimate["coverage"] == 3
+    assert estimate["estimated_execution_drag"] <= estimate["assumptions"]["maximum_execution_drag"]
+    assert estimate["tracking_error_pp"] <= estimate["assumptions"]["maximum_tracking_error_pp"]
+    assert estimate["minimum_capital_inr"] >= estimate["weighted_affordability_floor"]
