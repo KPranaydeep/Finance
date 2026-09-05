@@ -51,7 +51,7 @@ st.set_page_config(page_title="Public Portfolio", page_icon="📈", layout="wide
 
 st.markdown(
     """<style>
-    .block-container {max-width: 1220px; padding-top: 2rem; padding-bottom: 5rem;}
+    .block-container {max-width: 1220px; padding-top: 4.5rem; padding-bottom: 5rem;}
     .trust-hero {
         padding: 2.2rem 2.4rem; margin-bottom: 1.5rem; border-radius: 24px;
         background: radial-gradient(circle at 85% 15%, rgba(45,212,191,.22), transparent 32%),
@@ -87,7 +87,7 @@ st.markdown(
     .weight-fill {height:100%; border-radius:99px; background:linear-gradient(90deg,#14b8a6,#5eead4);}
     .price-cell {font-variant-numeric:tabular-nums; white-space:nowrap;}
     @media (max-width:640px) {
-      .block-container {padding-left:.85rem; padding-right:.85rem; padding-top:.75rem;}
+      .block-container {padding-left:.85rem; padding-right:.85rem; padding-top:4rem;}
       .trust-hero {padding:1.15rem 1rem; margin-bottom:1rem; border-radius:16px;}
       .trust-kicker {font-size:.62rem; letter-spacing:.12em;}
       .trust-title {font-size:1.72rem; line-height:1.08; margin:.4rem 0 .55rem;}
@@ -421,9 +421,11 @@ price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
     st.caption(f"Prices: latest available unadjusted close from Yahoo Finance · through {price_dates[-1]}")
 if entry_estimate:
+    minimum_1,minimum_2=st.columns(2)
+    minimum_1.metric("Bare minimum to begin",f"₹{entry_estimate['bare_minimum_capital_inr']:,.0f}","One affordable target share")
+    minimum_2.metric("Practical portfolio entry",f"₹{entry_estimate['minimum_capital_inr']:,.0f}","Full target representation")
     st.info(
-        f"Estimated minimum practical entry: **₹{entry_estimate['minimum_capital_inr']:,.0f}** — "
-        f"covers all {entry_estimate['constituent_count']} target securities with whole shares while keeping "
+        f"The practical estimate covers all {entry_estimate['constituent_count']} target securities with whole shares while keeping "
         f"estimated execution drag below {entry_estimate['assumptions']['maximum_execution_drag']:.2%}."
     )
     with st.expander("How minimum practical entry is calculated"):
@@ -448,8 +450,9 @@ execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCEN
 calculated_plan = None
 if execution_scenario == "Start fresh with cash":
     default_amount=float(entry_estimate["minimum_capital_inr"]) if entry_estimate else 1000.0
+    bare_amount=float(entry_estimate["bare_minimum_capital_inr"]) if entry_estimate else 100.0
     investment_amount = st.number_input(
-        "Amount to invest (₹)", min_value=100.0, value=default_amount, step=1000.0, format="%.0f"
+        "Amount to invest (₹)", min_value=bare_amount, value=default_amount, step=1000.0, format="%.0f"
     )
     try:
         calculated_plan = allocate_public_lumpsum(

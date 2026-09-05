@@ -59,6 +59,7 @@ def estimate_minimum_entry_capital(
     estimated_slippage=plan["invested_inr"]*slippage_rate
     return {
         "minimum_capital_inr":candidate,"constituent_count":count,"mean_price":mean_price,
+        "bare_minimum_capital_inr":math.ceil((float(price_values.min())*(1+statutory_cost_rate+slippage_rate)+fixed_cost_per_order)/10.0)*10.0,
         "price_standard_deviation":std_price,"minimum_price":float(price_values.min()),
         "maximum_price":float(price_values.max()),"one_share_floor":one_share_floor,
         "weighted_affordability_floor":weighted_affordability_floor,"dispersion_floor":dispersion_floor,
