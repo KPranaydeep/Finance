@@ -17,6 +17,7 @@ import yfinance as yf
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
+from public_portfolio_history import build_allocation_change_rows
 from public_portfolio_publications import load_trust_records, verify_trust_audit
 from public_portfolio_trust import CALCULATION_VERSION, forecast_calibration, performance_metrics, select_horizon, xirr
 from public_release_checks import inspect_public_data
@@ -210,8 +211,12 @@ def load_public_record(basket_id: str) -> dict[str, Any]:
             FROM trade_executions x JOIN trade_orders o ON o.order_id=x.order_id
             JOIN rebalance_events r ON r.rebalance_id=o.rebalance_id WHERE r.basket_id=%s ORDER BY x.executed_at DESC""",(basket_id,)).fetchall()
         trust=load_trust_records(conn,basket_id)
+        publication_positions=conn.execute("""SELECT p.publication_id,v.portfolio_version,p.ticker,p.target_weight
+            FROM public_portfolio_positions p JOIN public_portfolio_versions v ON v.publication_id=p.publication_id
+            WHERE v.basket_id=%s ORDER BY v.portfolio_version,p.ticker""",(basket_id,)).fetchall()
     return {"basket":dict(basket),"nav":[dict(r) for r in nav],"rebalances":[dict(r) for r in rebalances],
-            "executions":[dict(r) for r in executions],**trust}
+            "executions":[dict(r) for r in executions],
+            "publication_positions":[dict(r) for r in publication_positions],**trust}
 
 
 def pct(value: float | None) -> str:
@@ -599,9 +604,23 @@ if calibration["sufficient"]:
     )
 
 st.subheader("History")
-tabs=st.tabs(["Portfolio versions","Rebalances","Actual executions","NAV history"])
+tabs=st.tabs(["Portfolio versions","Allocation changes","Actual executions","NAV history"])
 with tabs[0]: st.dataframe(pd.DataFrame(record["publications"]),use_container_width=True,hide_index=True)
-with tabs[1]: st.dataframe(pd.DataFrame(record["rebalances"]),use_container_width=True,hide_index=True)
+with tabs[1]:
+    allocation_changes=build_allocation_change_rows(record["publications"],record["publication_positions"])
+    if allocation_changes:
+        change_frame=pd.DataFrame(allocation_changes)
+        change_frame["Target turnover"]=change_frame["Target turnover"].astype(float)*100
+        st.dataframe(
+            change_frame,use_container_width=True,hide_index=True,
+            column_config={"Target turnover":st.column_config.NumberColumn(format="%.1f%%")},
+        )
+        st.caption("Target turnover is half the sum of absolute weight changes. It describes published allocation changes, not executed trades.")
+    else:
+        st.info("A second active portfolio version is required before an allocation change can be shown.")
+    if record["rebalances"]:
+        with st.expander("Recorded execution-ledger rebalances"):
+            st.dataframe(pd.DataFrame(record["rebalances"]),use_container_width=True,hide_index=True)
 with tabs[2]: st.dataframe(pd.DataFrame(record["executions"]),use_container_width=True,hide_index=True)
 with tabs[3]: st.dataframe(pd.DataFrame(nav),use_container_width=True,hide_index=True)
 
