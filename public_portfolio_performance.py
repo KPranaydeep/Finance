@@ -78,33 +78,41 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict]) -> tupl
     }
     target_json = json.dumps(public_target, sort_keys=True, indent=2, default=str)
     threshold_pct = REBALANCE_MIN_EXPECTED_IMPROVEMENT * 100
-    prompt = f"""You are preparing a private, user-reviewed portfolio execution worksheet.
-
-I have attached or pasted a holdings report downloaded from my broker. Read that report and compare it with the immutable public target snapshot below. Do not rerun, modify, or improve the public optimizer.
+    prompt = f"""Create a short, actionable, user-reviewed portfolio execution plan from my attached broker holdings report and the immutable public target below. Do not rerun or modify the public optimizer.
 
 PUBLIC TARGET SNAPSHOT
 {target_json}
 
-MANDATORY PROCESS
-1. Read CSV, XLSX, PDF, or pasted holdings. Identify the original security name, ticker/ISIN, exchange, quantity, average cost, and available cash when present.
-2. Never expose, repeat, or retain my name, PAN, demat/account number, email, phone, address, or broker credentials. Tell me to redact them if detected.
-3. Normalize securities to the target tickers. Before calculating trades, show every ambiguous or unresolved mapping. Never guess a mapping, price, quantity, currency, or holding.
-4. Use current, timestamped market prices only when you can access a reliable source. Otherwise ask me for prices and stop before giving quantities.
-5. Calculate current value and weight for every holding, including positions outside the public target. Confirm that parsed quantities and total value look plausible.
-6. Produce two clearly separated results:
-   A. Drift-only comparison, which never implies that a trade should be executed.
-   B. Conditional execution worksheet using the gate below.
-7. The rebalance gate is a net expected annualized-return improvement of at least {threshold_pct:.0f} percentage points. Net improvement means proposed expected annual return minus current expected annual return minus annualized brokerage, taxes, spreads, slippage, and other estimated implementation costs.
-8. Do not invent expected returns. Use the gate only when both current and proposed expected returns come from an explicit, comparable, documented methodology with an uncertainty range. If this cannot be established, set every actionable call to HOLD and state: "6 percentage-point improvement not established."
-9. Even when the gate passes, reduce churn: use a 1 percentage-point target-weight tolerance band, ignore trades below the greater of INR 1,000 or 0.5% of portfolio value, prefer fewer netting trades, use whole shares, do not exceed available cash, and flag tax or illiquidity concerns. Do not sell and rebuy an economically equivalent position.
-10. Never place orders or claim guaranteed returns. This is a planning worksheet that I must verify with my broker and a qualified adviser.
+WORKING RULES
+1. Parse the report directly. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
+2. Do not repeat personal identifiers. Give only one short redaction warning if the report contains them.
+3. Treat the broker report as the complete stock portfolio unless it explicitly says otherwise. If cash is absent, assume opening cash is zero and fund buys from sale proceeds. State this assumption once; do not stop.
+4. Broker closing prices dated within five calendar days are acceptable for planning. Prefer newer reliable prices when tools permit. State the price date once. Do not block the plan merely because prices were not independently verified.
+5. Estimate both portfolios consistently. Use adjusted price history over the longest common period up to three years, requiring at least one year. Calculate each portfolio's annualized geometric return using its weights. Deduct estimated one-time taxes, brokerage, spread, and slippage from the proposed portfolio benefit. Label this a historical return-based estimate, not a guarantee.
+6. DECISION = REBALANCE only when proposed net annualized return minus current annualized return is at least {threshold_pct:.0f} percentage points. Otherwise DECISION = HOLD. If market-history tools are unavailable, ask only for permission to fetch prices/history or for a price-history file; do not produce a long refusal table.
+7. When REBALANCE applies, calculate practical whole-share trades. Sell non-target holdings and overweight holdings first; use those proceeds for buys. Never require additional cash unless the user explicitly requests investment of new money.
+8. Reduce churn: ignore a position within 1 percentage point of target; suppress a trade below the greater of INR 100 or 0.5% of portfolio value; do not sell and rebuy equivalent exposure; do not exceed available proceeds; flag illiquid securities and large tax impact.
+9. Allocate rounding residue to the largest underweight affordable target. Show residual cash. Never place orders automatically.
 
-REQUIRED OUTPUT
-- First: parsing summary, detected broker/format, data date, total portfolio value, available cash, unresolved rows, stale/missing prices, and assumptions.
-- Second: a mapping table with Broker Security, Resolved Ticker, ISIN, Exchange, Quantity, Price, Mapping Confidence, and Mapping Reason.
-- Third: an execution table with Ticker, Current Quantity, Current Weight %, Target Weight %, Difference %, Call (BUY/SELL/HOLD), Whole-share Quantity, Estimated Trade Value, Estimated Costs and Slippage, Net Expected Annualized Improvement, Confidence, and Reason.
-- Fourth: totals for buys, sells, costs, turnover, residual cash, and post-trade weight sum.
-- Finish with a concise manual execution sequence and a verification checklist. Mark unresolved rows as REVIEW, never as BUY or SELL.
+OUTPUT — KEEP IT SHORT
+Start with exactly these five lines:
+DECISION: REBALANCE, HOLD, or NEEDS DATA
+CURRENT ESTIMATED ANNUAL RETURN: x%
+TARGET ESTIMATED ANNUAL RETURN: x%
+NET ESTIMATED IMPROVEMENT: x percentage points
+WHY: one sentence
+
+If DECISION is REBALANCE, show one execution table containing only actual trades:
+Sequence | Ticker | BUY/SELL | Whole shares | Planning price | Approx. value | Reason
+
+Then show only:
+- Total sales, total purchases, estimated costs/slippage, turnover, and residual cash.
+- "Execute sells first, wait for proceeds, then execute buys in sequence. Recheck live prices before every order."
+- At most three warnings that could materially change execution.
+
+If DECISION is HOLD, do not print every target row. Show a maximum of five largest allocation differences and the next review trigger.
+
+If any security truly cannot be resolved after using its ISIN and company name, mark only that row REVIEW and continue calculating the resolvable portfolio when reasonable. Never fabricate a ticker, holding, price, return, or quantity.
 """
     return prompt, public_target
 
@@ -168,9 +176,9 @@ with st.expander("Copy execution-plan prompt"):
     st.caption("Use the copy icon in the top-right of the prompt, then paste it beside your broker report.")
     st.code(execution_prompt, language=None)
 st.caption(
-    "The prompt defaults to HOLD unless a comparable, documented net expected annualized-return "
-    "improvement of at least 6 percentage points is established. It also applies tolerance, minimum-trade, "
-    "whole-share, cost, slippage, and cash checks to reduce churn."
+    "The prompt gives a decision first and authorizes trades only when a consistent three-year historical "
+    "return estimate shows at least 6 percentage points of net annualized improvement. It uses sale proceeds, "
+    "whole shares, tolerance bands, minimum trade values, costs and slippage to reduce churn."
 )
 
 st.subheader("Performance — historical, observed")
