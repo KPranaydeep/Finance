@@ -19,6 +19,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
+from public_portfolio_trust import round_weights_to_whole_percent
 
 
 def _percent_drop_count(total_tickers, drop_bottom_pct=0.2, min_tickers_to_keep=1):
@@ -4626,10 +4627,10 @@ if run_btn:
             )
 
         publication_run_id = f"RUN-{uuid.uuid4().hex.upper()}"
-        approved_constituents = [
+        approved_constituents = round_weights_to_whole_percent([
             {"ticker": str(ticker), "target_weight": float(weight)}
             for ticker, weight in zip(log_returns.columns, optimal_weights)
-        ]
+        ])
         analysis_payload = {
             "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "run_id": publication_run_id,

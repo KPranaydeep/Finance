@@ -24,6 +24,31 @@ def fingerprint(value: object) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def round_weights_to_whole_percent(
+    constituents: Sequence[dict], *, cash_weight: float = 0.0
+) -> list[dict]:
+    """Largest-remainder rounding with deterministic ties and an exact total."""
+    available_points = 100 - int(round(float(cash_weight) * 100))
+    if available_points < 0 or available_points > 100 or not constituents:
+        raise ValueError("Invalid cash weight or empty constituent list")
+    raw = []
+    total = sum(float(row["target_weight"]) for row in constituents)
+    if total <= 0:
+        raise ValueError("Target weights must have a positive total")
+    for row in constituents:
+        ticker = str(row["ticker"]).strip().upper()
+        exact = float(row["target_weight"]) / total * available_points
+        floor = int(math.floor(exact))
+        raw.append({"ticker": ticker, "points": floor, "remainder": exact - floor})
+    remaining = available_points - sum(row["points"] for row in raw)
+    for row in sorted(raw, key=lambda item: (-item["remainder"], item["ticker"]))[:remaining]:
+        row["points"] += 1
+    return sorted(
+        ({"ticker": row["ticker"], "target_weight": row["points"] / 100.0} for row in raw if row["points"] > 0),
+        key=lambda row: (-row["target_weight"], row["ticker"]),
+    )
+
+
 def _dated_flows(flows: Iterable[tuple[date | datetime, float]]) -> list[tuple[date, float]]:
     grouped: dict[date, float] = {}
     for when, amount in flows:
