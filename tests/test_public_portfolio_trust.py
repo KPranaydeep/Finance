@@ -3,8 +3,9 @@ from datetime import date
 import numpy as np
 import pytest
 
-from public_portfolio_trust import bootstrap_outlook, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
+from public_portfolio_trust import bootstrap_outlook, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
 from public_portfolio_publications import validate_constituents, verify_trust_audit
+from public_release_checks import inspect_public_data
 
 
 def test_xirr_single_investment():
@@ -108,3 +109,38 @@ def test_audit_multi_basket_isolation_and_tampering():
     assert verify_trust_audit([],"A")[0] is False
     wrong=[{"basket_id":"B","sequence_number":1,"previous_hash":None,"event_hash":"x","payload_json":{}}]
     assert verify_trust_audit(wrong,"A")[0] is False
+
+
+def _audit_row(sequence, previous, payload, basket="A"):
+    envelope={"basket_id":basket,"sequence_number":sequence,"entity_type":"publication",
+              "entity_id":f"P{sequence}","event_type":"PUBLISHED","payload":payload}
+    return {"basket_id":basket,"sequence_number":sequence,"previous_hash":previous or None,
+            "payload_json":envelope,"event_hash":fingerprint({"previous_hash":previous,"event":envelope})}
+
+
+def test_audit_valid_chain_and_corruption_detection():
+    first=_audit_row(1,"",{"version":1})
+    second=_audit_row(2,first["event_hash"],{"version":2})
+    assert verify_trust_audit([first,second],"A")[0] is True
+    changed=[dict(first),dict(second)]
+    changed[1]["payload_json"]={**changed[1]["payload_json"],"payload":{"version":999}}
+    assert verify_trust_audit(changed,"A")[0] is False
+    broken=[dict(first),dict(second,previous_hash="bad-link")]
+    assert verify_trust_audit(broken,"A")[0] is False
+    wrong_hash=[dict(first,event_hash="0"*64),second]
+    assert verify_trust_audit(wrong_hash,"A")[0] is False
+
+
+def test_calibration_threshold_and_metrics():
+    forecasts=[{"forecast_id":f"F{i}","median_return":.01,"lower_50":0,"upper_50":.02,"lower_90":-.02,"upper_90":.04} for i in range(20)]
+    realizations=[{"forecast_id":f"F{i}","actual_return":.015} for i in range(20)]
+    assert forecast_calibration(forecasts[:19],realizations)["sufficient"] is False
+    result=forecast_calibration(forecasts,realizations)
+    assert result["coverage_50"]==1 and result["coverage_90"]==1
+    assert result["directional_accuracy"]==1
+
+
+def test_public_data_security_inspection():
+    assert inspect_public_data({"database_url":"postgresql://secret"})
+    assert inspect_public_data({"path":"C:\\Users\\Someone\\private.csv"})
+    assert inspect_public_data({"portfolio_version":"P001","weights":[.4,.6]}) == []
