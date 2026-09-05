@@ -42,3 +42,15 @@ jobs:
           PUBLIC_FORECAST_METHOD: historical-bootstrap-14d-v1
           PUBLIC_CACHE_TTL_SECONDS: "300"
           PUBLIC_REFRESH_POLICY: weekdays-after-market-close
+      - name: Run production smoke test
+        run: python production_smoke_test.py
+        env:
+          PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
+          PUBLIC_PORTFOLIO_ENV: PRODUCTION
+          PUBLIC_BASKET_ID: PUBLIC-01
+          PUBLIC_PORTFOLIO_TIMEZONE: Asia/Kolkata
+          PUBLIC_PERFORMANCE_VERSION: performance-v1
+          PUBLIC_FORECAST_VERSION: forecast-v1
+          PUBLIC_FORECAST_METHOD: historical-bootstrap-14d-v1
+          PUBLIC_CACHE_TTL_SECONDS: "300"
+          PUBLIC_REFRESH_POLICY: weekdays-after-market-close
