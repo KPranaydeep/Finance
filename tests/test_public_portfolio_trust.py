@@ -8,6 +8,7 @@ from public_portfolio_publications import validate_constituents, verify_trust_au
 from public_release_checks import inspect_public_data
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
 from production_smoke_test import current_forecast_is_due
+from public_portfolio_config import load_public_portfolio_config
 
 
 def test_xirr_single_investment():
@@ -102,13 +103,15 @@ def test_versioned_nav_switches_immutable_portfolio_versions():
         {"publication_id":"P2","as_of":"2024-01-03","weights":{"B":1.0}},
     ]
     result=versioned_model_nav(prices,publications)
-    assert result.iloc[0]["nav"] == pytest.approx(110)
-    assert result.iloc[1]["gross_nav"] == pytest.approx(132)
-    assert result.iloc[1]["net_nav"] == pytest.approx(132*(1-.0022))
-    assert result.iloc[1]["nav"] == result.iloc[1]["net_nav"]
-    assert result.iloc[1]["turnover"] == pytest.approx(1.0)
-    assert result.iloc[1]["estimated_drag"] == pytest.approx(.0022)
-    assert result.iloc[1]["publication_id"] == "P2"
+    assert result.iloc[0]["nav"] == pytest.approx(100)
+    assert result.iloc[0]["daily_return"] == 0
+    assert result.iloc[1]["nav"] == pytest.approx(110)
+    assert result.iloc[2]["gross_nav"] == pytest.approx(110)
+    assert result.iloc[2]["net_nav"] == pytest.approx(110*(1-.0022))
+    assert result.iloc[2]["nav"] == result.iloc[2]["net_nav"]
+    assert result.iloc[2]["turnover"] == pytest.approx(1.0)
+    assert result.iloc[2]["estimated_drag"] == pytest.approx(.0022)
+    assert result.iloc[2]["publication_id"] == "P2"
 
 
 def test_allocation_turnover_includes_cash_and_ignores_unchanged_weights():
@@ -215,3 +218,13 @@ def test_forecast_smoke_check_only_becomes_strict_when_due_for_current_version()
     assert current_forecast_is_due([{}]*61,trust)
     trust["forecasts"].append({"publication_id":"PUB-3"})
     assert not current_forecast_is_due([{}]*61,trust)
+
+
+def test_backfill_configuration_defaults_closed_and_validates_bounds(monkeypatch):
+    monkeypatch.delenv("PUBLIC_MODEL_BACKFILL_TRADING_DAYS",raising=False)
+    assert load_public_portfolio_config().model_backfill_trading_days == 0
+    monkeypatch.setenv("PUBLIC_MODEL_BACKFILL_TRADING_DAYS","120")
+    assert load_public_portfolio_config().model_backfill_trading_days == 120
+    monkeypatch.setenv("PUBLIC_MODEL_BACKFILL_TRADING_DAYS","-1")
+    with pytest.raises(RuntimeError,match="BACKFILL"):
+        load_public_portfolio_config()

@@ -167,6 +167,32 @@ def versioned_model_nav(
         eligible=[item for item in versions if pd.Timestamp(item["as_of"]).tz_localize(None) <= pd.Timestamp(timestamp).tz_localize(None)]
         if not eligible: continue
         current=eligible[-1]; weights=current["weights"]
+        changed=current["publication_id"] != prior_publication_id
+        if prior_publication_id is None:
+            rows.append({"nav_date":pd.Timestamp(timestamp).date(),"nav":net_nav,
+                         "gross_nav":gross_nav,"net_nav":net_nav,"daily_return":0.0,
+                         "gross_daily_return":0.0,"drawdown":0.0,
+                         "publication_id":current["publication_id"],"turnover":0.0,
+                         "estimated_drag":0.0})
+            prior_publication_id=current["publication_id"]
+            prior_weights=dict(weights)
+            continue
+        if changed:
+            # Establish the new version at the first close after publication.
+            # The transition day carries modeled implementation drag but no
+            # unobservable close-to-close return under the new allocation.
+            turnover=allocation_turnover(prior_weights,weights)
+            estimated_drag=turnover*(float(slippage_rate)+float(transaction_cost_rate))
+            net_nav*=1-estimated_drag
+            peak=max(peak,net_nav)
+            rows.append({"nav_date":pd.Timestamp(timestamp).date(),"nav":net_nav,
+                         "gross_nav":gross_nav,"net_nav":net_nav,"daily_return":-estimated_drag,
+                         "gross_daily_return":0.0,"drawdown":net_nav/peak-1,
+                         "publication_id":current["publication_id"],"turnover":turnover,
+                         "estimated_drag":estimated_drag})
+            prior_publication_id=current["publication_id"]
+            prior_weights=dict(weights)
+            continue
         values=[]
         for ticker,weight in weights.items():
             value=row.get(ticker)
@@ -175,13 +201,9 @@ def versioned_model_nav(
         if invested <= 0: continue
         daily=sum(weight*value for weight,value in values)/invested
         if not math.isfinite(daily): continue
-        changed=current["publication_id"] != prior_publication_id
-        # The index starts fully allocated at 100. Entry costs depend on each
-        # investor's capital and are handled by the private execution planner.
-        # Model drag begins with later published allocation transitions.
-        turnover=allocation_turnover(prior_weights,weights) if changed and prior_publication_id is not None else 0.0
-        estimated_drag=turnover*(float(slippage_rate)+float(transaction_cost_rate))
-        net_daily=(1+daily)*(1-estimated_drag)-1
+        turnover=0.0
+        estimated_drag=0.0
+        net_daily=daily
         gross_nav*=1+daily
         net_nav*=1+net_daily
         peak=max(peak,net_nav)
@@ -190,9 +212,6 @@ def versioned_model_nav(
                      "gross_daily_return":daily,"drawdown":net_nav/peak-1,
                      "publication_id":current["publication_id"],"turnover":turnover,
                      "estimated_drag":estimated_drag})
-        if changed:
-            prior_publication_id=current["publication_id"]
-            prior_weights=dict(weights)
     return pd.DataFrame(rows)
 
 

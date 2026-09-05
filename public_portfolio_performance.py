@@ -546,6 +546,9 @@ st.caption(
 
 st.subheader("Performance — historical, observed")
 nav=record["nav"]
+has_backfill=any(bool(row.get("is_backfill")) for row in nav)
+if has_backfill:
+    st.warning("Development backfill is active. Performance and forecasts include a historical simulation using the current published weights; they are not fully post-publication observations.")
 all_metrics=performance_metrics(nav)
 gross_nav=[{**row,"nav":row.get("gross_nav") or row["nav"]} for row in nav]
 gross_metrics=performance_metrics(gross_nav)
@@ -602,6 +605,8 @@ else:
     st.write(f"Probability of loss: **{pct(values.get('probability_negative'))}** · Probability of loss greater than 5%: **{pct(values.get('probability_loss_gt_threshold'))}**")
     st.warning("Statistical scenario — not a guaranteed prediction.")
     st.caption(f"14-day {values.get('method')} of observed daily returns · sample {values.get('sample_start')} to {values.get('sample_end')} · {values.get('observation_count')} observations · {forecast['calculation_version']}")
+    if values.get("history_source") == "DEVELOPMENT_BACKFILL":
+        st.caption("Development forecast: its input history includes backfilled simulation and must not be presented as a live-only track record.")
 
 calibration=forecast_calibration(forecasts,record.get("active_forecast_realizations",record["forecast_realizations"]))
 if calibration["sufficient"]:

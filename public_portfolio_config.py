@@ -17,6 +17,7 @@ class PublicPortfolioConfig:
     forecast_methodology_version: str
     cache_ttl_seconds: int
     refresh_policy: str
+    model_backfill_trading_days: int
 
 
 def load_public_portfolio_config(*, require_production: bool = False) -> PublicPortfolioConfig:
@@ -34,10 +35,13 @@ def load_public_portfolio_config(*, require_production: bool = False) -> PublicP
         forecast_methodology_version=os.getenv("PUBLIC_FORECAST_METHOD", "historical-bootstrap-14d-v1").strip(),
         cache_ttl_seconds=int(os.getenv("PUBLIC_CACHE_TTL_SECONDS", "300")),
         refresh_policy=os.getenv("PUBLIC_REFRESH_POLICY", "weekdays-after-market-close").strip(),
+        model_backfill_trading_days=int(os.getenv("PUBLIC_MODEL_BACKFILL_TRADING_DAYS", "0")),
     )
     if not config.basket_id or not config.performance_calculation_version or not config.forecast_calculation_version:
         raise RuntimeError("Public portfolio configuration values must not be blank")
     ZoneInfo(config.timezone)
     if config.cache_ttl_seconds < 0:
         raise RuntimeError("PUBLIC_CACHE_TTL_SECONDS must be non-negative")
+    if not 0 <= config.model_backfill_trading_days <= 1260:
+        raise RuntimeError("PUBLIC_MODEL_BACKFILL_TRADING_DAYS must be between 0 and 1260")
     return config

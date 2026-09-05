@@ -452,6 +452,8 @@ SCHEMA_STATEMENTS = (
 
           estimated_drag DOUBLE PRECISION NOT NULL DEFAULT 0,
 
+          is_backfill BOOLEAN NOT NULL DEFAULT FALSE,
+
           input_sha256 TEXT NOT NULL,
 
         calculated_at TIMESTAMPTZ NOT NULL,
@@ -472,6 +474,7 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS gross_daily_return DOUBLE PRECISION",
     "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS turnover DOUBLE PRECISION NOT NULL DEFAULT 0",
     "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS estimated_drag DOUBLE PRECISION NOT NULL DEFAULT 0",
+    "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS is_backfill BOOLEAN NOT NULL DEFAULT FALSE",
 
     """
     CREATE TABLE IF NOT EXISTS public_basket_audit_log (

@@ -10,6 +10,8 @@ The public model index applies each immutable target-weight version from its eff
 
 Public performance cards and forecasts use estimated-net NAV. Gross return and cumulative modeled drag remain visible as supporting evidence. Horizon metrics use deterministic calendar cutoffs and the first observation on or after the cutoff. Metrics requiring unavailable history are shown as `N/A`. This is model performance, not the return of a broker account, and no execution claim is made.
 
+During private development, `PUBLIC_MODEL_BACKFILL_TRADING_DAYS` may be set above zero to simulate the current published weights over a bounded number of prior trading days. Backfilled rows and forecasts are explicitly labelled as development simulation. The variable defaults to zero and must be zero—and the development ledger reset—before public release. With zero backfill, NAV begins at 100 on the first available close after publication and the first return is measured from the following trading close.
+
 ## 14-day statistical outlook
 
 The outlook reproducibly resamples estimated-net daily model returns and compounds 14-day simulated paths. Its deterministic seed is derived from the portfolio publication and forecast date. It reports the median, 25th/75th and 5th/95th percentiles, probability of gain, probability of loss, and probability of loss beyond the stated downside threshold. At least 60 daily returns (61 NAV observations) are required.
