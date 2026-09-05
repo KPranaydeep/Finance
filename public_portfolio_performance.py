@@ -370,8 +370,8 @@ if not current:
 st.markdown(
     f"""<section class="trust-hero">
       <div class="trust-kicker">PUBLIC-01 · VERIFIED MODEL PORTFOLIO</div>
-      <div class="trust-title">Invest with a clear target.</div>
-      <p class="trust-subtitle">Transparent allocation, observed performance, and private execution planning.</p>
+      <div class="trust-title">A risk-aware model portfolio.</div>
+      <p class="trust-subtitle">Transparent allocation, observed performance, and practical guidance to invest or rebalance.</p>
       <span class="trust-badge">✓ Immutable publication · P{int(current['portfolio_version']):03d}</span>
     </section>""",
     unsafe_allow_html=True,
