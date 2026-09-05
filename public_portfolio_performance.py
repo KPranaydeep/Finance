@@ -24,23 +24,22 @@ from public_release_checks import inspect_public_data
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger(__name__)
 HORIZONS = {"14D":14,"30D":30,"3M":91,"6M":183,"1Y":365,"3Y":1096,"5Y":1826,"MAX":None}
-REBALANCE_MIN_EXPECTED_IMPROVEMENT = 0.06
 EXECUTION_SCENARIOS = {
     "Start fresh with cash": (
         "I am starting without existing holdings. Ask me only for the total amount available to invest. "
         "Do not ask about a cash reserve and do not request a broker report. Allocate as much as practical "
         "to the public target using whole shares, leaving only unavoidable rounding residue. For a small amount, "
         "build the closest feasible starter allocation from affordable target securities; partial target coverage "
-        "is valid. Do not apply the 6 percentage-point rebalance gate or a minimum-trade-value rule."
+        "is valid. Do not apply a minimum-trade-value rule."
     ),
     "Rebalance existing holdings": (
-        "I have an existing portfolio. Read my attached broker report, compare it with the public target, "
-        "and apply the 6 percentage-point net annualized-improvement gate before suggesting any trades."
+        "I have an existing portfolio. Read my attached broker report, calculate its total reported market value "
+        "and each holding's current weight, then compare those weights directly with the public target. Build the "
+        "rebalance from those differences without fetching external prices, returns, or market history."
     ),
     "Add fresh cash to existing holdings": (
         "I will attach my existing holdings report and provide new cash. Ask only for the new cash amount; "
-        "do not ask about a cash reserve. Prefer BUY-only trades that reduce underweights; do not sell existing holdings and "
-        "do not apply the 6 percentage-point gate to deployment of new cash."
+        "do not ask about a cash reserve. Prefer BUY-only trades that reduce underweights and do not sell existing holdings."
     ),
     "Raise cash from existing holdings": (
         "I will attach my existing holdings report. Ask only for the cash amount I need. Produce the smallest "
@@ -291,7 +290,6 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict], prices:
         plan_block = "\nPRECALCULATED DETERMINISTIC PLAN — use these exact quantities; do not recalculate them\n" + json.dumps(
             calculated_plan, sort_keys=True, indent=2, default=str
         ) + "\n"
-    threshold_pct = REBALANCE_MIN_EXPECTED_IMPROVEMENT * 100
     scenario_instruction = EXECUTION_SCENARIOS[scenario]
     prompt = f"""Create a short, actionable, user-reviewed portfolio execution plan using the immutable public target below. Do not rerun or modify the public optimizer.
 
@@ -306,10 +304,10 @@ WORKING RULES
 1. Follow only the selected scenario. Ask only for the missing investment or withdrawal amount described there, then proceed. Never ask the user to choose a cash reserve. Parse a broker report only when that scenario requires one. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
 2. Do not repeat personal identifiers. Give only one short redaction warning if the report contains them.
 3. Treat the broker report as the complete stock portfolio unless it explicitly says otherwise. If cash is absent, assume opening cash is zero and fund buys from sale proceeds. State this assumption once; do not stop.
-4. Use the embedded target planning prices when dated within five calendar days. Broker closing prices within the same limit are acceptable for current holdings. Prefer newer reliable prices when tools permit. State the price dates once. Do not block the plan merely because prices were not independently verified.
-5. Estimate both portfolios consistently. Use adjusted price history over the longest common period up to three years, requiring at least one year. Calculate each portfolio's annualized geometric return using its weights. Deduct estimated one-time taxes, brokerage, spread, and slippage from the proposed portfolio benefit. Label this a historical return-based estimate, not a guarantee.
-6. Only for "Rebalance existing holdings": DECISION = REBALANCE when proposed net annualized return minus current annualized return is at least {threshold_pct:.0f} percentage points; otherwise DECISION = HOLD. Do not use this gate for fresh deployment, adding fresh cash, or raising cash. If required market-history tools are unavailable, ask only for permission to fetch prices/history or for a price-history file; do not produce a long refusal table.
-7. When REBALANCE applies, calculate practical whole-share trades. Sell non-target holdings and overweight holdings first; use those proceeds for buys. Never require additional cash unless the user explicitly requests investment of new money.
+4. For an existing portfolio, use the report's market value/closing value for every holding. Sum those values to obtain total reported portfolio value, then calculate current weight = holding market value ÷ total reported value. If report weights exist, use them only as a reconciliation check. Do not fetch live prices or historical returns.
+5. Calculate target value = total reported portfolio value × public target weight and value difference = target value − current market value. A positive difference is BUY, a negative difference is SELL, and a difference inside the tolerance is HOLD. A resolved holding absent from the public target has target weight and target value zero.
+6. Use the broker-reported closing price for owned holdings. For a target not present in the report, use its embedded public planning price. Do not fetch another price. If a required price is absent, mark only that security REVIEW and continue with the rest.
+7. DECISION = REBALANCE when at least one practical trade remains after tolerance and minimum-trade filters; otherwise DECISION = HOLD. Calculate practical whole-share trades, sell non-target and overweight holdings first, and use sale proceeds for buys. Never require additional cash unless the selected scenario adds new money.
 8. For an existing-portfolio rebalance or cash withdrawal, reduce churn: ignore a position within 1 percentage point of target and suppress a trade below the greater of INR 100 or 0.5% of portfolio value. Do not apply that minimum to fresh deployment or BUY-only deployment of new cash.
 9. For fresh or added cash, solve a whole-share integer allocation under the available budget. Compare feasible combinations and minimize the sum of squared percentage-point differences between post-trade weights and target weights, while applying a small penalty to residual cash. Do not call a plan "best" unless this comparison was actually performed.
 10. Recalculate portfolio weights from the chosen whole-share quantities and values. A small amount may hold only a subset of the target. Prefer useful diversification and closeness to target over forcing all 21 securities. Use remaining cash only when another share improves the allocation score; do not concentrate the portfolio merely to spend the last rupee. Never recommend increasing the investment amount merely because every target cannot be purchased.
@@ -326,11 +324,11 @@ STARTER COVERAGE: x target securities
 
 For "Add fresh cash to existing holdings", begin with DECISION: ADD CASH and the same amount, planned-investment, residual-cash, and coverage lines.
 
-Only for "Rebalance existing holdings", begin with:
+For "Rebalance existing holdings", begin with:
 DECISION: REBALANCE, HOLD, or NEEDS DATA
-CURRENT ESTIMATED ANNUAL RETURN: x%
-TARGET ESTIMATED ANNUAL RETURN: x%
-NET ESTIMATED IMPROVEMENT: x percentage points
+TOTAL REPORTED PORTFOLIO VALUE: ₹x
+LARGEST WEIGHT DIFFERENCE: x percentage points
+PLANNED TURNOVER: x%
 WHY: one sentence
 
 For "Raise cash from existing holdings", begin with DECISION: RAISE CASH, requested amount, planned proceeds, estimated costs, and expected net proceeds.
@@ -492,9 +490,9 @@ with st.expander("Copy execution-plan prompt"):
     st.caption("Use the copy icon in the top-right of the prompt, then paste it beside your broker report.")
     st.code(execution_prompt, language=None)
 st.caption(
-    "Fresh deployment and new-cash scenarios follow the public target directly. The 6 percentage-point gate "
-    "applies only when replacing an existing allocation. Fresh cash uses whole-share integer allocation even "
-    "for small amounts; churn thresholds apply only when selling or replacing existing holdings."
+    "Fresh cash uses deterministic whole-share allocation. Existing-portfolio rebalancing uses the broker "
+    "report's total market value and calculated weights against the public target—without fetching external "
+    "prices or return history. Tolerance and minimum-trade filters reduce churn."
 )
 
 st.subheader("Performance — historical, observed")
