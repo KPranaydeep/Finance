@@ -11,9 +11,9 @@ import yfinance as yf
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_config import load_public_portfolio_config
 from public_portfolio_publications import load_trust_records
-from public_portfolio_trust import fingerprint, versioned_model_nav
+from public_portfolio_trust import common_price_window, fingerprint, versioned_model_nav
 
-CALCULATION_VERSION=5  # gross and estimated-net model NAV; excludes voided publications
+CALCULATION_VERSION=6  # common-history backfill plus versioned rebalance transitions
 
 
 def main() -> int:
@@ -37,17 +37,21 @@ def main() -> int:
         data=yf.download(sorted(tickers),start=start.isoformat(),end=(datetime.now(timezone.utc).date()+timedelta(days=1)).isoformat(),
                          auto_adjust=True,progress=False,threads=False,group_by="column")
         closes=data["Close"] if isinstance(data.columns,pd.MultiIndex) else data[["Close"]].rename(columns={"Close":next(iter(tickers))})
-        actual_publication_date=trust["current"]["as_of"].date()
+        first_actual_publication_date=min(item["as_of"] for item in versions).date()
         if backfill_days:
-            closes=closes.tail(backfill_days+1)
-            versions=[{
-                "publication_id":trust["current"]["publication_id"],
-                "as_of":pd.Timestamp(closes.index[0]).to_pydatetime(),
-                "weights":next(item["weights"] for item in versions if item["publication_id"]==trust["current"]["publication_id"]),
-            }]
+            closes=common_price_window(
+                closes,sorted(tickers),maximum_trading_days=backfill_days
+            )
+            # Extend only the earliest active version into the development
+            # history. Later immutable publications retain their real dates,
+            # so each one creates a modeled rebalance and implementation drag.
+            versions=[dict(item) for item in versions]
+            versions[0]["as_of"]=pd.Timestamp(closes.index[0]).to_pydatetime()
         nav=versioned_model_nav(closes,versions)
         if not nav.empty:
-            nav["is_backfill"]=nav["nav_date"].map(lambda day: bool(backfill_days and day<actual_publication_date))
+            nav["is_backfill"]=nav["nav_date"].map(
+                lambda day: bool(backfill_days and day < first_actual_publication_date)
+            )
         now=datetime.now(timezone.utc)
         conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS gross_nav DOUBLE PRECISION")
         conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS net_nav DOUBLE PRECISION")

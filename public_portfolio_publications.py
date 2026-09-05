@@ -199,7 +199,8 @@ def load_trust_records(conn: Any, basket_id: str) -> dict:
         "SELECT ticker,target_weight FROM public_portfolio_positions WHERE publication_id=%s ORDER BY target_weight DESC,ticker",
         (current["publication_id"],),
     ).fetchall()
-    forecasts = conn.execute("SELECT * FROM public_forecasts WHERE basket_id=%s ORDER BY forecast_date DESC", (basket_id,)).fetchall()
+    forecasts = conn.execute("""SELECT * FROM public_forecasts WHERE basket_id=%s
+        ORDER BY forecast_date DESC, forecast_timestamp DESC, forecast_id DESC""", (basket_id,)).fetchall()
     realizations = conn.execute("""SELECT r.* FROM public_forecast_realizations r JOIN public_forecasts f ON f.forecast_id=r.forecast_id
         WHERE f.basket_id=%s ORDER BY r.realization_date DESC""", (basket_id,)).fetchall()
     audit = conn.execute("SELECT * FROM portfolio_trust_audit WHERE basket_id=%s ORDER BY sequence_number", (basket_id,)).fetchall()

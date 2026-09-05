@@ -3,11 +3,11 @@ from datetime import date
 import numpy as np
 import pytest
 
-from public_portfolio_trust import allocation_turnover, bootstrap_outlook, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
+from public_portfolio_trust import allocation_turnover, bootstrap_outlook, common_price_window, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
 from public_portfolio_publications import validate_constituents, verify_trust_audit
 from public_release_checks import inspect_public_data
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
-from production_smoke_test import current_forecast_is_due
+from production_smoke_test import current_forecast_is_due, filter_configured_backfill_findings
 from public_portfolio_config import load_public_portfolio_config
 
 
@@ -112,6 +112,26 @@ def test_versioned_nav_switches_immutable_portfolio_versions():
     assert result.iloc[2]["turnover"] == pytest.approx(1.0)
     assert result.iloc[2]["estimated_drag"] == pytest.approx(.0022)
     assert result.iloc[2]["publication_id"] == "P2"
+
+
+def test_common_price_window_uses_shared_constituent_history_and_requested_cap():
+    prices=pd.DataFrame(
+        {"A":[100,101,102,103,104,105],"B":[None,None,50,51,None,53],"OLD":[9,9,9,9,9,9]},
+        index=pd.date_range("2024-01-01",periods=6,freq="B"),
+    )
+    result=common_price_window(prices,["A","B"],maximum_trading_days=2)
+    assert list(result.columns) == ["A","B"]
+    assert list(result.index) == list(prices.index[-3:])
+    assert result.iloc[1]["B"] == 51
+
+
+def test_common_price_window_stops_at_earliest_last_observation():
+    prices=pd.DataFrame(
+        {"A":[100,101,102,103],"B":[50,51,None,None]},
+        index=pd.date_range("2024-01-01",periods=4,freq="B"),
+    )
+    result=common_price_window(prices,["A","B"],maximum_trading_days=10)
+    assert result.index[-1] == prices.index[1]
 
 
 def test_allocation_turnover_includes_cash_and_ignores_unchanged_weights():
@@ -228,3 +248,26 @@ def test_backfill_configuration_defaults_closed_and_validates_bounds(monkeypatch
     monkeypatch.setenv("PUBLIC_MODEL_BACKFILL_TRADING_DAYS","-1")
     with pytest.raises(RuntimeError,match="BACKFILL"):
         load_public_portfolio_config()
+
+
+def test_smoke_allows_only_configured_backfill_provenance_marker():
+    trust={
+        "active_forecasts":[{"forecast_json":{"history_source":"DEVELOPMENT_BACKFILL"}}],
+        "forecasts":[{"forecast_json":{"history_source":"DEVELOPMENT_BACKFILL"}}],
+    }
+    expected=[
+        "Non-production marker at $.active_forecasts[0].forecast_json.history_source",
+        "Non-production marker at $.forecasts[0].forecast_json.history_source",
+        "Non-production marker at $.current.strategy_version",
+    ]
+    assert filter_configured_backfill_findings(
+        expected,trust,backfill_trading_days=120
+    ) == ["Non-production marker at $.current.strategy_version"]
+
+
+def test_smoke_backfill_exception_closes_at_zero_and_requires_exact_value():
+    finding="Non-production marker at $.forecasts[0].forecast_json.history_source"
+    trust={"forecasts":[{"forecast_json":{"history_source":"DEVELOPMENT_BACKFILL"}}]}
+    assert filter_configured_backfill_findings([finding],trust,backfill_trading_days=0) == [finding]
+    trust["forecasts"][0]["forecast_json"]["history_source"]="DEVELOPMENT_OTHER"
+    assert filter_configured_backfill_findings([finding],trust,backfill_trading_days=120) == [finding]

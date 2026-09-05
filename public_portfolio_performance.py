@@ -590,7 +590,8 @@ if nav:
 
 available={label:days for label,days in HORIZONS.items() if select_horizon(nav,days)}
 if available:
-    selected=st.segmented_control("Period",list(available),default=list(available)[-1])
+    default_period="3Y" if "3Y" in available else list(available)[-1]
+    selected=st.segmented_control("Period",list(available),default=default_period)
     metrics=performance_metrics(select_horizon(nav,available[selected]))
     a,b,c,d=st.columns(4)
     a.metric("Total return",pct(metrics.get("total_return")))

@@ -145,6 +145,43 @@ def allocation_turnover(previous: dict[str,float], current: dict[str,float]) -> 
     )
 
 
+def common_price_window(
+    prices: pd.DataFrame, tickers: Sequence[str], *, maximum_trading_days: int
+) -> pd.DataFrame:
+    """Return the bounded period where every requested security has price history.
+
+    The common start is the latest first observation and the common end is the
+    earliest last observation.  Interior gaps are carried forward for model
+    mark-to-market, but no security is backfilled before it existed or beyond
+    its final available observation.
+    """
+    symbols=list(dict.fromkeys(str(ticker) for ticker in tickers))
+    if prices.empty or not symbols:
+        raise ValueError("Price history and at least one ticker are required")
+    if maximum_trading_days < 1:
+        raise ValueError("maximum_trading_days must be positive")
+    missing=[ticker for ticker in symbols if ticker not in prices.columns]
+    if missing:
+        raise ValueError(f"Missing price history for: {', '.join(missing)}")
+
+    frame=prices.loc[:,symbols].copy().sort_index().apply(pd.to_numeric,errors="coerce")
+    first_dates=[]; last_dates=[]
+    for ticker in symbols:
+        first=frame[ticker].first_valid_index()
+        last=frame[ticker].last_valid_index()
+        if first is None or last is None:
+            raise ValueError(f"No usable price history for: {ticker}")
+        first_dates.append(first); last_dates.append(last)
+    common_start=max(first_dates); common_end=min(last_dates)
+    if common_start > common_end:
+        raise ValueError("The portfolio constituents have no common price-history period")
+
+    common=frame.loc[common_start:common_end].ffill().dropna(subset=symbols)
+    if len(common) < 2:
+        raise ValueError("The common price-history period is too short")
+    return common.tail(maximum_trading_days+1)
+
+
 def versioned_model_nav(
     prices: pd.DataFrame,
     publications: Sequence[dict],
