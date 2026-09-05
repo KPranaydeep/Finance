@@ -4,6 +4,7 @@ Upload these paths to the Finance repository with the same names:
 
 - `portfolio_rebalancer_database.py` — private calculation plus explicit approval publisher.
 - `pages/02_Public_Basket_Publisher.py` — operator fallback publisher; never optimizes.
+- `pages/ZZ_Correct_Public_Portfolio_Version.py` — temporary authenticated correction page; delete after P002 is corrected.
 - `public_portfolio_publications.py` — repeatable schema, immutable publications, forecasts, realizations, and audit.
 - `public_portfolio_trust.py` — performance, XIRR, bootstrap, calibration, and model-NAV calculations.
 - `public_portfolio_config.py` — validated environment/configuration contract.

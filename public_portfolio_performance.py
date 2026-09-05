@@ -119,7 +119,7 @@ if nav:
     st.line_chart(chart.set_index("nav_date")[["nav"]],y_label="Portfolio index")
 
 st.subheader("14-Day Outlook — statistical estimate")
-forecasts=record["forecasts"]
+forecasts=record.get("active_forecasts",record["forecasts"])
 if not forecasts:
     st.info("No accountable 14-day forecast has been recorded yet.")
 else:
@@ -133,7 +133,7 @@ else:
     st.warning("Statistical scenario — not a guaranteed prediction.")
     st.caption(f"14-day {values.get('method')} of observed daily returns · sample {values.get('sample_start')} to {values.get('sample_end')} · {values.get('observation_count')} observations · {forecast['calculation_version']}")
 
-calibration=forecast_calibration(forecasts,record["forecast_realizations"])
+calibration=forecast_calibration(forecasts,record.get("active_forecast_realizations",record["forecast_realizations"]))
 if calibration["sufficient"]:
     st.caption(
         f"Forecast validation ({calibration['sample_size']} completed): 50% coverage {calibration['coverage_50']:.1%}; "

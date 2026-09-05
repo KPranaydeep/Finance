@@ -53,3 +53,13 @@ After the production smoke test, remove these temporary Streamlit pages:
 - `pages/ZZ_Run_From_CSV_AvgPrice.py`
 
 Do not delete legitimate production publications or ledger history.
+
+## Correcting a mistaken publication
+
+Never delete or update an immutable publication. Temporarily deploy
+`pages/ZZ_Correct_Public_Portfolio_Version.py`, authenticate with the publisher token, and append a
+`VOIDED_DUPLICATE` correction referencing the authoritative version. Corrected versions remain in
+History with their reason but are excluded from the current portfolio, new forecasts, and NAV
+calculation version 4. Run the daily trust workflow, verify the evidence bundle, then remove the
+temporary correction page. New exact-allocation replicas are rejected by allocation fingerprint,
+even when their run IDs or timestamps differ.

@@ -12,7 +12,7 @@ from public_portfolio_config import load_public_portfolio_config
 from public_portfolio_publications import load_trust_records
 from public_portfolio_trust import fingerprint, versioned_model_nav
 
-CALCULATION_VERSION=3
+CALCULATION_VERSION=4  # excludes publications carrying immutable void corrections
 
 
 def main() -> int:
@@ -22,9 +22,9 @@ def main() -> int:
     if not url: raise RuntimeError("Public PostgreSQL is not configured")
     with connect_public_basket_db(url) as conn:
         trust=load_trust_records(conn,basket_id)
-        if not trust["publications"]: return 0
+        if not trust["active_publications"]: return 0
         versions=[]; tickers=set()
-        for publication in reversed(trust["publications"]):
+        for publication in reversed(trust["active_publications"]):
             rows=conn.execute("SELECT ticker,target_weight FROM public_portfolio_positions WHERE publication_id=%s",(publication["publication_id"],)).fetchall()
             weights={row["ticker"]:float(row["target_weight"]) for row in rows}; tickers.update(weights)
             versions.append({"publication_id":publication["publication_id"],"as_of":publication["as_of"],"weights":weights})
