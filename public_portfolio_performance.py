@@ -1,9 +1,10 @@
+"""Production public portfolio: observed evidence and accountable outlook."""
+
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -11,395 +12,144 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from public_basket_postgres import (
-    DEFAULT_BASKET_ID,
-    connect_public_basket_db,
-    get_public_basket_database_url,
-)
+from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
+from public_portfolio_publications import load_trust_records, verify_trust_audit
+from public_portfolio_trust import CALCULATION_VERSION, performance_metrics, select_horizon, xirr
 
-
-INDIA_TZ = ZoneInfo("Asia/Kolkata")
+IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger(__name__)
+HORIZONS = {"14D":14,"30D":30,"3M":91,"6M":183,"1Y":365,"3Y":1096,"5Y":1826,"MAX":None}
 
-
-st.set_page_config(
-    page_title="Public Portfolio Performance",
-    page_icon="📈",
-    layout="wide",
-)
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        default=str,
-        allow_nan=False,
-    )
-
-
-def sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def display_value(value: Any) -> Any:
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=INDIA_TZ)
-        return value.astimezone(INDIA_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, (dict, list, tuple)):
-        return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
-    return value
-
-
-def display_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {key: display_value(value) for key, value in row.items()}
-        for row in rows
-    ]
-
-
-def detect_schema(conn: Any) -> str:
-    rows = conn.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = current_schema()
-          AND table_name = 'public_baskets'
-        """
-    ).fetchall()
-    columns = {row["column_name"] for row in rows}
-    if {"base_currency", "status"}.issubset(columns) and "rebalance_rule" not in columns:
-        return "V2"
-    if {"calendar_market", "rebalance_rule"}.issubset(columns):
-        return "V1"
-    return "UNKNOWN"
+st.set_page_config(page_title="Public Portfolio", page_icon="📈", layout="wide")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_public_history(basket_id: str) -> dict[str, Any]:
-    database_url = get_public_basket_database_url()
-    if not database_url:
-        raise RuntimeError("Public PostgreSQL is not configured")
-
-    conn = connect_public_basket_db(database_url)
-    try:
-        schema = detect_schema(conn)
-        if schema == "UNKNOWN":
-            raise RuntimeError("Unrecognized public-basket schema")
-        if schema == "V1":
-            basket = conn.execute(
-                """
-                SELECT basket_id, basket_name, strategy_version, schema_version, created_at
-                FROM public_baskets
-                WHERE basket_id = %s
-                """,
-                (basket_id,),
-            ).fetchone()
-            return {
-                "schema": "V1",
-                "basket": dict(basket) if basket else None,
-                "signals": [],
-                "rebalances": [],
-                "orders": [],
-                "executions": [],
-                "nav": [],
-                "audit": [],
-            }
-
-        basket = conn.execute(
-            """
-            SELECT basket_id, basket_name, base_currency, strategy_version,
-                   schema_version, created_at, status
-            FROM public_baskets
-            WHERE basket_id = %s
-            """,
-            (basket_id,),
-        ).fetchone()
-
-        signals = conn.execute(
-            """
-            SELECT signal_run_id, basket_id, generated_at, data_as_of,
-                   strategy_version, git_commit_sha, input_snapshot_sha256,
-                   settings_json, portfolio_before_json, optimizer_output_json,
-                   signal_output_json, decision_status, payload_sha256, created_at
-            FROM signal_runs
-            WHERE basket_id = %s
-            ORDER BY generated_at DESC
-            """,
-            (basket_id,),
-        ).fetchall()
-
-        rebalances = conn.execute(
-            """
-            SELECT rebalance_id, basket_id, signal_run_id, created_at, effective_at,
-                   status, rationale, payload_json, payload_sha256
-            FROM rebalance_events
-            WHERE basket_id = %s
-            ORDER BY created_at DESC
-            """,
-            (basket_id,),
-        ).fetchall()
-
-        orders = conn.execute(
-            """
-            SELECT o.order_id, o.rebalance_id, o.created_at, o.symbol,
-                   o.yahoo_ticker, o.isin, o.side, o.current_weight,
-                   o.target_weight, o.theoretical_quantity, o.requested_quantity,
-                   o.reference_price, o.execution_rule, o.order_status,
-                   o.payload_json, o.payload_sha256
-            FROM trade_orders AS o
-            JOIN rebalance_events AS r ON r.rebalance_id = o.rebalance_id
-            WHERE r.basket_id = %s
-            ORDER BY o.created_at DESC, o.symbol
-            """,
-            (basket_id,),
-        ).fetchall()
-
-        executions = conn.execute(
-            """
-            SELECT x.execution_id, x.order_id, o.symbol, o.side, x.executed_at,
-                   x.quantity, x.market_price, x.execution_price, x.fees_inr,
-                   x.taxes_inr, x.slippage_bps, x.cash_change_inr,
-                   x.payload_json, x.payload_sha256
-            FROM trade_executions AS x
-            JOIN trade_orders AS o ON o.order_id = x.order_id
-            JOIN rebalance_events AS r ON r.rebalance_id = o.rebalance_id
-            WHERE r.basket_id = %s
-            ORDER BY x.executed_at DESC
-            """,
-            (basket_id,),
-        ).fetchall()
-
-        nav = conn.execute(
-            """
-            SELECT DISTINCT ON (nav_date) nav_date, calculation_version, nav,
-                   portfolio_value, cash_value, total_value, daily_return,
-                   drawdown, input_sha256, calculated_at
-            FROM daily_nav
-            WHERE basket_id = %s
-            ORDER BY nav_date, calculation_version DESC
-            """,
-            (basket_id,),
-        ).fetchall()
-
-        audit = conn.execute(
-            """
-            SELECT audit_id, event_at, entity_type, entity_id, event_type,
-                   payload_json, previous_hash, event_hash
-            FROM public_basket_audit_log
-            ORDER BY audit_id
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-
-    return {
-        "schema": "V2",
-        "basket": dict(basket) if basket else None,
-        "signals": [dict(row) for row in signals],
-        "rebalances": [dict(row) for row in rebalances],
-        "orders": [dict(row) for row in orders],
-        "executions": [dict(row) for row in executions],
-        "nav": [dict(row) for row in nav],
-        "audit": [dict(row) for row in audit],
-    }
+def load_public_record(basket_id: str) -> dict[str, Any]:
+    url=get_public_basket_database_url()
+    if not url: raise RuntimeError("Public record is not configured")
+    with connect_public_basket_db(url) as conn:
+        basket=conn.execute("SELECT * FROM public_baskets WHERE basket_id=%s",(basket_id,)).fetchone()
+        if not basket: return {"basket":None}
+        nav=conn.execute("""SELECT DISTINCT ON (nav_date) * FROM daily_nav WHERE basket_id=%s
+                            ORDER BY nav_date,calculation_version DESC""",(basket_id,)).fetchall()
+        rebalances=conn.execute("""SELECT rebalance_id,effective_at,status,rationale,payload_sha256
+            FROM rebalance_events WHERE basket_id=%s ORDER BY created_at DESC""",(basket_id,)).fetchall()
+        executions=conn.execute("""SELECT x.executed_at,o.symbol,o.side,x.quantity,x.execution_price,x.fees_inr,x.taxes_inr
+            FROM trade_executions x JOIN trade_orders o ON o.order_id=x.order_id
+            JOIN rebalance_events r ON r.rebalance_id=o.rebalance_id WHERE r.basket_id=%s ORDER BY x.executed_at DESC""",(basket_id,)).fetchall()
+        trust=load_trust_records(conn,basket_id)
+    return {"basket":dict(basket),"nav":[dict(r) for r in nav],"rebalances":[dict(r) for r in rebalances],
+            "executions":[dict(r) for r in executions],**trust}
 
 
-def verify_audit_chain(rows: list[dict[str, Any]]) -> tuple[bool, str]:
-    previous_hash = ""
+def pct(value: float | None) -> str:
+    return "N/A" if value is None or not np.isfinite(value) else f"{value:.2%}"
+
+
+def investor_cash_flows(rows: list[dict], terminal_date, terminal_value: float) -> list[tuple]:
+    flows=[]
     for row in rows:
-        stored_previous = row.get("previous_hash") or ""
-        if stored_previous != previous_hash:
-            return False, f"Broken link at audit record {row['audit_id']}"
-        payload = row.get("payload_json")
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        expected_hash = sha256_text(previous_hash + "|" + canonical_json(payload))
-        if expected_hash != row.get("event_hash"):
-            return False, f"Hash mismatch at audit record {row['audit_id']}"
-        previous_hash = row["event_hash"]
-    if not rows:
-        return False, "No audit records have been published yet"
-    return True, f"All {len(rows):,} audit records link correctly"
+        kind=str(row["event_type"]).upper()
+        amount=abs(float(row["amount_inr"]))
+        if kind in {"CONTRIBUTION","DEPOSIT","CAPITAL_CONTRIBUTION"}: flows.append((row["event_at"],-amount))
+        elif kind in {"WITHDRAWAL","CAPITAL_WITHDRAWAL"}: flows.append((row["event_at"],amount))
+    if flows and terminal_value > 0: flows.append((terminal_date,terminal_value))
+    return flows
 
 
-def performance_summary(nav_frame: pd.DataFrame) -> dict[str, Any]:
-    frame = nav_frame.copy()
-    frame["nav_date"] = pd.to_datetime(frame["nav_date"], errors="coerce")
-    frame["nav"] = pd.to_numeric(frame["nav"], errors="coerce")
-    frame = frame.dropna(subset=["nav_date", "nav"]).sort_values("nav_date")
-    frame = frame.drop_duplicates("nav_date", keep="last")
-    frame = frame[frame["nav"] > 0]
-    if frame.empty:
-        return {}
-
-    start_nav = float(frame.iloc[0]["nav"])
-    end_nav = float(frame.iloc[-1]["nav"])
-    elapsed_days = int((frame.iloc[-1]["nav_date"] - frame.iloc[0]["nav_date"]).days)
-    daily_returns = frame["nav"].pct_change().dropna()
-    running_peak = frame["nav"].cummax()
-    drawdown = frame["nav"] / running_peak - 1.0
-    return {
-        "start_date": frame.iloc[0]["nav_date"].date(),
-        "end_date": frame.iloc[-1]["nav_date"].date(),
-        "observations": int(len(frame)),
-        "start_nav": start_nav,
-        "end_nav": end_nav,
-        "total_return": float(end_nav / start_nav - 1.0),
-        "annual_return": (
-            float((end_nav / start_nav) ** (365.25 / elapsed_days) - 1.0)
-            if elapsed_days > 0 else float("nan")
-        ),
-        "annual_volatility": (
-            float(daily_returns.std(ddof=1) * np.sqrt(252))
-            if len(daily_returns) >= 2 else float("nan")
-        ),
-        "max_drawdown": float(drawdown.min()),
-    }
-
-
-def evidence_bundle(history: dict[str, Any]) -> bytes:
-    return json.dumps(history, sort_keys=True, indent=2, default=str).encode("utf-8")
-
-
-def show_recent(title: str, rows: list[dict[str, Any]], columns: list[str]) -> None:
-    st.subheader(title)
-    if not rows:
-        st.info(f"No {title.lower()} have been published.")
-        return
-    selected = [{column: row.get(column) for column in columns} for row in rows[:25]]
-    st.dataframe(display_rows(selected), use_container_width=True, hide_index=True)
-
-
-st.title("Public Portfolio Performance")
-st.caption(
-    "A public record of optimizer signals, rebalance decisions, model orders, "
-    "recorded executions, and portfolio performance. No uploads are required."
-)
-
-if not get_public_basket_database_url():
-    st.info("Public history will appear after durable PostgreSQL is configured.")
-    st.stop()
-
+st.title("PUBLIC PORTFOLIO")
+st.caption("An immutable public record. Historical results are observed; outlooks are statistical scenarios.")
 try:
-    with st.spinner("Loading verified public records…"):
-        history = load_public_history(DEFAULT_BASKET_ID)
+    record=load_public_record(DEFAULT_BASKET_ID)
 except Exception:
-    LOGGER.exception("Unable to load public portfolio history")
-    st.error(
-        "The verified public record is temporarily unavailable. No figures are "
-        "shown because partial or unverified results could be misleading."
-    )
+    LOGGER.exception("Public portfolio load failed")
+    st.error("The verified public record is temporarily unavailable.")
+    st.stop()
+if not record.get("basket"):
+    st.info("No public portfolio has been published yet.")
     st.stop()
 
-if history["schema"] == "V1":
-    st.warning(
-        "The public ledger is undergoing a version-2 migration. Performance and "
-        "event details will appear after the migration is verified."
-    )
+basket,current=record["basket"],record.get("current")
+if not current:
+    st.info("The basket exists, but no approved portfolio version has been published.")
     st.stop()
 
-basket = history["basket"]
-if basket is None:
-    st.info("The public portfolio has not been initialized yet.")
-    st.stop()
+st.subheader("Portfolio")
+c1,c2,c3,c4=st.columns(4)
+c1.metric("Portfolio version",f"P{int(current['portfolio_version']):03d}")
+c2.metric("Constituents",len(record["constituents"]))
+c3.metric("Cash weight",pct(float(current["cash_weight"])))
+c4.metric("As of",current["as_of"].astimezone(IST).strftime("%d %b %Y"))
+allocation=pd.DataFrame(record["constituents"])
+if float(current["cash_weight"])>0:
+    allocation=pd.concat([allocation,pd.DataFrame([{"ticker":"CASH","target_weight":current["cash_weight"]}])],ignore_index=True)
+allocation["Allocation"]=allocation["target_weight"].map(lambda x:f"{float(x):.2%}")
+st.dataframe(allocation[["ticker","Allocation"]],use_container_width=True,hide_index=True)
+st.caption(f"Strategy {current['strategy_version']} · Published {current['published_at'].astimezone(IST):%d %b %Y %H:%M IST}")
 
-nav_frame = pd.DataFrame(history["nav"])
-summary = performance_summary(nav_frame) if not nav_frame.empty else {}
-audit_ok, audit_message = verify_audit_chain(history["audit"])
-
-st.subheader("At a glance")
-if not summary:
-    st.info("There is not yet enough published NAV history to calculate performance.")
+st.subheader("Performance — historical, observed")
+nav=record["nav"]
+all_metrics=performance_metrics(nav)
+terminal=float(nav[-1]["total_value"]) if nav else 0.0
+flows=investor_cash_flows(record["cash_flows"],nav[-1]["nav_date"] if nav else datetime.now(IST),terminal)
+xirr_value=xirr(flows) if flows else None
+m1,m2,m3,m4=st.columns(4)
+m1.metric("Since inception return",pct(all_metrics.get("total_return")))
+m2.metric("Historical XIRR",pct(xirr_value))
+m3.metric("Maximum drawdown",pct(all_metrics.get("maximum_drawdown")))
+m4.metric("Annualized volatility",pct(all_metrics.get("annualized_volatility")))
+if xirr_value is None:
+    st.caption("Historical XIRR: N/A — insufficient/invalid external cash-flow history. Portfolio index return is shown separately.")
 else:
-    metric_1, metric_2, metric_3, metric_4 = st.columns(4)
-    metric_1.metric("Growth since public start", f"{summary['total_return']:.2%}")
-    metric_2.metric("Latest portfolio index", f"{summary['end_nav']:,.2f}")
-    metric_3.metric("Largest fall", f"{summary['max_drawdown']:.2%}")
-    metric_4.metric("Published days", f"{summary['observations']:,}")
+    st.caption(f"Historical XIRR uses actual investor-perspective cash flows from {flows[0][0]:%d %b %Y} to {flows[-1][0]:%d %b %Y}.")
 
-    if np.isfinite(summary["annual_return"]):
-        st.caption(
-            f"Annualized growth: {summary['annual_return']:.2%}. This is not a forecast."
-        )
-    chart = nav_frame.copy()
-    chart["nav_date"] = pd.to_datetime(chart["nav_date"], errors="coerce")
-    chart["nav"] = pd.to_numeric(chart["nav"], errors="coerce")
-    chart = chart.dropna(subset=["nav_date", "nav"]).sort_values("nav_date")
-    st.line_chart(chart.set_index("nav_date")[["nav"]], y_label="Portfolio index")
+available={label:days for label,days in HORIZONS.items() if select_horizon(nav,days)}
+if available:
+    selected=st.segmented_control("Period",list(available),default=list(available)[-1])
+    metrics=performance_metrics(select_horizon(nav,available[selected]))
+    a,b,c,d=st.columns(4)
+    a.metric("Total return",pct(metrics.get("total_return")))
+    b.metric("Annualized return",pct(metrics.get("annualized_return")))
+    c.metric("Current drawdown",pct(metrics.get("current_drawdown")))
+    d.metric("Positive days",pct(metrics.get("positive_day_percentage")))
+    detail=pd.DataFrame([{k:v for k,v in metrics.items() if k not in {"start_date","end_date"}}])
+    with st.expander("Detailed period statistics"): st.json(metrics)
+if nav:
+    chart=pd.DataFrame(nav); chart["nav_date"]=pd.to_datetime(chart["nav_date"])
+    st.line_chart(chart.set_index("nav_date")[["nav"]],y_label="Portfolio index")
 
-st.subheader("Published ledger")
-count_1, count_2, count_3, count_4 = st.columns(4)
-count_1.metric("Signal runs", len(history["signals"]))
-count_2.metric("Rebalance events", len(history["rebalances"]))
-count_3.metric("Orders", len(history["orders"]))
-count_4.metric("Executions", len(history["executions"]))
+st.subheader("14-Day Outlook — statistical estimate")
+forecasts=record["forecasts"]
+if not forecasts:
+    st.info("No accountable 14-day forecast has been recorded yet.")
+else:
+    forecast=forecasts[0]; values=forecast["forecast_json"]
+    o1,o2,o3,o4=st.columns(4)
+    o1.metric("Median outcome",pct(values.get("median_return")))
+    o2.metric("50% range",f"{pct(values.get('lower_50'))} to {pct(values.get('upper_50'))}")
+    o3.metric("90% range",f"{pct(values.get('lower_90'))} to {pct(values.get('upper_90'))}")
+    o4.metric("Probability of gain",pct(values.get("probability_positive")))
+    st.write(f"Probability of loss: **{pct(values.get('probability_negative'))}** · Probability of loss greater than 5%: **{pct(values.get('probability_loss_gt_threshold'))}**")
+    st.warning("Statistical scenario — not a guaranteed prediction.")
+    st.caption(f"14-day {values.get('method')} of observed daily returns · sample {values.get('sample_start')} to {values.get('sample_end')} · {values.get('observation_count')} observations · {forecast['calculation_version']}")
 
-show_recent(
-    "Recent signal runs",
-    history["signals"],
-    ["signal_run_id", "generated_at", "data_as_of", "decision_status", "strategy_version", "payload_sha256"],
-)
-show_recent(
-    "Recent rebalance events",
-    history["rebalances"],
-    ["rebalance_id", "signal_run_id", "created_at", "effective_at", "status", "rationale", "payload_sha256"],
-)
+evaluated=[f for f in forecasts if f.get("actual_return") is not None]
+if len(evaluated)>=20:
+    actual=np.array([float(f["actual_return"]) for f in evaluated]); predicted=np.array([float(f["forecast_json"]["median_return"]) for f in evaluated])
+    st.caption(f"Forecast validation ({len(evaluated)} completed forecasts): mean error {np.mean(predicted-actual):.2%}; directional accuracy {np.mean(np.sign(predicted)==np.sign(actual)):.1%}.")
 
-with st.expander("Orders and executions", expanded=False):
-    show_recent(
-        "Model orders",
-        history["orders"],
-        ["order_id", "created_at", "symbol", "side", "requested_quantity", "reference_price", "order_status"],
-    )
-    show_recent(
-        "Recorded executions",
-        history["executions"],
-        ["execution_id", "order_id", "executed_at", "symbol", "side", "quantity", "execution_price", "fees_inr", "taxes_inr"],
-    )
+st.subheader("History")
+tabs=st.tabs(["Portfolio versions","Rebalances","Actual executions","NAV history"])
+with tabs[0]: st.dataframe(pd.DataFrame(record["publications"]),use_container_width=True,hide_index=True)
+with tabs[1]: st.dataframe(pd.DataFrame(record["rebalances"]),use_container_width=True,hide_index=True)
+with tabs[2]: st.dataframe(pd.DataFrame(record["executions"]),use_container_width=True,hide_index=True)
+with tabs[3]: st.dataframe(pd.DataFrame(nav),use_container_width=True,hide_index=True)
 
 st.subheader("Verification")
-if audit_ok:
-    st.success(audit_message)
-else:
-    st.warning(audit_message)
-st.write(
-    "Every ledger record carries a SHA-256 fingerprint, and audit records are "
-    "linked in sequence so a broken public history can be detected."
-)
-
-st.download_button(
-    "Download the public evidence bundle",
-    data=evidence_bundle(history),
-    file_name=f"{DEFAULT_BASKET_ID.lower()}-public-evidence-v2.json",
-    mime="application/json",
-    use_container_width=True,
-)
-
-st.subheader("Important limits")
-st.warning(
-    "This is a model portfolio, not personal investment advice. Returns can be "
-    "negative, and past performance does not predict future results."
-)
-st.info(
-    "Benchmark comparison is intentionally omitted until a versioned benchmark "
-    "series and its calculation rules are stored in the public ledger."
-)
-
-with st.expander("Portfolio identity"):
-    st.write(
-        {
-            "basket_id": basket["basket_id"],
-            "basket_name": basket["basket_name"],
-            "base_currency": basket["base_currency"],
-            "status": basket["status"],
-            "strategy_version": basket["strategy_version"],
-            "schema_version": basket["schema_version"],
-            "display_timezone": "Asia/Kolkata",
-        }
-    )
+audit_ok,audit_message=verify_trust_audit(record["audit"],DEFAULT_BASKET_ID)
+(st.success if audit_ok else st.warning)(audit_message)
+st.write("Portfolio versions and forecasts are append-only, fingerprinted, and verified within this basket.")
+evidence=json.dumps(record,sort_keys=True,indent=2,default=str).encode()
+st.download_button("Download evidence bundle",evidence,f"{DEFAULT_BASKET_ID.lower()}-evidence.json","application/json",use_container_width=True)
+st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
+st.info("Historical performance and statistical scenarios are not investment advice and do not guarantee future results.")

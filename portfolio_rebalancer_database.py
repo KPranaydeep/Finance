@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import time
+import uuid
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, time as clock_time, timedelta, timezone
@@ -4624,8 +4625,14 @@ if run_btn:
                 width="stretch",
             )
 
+        publication_run_id = f"RUN-{uuid.uuid4().hex.upper()}"
+        approved_constituents = [
+            {"ticker": str(ticker), "target_weight": float(weight)}
+            for ticker, weight in zip(log_returns.columns, optimal_weights)
+        ]
         analysis_payload = {
-            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "run_id": publication_run_id,
             "holdings_analyzed": int((portfolio_df["Quantity"] > 0).sum()),
             "total_invested": float(total_invested),
             "executable_trade_count": int(len(rebal_df)),
@@ -4666,6 +4673,16 @@ if run_btn:
             },
             "current_stats": current_stats or {},
             "optimal_stats": optimal_stats or {},
+            "optimal_allocation": approved_constituents,
+            "publication_candidate": {
+                "basket_id": "PUBLIC-01",
+                "run_id": publication_run_id,
+                "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "calculation_version": "private-rebalancer-v1",
+                "strategy_version": "portfolio-rebalancer-v1",
+                "constituents": approved_constituents,
+                "cash_weight": 0.0,
+            },
             "top_correlations": (
                 top_corrs.head(5).to_dict(orient="records")
                 if not top_corrs.empty
