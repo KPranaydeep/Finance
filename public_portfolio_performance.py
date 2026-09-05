@@ -367,6 +367,22 @@ if not current:
     st.info("The basket exists, but no approved portfolio version has been published.")
     st.stop()
 
+# A forecast belongs to one immutable publication.  Never show an older
+# portfolio version's forecast as though it described the current allocation.
+current_forecasts=[
+    row for row in record.get("forecasts", [])
+    if row.get("publication_id") == current.get("publication_id")
+    and int(row.get("horizon_days") or 0) == 14
+]
+current_forecast=current_forecasts[0] if current_forecasts else None
+current_forecast_values=(current_forecast.get("forecast_json") or {}) if current_forecast else {}
+median_outcome=pct(current_forecast_values.get("median_return"))
+forecast_note=(
+    "14-day statistical estimate"
+    if current_forecast
+    else "Awaiting sufficient model history"
+)
+
 st.markdown(
     f"""<section class="trust-hero">
       <div class="trust-kicker">PUBLIC-01 · VERIFIED MODEL PORTFOLIO</div>
@@ -382,7 +398,7 @@ st.markdown(
     '<div class="metric-grid">'
     f'<div class="metric-card"><div class="metric-label">Version</div><div class="metric-value">P{int(current["portfolio_version"]):03d}</div><div class="metric-note">Immutable snapshot</div></div>'
     f'<div class="metric-card"><div class="metric-label">Constituents</div><div class="metric-value">{len(record["constituents"])}</div><div class="metric-note">Target holdings</div></div>'
-    f'<div class="metric-card"><div class="metric-label">Invested target</div><div class="metric-value">{(1-float(current["cash_weight"])):.0%}</div><div class="metric-note">Across securities</div></div>'
+    f'<div class="metric-card"><div class="metric-label">Median outcome</div><div class="metric-value">{median_outcome}</div><div class="metric-note">{forecast_note}</div></div>'
     f'<div class="metric-card"><div class="metric-label">Data as of</div><div class="metric-value">{current["as_of"].astimezone(IST):%d %b %Y}</div><div class="metric-note">Asia/Kolkata</div></div>'
     '</div>',
     unsafe_allow_html=True,
@@ -590,7 +606,7 @@ if nav:
     st.line_chart(chart.set_index("nav_date")[["Estimated net","Gross"]],y_label="Model index")
 
 st.subheader("14-Day Outlook — statistical estimate")
-forecasts=record.get("active_forecasts",record["forecasts"])
+forecasts=current_forecasts
 if not forecasts:
     collected=min(len(nav),61)
     st.info(f"Building accountable forecast history: {collected} of 61 required NAV observations collected.")
@@ -608,7 +624,12 @@ else:
     if values.get("history_source") == "DEVELOPMENT_BACKFILL":
         st.caption("Development forecast: its input history includes backfilled simulation and must not be presented as a live-only track record.")
 
-calibration=forecast_calibration(forecasts,record.get("active_forecast_realizations",record["forecast_realizations"]))
+current_forecast_ids={row["forecast_id"] for row in forecasts}
+current_realizations=[
+    row for row in record.get("forecast_realizations", [])
+    if row.get("forecast_id") in current_forecast_ids
+]
+calibration=forecast_calibration(forecasts,current_realizations)
 if calibration["sufficient"]:
     st.caption(
         f"Forecast validation ({calibration['sample_size']} completed): 50% coverage {calibration['coverage_50']:.1%}; "
