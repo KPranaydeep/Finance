@@ -28,7 +28,8 @@ def main() -> int:
     else:
         with connect_public_basket_db(url) as conn:
             trust=load_trust_records(conn,basket_id)
-            nav=conn.execute("SELECT nav_date,nav,total_value FROM daily_nav WHERE basket_id=%s ORDER BY nav_date",(basket_id,)).fetchall()
+            nav=conn.execute("""SELECT DISTINCT ON (nav_date) nav_date,nav,total_value FROM daily_nav
+                WHERE basket_id=%s ORDER BY nav_date,calculation_version DESC""",(basket_id,)).fetchall()
         if not trust["current"]: failures.append("latest published portfolio is missing")
         total=sum(float(row["target_weight"]) for row in trust["constituents"])+(float(trust["current"]["cash_weight"]) if trust["current"] else 0)
         if trust["current"] and abs(total-1)>1e-6: failures.append("portfolio weights do not sum to one")

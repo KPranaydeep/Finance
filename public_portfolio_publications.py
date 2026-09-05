@@ -306,10 +306,10 @@ def evaluate_due_forecasts(conn: Any, basket_id: str) -> int:
         WHERE f.basket_id=%s AND r.forecast_id IS NULL""",(basket_id,)).fetchall()
     updated=0
     for row in pending:
-        observations=conn.execute("""SELECT nav_date,nav FROM daily_nav WHERE basket_id=%s AND nav_date >= %s
-            ORDER BY nav_date,calculation_version DESC""",(basket_id,row["forecast_date"])).fetchall()
-        by_day={item["nav_date"]:float(item["nav"]) for item in observations}
-        ordered=sorted(by_day.items())
+        observations=conn.execute("""SELECT DISTINCT ON (nav_date) nav_date,nav FROM daily_nav
+            WHERE basket_id=%s AND nav_date >= %s ORDER BY nav_date,calculation_version DESC""",
+            (basket_id,row["forecast_date"])).fetchall()
+        ordered=[(item["nav_date"],float(item["nav"])) for item in observations]
         if len(ordered)<=int(row["horizon_days"]): continue
         start,end=ordered[0],ordered[int(row["horizon_days"])]
         actual=end[1]/start[1]-1

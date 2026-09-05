@@ -440,9 +440,19 @@ SCHEMA_STATEMENTS = (
 
         daily_return DOUBLE PRECISION,
 
-        drawdown DOUBLE PRECISION,
+          drawdown DOUBLE PRECISION,
 
-        input_sha256 TEXT NOT NULL,
+          gross_nav DOUBLE PRECISION,
+
+          net_nav DOUBLE PRECISION,
+
+          gross_daily_return DOUBLE PRECISION,
+
+          turnover DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+          estimated_drag DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+          input_sha256 TEXT NOT NULL,
 
         calculated_at TIMESTAMPTZ NOT NULL,
 
@@ -456,6 +466,12 @@ SCHEMA_STATEMENTS = (
             REFERENCES public_baskets(basket_id)
     )
     """,
+
+    "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS gross_nav DOUBLE PRECISION",
+    "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS net_nav DOUBLE PRECISION",
+    "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS gross_daily_return DOUBLE PRECISION",
+    "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS turnover DOUBLE PRECISION NOT NULL DEFAULT 0",
+    "ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS estimated_drag DOUBLE PRECISION NOT NULL DEFAULT 0",
 
     """
     CREATE TABLE IF NOT EXISTS public_basket_audit_log (

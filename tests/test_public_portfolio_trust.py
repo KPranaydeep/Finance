@@ -3,7 +3,7 @@ from datetime import date
 import numpy as np
 import pytest
 
-from public_portfolio_trust import bootstrap_outlook, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
+from public_portfolio_trust import allocation_turnover, bootstrap_outlook, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr
 from public_portfolio_publications import validate_constituents, verify_trust_audit
 from public_release_checks import inspect_public_data
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
@@ -103,8 +103,18 @@ def test_versioned_nav_switches_immutable_portfolio_versions():
     ]
     result=versioned_model_nav(prices,publications)
     assert result.iloc[0]["nav"] == pytest.approx(110)
-    assert result.iloc[1]["nav"] == pytest.approx(132)
+    assert result.iloc[1]["gross_nav"] == pytest.approx(132)
+    assert result.iloc[1]["net_nav"] == pytest.approx(132*(1-.0022))
+    assert result.iloc[1]["nav"] == result.iloc[1]["net_nav"]
+    assert result.iloc[1]["turnover"] == pytest.approx(1.0)
+    assert result.iloc[1]["estimated_drag"] == pytest.approx(.0022)
     assert result.iloc[1]["publication_id"] == "P2"
+
+
+def test_allocation_turnover_includes_cash_and_ignores_unchanged_weights():
+    assert allocation_turnover({"A":.6,"B":.4},{"A":.6,"B":.4}) == 0
+    assert allocation_turnover({"A":1.0},{"B":1.0}) == 1.0
+    assert allocation_turnover({"A":.5},{"A":1.0}) == pytest.approx(.5)
 
 
 def test_audit_multi_basket_isolation_and_tampering():

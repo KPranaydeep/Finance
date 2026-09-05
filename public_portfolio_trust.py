@@ -13,7 +13,9 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
-CALCULATION_VERSION = "public-trust-v1"
+CALCULATION_VERSION = "public-trust-net-v2"
+MODEL_SLIPPAGE_RATE = 0.0010
+MODEL_TRANSACTION_COST_RATE = 0.0012
 
 
 def canonical_json(value: object) -> str:
@@ -132,14 +134,35 @@ def select_horizon(rows: Sequence[dict], days: int | None) -> list[dict]:
     return selected.to_dict("records") if len(selected) >= 2 else []
 
 
-def versioned_model_nav(prices: pd.DataFrame, publications: Sequence[dict], *, initial_nav: float = 100.0) -> pd.DataFrame:
-    """Chain observed asset returns using the portfolio version effective each day."""
+def allocation_turnover(previous: dict[str,float], current: dict[str,float]) -> float:
+    """Two-way target turnover, including the implied cash sleeve."""
+    tickers=set(previous)|set(current)
+    previous_cash=max(0.0,1.0-sum(previous.values()))
+    current_cash=max(0.0,1.0-sum(current.values()))
+    return 0.5*(
+        sum(abs(float(current.get(ticker,0))-float(previous.get(ticker,0))) for ticker in tickers)
+        + abs(current_cash-previous_cash)
+    )
+
+
+def versioned_model_nav(
+    prices: pd.DataFrame,
+    publications: Sequence[dict],
+    *,
+    initial_nav: float = 100.0,
+    slippage_rate: float = MODEL_SLIPPAGE_RATE,
+    transaction_cost_rate: float = MODEL_TRANSACTION_COST_RATE,
+) -> pd.DataFrame:
+    """Chain gross and estimated-net model returns across portfolio versions."""
     if prices.empty or not publications:
-        return pd.DataFrame(columns=["nav_date", "nav", "daily_return", "drawdown", "publication_id"])
+        return pd.DataFrame(columns=["nav_date","nav","gross_nav","net_nav","daily_return",
+                                     "gross_daily_return","drawdown","publication_id","turnover","estimated_drag"])
     frame=prices.copy().sort_index().apply(pd.to_numeric,errors="coerce").ffill()
     returns=frame.pct_change()
     versions=sorted(publications,key=lambda item:pd.Timestamp(item["as_of"]))
-    nav=float(initial_nav); peak=nav; rows=[]
+    gross_nav=float(initial_nav); net_nav=float(initial_nav); peak=net_nav; rows=[]
+    prior_publication_id=None
+    prior_weights: dict[str,float]={}
     for timestamp,row in returns.iterrows():
         eligible=[item for item in versions if pd.Timestamp(item["as_of"]).tz_localize(None) <= pd.Timestamp(timestamp).tz_localize(None)]
         if not eligible: continue
@@ -152,9 +175,24 @@ def versioned_model_nav(prices: pd.DataFrame, publications: Sequence[dict], *, i
         if invested <= 0: continue
         daily=sum(weight*value for weight,value in values)/invested
         if not math.isfinite(daily): continue
-        nav*=1+daily; peak=max(peak,nav)
-        rows.append({"nav_date":pd.Timestamp(timestamp).date(),"nav":nav,"daily_return":daily,
-                     "drawdown":nav/peak-1,"publication_id":current["publication_id"]})
+        changed=current["publication_id"] != prior_publication_id
+        # The index starts fully allocated at 100. Entry costs depend on each
+        # investor's capital and are handled by the private execution planner.
+        # Model drag begins with later published allocation transitions.
+        turnover=allocation_turnover(prior_weights,weights) if changed and prior_publication_id is not None else 0.0
+        estimated_drag=turnover*(float(slippage_rate)+float(transaction_cost_rate))
+        net_daily=(1+daily)*(1-estimated_drag)-1
+        gross_nav*=1+daily
+        net_nav*=1+net_daily
+        peak=max(peak,net_nav)
+        rows.append({"nav_date":pd.Timestamp(timestamp).date(),"nav":net_nav,
+                     "gross_nav":gross_nav,"net_nav":net_nav,"daily_return":net_daily,
+                     "gross_daily_return":daily,"drawdown":net_nav/peak-1,
+                     "publication_id":current["publication_id"],"turnover":turnover,
+                     "estimated_drag":estimated_drag})
+        if changed:
+            prior_publication_id=current["publication_id"]
+            prior_weights=dict(weights)
     return pd.DataFrame(rows)
 
 

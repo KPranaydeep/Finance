@@ -12,7 +12,7 @@ from public_portfolio_config import load_public_portfolio_config
 from public_portfolio_publications import load_trust_records
 from public_portfolio_trust import fingerprint, versioned_model_nav
 
-CALCULATION_VERSION=4  # excludes publications carrying immutable void corrections
+CALCULATION_VERSION=5  # gross and estimated-net model NAV; excludes voided publications
 
 
 def main() -> int:
@@ -34,12 +34,20 @@ def main() -> int:
         closes=data["Close"] if isinstance(data.columns,pd.MultiIndex) else data[["Close"]].rename(columns={"Close":next(iter(tickers))})
         nav=versioned_model_nav(closes,versions)
         now=datetime.now(timezone.utc)
+        conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS gross_nav DOUBLE PRECISION")
+        conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS net_nav DOUBLE PRECISION")
+        conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS gross_daily_return DOUBLE PRECISION")
+        conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS turnover DOUBLE PRECISION NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE daily_nav ADD COLUMN IF NOT EXISTS estimated_drag DOUBLE PRECISION NOT NULL DEFAULT 0")
         for row in nav.to_dict("records"):
             material={"basket_id":basket_id,**row,"calculation_version":CALCULATION_VERSION}
             conn.execute("""INSERT INTO daily_nav (basket_id,nav_date,calculation_version,nav,portfolio_value,cash_value,total_value,
-                daily_return,drawdown,input_sha256,calculated_at) VALUES (%s,%s,%s,%s,0,0,0,%s,%s,%s,%s)
+                daily_return,drawdown,input_sha256,calculated_at,gross_nav,net_nav,gross_daily_return,turnover,estimated_drag)
+                VALUES (%s,%s,%s,%s,0,0,0,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (basket_id,nav_date,calculation_version) DO NOTHING""",
-                (basket_id,row["nav_date"],CALCULATION_VERSION,row["nav"],row["daily_return"],row["drawdown"],fingerprint(material),now))
+                (basket_id,row["nav_date"],CALCULATION_VERSION,row["nav"],row["daily_return"],row["drawdown"],
+                 fingerprint(material),now,row["gross_nav"],row["net_nav"],row["gross_daily_return"],
+                 row["turnover"],row["estimated_drag"]))
     return 0
 
 

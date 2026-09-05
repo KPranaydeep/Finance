@@ -19,7 +19,8 @@ from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, 
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
 from public_portfolio_history import build_allocation_change_rows
 from public_portfolio_publications import load_trust_records, verify_trust_audit
-from public_portfolio_trust import CALCULATION_VERSION, forecast_calibration, performance_metrics, select_horizon, xirr
+from public_portfolio_trust import (CALCULATION_VERSION, MODEL_SLIPPAGE_RATE,
+    MODEL_TRANSACTION_COST_RATE, forecast_calibration, performance_metrics, select_horizon)
 from public_release_checks import inspect_public_data
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -205,17 +206,11 @@ def load_public_record(basket_id: str) -> dict[str, Any]:
         if not basket: return {"basket":None}
         nav=conn.execute("""SELECT DISTINCT ON (nav_date) * FROM daily_nav WHERE basket_id=%s
                             ORDER BY nav_date,calculation_version DESC""",(basket_id,)).fetchall()
-        rebalances=conn.execute("""SELECT rebalance_id,effective_at,status,rationale,payload_sha256
-            FROM rebalance_events WHERE basket_id=%s ORDER BY created_at DESC""",(basket_id,)).fetchall()
-        executions=conn.execute("""SELECT x.executed_at,o.symbol,o.side,x.quantity,x.execution_price,x.fees_inr,x.taxes_inr
-            FROM trade_executions x JOIN trade_orders o ON o.order_id=x.order_id
-            JOIN rebalance_events r ON r.rebalance_id=o.rebalance_id WHERE r.basket_id=%s ORDER BY x.executed_at DESC""",(basket_id,)).fetchall()
         trust=load_trust_records(conn,basket_id)
         publication_positions=conn.execute("""SELECT p.publication_id,v.portfolio_version,p.ticker,p.target_weight
             FROM public_portfolio_positions p JOIN public_portfolio_versions v ON v.publication_id=p.publication_id
             WHERE v.basket_id=%s ORDER BY v.portfolio_version,p.ticker""",(basket_id,)).fetchall()
-    return {"basket":dict(basket),"nav":[dict(r) for r in nav],"rebalances":[dict(r) for r in rebalances],
-            "executions":[dict(r) for r in executions],
+    return {"basket":dict(basket),"nav":[dict(r) for r in nav],
             "publication_positions":[dict(r) for r in publication_positions],**trust}
 
 
@@ -552,18 +547,27 @@ st.caption(
 st.subheader("Performance — historical, observed")
 nav=record["nav"]
 all_metrics=performance_metrics(nav)
-terminal=float(nav[-1]["total_value"]) if nav else 0.0
-flows=investor_cash_flows(record["cash_flows"],nav[-1]["nav_date"] if nav else datetime.now(IST),terminal)
-xirr_value=xirr(flows) if flows else None
+gross_nav=[{**row,"nav":row.get("gross_nav") or row["nav"]} for row in nav]
+gross_metrics=performance_metrics(gross_nav)
+total_turnover=sum(float(row.get("turnover") or 0) for row in nav)
+estimated_drag=sum(float(row.get("estimated_drag") or 0) for row in nav)
 m1,m2,m3,m4=st.columns(4)
-m1.metric("Since inception return",pct(all_metrics.get("total_return")))
-m2.metric("Historical XIRR",pct(xirr_value))
-m3.metric("Maximum drawdown",pct(all_metrics.get("maximum_drawdown")))
-m4.metric("Annualized volatility",pct(all_metrics.get("annualized_volatility")))
-if xirr_value is None:
-    st.caption("Historical XIRR: N/A — insufficient/invalid external cash-flow history. Portfolio index return is shown separately.")
-else:
-    st.caption(f"Historical XIRR uses actual investor-perspective cash flows from {flows[0][0]:%d %b %Y} to {flows[-1][0]:%d %b %Y}.")
+m1.metric("Estimated net return",pct(all_metrics.get("total_return")))
+m2.metric("Maximum drawdown",pct(all_metrics.get("maximum_drawdown")))
+m3.metric("Annualized volatility",pct(all_metrics.get("annualized_volatility")))
+m4.metric("Portfolio turnover",pct(total_turnover) if nav else "N/A")
+st.caption(
+    f"Estimated net model performance deducts {MODEL_SLIPPAGE_RATE:.2%} slippage and "
+    f"{MODEL_TRANSACTION_COST_RATE:.2%} transaction costs from published allocation turnover. "
+    "It is not a broker-account return; investor-specific entry costs are handled in the execution plan."
+)
+if nav:
+    with st.expander("Gross return and modeled implementation drag"):
+        g1,g2,g3=st.columns(3)
+        g1.metric("Gross model return",pct(gross_metrics.get("total_return")))
+        g2.metric("Cumulative modeled drag",pct(estimated_drag))
+        net_difference=(all_metrics.get("total_return")-gross_metrics.get("total_return")) if all_metrics and gross_metrics else None
+        g3.metric("Net impact",pct(net_difference))
 
 available={label:days for label,days in HORIZONS.items() if select_horizon(nav,days)}
 if available:
@@ -578,12 +582,16 @@ if available:
     with st.expander("Detailed period statistics"): st.json(metrics)
 if nav:
     chart=pd.DataFrame(nav); chart["nav_date"]=pd.to_datetime(chart["nav_date"])
-    st.line_chart(chart.set_index("nav_date")[["nav"]],y_label="Portfolio index")
+    chart["Estimated net"]=chart["nav"]
+    chart["Gross"]=chart["gross_nav"].fillna(chart["nav"]) if "gross_nav" in chart else chart["nav"]
+    st.line_chart(chart.set_index("nav_date")[["Estimated net","Gross"]],y_label="Model index")
 
 st.subheader("14-Day Outlook — statistical estimate")
 forecasts=record.get("active_forecasts",record["forecasts"])
 if not forecasts:
-    st.info("No accountable 14-day forecast has been recorded yet.")
+    collected=min(len(nav),61)
+    st.info(f"Building accountable forecast history: {collected} of 61 required NAV observations collected.")
+    st.progress(collected/61)
 else:
     forecast=forecasts[0]; values=forecast["forecast_json"]
     o1,o2,o3,o4=st.columns(4)
@@ -604,7 +612,7 @@ if calibration["sufficient"]:
     )
 
 st.subheader("History")
-tabs=st.tabs(["Portfolio versions","Allocation changes","Actual executions","NAV history"])
+tabs=st.tabs(["Portfolio versions","Allocation changes","Net NAV history"])
 with tabs[0]: st.dataframe(pd.DataFrame(record["publications"]),use_container_width=True,hide_index=True)
 with tabs[1]:
     allocation_changes=build_allocation_change_rows(record["publications"],record["publication_positions"])
@@ -618,19 +626,23 @@ with tabs[1]:
         st.caption("Target turnover is half the sum of absolute weight changes. It describes published allocation changes, not executed trades.")
     else:
         st.info("A second active portfolio version is required before an allocation change can be shown.")
-    if record["rebalances"]:
-        with st.expander("Recorded execution-ledger rebalances"):
-            st.dataframe(pd.DataFrame(record["rebalances"]),use_container_width=True,hide_index=True)
-with tabs[2]: st.dataframe(pd.DataFrame(record["executions"]),use_container_width=True,hide_index=True)
-with tabs[3]: st.dataframe(pd.DataFrame(nav),use_container_width=True,hide_index=True)
+with tabs[2]:
+    if nav:
+        nav_frame=pd.DataFrame(nav)
+        visible=[column for column in ["nav_date","publication_id","gross_nav","net_nav","turnover","estimated_drag"] if column in nav_frame]
+        st.dataframe(nav_frame[visible],use_container_width=True,hide_index=True)
+    else:
+        st.info("Net model NAV history will appear after the daily update runs.")
 
 st.subheader("Verification")
 audit_ok,audit_message=verify_trust_audit(record["audit"],DEFAULT_BASKET_ID)
 (st.success if audit_ok else st.warning)(audit_message)
 st.write("Portfolio versions and forecasts are append-only, fingerprinted, and verified within this basket.")
-evidence_state={**record,"performance_metrics":all_metrics,"historical_xirr":xirr_value,
-                "xirr_cash_flows":[(str(day),amount) for day,amount in flows],"forecast_calibration":calibration,
-                "methodology":{"performance":CALCULATION_VERSION,"forecast":"bootstrap historical daily portfolio returns"}}
+evidence_state={**record,"performance_metrics":all_metrics,"gross_performance_metrics":gross_metrics,
+                "portfolio_turnover":total_turnover,"estimated_implementation_drag":estimated_drag,
+                "forecast_calibration":calibration,"methodology":{"performance":CALCULATION_VERSION,
+                "slippage_rate":MODEL_SLIPPAGE_RATE,"transaction_cost_rate":MODEL_TRANSACTION_COST_RATE,
+                "forecast":"bootstrap estimated-net daily model returns"}}
 security_findings=inspect_public_data(evidence_state,production=True)
 if security_findings:
     st.error("Evidence export is unavailable because the public-data inspection did not pass.")
@@ -638,4 +650,4 @@ if security_findings:
 evidence=json.dumps(evidence_state,sort_keys=True,indent=2,default=str).encode()
 st.download_button("Download evidence bundle",evidence,f"{DEFAULT_BASKET_ID.lower()}-evidence.json","application/json",use_container_width=True)
 st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
-st.info("Historical performance and statistical scenarios are not investment advice and do not guarantee future results.")
+st.info("Model performance and statistical scenarios are not investment advice and do not guarantee future results.")
