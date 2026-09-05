@@ -75,11 +75,10 @@ if not current:
     st.stop()
 
 st.subheader("Portfolio")
-c1,c2,c3,c4=st.columns(4)
+c1,c2,c3=st.columns(3)
 c1.metric("Portfolio version",f"P{int(current['portfolio_version']):03d}")
 c2.metric("Constituents",len(record["constituents"]))
-c3.metric("Cash weight",pct(float(current["cash_weight"])))
-c4.metric("As of",current["as_of"].astimezone(IST).strftime("%d %b %Y"))
+c3.metric("As of",current["as_of"].astimezone(IST).strftime("%d %b %Y"))
 allocation=pd.DataFrame(record["constituents"])
 if float(current["cash_weight"])>0:
     allocation=pd.concat([allocation,pd.DataFrame([{"ticker":"CASH","target_weight":current["cash_weight"]}])],ignore_index=True)
