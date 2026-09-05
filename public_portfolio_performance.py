@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import streamlit as st
+import yfinance as yf
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import load_trust_records, verify_trust_audit
@@ -59,7 +60,38 @@ def investor_cash_flows(rows: list[dict], terminal_date, terminal_value: float) 
     return flows
 
 
-def build_execution_plan_prompt(current: dict, constituents: list[dict]) -> tuple[str, dict]:
+@st.cache_data(ttl=900, show_spinner=False)
+def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
+    """Return the latest available unadjusted closes without blocking the page on failures."""
+    if not tickers:
+        return {}
+    try:
+        data = yf.download(
+            list(tickers), period="7d", interval="1d", auto_adjust=False,
+            progress=False, threads=True, group_by="column",
+        )
+        if data.empty:
+            return {}
+        close = data["Close"] if isinstance(data.columns, pd.MultiIndex) else data.get("Close")
+        if isinstance(close, pd.Series):
+            close = close.to_frame(name=tickers[0])
+        result = {}
+        for ticker in tickers:
+            if close is None or ticker not in close.columns:
+                continue
+            series = pd.to_numeric(close[ticker], errors="coerce").dropna()
+            if not series.empty:
+                result[ticker] = {
+                    "price": float(series.iloc[-1]),
+                    "price_as_of": pd.Timestamp(series.index[-1]).date().isoformat(),
+                }
+        return result
+    except Exception:
+        LOGGER.exception("Latest public allocation prices could not be loaded")
+        return {}
+
+
+def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict]) -> tuple[str, dict]:
     """Build a version-bound prompt containing public data only."""
     public_target = {
         "basket_id": current["basket_id"],
@@ -71,10 +103,16 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict]) -> tupl
         "as_of": str(current["as_of"]),
         "published_at": str(current["published_at"]),
         "target_positions": [
-            {"ticker": row["ticker"], "target_weight_pct": round(float(row["target_weight"]) * 100)}
+            {
+                "ticker": row["ticker"],
+                "target_weight_pct": round(float(row["target_weight"]) * 100),
+                "planning_price": prices.get(row["ticker"], {}).get("price"),
+                "price_as_of": prices.get(row["ticker"], {}).get("price_as_of"),
+            }
             for row in constituents
         ],
         "cash_weight_pct": round(float(current["cash_weight"]) * 100),
+        "price_source": "Yahoo Finance latest available unadjusted close; reference data, not part of the immutable portfolio fingerprint",
     }
     target_json = json.dumps(public_target, sort_keys=True, indent=2, default=str)
     threshold_pct = REBALANCE_MIN_EXPECTED_IMPROVEMENT * 100
@@ -87,7 +125,7 @@ WORKING RULES
 1. Parse the report directly. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
 2. Do not repeat personal identifiers. Give only one short redaction warning if the report contains them.
 3. Treat the broker report as the complete stock portfolio unless it explicitly says otherwise. If cash is absent, assume opening cash is zero and fund buys from sale proceeds. State this assumption once; do not stop.
-4. Broker closing prices dated within five calendar days are acceptable for planning. Prefer newer reliable prices when tools permit. State the price date once. Do not block the plan merely because prices were not independently verified.
+4. Use the embedded target planning prices when dated within five calendar days. Broker closing prices within the same limit are acceptable for current holdings. Prefer newer reliable prices when tools permit. State the price dates once. Do not block the plan merely because prices were not independently verified.
 5. Estimate both portfolios consistently. Use adjusted price history over the longest common period up to three years, requiring at least one year. Calculate each portfolio's annualized geometric return using its weights. Deduct estimated one-time taxes, brokerage, spread, and slippage from the proposed portfolio benefit. Label this a historical return-based estimate, not a guarantee.
 6. DECISION = REBALANCE only when proposed net annualized return minus current annualized return is at least {threshold_pct:.0f} percentage points. Otherwise DECISION = HOLD. If market-history tools are unavailable, ask only for permission to fetch prices/history or for a price-history file; do not produce a long refusal table.
 7. When REBALANCE applies, calculate practical whole-share trades. Sell non-target holdings and overweight holdings first; use those proceeds for buys. Never require additional cash unless the user explicitly requests investment of new money.
@@ -140,10 +178,17 @@ c1.metric("Portfolio version",f"P{int(current['portfolio_version']):03d}")
 c2.metric("Constituents",len(record["constituents"]))
 c3.metric("As of",current["as_of"].astimezone(IST).strftime("%d %b %Y"))
 allocation=pd.DataFrame(record["constituents"])
+price_snapshot=load_latest_prices(tuple(allocation["ticker"].astype(str)))
 if float(current["cash_weight"])>0:
     allocation=pd.concat([allocation,pd.DataFrame([{"ticker":"CASH","target_weight":current["cash_weight"]}])],ignore_index=True)
 allocation["Allocation"]=allocation["target_weight"].map(lambda x:f"{float(x):.2%}")
-st.dataframe(allocation[["ticker","Allocation"]],use_container_width=True,hide_index=True)
+allocation["Price"]=allocation["ticker"].map(
+    lambda ticker: f"{price_snapshot[ticker]['price']:,.2f}" if ticker in price_snapshot else "N/A"
+)
+st.dataframe(allocation[["ticker","Allocation","Price"]],use_container_width=True,hide_index=True)
+price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
+if price_dates:
+    st.caption(f"Prices: latest available unadjusted close from Yahoo Finance · through {price_dates[-1]}")
 st.caption(f"Strategy {current['strategy_version']} · Published {current['published_at'].astimezone(IST):%d %b %Y %H:%M IST}")
 
 st.subheader("Build your private execution plan")
@@ -155,7 +200,7 @@ st.warning(
     "Before sharing a broker report, remove your name, PAN, demat/account number, email, phone, "
     "address, and any credentials. Review the AI provider's privacy policy."
 )
-execution_prompt, public_target = build_execution_plan_prompt(current, record["constituents"])
+execution_prompt, public_target = build_execution_plan_prompt(current, record["constituents"], price_snapshot)
 version_label = f"p{int(current['portfolio_version']):03d}"
 download_1, download_2 = st.columns(2)
 download_1.download_button(
