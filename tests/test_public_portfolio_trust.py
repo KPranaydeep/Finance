@@ -1,6 +1,7 @@
 from datetime import date
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from public_portfolio_trust import allocation_turnover, bootstrap_outlook, common_price_window, fingerprint, forecast_calibration, performance_metrics, round_weights_to_whole_percent, versioned_model_nav, xirr

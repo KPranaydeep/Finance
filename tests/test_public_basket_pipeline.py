@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import sys
 from datetime import datetime, timezone
@@ -226,19 +227,17 @@ class TestCoreExtraction:
         pytest.importorskip("streamlit")
         core = importlib.import_module("portfolio_optimizer_core")
 
-        assert core.run_portfolio_analysis_multi.__code__.co_filename.endswith(
-            "portfolio_rebalancer_database.py"
-        )
-        assert core.rebalance_plan_multi.__code__.co_filename.endswith(
-            "portfolio_rebalancer_database.py"
-        )
-        assert core.get_latest_price_map.__code__.co_filename.endswith(
-            "portfolio_rebalancer_database.py"
-        )
+        functions = [inspect.unwrap(function) for function in (
+            core.run_portfolio_analysis_multi,
+            core.rebalance_plan_multi,
+            core.get_latest_price_map,
+        )]
+        for function in functions:
+            assert function.__code__.co_filename.endswith(
+                "portfolio_rebalancer_database.py"
+            )
 
         source = core._source_path().read_text(encoding="utf-8")
         assert core._ui_boundary(source) > max(
-            core.run_portfolio_analysis_multi.__code__.co_firstlineno,
-            core.rebalance_plan_multi.__code__.co_firstlineno,
-            core.get_latest_price_map.__code__.co_firstlineno,
+            function.__code__.co_firstlineno for function in functions
         )
