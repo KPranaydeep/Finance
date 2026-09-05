@@ -166,6 +166,15 @@ def test_lumpsum_reports_missing_prices_and_rejects_invalid_amount():
     with pytest.raises(ValueError): allocate_public_lumpsum(target,{"A":100},0)
 
 
+def test_starter_subset_limits_orders_to_highest_target_weights():
+    target=[{"ticker":"A","target_weight":.4},{"ticker":"B","target_weight":.3},
+            {"ticker":"C","target_weight":.2},{"ticker":"D","target_weight":.1}]
+    result=allocate_public_lumpsum(target,{"A":100,"B":80,"C":40,"D":20},10_000,starter_max_assets=2)
+    assert result["mode"] == "STARTER_SUBSET"
+    assert result["coverage"] == 2
+    assert {row["ticker"] for row in result["orders"]} == {"A","B"}
+
+
 def test_minimum_entry_uses_prices_costs_coverage_and_tracking():
     target=[{"ticker":"A","target_weight":.25},{"ticker":"B","target_weight":.25},
             {"ticker":"C","target_weight":.25},{"ticker":"D","target_weight":.25}]
@@ -176,7 +185,7 @@ def test_minimum_entry_uses_prices_costs_coverage_and_tracking():
     assert estimate["estimated_execution_drag"] <= estimate["assumptions"]["maximum_execution_drag"]
     assert estimate["tracking_error_pp"] <= estimate["assumptions"]["maximum_tracking_error_pp"]
     assert estimate["minimum_capital_inr"] >= estimate["weighted_affordability_floor"]
-    assert estimate["minimum_viable_starter_inr"] < estimate["minimum_capital_inr"]
+    assert estimate["minimum_viable_starter_inr"] <= estimate["minimum_capital_inr"]
     starter=estimate["starter"]
     assumptions=estimate["assumptions"]
     assert starter["coverage"] >= assumptions["starter_required_coverage"]

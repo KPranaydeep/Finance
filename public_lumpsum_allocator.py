@@ -64,7 +64,9 @@ def estimate_minimum_entry_capital(
     # Find the smallest rounded amount that produces a genuinely usable starter
     # allocation.  A cheapest-share figure is technically affordable but is not
     # a portfolio, so it is retained only as an internal diagnostic.
-    starter_required_coverage=max(1,math.ceil(math.sqrt(count)))
+    starter_required_coverage=max(
+        1,math.ceil(math.sqrt(count)),math.ceil(1.0/starter_maximum_position_weight)
+    )
     technical_floor=math.ceil(
         (float(price_values.min())*(1+variable_drag)+fixed_cost_per_order)/10.0
     )*10.0
@@ -72,7 +74,9 @@ def estimate_minimum_entry_capital(
     starter_plan=None
     starter_metrics=None
     while starter_candidate<=candidate:
-        trial=allocate_public_lumpsum(usable,price_map,starter_candidate)
+        trial=allocate_public_lumpsum(
+            usable,price_map,starter_candidate,starter_max_assets=starter_required_coverage
+        )
         order_tickers={row["ticker"] for row in trial["orders"]}
         target_coverage=sum(row["target_weight"] for row in usable if row["ticker"] in order_tickers)
         invested_ratio=trial["invested_inr"]/starter_candidate
@@ -137,6 +141,7 @@ def allocate_public_lumpsum(
     amount_inr: float,
     *,
     max_weight_per_asset: float = 0.10,
+    starter_max_assets: int | None = None,
 ) -> dict:
     """Allocate cash with the production cap, falling back to a small-capital starter plan."""
     amount = float(amount_inr)
@@ -162,6 +167,13 @@ def allocate_public_lumpsum(
     available = [row for row in rows if np.isfinite(row["price"]) and row["price"] > 0]
     if not available:
         raise ValueError("No target security has an available price")
+    if starter_max_assets is not None:
+        asset_limit=max(1,min(int(starter_max_assets),len(available)))
+        # A starter represents the strongest published convictions first. Price
+        # is only a deterministic tie-breaker; it never changes target ranking.
+        available=sorted(
+            available,key=lambda row:(-row["weight"],row["price"],row["ticker"])
+        )[:asset_limit]
 
     weights = np.array([row["weight"] for row in available], dtype=float)
     weights = weights / weights.sum()
@@ -186,7 +198,7 @@ def allocate_public_lumpsum(
             invested[best] += price_values[best]
 
     fill_with_cap()
-    mode = "TARGET_WEIGHT"
+    mode = "STARTER_SUBSET" if starter_max_assets is not None else "TARGET_WEIGHT"
 
     # Whole-share caps can strand most of a small investment. In that case,
     # construct a diversified starter allocation by minimizing target error plus

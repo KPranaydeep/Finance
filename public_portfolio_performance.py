@@ -462,8 +462,19 @@ if execution_scenario == "Start fresh with cash":
         "Amount to invest (₹)", min_value=starter_amount, value=default_amount, step=1000.0, format="%.0f"
     )
     try:
+        starter_asset_limit=None
+        if entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
+            starter_floor=float(entry_estimate["minimum_viable_starter_inr"])
+            practical_floor=float(entry_estimate["minimum_capital_inr"])
+            progress=max(0.0,min(1.0,(float(investment_amount)-starter_floor)/(practical_floor-starter_floor)))
+            minimum_assets=int(entry_estimate["assumptions"]["starter_required_coverage"])
+            starter_asset_limit=min(
+                int(entry_estimate["constituent_count"]),
+                minimum_assets+int(progress*(int(entry_estimate["constituent_count"])-minimum_assets)),
+            )
         calculated_plan = allocate_public_lumpsum(
-            record["constituents"], price_snapshot, float(investment_amount)
+            record["constituents"], price_snapshot, float(investment_amount),
+            starter_max_assets=starter_asset_limit,
         )
         p1,p2,p3=st.columns(3)
         p1.metric("Planned investment",f"₹{calculated_plan['invested_inr']:,.2f}")
@@ -494,7 +505,7 @@ if execution_scenario == "Start fresh with cash":
             st.info("Starter allocation: diversified and cost-aware, but it will not contain every target security.")
         else:
             st.success("This amount meets the estimated practical-entry conditions for the published portfolio.")
-        st.caption("Starter mode" if calculated_plan["mode"]=="STARTER" else "Target-weight mode")
+        st.caption("Starter-basket mode" if calculated_plan["mode"].startswith("STARTER") else "Target-weight mode")
     except Exception as exc:
         st.info(f"A fresh-cash plan cannot be calculated until prices are available: {exc}")
 st.warning(
