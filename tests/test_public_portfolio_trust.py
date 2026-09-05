@@ -7,6 +7,7 @@ from public_portfolio_trust import bootstrap_outlook, fingerprint, forecast_cali
 from public_portfolio_publications import validate_constituents, verify_trust_audit
 from public_release_checks import inspect_public_data
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
+from production_smoke_test import current_forecast_is_due
 
 
 def test_xirr_single_investment():
@@ -194,3 +195,13 @@ def test_minimum_entry_uses_prices_costs_coverage_and_tracking():
     assert starter["target_weight_coverage"] >= assumptions["starter_minimum_target_coverage"]
     assert starter["estimated_execution_drag"] <= assumptions["maximum_execution_drag"]
     assert "bare_minimum_capital_inr" not in estimate
+
+
+def test_forecast_smoke_check_only_becomes_strict_when_due_for_current_version():
+    trust={"current":{"publication_id":"PUB-3"},"forecasts":[]}
+    assert not current_forecast_is_due([{}]*60,trust)
+    assert current_forecast_is_due([{}]*61,trust)
+    trust["forecasts"]=[{"publication_id":"PUB-1"}]
+    assert current_forecast_is_due([{}]*61,trust)
+    trust["forecasts"].append({"publication_id":"PUB-3"})
+    assert not current_forecast_is_due([{}]*61,trust)
