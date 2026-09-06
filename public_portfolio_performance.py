@@ -628,14 +628,18 @@ if nav:
         if comparison.empty:
             st.info("Not enough common portfolio, VT and exchange-rate observations to compare.")
         else:
-            st.line_chart(comparison,y_label="Growth index · start = 100")
+            multiples=comparison.div(100)
+            st.line_chart(multiples,y_label="Growth multiple (×)")
             portfolio_return=float(comparison.iloc[-1,0]/100-1)
             benchmark_return=float(comparison.iloc[-1,1]/100-1)
             p_col,b_col,d_col=st.columns(3)
-            p_col.metric("Portfolio · common period",pct(portfolio_return))
-            b_col.metric(WORLD_BENCHMARK_LABEL,pct(benchmark_return))
+            p_col.metric("Portfolio growth",f"{1+portfolio_return:.2f}×")
+            p_col.caption(f"₹1 → ₹{1+portfolio_return:.2f} · Return {portfolio_return:+.2%}")
+            b_col.metric(WORLD_BENCHMARK_LABEL,f"{1+benchmark_return:.2f}×")
+            b_col.caption(f"₹1 → ₹{1+benchmark_return:.2f} · Return {benchmark_return:+.2%}")
             d_col.metric("Return difference",f"{(portfolio_return-benchmark_return)*100:+.2f} pp")
-            st.caption(f"Both start at 100 · {comparison.index[0]:%d %b %Y} to {comparison.index[-1]:%d %b %Y} · {len(comparison)} common dates. Follows the selected period.")
+            st.caption(f"Both start at 1.00× · {comparison.index[0]:%d %b %Y} to {comparison.index[-1]:%d %b %Y} · {len(comparison)} common dates. Follows the selected period.")
+            st.caption("A growth multiple includes the starting amount: 1.00× = unchanged, 2.00× = doubled (+100%), 0.80× = −20%. Multiples are cumulative over the displayed period, not annual returns. Return difference is in percentage points (pp).")
             st.caption("VT is an investable proxy for the FTSE Global All Cap Index. Yahoo Finance dividend/split-adjusted closes × USD/INR include currency movements and approximate reinvested distributions. ETF fees are reflected in its price; investor taxes and trading costs are excluded.")
             st.caption("Uses each market's end-of-day close on matching calendar dates. US trading closes after India; this is not a synchronized intraday comparison. Missing dates are omitted, not filled.")
     except Exception:
