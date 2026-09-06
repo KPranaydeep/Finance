@@ -302,7 +302,8 @@ def record_forecast(conn: Any, *, basket_id: str, publication_id: str, forecast_
 
 
 def evaluate_due_forecasts(conn: Any, basket_id: str) -> int:
-    """Attach outcomes after the requested number of subsequent NAV observations."""
+    """Evaluate calendar forecasts at expiry; preserve legacy trading-day rules."""
+    from public_outlook import calendar_realization
     pending=conn.execute("""SELECT f.* FROM public_forecasts f LEFT JOIN public_forecast_realizations r ON r.forecast_id=f.forecast_id
         WHERE f.basket_id=%s AND r.forecast_id IS NULL""",(basket_id,)).fetchall()
     updated=0
@@ -311,8 +312,14 @@ def evaluate_due_forecasts(conn: Any, basket_id: str) -> int:
             WHERE basket_id=%s AND nav_date >= %s ORDER BY nav_date,calculation_version DESC""",
             (basket_id,row["forecast_date"])).fetchall()
         ordered=[(item["nav_date"],float(item["nav"])) for item in observations]
-        if len(ordered)<=int(row["horizon_days"]): continue
-        start,end=ordered[0],ordered[int(row["horizon_days"])]
+        payload=row.get("forecast_json") or {}
+        if payload.get("horizon_unit") == "calendar_days":
+            matched=calendar_realization(payload,observations)
+            if matched is None: continue
+            start,end=matched
+        else:
+            if len(ordered)<=int(row["horizon_days"]): continue
+            start,end=ordered[0],ordered[int(row["horizon_days"])]
         actual=end[1]/start[1]-1
         realization_material={"forecast_id":row["forecast_id"],"actual_start_value":start[1],"actual_end_value":end[1],
                               "actual_return":actual,"realization_date":str(end[0]),"comparison_status":"COMPLETE"}

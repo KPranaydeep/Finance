@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
+from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
@@ -372,13 +373,14 @@ if not current:
 current_forecasts=[
     row for row in record.get("forecasts", [])
     if row.get("publication_id") == current.get("publication_id")
-    and int(row.get("horizon_days") or 0) == 14
+    and int(row.get("horizon_days") or 0) == HORIZON_DAYS
+    and (row.get("forecast_json") or {}).get("method") == METHOD
 ]
 current_forecast=current_forecasts[0] if current_forecasts else None
 current_forecast_values=(current_forecast.get("forecast_json") or {}) if current_forecast else {}
 median_outcome=pct(current_forecast_values.get("median_return"))
 forecast_note=(
-    "14-day statistical estimate"
+    "28 calendar days · estimated"
     if current_forecast
     else "Awaiting sufficient model history"
 )
@@ -606,12 +608,12 @@ if nav:
     chart["Gross"]=chart["gross_nav"].fillna(chart["nav"]) if "gross_nav" in chart else chart["nav"]
     st.line_chart(chart.set_index("nav_date")[["Estimated net","Gross"]],y_label="Model index")
 
-st.subheader("14-Day Outlook — statistical estimate")
+st.subheader("28-Day Outlook — statistical estimate")
 forecasts=current_forecasts
 if not forecasts:
-    collected=min(len(nav),61)
-    st.info(f"Building accountable forecast history: {collected} of 61 required NAV observations collected.")
-    st.progress(collected/61)
+    collected=min(len(nav),MINIMUM_NAV_ROWS)
+    st.info(f"Awaiting a 28-day outlook: {collected} of {MINIMUM_NAV_ROWS} minimum NAV observations collected; at least 20 complete four-week scenarios are also required. Run the daily update after sufficient history is available.")
+    st.progress(collected/MINIMUM_NAV_ROWS)
 else:
     forecast=forecasts[0]; values=forecast["forecast_json"]
     o1,o2,o3,o4=st.columns(4)
@@ -621,7 +623,8 @@ else:
     o4.metric("Probability of gain",pct(values.get("probability_positive")))
     st.write(f"Probability of loss: **{pct(values.get('probability_negative'))}** · Probability of loss greater than 5%: **{pct(values.get('probability_loss_gt_threshold'))}**")
     st.warning("Statistical scenario — not a guaranteed prediction.")
-    st.caption(f"14-day {values.get('method')} of observed daily returns · sample {values.get('sample_start')} to {values.get('sample_end')} · {values.get('observation_count')} observations · {forecast['calculation_version']}")
+    st.caption(f"Four weeks (28 calendar days) · through {values.get('target_date')} · history {values.get('sample_start')} to {values.get('sample_end')} · {values.get('scenario_count')} historical four-week scenarios.")
+    st.caption("Historical scenarios preserve the sequence of returns and overlap. Ranges describe historical variation; they are not independently validated probability guarantees. Future allocation changes are unknown.")
     if values.get("history_source") == "DEVELOPMENT_BACKFILL":
         st.caption("Development forecast: its input history includes backfilled simulation and must not be presented as a live-only track record.")
 
@@ -669,7 +672,7 @@ evidence_state={**record,"performance_metrics":all_metrics,"gross_performance_me
                 "portfolio_turnover":total_turnover,"estimated_implementation_drag":estimated_drag,
                 "forecast_calibration":calibration,"methodology":{"performance":CALCULATION_VERSION,
                 "slippage_rate":MODEL_SLIPPAGE_RATE,"transaction_cost_rate":MODEL_TRANSACTION_COST_RATE,
-                "forecast":"bootstrap estimated-net daily model returns"}}
+                "forecast":"28-calendar-day historical blocks of estimated-net basket NAV"}}
 security_findings=inspect_public_data(evidence_state,production=True)
 if security_findings:
     st.error("Evidence export is unavailable because the public-data inspection did not pass.")

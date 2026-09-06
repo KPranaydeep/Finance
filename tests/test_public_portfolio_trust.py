@@ -232,13 +232,17 @@ def test_minimum_entry_uses_prices_costs_coverage_and_tracking():
 
 
 def test_forecast_smoke_check_only_becomes_strict_when_due_for_current_version():
+    from public_outlook import METHOD
+    rows=[{"nav_date":day.date(),"nav":100.0} for day in pd.bdate_range("2024-01-01",periods=160)]
     trust={"current":{"publication_id":"PUB-3"},"forecasts":[]}
-    assert not current_forecast_is_due([{}]*60,trust)
-    assert current_forecast_is_due([{}]*61,trust)
+    assert not current_forecast_is_due(rows[:60],trust)
+    assert current_forecast_is_due(rows,trust)
     trust["forecasts"]=[{"publication_id":"PUB-1"}]
-    assert current_forecast_is_due([{}]*61,trust)
-    trust["forecasts"].append({"publication_id":"PUB-3"})
-    assert not current_forecast_is_due([{}]*61,trust)
+    assert current_forecast_is_due(rows,trust)
+    trust["forecasts"].append({"publication_id":"PUB-3","horizon_days":14})
+    assert current_forecast_is_due(rows,trust)
+    trust["forecasts"].append({"publication_id":"PUB-3","horizon_days":28,"forecast_json":{"method":METHOD}})
+    assert not current_forecast_is_due(rows,trust)
 
 
 def test_backfill_configuration_defaults_closed_and_validates_bounds(monkeypatch):
