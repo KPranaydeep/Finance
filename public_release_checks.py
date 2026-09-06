@@ -23,3 +23,31 @@ def inspect_public_data(value: Any, *, production: bool = True, path: str = "$")
         if any(pattern.search(value) for pattern in SENSITIVE_VALUES): findings.append(f"Sensitive value pattern at {path}")
         if production and TEST_MARKERS.search(value): findings.append(f"Non-production marker at {path}")
     return sorted(set(findings))
+
+
+def prepare_evidence_export(value: dict) -> tuple[dict, list[str]]:
+    """Inspect a labelled research export without relaxing production checks.
+
+    The exception is limited to known forecast provenance fields and requires
+    actual backfill flags in the loaded NAV. Original records are not changed.
+    """
+    research=any(isinstance(row,dict) and row.get("is_backfill") is True
+                 for row in value.get("nav",[]))
+    evidence={**value,"evidence_metadata":{
+        "classification":"RESEARCH_SIMULATION" if research else "POST_PUBLICATION_MODEL",
+        "contains_backfilled_nav":research,
+        "description":(
+            "Includes retrospectively simulated history; it is not a live investment track record."
+            if research else "Model evidence based on recorded post-publication NAV."
+        ),
+    }}
+    findings=inspect_public_data(evidence,production=True)
+    if not research:
+        return evidence,findings
+    allowed=set()
+    for collection in ("forecasts","active_forecasts"):
+        for index,row in enumerate(evidence.get(collection,[])):
+            payload=row.get("forecast_json") if isinstance(row,dict) else None
+            if isinstance(payload,dict) and payload.get("history_source") == "DEVELOPMENT_BACKFILL":
+                allowed.add(f"Non-production marker at $.{collection}[{index}].forecast_json.history_source")
+    return evidence,[finding for finding in findings if finding not in allowed]

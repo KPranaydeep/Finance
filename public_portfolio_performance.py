@@ -24,7 +24,7 @@ from public_portfolio_history import build_allocation_change_rows
 from public_portfolio_publications import load_trust_records, verify_trust_audit
 from public_portfolio_trust import (CALCULATION_VERSION, MODEL_SLIPPAGE_RATE,
     MODEL_TRANSACTION_COST_RATE, forecast_calibration, performance_metrics, select_horizon)
-from public_release_checks import inspect_public_data
+from public_release_checks import prepare_evidence_export
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger(__name__)
@@ -567,7 +567,7 @@ st.subheader("Performance — historical, observed")
 nav=record["nav"]
 has_backfill=any(bool(row.get("is_backfill")) for row in nav)
 if has_backfill:
-    st.warning("Development backfill is active. Performance and forecasts include a historical simulation using the current published weights; they are not fully post-publication observations.")
+    st.warning("Development backfill is active. History before the first publication simulates the earliest active portfolio; later publications retain their dated allocation changes. These results are not a live investment track record.")
 all_metrics=performance_metrics(nav)
 gross_nav=[{**row,"nav":row.get("gross_nav") or row["nav"]} for row in nav]
 gross_metrics=performance_metrics(gross_nav)
@@ -674,11 +674,16 @@ evidence_state={**record,"performance_metrics":all_metrics,"gross_performance_me
                 "forecast_calibration":calibration,"methodology":{"performance":CALCULATION_VERSION,
                 "slippage_rate":MODEL_SLIPPAGE_RATE,"transaction_cost_rate":MODEL_TRANSACTION_COST_RATE,
                 "forecast":"28-calendar-day historical blocks of estimated-net basket NAV"}}
-security_findings=inspect_public_data(evidence_state,production=True)
+evidence_state,security_findings=prepare_evidence_export(evidence_state)
 if security_findings:
     st.error("Evidence export is unavailable because the public-data inspection did not pass.")
     st.stop()
 evidence=json.dumps(evidence_state,sort_keys=True,indent=2,default=str).encode()
-st.download_button("Download evidence bundle",evidence,f"{DEFAULT_BASKET_ID.lower()}-evidence.json","application/json",use_container_width=True)
+is_simulation=evidence_state["evidence_metadata"]["contains_backfilled_nav"]
+export_label="Download simulation evidence" if is_simulation else "Download evidence bundle"
+export_suffix="simulation-evidence" if is_simulation else "evidence"
+if is_simulation:
+    st.caption("This download includes simulated history and is labelled as research evidence.")
+st.download_button(export_label,evidence,f"{DEFAULT_BASKET_ID.lower()}-{export_suffix}.json","application/json",use_container_width=True)
 st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
 st.info("Model performance and statistical scenarios are not investment advice and do not guarantee future results.")
