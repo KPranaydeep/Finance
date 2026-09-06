@@ -27,8 +27,8 @@ jobs:
           PUBLIC_BASKET_ID: PUBLIC-01
           PUBLIC_PORTFOLIO_TIMEZONE: Asia/Kolkata
           PUBLIC_PERFORMANCE_VERSION: performance-v1
-          PUBLIC_FORECAST_VERSION: forecast-v2-common-history
-          PUBLIC_FORECAST_METHOD: historical-bootstrap-14d-v1
+          PUBLIC_FORECAST_VERSION: forecast-v3-28calendar
+          PUBLIC_FORECAST_METHOD: historical-calendar-block-28d-v1
           PUBLIC_CACHE_TTL_SECONDS: "300"
           PUBLIC_REFRESH_POLICY: weekdays-after-market-close
           PUBLIC_MODEL_BACKFILL_TRADING_DAYS: ${{ vars.PUBLIC_MODEL_BACKFILL_TRADING_DAYS || '0' }}
@@ -39,8 +39,8 @@ jobs:
           PUBLIC_BASKET_ID: PUBLIC-01
           PUBLIC_PORTFOLIO_TIMEZONE: Asia/Kolkata
           PUBLIC_PERFORMANCE_VERSION: performance-v1
-          PUBLIC_FORECAST_VERSION: forecast-v2-common-history
-          PUBLIC_FORECAST_METHOD: historical-bootstrap-14d-v1
+          PUBLIC_FORECAST_VERSION: forecast-v3-28calendar
+          PUBLIC_FORECAST_METHOD: historical-calendar-block-28d-v1
           PUBLIC_CACHE_TTL_SECONDS: "300"
           PUBLIC_REFRESH_POLICY: weekdays-after-market-close
           PUBLIC_MODEL_BACKFILL_TRADING_DAYS: ${{ vars.PUBLIC_MODEL_BACKFILL_TRADING_DAYS || '0' }}
@@ -52,8 +52,8 @@ jobs:
           PUBLIC_BASKET_ID: PUBLIC-01
           PUBLIC_PORTFOLIO_TIMEZONE: Asia/Kolkata
           PUBLIC_PERFORMANCE_VERSION: performance-v1
-          PUBLIC_FORECAST_VERSION: forecast-v2-common-history
-          PUBLIC_FORECAST_METHOD: historical-bootstrap-14d-v1
+          PUBLIC_FORECAST_VERSION: forecast-v3-28calendar
+          PUBLIC_FORECAST_METHOD: historical-calendar-block-28d-v1
           PUBLIC_CACHE_TTL_SECONDS: "300"
           PUBLIC_REFRESH_POLICY: weekdays-after-market-close
           PUBLIC_MODEL_BACKFILL_TRADING_DAYS: ${{ vars.PUBLIC_MODEL_BACKFILL_TRADING_DAYS || '0' }}
