@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
+from public_world_benchmark import compare_world_benchmark, LABEL as WORLD_BENCHMARK_LABEL
 from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
 
 from public_basket_postgres import DEFAULT_BASKET_ID, connect_public_basket_db, get_public_basket_database_url
@@ -214,6 +215,18 @@ def load_public_record(basket_id: str) -> dict[str, Any]:
             WHERE v.basket_id=%s ORDER BY v.portfolio_version,p.ticker""",(basket_id,)).fetchall()
     return {"basket":dict(basket),"nav":[dict(r) for r in nav],
             "publication_positions":[dict(r) for r in publication_positions],**trust}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_world_benchmark(start_date: str, end_date: str):
+    data=yf.download(["VT","INR=X"],start=start_date,end=end_date,
+                     auto_adjust=True,progress=False,threads=False,group_by="column")
+    if data.empty or not isinstance(data.columns,pd.MultiIndex):
+        raise ValueError("World benchmark history is unavailable")
+    closes=data["Close"]
+    if "VT" not in closes or "INR=X" not in closes:
+        raise ValueError("World benchmark price or exchange-rate history is unavailable")
+    return closes["VT"],closes["INR=X"]
 
 
 def pct(value: float | None) -> str:
@@ -604,10 +617,30 @@ if available:
     detail=pd.DataFrame([{k:v for k,v in metrics.items() if k not in {"start_date","end_date"}}])
     with st.expander("Detailed period statistics"): st.json(metrics)
 if nav:
-    chart=pd.DataFrame(nav); chart["nav_date"]=pd.to_datetime(chart["nav_date"])
-    chart["Estimated net"]=chart["nav"]
-    chart["Gross"]=chart["gross_nav"].fillna(chart["nav"]) if "gross_nav" in chart else chart["nav"]
-    st.line_chart(chart.set_index("nav_date")[["Estimated net","Gross"]],y_label="Model index")
+    chart_rows=select_horizon(nav,HORIZONS[selected]) if available else nav
+    st.subheader("Portfolio vs global stocks")
+    try:
+        vt,fx=load_world_benchmark(
+            str(min(row["nav_date"] for row in nav)),
+            str(pd.Timestamp(max(row["nav_date"] for row in nav)).date()+pd.Timedelta(days=1)),
+        )
+        comparison=compare_world_benchmark(chart_rows,vt,fx)
+        if comparison.empty:
+            st.info("Not enough common portfolio, VT and exchange-rate observations to compare.")
+        else:
+            st.line_chart(comparison,y_label="Growth index · start = 100")
+            portfolio_return=float(comparison.iloc[-1,0]/100-1)
+            benchmark_return=float(comparison.iloc[-1,1]/100-1)
+            p_col,b_col,d_col=st.columns(3)
+            p_col.metric("Portfolio · common period",pct(portfolio_return))
+            b_col.metric(WORLD_BENCHMARK_LABEL,pct(benchmark_return))
+            d_col.metric("Return difference",f"{(portfolio_return-benchmark_return)*100:+.2f} pp")
+            st.caption(f"Both start at 100 · {comparison.index[0]:%d %b %Y} to {comparison.index[-1]:%d %b %Y} · {len(comparison)} common dates. Follows the selected period.")
+            st.caption("VT is an investable proxy for the FTSE Global All Cap Index. Yahoo Finance dividend/split-adjusted closes × USD/INR include currency movements and approximate reinvested distributions. ETF fees are reflected in its price; investor taxes and trading costs are excluded.")
+            st.caption("Uses each market's end-of-day close on matching calendar dates. US trading closes after India; this is not a synchronized intraday comparison. Missing dates are omitted, not filled.")
+    except Exception:
+        LOGGER.exception("World benchmark comparison unavailable")
+        st.info("Global-stock comparison is temporarily unavailable. Portfolio metrics above remain available.")
 
 st.subheader("28-Day Outlook — statistical estimate")
 forecasts=current_forecasts
