@@ -182,6 +182,16 @@ def common_price_window(
     return common.tail(maximum_trading_days+1)
 
 
+def model_timestamp_utc(value):
+    """Interpret timezone-free model dates in NSE local time; compare in UTC."""
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        raise ValueError("Model timestamps must not be missing")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("Asia/Kolkata")
+    return timestamp.tz_convert("UTC")
+
+
 def versioned_model_nav(
     prices: pd.DataFrame,
     publications: Sequence[dict],
@@ -196,12 +206,12 @@ def versioned_model_nav(
                                      "gross_daily_return","drawdown","publication_id","turnover","estimated_drag"])
     frame=prices.copy().sort_index().apply(pd.to_numeric,errors="coerce").ffill()
     returns=frame.pct_change()
-    versions=sorted(publications,key=lambda item:pd.Timestamp(item["as_of"]))
+    versions=sorted(publications,key=lambda item:model_timestamp_utc(item["as_of"]))
     gross_nav=float(initial_nav); net_nav=float(initial_nav); peak=net_nav; rows=[]
     prior_publication_id=None
     prior_weights: dict[str,float]={}
     for timestamp,row in returns.iterrows():
-        eligible=[item for item in versions if pd.Timestamp(item["as_of"]).tz_localize(None) <= pd.Timestamp(timestamp).tz_localize(None)]
+        eligible=[item for item in versions if model_timestamp_utc(item["as_of"]) <= model_timestamp_utc(timestamp)]
         if not eligible: continue
         current=eligible[-1]; weights=current["weights"]
         changed=current["publication_id"] != prior_publication_id
