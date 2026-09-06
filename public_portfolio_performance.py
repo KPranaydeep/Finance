@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from public_nav_snapshots import load_nav_snapshot
+
 import html
 import json
 import logging
@@ -205,8 +207,7 @@ def load_public_record(basket_id: str) -> dict[str, Any]:
     with connect_public_basket_db(url) as conn:
         basket=conn.execute("SELECT * FROM public_baskets WHERE basket_id=%s",(basket_id,)).fetchone()
         if not basket: return {"basket":None}
-        nav=conn.execute("""SELECT DISTINCT ON (nav_date) * FROM daily_nav WHERE basket_id=%s
-                            ORDER BY nav_date,calculation_version DESC""",(basket_id,)).fetchall()
+        nav=load_nav_snapshot(conn,basket_id)
         trust=load_trust_records(conn,basket_id)
         publication_positions=conn.execute("""SELECT p.publication_id,v.portfolio_version,p.ticker,p.target_weight
             FROM public_portfolio_positions p JOIN public_portfolio_versions v ON v.publication_id=p.publication_id

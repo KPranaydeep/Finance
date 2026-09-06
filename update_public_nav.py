@@ -12,6 +12,7 @@ from public_basket_postgres import connect_public_basket_db, get_public_basket_d
 from public_portfolio_config import load_public_portfolio_config
 from public_portfolio_publications import load_trust_records
 from public_portfolio_trust import common_price_window, fingerprint, versioned_model_nav
+from public_nav_snapshots import save_nav_snapshot
 
 CALCULATION_VERSION=6  # common-history backfill plus versioned rebalance transitions
 
@@ -68,6 +69,7 @@ def main() -> int:
                 (basket_id,row["nav_date"],CALCULATION_VERSION,row["nav"],row["daily_return"],row["drawdown"],
                  fingerprint(material),now,row["gross_nav"],row["net_nav"],row["gross_daily_return"],
                  row["turnover"],row["estimated_drag"],row["is_backfill"]))
+        save_nav_snapshot(conn,basket_id,nav.to_dict("records"),CALCULATION_VERSION)
     return 0
 
 

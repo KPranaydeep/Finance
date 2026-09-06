@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from public_nav_snapshots import load_nav_snapshot
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -307,10 +309,9 @@ def evaluate_due_forecasts(conn: Any, basket_id: str) -> int:
     pending=conn.execute("""SELECT f.* FROM public_forecasts f LEFT JOIN public_forecast_realizations r ON r.forecast_id=f.forecast_id
         WHERE f.basket_id=%s AND r.forecast_id IS NULL""",(basket_id,)).fetchall()
     updated=0
+    history=load_nav_snapshot(conn,basket_id)
     for row in pending:
-        observations=conn.execute("""SELECT DISTINCT ON (nav_date) nav_date,nav FROM daily_nav
-            WHERE basket_id=%s AND nav_date >= %s ORDER BY nav_date,calculation_version DESC""",
-            (basket_id,row["forecast_date"])).fetchall()
+        observations=[item for item in history if item["nav_date"] >= row["forecast_date"]]
         ordered=[(item["nav_date"],float(item["nav"])) for item in observations]
         payload=row.get("forecast_json") or {}
         if payload.get("horizon_unit") == "calendar_days":
