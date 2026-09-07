@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
+from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
 from public_world_benchmark import compare_world_benchmark, LABEL as WORLD_BENCHMARK_LABEL
 from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
 
@@ -229,6 +230,15 @@ def load_world_benchmark(start_date: str, end_date: str):
     return closes["VT"],closes["INR=X"]
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_market_mood():
+    try:
+        return fetch_mmi()
+    except Exception:
+        LOGGER.warning("Tickertape MMI is temporarily unavailable")
+        return None
+
+
 def pct(value: float | None) -> str:
     return "N/A" if value is None or not np.isfinite(value) else f"{value:.2%}"
 
@@ -419,6 +429,22 @@ st.markdown(
     '</div>',
     unsafe_allow_html=True,
 )
+
+# Informational only: this value never enters allocation, forecast or order inputs.
+mood=load_market_mood()
+with st.container(border=True):
+    if mood is None:
+        st.markdown("**India market mood · MMI**")
+        st.caption("Temporarily unavailable · Tickertape")
+    else:
+        mood_value,mood_details=st.columns([1,2])
+        mood_value.metric("India market mood · MMI",f"{mood['score']:.1f} / 100")
+        with mood_details:
+            st.markdown(f"**{mood['zone']}**")
+            source_time=datetime.fromisoformat(mood["source_at"]).astimezone(IST)
+            st.caption(f"As of {source_time:%d %b %Y, %H:%M} IST" +
+                       (" · Older reading" if mood["older_reading"] else ""))
+            st.markdown(f"[Tickertape]({MMI_SOURCE_URL}) · Display only")
 
 st.subheader("Target allocation")
 allocation=pd.DataFrame(record["constituents"])
