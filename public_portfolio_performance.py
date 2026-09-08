@@ -528,14 +528,16 @@ if execution_scenario == "Start fresh with cash":
     default_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 1000.0
     starter_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 100.0
     investment_amount = st.number_input(
-        "Amount to invest (₹)", min_value=starter_amount, value=default_amount, step=1000.0, format="%.0f"
+        "Amount to invest (₹)", min_value=1.0, value=max(1.0,default_amount), step=100.0, format="%.2f",
+        help="The viable starter is a suggested starting amount, not a minimum. You can enter a smaller amount."
     )
     try:
         starter_asset_limit=None
-        if entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
+        if entry_estimate and starter_amount <= float(investment_amount)<entry_estimate["minimum_capital_inr"]:
             starter_floor=float(entry_estimate["minimum_viable_starter_inr"])
             practical_floor=float(entry_estimate["minimum_capital_inr"])
-            progress=max(0.0,min(1.0,(float(investment_amount)-starter_floor)/(practical_floor-starter_floor)))
+            span=practical_floor-starter_floor
+            progress=max(0.0,min(1.0,(float(investment_amount)-starter_floor)/span)) if span>0 else 1.0
             minimum_assets=int(entry_estimate["assumptions"]["starter_required_coverage"])
             starter_asset_limit=min(
                 int(entry_estimate["constituent_count"]),
@@ -570,9 +572,13 @@ if execution_scenario == "Start fresh with cash":
             )
         if calculated_plan["missing_prices"]:
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
-        if entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
+        if not calculated_plan["orders"]:
+            st.info("No suitable whole-share allocation fits this amount under the current planning rules. The amount remains uninvested; increase it to obtain a buy plan.")
+        elif entry_estimate and float(investment_amount)<starter_amount:
+            st.info("Small-amount plan: fewer holdings and greater differences from target weights are possible. The viable-starter diversification and cost conditions may not be met.")
+        elif entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
             st.info("Starter allocation: diversified and cost-aware, but it will not contain every target security.")
-        else:
+        elif entry_estimate:
             st.success("This amount meets the estimated practical-entry conditions for the published portfolio.")
         st.caption("Starter-basket mode" if calculated_plan["mode"].startswith("STARTER") else "Target-weight mode")
     except Exception as exc:
