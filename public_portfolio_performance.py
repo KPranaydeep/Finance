@@ -511,6 +511,17 @@ st.write(
     "Choose what you want to do, then give the generated prompt to the AI assistant of your choice. "
     "For an existing portfolio, attach your broker report there—not on this website."
 )
+st.markdown(
+    """<div aria-label="Brokerage calculators" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px;">
+    <a href="https://groww.in/calculators/brokerage-calculator" target="_blank" rel="noopener noreferrer"
+       aria-label="Groww brokerage calculator (opens in a new tab)"
+       style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;box-sizing:border-box;padding:8px 14px;border:1px solid #64748b;border-radius:8px;color:inherit;text-decoration:none;font-size:14px;font-weight:600;">Groww · Brokerage</a>
+    <a href="https://zerodha.com/brokerage-calculator/#tab-equities" target="_blank" rel="noopener noreferrer"
+       aria-label="Zerodha Kite brokerage calculator (opens in a new tab)"
+       style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;box-sizing:border-box;padding:8px 14px;border:1px solid #64748b;border-radius:8px;color:inherit;text-decoration:none;font-size:14px;font-weight:600;">Kite · Brokerage</a>
+    </div>""",
+    unsafe_allow_html=True,
+)
 execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCENARIOS))
 calculated_plan = None
 if execution_scenario == "Start fresh with cash":
