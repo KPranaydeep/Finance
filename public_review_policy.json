@@ -1,6 +1,6 @@
 {
   "policy_version": "owner-review-policy-v1",
-  "policy_approved": false,
+  "policy_approved": true,
   "tax_profile": "resident_individual_regular_delivery",
   "tariff_verified_on": "2026-09-09",
   "tariff_max_age_days": 90,
