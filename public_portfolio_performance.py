@@ -634,7 +634,7 @@ if execution_scenario == "Raise cash from existing holdings":
                 else:
                     st.info("The reference model's residual cash covers this amount. No sales are required.")
                 st.caption(f"Available model cash ₹{sale_plan['available_cash']:,.2f} + gross sales ₹{sale_plan['gross_sales']:,.2f} − costs ₹{sale_plan['costs']:,.2f} − withdrawal ₹{sale_plan['requested']:,.2f} = remaining cash ₹{sale_plan['residual_cash']:,.2f}.")
-                st.caption("Whole-share optimization balances remaining target-allocation differences and estimated selling costs. Uses existing planning prices; capital-gains taxes are not estimated.")
+                st.caption("Minimizes estimated selling costs first. Remaining target-allocation differences only break ties at the same minimum cost. Uses existing planning prices; capital-gains taxes are not estimated.")
         except Exception as exc:
             st.info(f"Model withdrawal calculation unavailable: {exc}")
     else:

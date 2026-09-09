@@ -73,7 +73,9 @@ def allocate_withdrawal(plan, constituents, requested, assumptions):
     positive=a.copy(); positive[cashdev]=-1
     negative=-a; negative[cashdev]=-1
     constraint(positive,hi=-constant); constraint(negative,hi=constant)
-    result=milp(objective,integrality=integer,bounds=Bounds(lower,upper),
+    cost_objective=np.zeros(size)
+    cost_objective[fee]=1
+    result=milp(cost_objective,integrality=integer,bounds=Bounds(lower,upper),
                 constraints=LinearConstraint(np.array(matrix),lows,highs),
                 options={"time_limit":10,"mip_rel_gap":0.0})
     if result.status==2:
@@ -86,11 +88,19 @@ def allocate_withdrawal(plan, constituents, requested, assumptions):
                     maximum_available=maximum/100,shortfall=max(0,request-maximum)/100)
     if result.status!=0 or result.x is None:
         raise RuntimeError("Withdrawal calculation did not finish; try a different amount")
+    minimum_fee=int(round(result.x[fee]))
+    # Never pay extra to improve allocation: lock the proven minimum cost.
+    lower[fee]=upper[fee]=minimum_fee
+    tie_result=milp(objective,integrality=integer,bounds=Bounds(lower,upper),
+                    constraints=LinearConstraint(np.array(matrix),lows,highs),
+                    options={"time_limit":10,"mip_rel_gap":0.0})
+    if tie_result.status==0 and tie_result.x is not None:
+        result=tie_result
     sold=np.rint(result.x[:n]).astype(int)
     gross=int(np.dot(prices,sold))
     fees=math.ceil(gross*rate+fixed*int(np.count_nonzero(sold))-1e-7)
     residual=cash+gross-fees-request
-    if np.any(sold<0) or np.any(sold>quantities) or residual<0:
+    if np.any(sold<0) or np.any(sold>quantities) or residual<0 or fees!=minimum_fee:
         raise RuntimeError("Withdrawal reconciliation failed")
     orders=[{"Action":"SELL","Ticker":r["ticker"],"Shares":int(sold[i]),
              "Price":prices[i]/100,"Approx. value":sold[i]*prices[i]/100,

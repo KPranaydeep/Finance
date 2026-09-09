@@ -24,6 +24,26 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual(r["costs"],20)
         self.assertEqual(r["residual_cash"],79)
 
+    def test_cost_priority_over_better_diversification(self):
+        self.cost["fixed_cost_per_order"]=20
+        r=allocate_withdrawal(self.plan,self.weights,400,self.cost)
+        self.assertEqual(len(r["orders"]),1)
+        self.assertEqual(r["costs"],20)
+        self.assertEqual(r["gross_sales"],500)
+
+    def test_proportional_fee_minimum_matches_exhaustive_search(self):
+        import math
+        self.cost.update(fixed_cost_per_order=20,statutory_cost_rate=.0012,slippage_rate=.001)
+        r=allocate_withdrawal(self.plan,self.weights,400,self.cost)
+        candidates=[]
+        for a in range(11):
+            for b in range(11):
+                gross=(a+b)*10000
+                fee=math.ceil(gross*.0022+2000*((a>0)+(b>0))-1e-7)
+                if gross-fee>=40000:
+                    candidates.append(fee)
+        self.assertEqual(round(r["costs"]*100),min(candidates))
+
     def test_cash_only_and_insufficient(self):
         self.plan["residual_cash_inr"]=5
         r=allocate_withdrawal(self.plan,self.weights,1,self.cost)
