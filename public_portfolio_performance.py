@@ -17,6 +17,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
+from public_withdrawal_allocator import allocate_withdrawal
 from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
 from public_world_benchmark import compare_world_benchmark, LABEL as WORLD_BENCHMARK_LABEL
 from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
@@ -512,8 +513,8 @@ st.caption(f"Strategy {current['strategy_version']} · Published {current['publi
 
 st.subheader("Build your private execution plan")
 st.write(
-    "Choose what you want to do, then give the generated prompt to the AI assistant of your choice. "
-    "For an existing portfolio, attach your broker report there—not on this website."
+    "Choose what you want to do. Fresh-cash and model-withdrawal plans are calculated here. "
+    "Other personal-portfolio scenarios provide a private execution prompt."
 )
 st.markdown(
     """<div aria-label="Brokerage calculators" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px;">
@@ -590,6 +591,7 @@ if execution_scenario == "Start fresh with cash":
         st.info(f"A fresh-cash plan cannot be calculated until prices are available: {exc}")
 if execution_scenario == "Raise cash from existing holdings":
     withdrawal_suggestion=None
+    reference_plan=None
     if entry_estimate:
         try:
             reference_plan=allocate_public_lumpsum(
@@ -611,44 +613,70 @@ if execution_scenario == "Raise cash from existing holdings":
         )
     else:
         st.caption("Model suggestion unavailable. Enter the net cash you need, starting from ₹1.")
-    st.caption("Your broker report determines the actual sales. Attach it to your chosen AI assistant, not here.")
+    st.caption("Model example: holdings are constructed at the current practical-entry capital using published weights and planning prices. These are not your personal holdings.")
+    if reference_plan is not None and entry_estimate:
+        try:
+            sale_plan=allocate_withdrawal(reference_plan,record["constituents"],withdrawal_amount,entry_estimate["assumptions"])
+            if sale_plan["status"]=="INSUFFICIENT":
+                st.info(f"The reference model can raise at most ₹{sale_plan['maximum_available']:,.2f} after estimated charges. Shortfall: ₹{sale_plan['shortfall']:,.2f}.")
+            else:
+                w1,w2,w3=st.columns(3)
+                w1.metric("Cash requested",f"₹{sale_plan['requested']:,.2f}")
+                w2.metric("Estimated selling costs",f"₹{sale_plan['costs']:,.2f}")
+                w3.metric("Cash left in model",f"₹{sale_plan['residual_cash']:,.2f}")
+                if sale_plan["orders"]:
+                    sale_frame=pd.DataFrame(sale_plan["orders"])
+                    st.dataframe(sale_frame,hide_index=True,use_container_width=True,
+                                 column_config={"Price":st.column_config.NumberColumn(format="₹%.2f"),
+                                                "Approx. value":st.column_config.NumberColumn(format="₹%.2f")})
+                    st.download_button("Download model withdrawal CSV",sale_frame.to_csv(index=False).encode("utf-8"),
+                                       "model-withdrawal.csv","text/csv")
+                else:
+                    st.info("The reference model's residual cash covers this amount. No sales are required.")
+                st.caption(f"Available model cash ₹{sale_plan['available_cash']:,.2f} + gross sales ₹{sale_plan['gross_sales']:,.2f} − costs ₹{sale_plan['costs']:,.2f} − withdrawal ₹{sale_plan['requested']:,.2f} = remaining cash ₹{sale_plan['residual_cash']:,.2f}.")
+                st.caption("Whole-share optimization balances remaining target-allocation differences and estimated selling costs. Uses existing planning prices; capital-gains taxes are not estimated.")
+        except Exception as exc:
+            st.info(f"Model withdrawal calculation unavailable: {exc}")
+    else:
+        st.info("Complete model prices and a practical-entry estimate are needed to calculate sales.")
 
-st.warning(
-    "If you share a broker report, first remove your name, PAN, demat/account number, email, phone, "
-    "address, and any credentials. Review the AI provider's privacy policy."
-)
-execution_prompt, public_target = build_execution_plan_prompt(
-    current, record["constituents"], price_snapshot, execution_scenario, calculated_plan, entry_estimate,
-    withdrawal_amount=withdrawal_amount,
-)
-version_label = f"p{int(current['portfolio_version']):03d}"
-action_1, action_2, action_3, action_4 = st.columns(4)
-with action_1:
-    share_prompt_button(execution_prompt,version_label.upper())
-with action_2:
-    copy_prompt_button(execution_prompt)
-action_3.download_button(
-    "Download prompt.txt",
-    data=execution_prompt.encode("utf-8"),
-    file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-execution-prompt.txt",
-    mime="text/plain",
-    use_container_width=True,
-)
-action_4.download_button(
-    "Download public target JSON",
-    data=json.dumps(public_target, sort_keys=True, indent=2, default=str).encode("utf-8"),
-    file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-target.json",
-    mime="application/json",
-    use_container_width=True,
-)
-with st.expander("Copy execution-plan prompt"):
-    st.caption("Use the copy icon in the top-right of the prompt, then paste it beside your broker report.")
-    st.code(execution_prompt, language=None)
-st.caption(
-    "Fresh cash uses deterministic whole-share allocation. Existing-portfolio rebalancing uses the broker "
-    "report's total market value and calculated weights against the public target—without fetching external "
-    "prices or return history. Tolerance and minimum-trade filters reduce churn."
-)
+if execution_scenario != "Raise cash from existing holdings":
+    st.warning(
+        "If you share a broker report, first remove your name, PAN, demat/account number, email, phone, "
+        "address, and any credentials. Review the AI provider's privacy policy."
+    )
+    execution_prompt, public_target = build_execution_plan_prompt(
+        current, record["constituents"], price_snapshot, execution_scenario, calculated_plan, entry_estimate,
+        withdrawal_amount=withdrawal_amount,
+    )
+    version_label = f"p{int(current['portfolio_version']):03d}"
+    action_1, action_2, action_3, action_4 = st.columns(4)
+    with action_1:
+        share_prompt_button(execution_prompt,version_label.upper())
+    with action_2:
+        copy_prompt_button(execution_prompt)
+    action_3.download_button(
+        "Download prompt.txt",
+        data=execution_prompt.encode("utf-8"),
+        file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-execution-prompt.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+    action_4.download_button(
+        "Download public target JSON",
+        data=json.dumps(public_target, sort_keys=True, indent=2, default=str).encode("utf-8"),
+        file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-target.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    with st.expander("Copy execution-plan prompt"):
+        st.caption("Use the copy icon in the top-right of the prompt, then paste it beside your broker report.")
+        st.code(execution_prompt, language=None)
+    st.caption(
+        "Fresh cash uses deterministic whole-share allocation. Existing-portfolio rebalancing uses the broker "
+        "report's total market value and calculated weights against the public target—without fetching external "
+        "prices or return history. Tolerance and minimum-trade filters reduce churn."
+    )
 
 st.subheader("Performance — historical, observed")
 nav=record["nav"]
