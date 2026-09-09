@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from public_nav_snapshots import load_nav_snapshot
+from public_review.ui import render_review_panel
 
 import html
 import json
@@ -435,6 +436,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+render_review_panel(basket["basket_id"], record.get("active_publications", []))
+
 # Informational only: this value never enters allocation, forecast or order inputs.
 mood=load_market_mood()
 with st.container(border=True):
@@ -826,3 +829,4 @@ if is_simulation:
 st.download_button(export_label,evidence,f"{DEFAULT_BASKET_ID.lower()}-{export_suffix}.json","application/json",use_container_width=True)
 st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
 st.info("Model performance and statistical scenarios are not investment advice and do not guarantee future results.")
+

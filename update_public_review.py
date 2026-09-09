@@ -1,0 +1,38 @@
+"""Owner-configured background monitor, isolated from NAV/forecast production jobs."""
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from public_review.config import load_policy
+from public_review.notifications import send
+
+
+def main():
+    if os.getenv("PUBLIC_REVIEW_ENABLED", "false").lower() != "true":
+        print(json.dumps({"status": "DISABLED", "reason": "Owner setup required; no database writes"}))
+        return 0
+    try:
+        policy = load_policy(datetime.now(timezone.utc).date())
+        from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
+        from public_review.service import run
+        url = get_public_basket_database_url()
+        if not url:
+            raise ValueError("DATABASE_CONFIGURATION_REQUIRED")
+        with connect_public_basket_db(url) as conn:
+            result = run(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"), policy,
+                         acknowledge=os.getenv("PUBLIC_REVIEW_ACK_BASELINE") or None)
+        print(json.dumps(result))
+        return 1 if result["failed"] else 0
+    except Exception:
+        # Workflow failure notifications remain a backup if the chosen channel fails.
+        try:
+            send("Public portfolio monitoring is unavailable. Check the review policy, credentials and workflow. No trade instruction was generated.")
+        except Exception:
+            pass
+        print(json.dumps({"status": "CANNOT_ASSESS", "reason": "Review configuration or monitoring failed; no trade was submitted"}))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

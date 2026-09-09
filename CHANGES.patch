@@ -1,0 +1,37 @@
+diff --git a/public_portfolio_performance.py b/public_portfolio_performance.py
+--- a/public_portfolio_performance.py
++++ b/public_portfolio_performance.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ from public_nav_snapshots import load_nav_snapshot
++from public_review.ui import render_review_panel
+ 
+ import html
+ import json
+@@ -435,6 +436,8 @@
+     unsafe_allow_html=True,
+ )
+ 
++render_review_panel(basket["basket_id"], record.get("active_publications", []))
++
+ # Informational only: this value never enters allocation, forecast or order inputs.
+ mood=load_market_mood()
+ with st.container(border=True):
+diff --git a/requirements.txt b/requirements.txt
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,4 +1,4 @@
++streamlit>=1.57,<1.60
+-streamlit>=1.45,<1.60
+ numpy>=2.0,<2.4
+ pandas>=2.2,<3.0
+ scipy>=1.13,<1.17
+@@ -26,3 +26,6 @@
+ 
+ gspread>=6.0
+ google-auth>=2.29
++
++# Model review UI and exchange-session calendar
++pandas-market-calendars>=5,<6
+
