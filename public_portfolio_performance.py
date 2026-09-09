@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
+from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
 from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
 from public_world_benchmark import compare_world_benchmark, LABEL as WORLD_BENCHMARK_LABEL
 from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
@@ -287,7 +288,8 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
 
 def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str,
                                 calculated_plan: dict | None = None,
-                                entry_estimate: dict | None = None) -> tuple[str, dict]:
+                                entry_estimate: dict | None = None,
+                                withdrawal_amount: float | None = None) -> tuple[str, dict]:
     """Build a version-bound prompt containing public data only."""
     public_target = {
         "basket_id": current["basket_id"],
@@ -318,6 +320,8 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict], prices:
             calculated_plan, sort_keys=True, indent=2, default=str
         ) + "\n"
     scenario_instruction = EXECUTION_SCENARIOS[scenario]
+    if scenario == "Raise cash from existing holdings" and withdrawal_amount is not None:
+        scenario_instruction=withdrawal_instructions(withdrawal_amount)
     prompt = f"""Create a short, actionable, user-reviewed portfolio execution plan using the immutable public target below. Do not rerun or modify the public optimizer.
 
 SELECTED SCENARIO: {scenario}
@@ -332,10 +336,10 @@ WORKING RULES
 2. Do not repeat personal identifiers. Give only one short redaction warning if the report contains them.
 3. Treat the broker report as the complete stock portfolio unless it explicitly says otherwise. If cash is absent, assume opening cash is zero and fund buys from sale proceeds. State this assumption once; do not stop.
 4. For an existing portfolio, use the report's market value/closing value for every holding. Sum those values to obtain total reported portfolio value, then calculate current weight = holding market value ÷ total reported value. If report weights exist, use them only as a reconciliation check. Do not fetch live prices or historical returns.
-5. Calculate target value = total reported portfolio value × public target weight and value difference = target value − current market value. A positive difference is BUY, a negative difference is SELL, and a difference inside the tolerance is HOLD. A resolved holding absent from the public target has target weight and target value zero.
+5. For rebalancing, calculate target value = total reported portfolio value × public target weight and value difference = target value − current market value. A positive difference is BUY, a negative difference is SELL, and a difference inside the tolerance is HOLD. For cash withdrawal, use the remaining value after withdrawal and costs, following the selected scenario. A resolved holding absent from the public target has target weight and target value zero.
 6. Use the broker-reported closing price for owned holdings. For a target not present in the report, use its embedded public planning price. Do not fetch another price. If a required price is absent, mark only that security REVIEW and continue with the rest.
-7. DECISION = REBALANCE when at least one practical trade remains after tolerance and minimum-trade filters; otherwise DECISION = HOLD. Calculate practical whole-share trades, sell non-target and overweight holdings first, and use sale proceeds for buys. Never require additional cash unless the selected scenario adds new money.
-8. For an existing-portfolio rebalance or cash withdrawal, reduce churn: ignore a position within 1 percentage point of target and suppress a trade below the greater of INR 100 or 0.5% of portfolio value. Do not apply that minimum to fresh deployment or BUY-only deployment of new cash.
+7. For rebalancing, DECISION = REBALANCE when at least one practical trade remains after tolerance and minimum-trade filters; otherwise DECISION = HOLD. Calculate practical whole-share trades, sell non-target and overweight holdings first, and use sale proceeds for buys. Cash withdrawal uses SELL-only or confirmed cash as specified in its scenario. Never require additional cash unless the selected scenario adds new money.
+8. For an existing-portfolio rebalance, reduce churn: ignore a position within 1 percentage point of target and suppress a trade below the greater of INR 100 or 0.5% of portfolio value. Do not apply that minimum to a requested cash withdrawal, fresh deployment or BUY-only deployment of new cash.
 9. For fresh or added cash, solve a whole-share integer allocation under the available budget. Compare feasible combinations and minimize the sum of squared percentage-point differences between post-trade weights and target weights, while applying a small penalty to residual cash. Do not call a plan "best" unless this comparison was actually performed.
 10. Recalculate portfolio weights from the chosen whole-share quantities and values. A small amount may hold only a subset of the target. Prefer useful diversification and closeness to target over forcing all 21 securities. Use remaining cash only when another share improves the allocation score; do not concentrate the portfolio merely to spend the last rupee. Never recommend increasing the investment amount merely because every target cannot be purchased.
 11. Never include a BUY or SELL row with zero shares. Omit unavailable trades entirely. Show residual cash and never place orders automatically.
@@ -524,6 +528,7 @@ st.markdown(
 )
 execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCENARIOS))
 calculated_plan = None
+withdrawal_amount = None
 if execution_scenario == "Start fresh with cash":
     default_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 1000.0
     starter_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 100.0
@@ -583,12 +588,38 @@ if execution_scenario == "Start fresh with cash":
         st.caption("Starter-basket mode" if calculated_plan["mode"].startswith("STARTER") else "Target-weight mode")
     except Exception as exc:
         st.info(f"A fresh-cash plan cannot be calculated until prices are available: {exc}")
+if execution_scenario == "Raise cash from existing holdings":
+    withdrawal_suggestion=None
+    if entry_estimate:
+        try:
+            reference_plan=allocate_public_lumpsum(
+                record["constituents"],price_snapshot,float(entry_estimate["minimum_capital_inr"])
+            )
+            withdrawal_suggestion=suggested_withdrawal(reference_plan,entry_estimate,record["constituents"])
+        except Exception:
+            LOGGER.warning("Illustrative withdrawal default is unavailable")
+    withdrawal_amount=st.number_input(
+        "Cash to raise (₹)",min_value=1.0,
+        value=float(withdrawal_suggestion["amount_inr"]) if withdrawal_suggestion else 1.0,
+        step=100.0,format="%.2f",key="cash_to_raise_inr",
+        help="Enter the net cash you need. The model suggestion is editable and does not choose your actual sales.",
+    )
+    if withdrawal_suggestion:
+        st.caption(
+            f"Suggested from one small model holding at ₹{withdrawal_suggestion['reference_capital_inr']:,.0f} "
+            "reference capital, after estimated charges. Change this to the cash you need."
+        )
+    else:
+        st.caption("Model suggestion unavailable. Enter the net cash you need, starting from ₹1.")
+    st.caption("Your broker report determines the actual sales. Attach it to your chosen AI assistant, not here.")
+
 st.warning(
     "If you share a broker report, first remove your name, PAN, demat/account number, email, phone, "
     "address, and any credentials. Review the AI provider's privacy policy."
 )
 execution_prompt, public_target = build_execution_plan_prompt(
-    current, record["constituents"], price_snapshot, execution_scenario, calculated_plan, entry_estimate
+    current, record["constituents"], price_snapshot, execution_scenario, calculated_plan, entry_estimate,
+    withdrawal_amount=withdrawal_amount,
 )
 version_label = f"p{int(current['portfolio_version']):03d}"
 action_1, action_2, action_3, action_4 = st.columns(4)
