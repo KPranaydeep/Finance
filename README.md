@@ -1,27 +1,24 @@
-# Personal Finance Toolkit 📊
+# CI policy-test isolation fix — v47
 
-A minimal Streamlit suite for smarter money planning:
+The failing test read your real public_review_policy.json and assumed approval was
+false. Approving the real policy correctly made that assumption false. This was a
+test bug, not a reason to disable your approved production policy.
 
-- 💰 LAMF Simulator  
-- 🎯 Target Corpus Planner
-- 🧠 Smart SWP Planner (Inflation-Proof)
-- 📈 Nifty 50 + alternative-assets rebalancer
+Replace these two files in GitHub main, preserving paths:
 
-🔗 [Launch App](https://finance-master.streamlit.app/)
+- tests/test_review_operations.py
+- tests/review_fixtures.py
 
-## Nifty alternative-assets rebalancer
+The rejection test now supplies explicitly unapproved in-memory data to the real
+policy loader. Other tests use independent, fresh fixtures instead of reading your
+production settings. Added coverage verifies approved policies, expired tariffs,
+strict boolean approval and fixture isolation. Test dates are fixed so these tests
+do not change behavior as the calendar advances.
 
-The root-level `nifty_alternative_rebalancer.py` Streamlit app compares Nifty 50
-with selectable non-company assets such as precious metals, cryptocurrencies,
-and ETFs. Selected alternatives are fetched together and presented as separate
-Nifty–alternative dual portfolios in one result table and overlapping chart.
+Do not change public_review_policy.json, your secrets, or any runtime code for this
+fix. The real policy approval and freshness guards are unchanged.
 
-Run from the repository root:
+Commit the replacements to main and use the new push-triggered test run. Re-running
+the old failed run uses its old commit and will repeat the old failure.
 
-```powershell
-python -m pip install -r requirements.txt
-python -m streamlit run nifty_alternative_rebalancer.py
-```
-
-For Streamlit Community Cloud, use `nifty_alternative_rebalancer.py` as the main
-file path.
+Based on main 75def9d0af087dcad8673dd3516d5c0739c4a711.

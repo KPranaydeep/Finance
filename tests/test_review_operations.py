@@ -1,6 +1,6 @@
 import unittest
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import patch
 from public_review.core import digest
 from public_review import store, market
@@ -62,9 +62,34 @@ class OperationTests(unittest.TestCase):
 
     def test_unapproved_policy_blocks(self):
         from public_review.config import load_policy
-        from pathlib import Path
-        with patch.dict('os.environ',{'PUBLIC_REVIEW_POLICY_PATH':str(Path(__file__).resolve().parents[1]/'public_review_policy.json')}):
-            with self.assertRaisesRegex(ValueError,'POLICY_APPROVAL_REQUIRED'): load_policy()
+        for approval in (False, None, 'true', 1):
+            with self.subTest(approval=approval):
+                fixture=policy()
+                fixture['policy_approved']=approval
+                with patch('public_review.config.Path.read_text',return_value=json.dumps(fixture)):
+                    with self.assertRaisesRegex(ValueError,'POLICY_APPROVAL_REQUIRED'):
+                        load_policy(today=date(2026,9,9))
+
+    def test_approved_policy_loads(self):
+        from public_review.config import load_policy
+        fixture=policy()
+        with patch('public_review.config.Path.read_text',return_value=json.dumps(fixture)):
+            self.assertEqual(load_policy(today=date(2026,9,9)),fixture)
+
+    def test_approved_but_stale_tariff_blocks(self):
+        from public_review.config import load_policy
+        with patch('public_review.config.Path.read_text',return_value=json.dumps(policy())):
+            with self.assertRaisesRegex(ValueError,'TARIFF_REVIEW_REQUIRED'):
+                load_policy(today=date(2026,12,9))
+
+    def test_policy_fixture_is_independent_and_returns_fresh_data(self):
+        with patch('pathlib.Path.read_text',side_effect=AssertionError('No production-file reads in fixture')):
+            first=policy()
+            first['policy_approved']=False
+            first['instrument_kinds'].clear()
+            fresh=policy()
+        self.assertTrue(fresh['policy_approved'])
+        self.assertEqual(len(fresh['instrument_kinds']),2)
 
     def test_delivery_error_is_recorded_without_exception_or_secrets(self):
         from public_review.service import notify_safely
@@ -89,4 +114,3 @@ class OperationTests(unittest.TestCase):
         publications(db,'B')
         self.assertIn('v.publication_status',db.sql[0])
         self.assertNotIn('v.status=',db.sql[0])
-
