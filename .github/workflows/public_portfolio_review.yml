@@ -1,0 +1,51 @@
+name: Public portfolio model review
+
+on:
+  schedule:
+    # Daily, including weekends/special sessions: stale heartbeat and alert checks
+    # must work independently of NAV/forecast workflow failures.
+    - cron: "45 12 * * *"
+  workflow_dispatch:
+    inputs:
+      acknowledge_baseline:
+        description: "Optional frozen baseline ID: acknowledge review only; does not record a trade"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-portfolio-model-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    environment: PRODUCTION
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Test model monitoring
+        run: python -m unittest discover -s tests -p 'test_review_*.py' -v
+      - name: Run model review and notify owner
+        run: python update_public_review.py
+        env:
+          PUBLIC_REVIEW_ENABLED: ${{ vars.PUBLIC_REVIEW_ENABLED || 'false' }}
+          PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
+          PUBLIC_BASKET_ID: PUBLIC-01
+          PUBLIC_REVIEW_ACK_BASELINE: ${{ inputs.acknowledge_baseline }}
+          PUBLIC_REVIEW_ALERT_CHANNEL: ${{ vars.PUBLIC_REVIEW_ALERT_CHANNEL || 'none' }}
+          PUBLIC_REVIEW_TELEGRAM_TOKEN: ${{ secrets.PUBLIC_REVIEW_TELEGRAM_TOKEN }}
+          PUBLIC_REVIEW_TELEGRAM_CHAT_ID: ${{ secrets.PUBLIC_REVIEW_TELEGRAM_CHAT_ID }}
+          PUBLIC_REVIEW_SMTP_HOST: ${{ secrets.PUBLIC_REVIEW_SMTP_HOST }}
+          PUBLIC_REVIEW_SMTP_USER: ${{ secrets.PUBLIC_REVIEW_SMTP_USER }}
+          PUBLIC_REVIEW_SMTP_PASSWORD: ${{ secrets.PUBLIC_REVIEW_SMTP_PASSWORD }}
+          PUBLIC_REVIEW_EMAIL_FROM: ${{ secrets.PUBLIC_REVIEW_EMAIL_FROM }}
+          PUBLIC_REVIEW_EMAIL_TO: ${{ secrets.PUBLIC_REVIEW_EMAIL_TO }}
+
