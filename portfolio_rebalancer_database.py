@@ -1944,14 +1944,8 @@ def add_symbols_to_master(symbols, owner):
 
     return added, duplicates, invalid_symbols, missing_initial_price
 
-
 def add_symbols_to_universal(symbols):
-    """Add symbols to the shared universal portfolio (quantity fixed at 0).
-
-    This list is visible/editable by every user and never counts toward anyone's
-    real holdings; it exists purely as a shared reference/watchlist that any user
-    can copy into their own personal holdings.
-    """
+    """Add symbols to the shared universal portfolio (quantity fixed at 0)..."""
     if not symbols:
         return [], [], []
 
@@ -1985,28 +1979,44 @@ def add_symbols_to_universal(symbols):
     duplicates = [s for s in valid_symbols if s in existing]
     new_instruments = [item for item in instruments if item["symbol"] not in existing]
 
+    # ✅ ADD THIS BLOCK (same as add_symbols_to_master)
+    ticker_price_map = {}
+    if new_instruments:
+        try:
+            ticker_price_map = get_latest_price_map(
+                tuple(item["yahoo_ticker"] for item in new_instruments)
+            )
+        except Exception:
+            ticker_price_map = {}
+
     now = datetime.now().isoformat(timespec="seconds")
     added = []
 
     with get_db_connection() as conn:
         for item in new_instruments:
+            ticker = item["yahoo_ticker"]
+            initial_price = ticker_price_map.get(ticker)  # ✅ Fetch price
+            if initial_price is None or not np.isfinite(initial_price) or initial_price <= 0:
+                initial_price = None
+            
             conn.execute(
                 """
                 INSERT INTO master_holdings
                     (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
                      quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     UNIVERSAL_OWNER, item["symbol"], item["stock_name"], item["yahoo_ticker"],
-                    item["exchange"], _normalize_currency_code(item["currency"]), now, now,
+                    item["exchange"], _normalize_currency_code(item["currency"]),
+                    initial_price,  # ✅ Use fetched price instead of NULL
+                    now, now,
                 ),
             )
             added.append(item["symbol"])
         conn.commit()
 
     return added, duplicates, invalid_symbols
-
 
 def remove_symbols_from_master(symbols, owner):
     if not symbols:
