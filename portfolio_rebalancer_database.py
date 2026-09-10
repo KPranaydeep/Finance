@@ -1870,7 +1870,6 @@ def convert_price_history_to_inr(prices, ticker_currency_pairs):
 
     return converted
 
-
 def add_symbols_to_master(symbols, owner):
     if not symbols:
         return [], [], [], []
@@ -1882,34 +1881,53 @@ def add_symbols_to_master(symbols, owner):
 
     for entered_symbol in symbols:
         instrument = resolve_yahoo_instrument(entered_symbol, lookup)
+
         if instrument is None:
             invalid_symbols.append(entered_symbol)
             continue
+
         symbol = instrument["symbol"]
+
         if symbol not in seen_symbols:
             instruments.append(instrument)
             seen_symbols.add(symbol)
 
     valid_symbols = [item["symbol"] for item in instruments]
+
     with get_db_connection() as conn:
         existing = {
             row["symbol"]
             for row in conn.execute(
-                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
-                    ",".join("?" for _ in valid_symbols)
-                ),
+                """
+                SELECT symbol
+                FROM master_holdings
+                WHERE owner = ?
+                  AND symbol IN ({})
+                """.format(",".join("?" for _ in valid_symbols)),
                 [owner, *valid_symbols],
             ).fetchall()
         } if valid_symbols else set()
 
-    duplicates = [s for s in valid_symbols if s in existing]
-    new_instruments = [item for item in instruments if item["symbol"] not in existing]
+    duplicates = [
+        symbol for symbol in valid_symbols
+        if symbol in existing
+    ]
 
+    new_instruments = [
+        item for item in instruments
+        if item["symbol"] not in existing
+    ]
+
+    # First attempt: fetch prices in bulk.
     ticker_price_map = {}
+
     if new_instruments:
         try:
             ticker_price_map = get_latest_price_map(
-                tuple(item["yahoo_ticker"] for item in new_instruments)
+                tuple(
+                    item["yahoo_ticker"]
+                    for item in new_instruments
+                )
             )
         except Exception:
             ticker_price_map = {}
@@ -1920,32 +1938,75 @@ def add_symbols_to_master(symbols, owner):
 
     with get_db_connection() as conn:
         for item in new_instruments:
-            ticker = item["yahoo_ticker"]
+            ticker = str(item["yahoo_ticker"]).strip().upper()
             initial_price = ticker_price_map.get(ticker)
-            if initial_price is None or not np.isfinite(initial_price) or initial_price <= 0:
+
+            # Second attempt: retry individually if the bulk request failed.
+            if (
+                initial_price is None
+                or not np.isfinite(initial_price)
+                or initial_price <= 0
+            ):
+                try:
+                    retry_price_map = get_latest_price_map((ticker,))
+                    initial_price = retry_price_map.get(ticker)
+                except Exception:
+                    initial_price = None
+
+            # Store NULL only if both attempts failed.
+            if (
+                initial_price is None
+                or not np.isfinite(initial_price)
+                or initial_price <= 0
+            ):
                 initial_price = None
                 missing_initial_price.append(item["symbol"])
+            else:
+                initial_price = float(initial_price)
 
             conn.execute(
                 """
                 INSERT INTO master_holdings
-                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
-                     quantity, average_price, added_at, updated_at)
+                    (
+                        owner,
+                        symbol,
+                        stock_name,
+                        yahoo_ticker,
+                        exchange,
+                        currency,
+                        quantity,
+                        average_price,
+                        added_at,
+                        updated_at
+                    )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    owner, item["symbol"], item["stock_name"], ticker,
-                    item["exchange"], _normalize_currency_code(item["currency"]),
-                    1.0, initial_price, now, now,
+                    owner,
+                    item["symbol"],
+                    item["stock_name"],
+                    ticker,
+                    item["exchange"],
+                    _normalize_currency_code(item["currency"]),
+                    1.0,
+                    initial_price,
+                    now,
+                    now,
                 ),
             )
+
             added.append(item["symbol"])
+
         conn.commit()
 
     return added, duplicates, invalid_symbols, missing_initial_price
 
 def add_symbols_to_universal(symbols):
-    """Add symbols to the shared universal portfolio (quantity fixed at 0)..."""
+    """Add symbols to the shared universal portfolio.
+
+    Quantity is fixed at zero. The latest available native-market price
+    is stored as the initial average price.
+    """
     if not symbols:
         return [], [], []
 
@@ -1956,35 +2017,53 @@ def add_symbols_to_universal(symbols):
 
     for entered_symbol in symbols:
         instrument = resolve_yahoo_instrument(entered_symbol, lookup)
+
         if instrument is None:
             invalid_symbols.append(entered_symbol)
             continue
+
         symbol = instrument["symbol"]
+
         if symbol not in seen_symbols:
             instruments.append(instrument)
             seen_symbols.add(symbol)
 
     valid_symbols = [item["symbol"] for item in instruments]
+
     with get_db_connection() as conn:
         existing = {
             row["symbol"]
             for row in conn.execute(
-                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
-                    ",".join("?" for _ in valid_symbols)
-                ),
+                """
+                SELECT symbol
+                FROM master_holdings
+                WHERE owner = ?
+                  AND symbol IN ({})
+                """.format(",".join("?" for _ in valid_symbols)),
                 [UNIVERSAL_OWNER, *valid_symbols],
-            ).fetchall()
-        } if valid_symbols else set()
+*           ).fetchall()
+        } *f valid_symbols else set()
 
-    duplicates = [s for s in valid_symbols if s in existing]
-    new_instruments = [item for item in instruments if item["symbol"] not in existing]
+    duplicates = [
+        symbol for symbol in valid_symbols
+        if symbol in existing
+    ]
 
-    # ✅ ADD THIS BLOCK (same as add_symbols_to_master)
+    new_instruments = [
+        item for item in instruments
+        if item["symbol"] not in existing
+    ]
+
+    # First attempt: fetch prices in bulk.
     ticker_price_map = {}
+
     if new_instruments:
         try:
             ticker_price_map = get_latest_price_map(
-                tuple(item["yahoo_ticker"] for item in new_instruments)
+                tuple(
+                    item["yahoo_ticker"]
+                    for item in new_instruments
+                )
             )
         except Exception:
             ticker_price_map = {}
@@ -1994,30 +2073,66 @@ def add_symbols_to_universal(symbols):
 
     with get_db_connection() as conn:
         for item in new_instruments:
-            ticker = item["yahoo_ticker"]
-            initial_price = ticker_price_map.get(ticker)  # ✅ Fetch price
-            if initial_price is None or not np.isfinite(initial_price) or initial_price <= 0:
+            ticker = str(item["yahoo_ticker"]).strip().upper()
+            initial_price = ticker_price_map.get(ticker)
+
+            # Second attempt: retry individually if the bulk request failed.
+            if (
+                initial_price is None
+                or not np.isfinite(initial_price)
+                or initial_price <= 0
+            ):
+                try:
+                    retry_price_map = get_latest_price_map((ticker,))
+                    initial_price = retry_price_map.get(ticker)
+                except Exception:
+                    initial_price = None
+
+            # Store NULL only if both attempts failed.
+            if (
+                initial_price is None
+                or not np.isfinite(initial_price)
+                or initial_price <= 0
+            ):
                 initial_price = None
-            
+            else:
+                initial_price = float(initial_price)
+
             conn.execute(
                 """
                 INSERT INTO master_holdings
-                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
-                     quantity, average_price, added_at, updated_at)
+                    (
+                        owner,
+                        symbol,
+                        stock_name,
+                        yahoo_ticker,
+                        exchange,
+                        currency,
+                        quantity,
+                        average_price,
+                        added_at,
+                        updated_at
+                    )
                 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
-                    UNIVERSAL_OWNER, item["symbol"], item["stock_name"], item["yahoo_ticker"],
-                    item["exchange"], _normalize_currency_code(item["currency"]),
-                    initial_price,  # ✅ Use fetched price instead of NULL
-                    now, now,
+                    UNIVERSAL_OWNER,
+                    item["symbol"],
+                    item["stock_name"],
+                    ticker,
+                    item["exchange"],
+                    _normalize_currency_code(item["currency"]),
+                    initial_price,
+                    now,
+                    now,
                 ),
             )
+
             added.append(item["symbol"])
+
         conn.commit()
 
     return added, duplicates, invalid_symbols
-
 def remove_symbols_from_master(symbols, owner):
     if not symbols:
         return [], []
