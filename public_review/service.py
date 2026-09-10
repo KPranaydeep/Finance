@@ -7,7 +7,7 @@ import pandas as pd
 from . import VERSION
 from . import store, market
 from .core import freeze, evaluate, compare_exits, decision, digest
-from .forecast import estimate, validate
+from .forecast import estimate, validate, METHOD
 from .notifications import send
 
 SAFE_ERRORS = {
@@ -35,7 +35,7 @@ def publications(conn, basket):
     return result
 
 
-def build_assessment(baseline, histories, as_of, future, policy, prior, latest_weights, now):
+def build_assessment(baseline, histories, as_of, future, policy, prior, latest_weights, now, comparisons=True):
     prices = {t: float(h.loc[as_of, "Close"]) for t, h in histories.items()}
     dividends = []
     for lot in baseline["lots"]:
@@ -72,12 +72,16 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
         validation = validate(returns, baseline, prices, list(returns.index), policy)
         future_baseline = deepcopy(baseline)
         future_baseline["cash"] += sum(x["net"] for x in dividends)
-        forecast = estimate(future_baseline, prices, returns, future, policy, peak, validation)
+        forecast = estimate(future_baseline, prices, returns, future, policy, peak, validation, dividends=dividends)
     ack = store.latest(prior, "ACKNOWLEDGED", baseline["baseline_id"])
     last = store.latest(prior, "ASSESSMENT", baseline["baseline_id"])
     promised = (last["payload"].get("decision", {}).get("next_review") if last and
                 (not ack or ack["seq"] < last["seq"]) else None)
-    assessed = decision(metrics, baseline, latest_weights, policy, peak, forecast, promised)
+    # Keep an operational risk-check date even when statistical timing fails
+    # validation; do not label that fallback as a target-crossing forecast.
+    timing = {"next_review": forecast.get("next_review") or (future[0] if future else None)}
+    assessed = decision(metrics, baseline, latest_weights, policy, peak, timing, promised)
+    assessed["date_basis"] = "VALIDATED_FORECAST" if forecast.get("next_review") else "NEXT_SESSION_RISK_CHECK"
     try:
         from public_market_mood import fetch_mmi
         mood = fetch_mmi()
@@ -86,7 +90,7 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
     return {"version": VERSION, "baseline_id": baseline["baseline_id"], "as_of": as_of,
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation,
-            "comparisons": compare_exits(baseline, prices, as_of, policy, metrics),
+            "comparisons": compare_exits(baseline, prices, as_of, policy, metrics) if comparisons else [],
             "mmi": mood, "price_hash": digest({t: {d: float(v) for d, v in h.Close.items()} for t, h in histories.items()}),
             "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
             "model_only": True}
@@ -150,7 +154,7 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 data = {t: h for t, h in data.items() if t in {r["ticker"] for r in baseline["lots"]}}
             stage = "assessment"
             payload = build_assessment(baseline, data, as_of, future, policy, history, pubs[0]["weights"], now)
-            key = "assessment:" + baseline_id + ":" + digest({"as_of": as_of, "policy": policy,
+            key = "assessment:" + baseline_id + ":" + digest({"method": METHOD, "as_of": as_of, "policy": policy,
                   "prices": payload["price_hash"], "ack": (store.latest(history, "ACKNOWLEDGED", baseline_id) or {}).get("seq")})
             store.append(conn, basket, key, "ASSESSMENT", baseline_id, payload)
             store.append(conn, basket, "heartbeat:" + baseline_id + ":" + now.isoformat(),

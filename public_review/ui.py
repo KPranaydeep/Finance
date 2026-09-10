@@ -19,6 +19,57 @@ def percent(value):
     return "N/A" if value is None else f"{value:.2%}"
 
 
+@st.cache_data(ttl=300, max_entries=16, show_spinner=False)
+def load_fresh_preview(basket_id, publication_id):
+    from .preview import historical_preview
+    from .config import load_policy
+    from .service import publications
+    from public_basket_postgres import get_public_basket_database_url, connect_public_basket_db
+    policy = load_policy()
+    with connect_public_basket_db(get_public_basket_database_url()) as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        pubs = publications(conn, basket_id)
+        publication = next(p for p in pubs if p["publication_id"] == publication_id)
+        events = store.read(conn, basket_id)
+    return historical_preview(publication, policy, events)
+
+
+def render_crossings(forecast):
+    rows = forecast.get("security_crossings", [])
+    if not rows:
+        return
+    st.caption(f"Net annualized target: {percent(forecast['target_xirr'])} · "
+               f"Crossing probability threshold: {percent(forecast['crossing_probability_threshold'])}. "
+               "A probability threshold is not statistical confidence or a guaranteed exit date.")
+    st.table(pd.DataFrame([{"Security": r["ticker"],
+                           "Estimated crossing": r["crossing_date"] or "Not reached in horizon",
+                           "Probability by date": percent(r["probability"])} for r in rows]))
+    st.caption("Research estimates unless validation passes. A crossing requests a review, not an automatic sale. Short-term XIRR can look large despite a small rupee gain.")
+
+
+def render_fresh_preview(p):
+    d, f = p["decision"], p["forecast"]
+    # Retain earlier page-view dates in this session; durable workflow dates
+    # are also honored by the assessment engine.
+    key = "review_promise_" + p["publication_id"] + "_" + str(p.get("ack_epoch", 0))
+    candidate = d.get("next_review")
+    prior = st.session_state.get(key)
+    date = min(x for x in (candidate, prior) if x) if candidate or prior else None
+    st.session_state[key] = date
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    due = bool(d.get("reasons")) or bool(date and date <= today)
+    st.metric("Latest suggested review", "Review now" if due else (date or "Next session risk check"))
+    if p["provisional"]:
+        st.caption("Provisional: " + p["assumption"])
+    if d.get("target_crossed_securities"):
+        st.warning("Net target already crossed: " + ", ".join(d["target_crossed_securities"]) + ". Review costs and risk before selling.")
+    if f.get("next_review") is None:
+        st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
+    st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
+    with st.expander("Earliest security target crossings"):
+        render_crossings(f)
+
+
 def render_pending(row, now):
     if row is None:
         st.info("No monitoring record exists for this publication yet. Run the enabled model-review workflow; if it already ran, check that the page and workflow use the same basket and database.")
@@ -112,6 +163,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
                            file_name=f"model-exit-comparison-P{baseline['portfolio_version']:03d}.json", mime="application/json")
     with st.expander("Review-date evidence and assumptions"):
         forecast = p["forecast"]
+        render_crossings(forecast)
         st.write("Forecast status: " + forecast["status"].replace("_", " ").lower())
         if forecast.get("curve"):
             curve = pd.DataFrame(forecast["curve"])
@@ -132,6 +184,13 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
 
 def render_review_panel(basket_id, active_publications):
     st.subheader("Your next portfolio review")
+    if active_publications:
+        try:
+            with st.spinner("Assessing security targets from available history..."):
+                preview = load_fresh_preview(basket_id, active_publications[0]["publication_id"])
+            render_fresh_preview(preview)
+        except Exception:
+            st.warning("Fresh historical review is unavailable. Stored monitoring below may be older; no live review date is implied.")
     try:
         events = load_events(basket_id)
         render_events(events, {p["publication_id"] for p in active_publications},

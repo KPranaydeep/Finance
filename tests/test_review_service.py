@@ -31,7 +31,9 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(sum(r['kind']=='BASELINE' for r in db.rows),1)
         self.assertEqual(sum(r['kind']=='ASSESSMENT' for r in db.rows),1)
         assessment=next(r['payload'] for r in db.rows if r['kind']=='ASSESSMENT')
-        self.assertIsNone(assessment['decision']['next_review'])
+        self.assertEqual(assessment['decision']['next_review'], '2026-09-10')
+        self.assertEqual(assessment['decision']['date_basis'], 'NEXT_SESSION_RISK_CHECK')
+        self.assertIsNone(assessment['forecast']['next_review'])
         self.assertEqual(assessment['metrics']['date'],'2026-09-09')
 
     def test_split_does_not_silently_restate_frozen_units(self):
@@ -45,4 +47,3 @@ class ServiceTests(unittest.TestCase):
         h['A.NS']=h['A.NS'].drop('2026-09-08')
         with self.assertRaisesRegex(ValueError,'COMMON_HISTORY_HAS_MISSING_SESSIONS'):
             build_assessment(b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],datetime(2026,9,9,13,tzinfo=timezone.utc))
-

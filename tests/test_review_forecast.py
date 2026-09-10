@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 import pandas as pd
-from public_review.forecast import paths, estimate, validate
+from public_review.forecast import paths, estimate, validate, METHOD
 from public_review.core import digest
 from review_fixtures import policy, baseline
 
@@ -30,7 +30,7 @@ class ForecastTests(unittest.TestCase):
         b=baseline(); p=policy()
         r=pd.DataFrame(np.zeros((252,2)),columns=['A.NS','B.NS'])
         days=[str(d.date()) for d in pd.bdate_range('2026-09-10',periods=20)]
-        v={'passed':True,'policy_hash':digest(p),'tickers':['A.NS','B.NS']}
+        v={'passed':True,'policy_hash':digest(p),'tickers':['A.NS','B.NS'],'method':METHOD}
         self.assertIsNotNone(estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000,v)['next_review'])
         v['policy_hash']='wrong'
         self.assertIsNone(estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000,v)['next_review'])
@@ -45,4 +45,3 @@ class ForecastTests(unittest.TestCase):
         for f in v['detail']:
             self.assertLess(f['train_end_row'],f['test_start_row'])
         self.assertLess(v['detail'][0]['test_end_row'],v['detail'][1]['test_start_row'])
-

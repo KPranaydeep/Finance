@@ -122,6 +122,10 @@ def decision(metrics, baseline, latest_weights, policy, peak, forecast=None, pro
         reasons.append("RISK_REVIEW")
     if metrics["xirr"] is not None and metrics["xirr"] >= policy["target_xirr"]:
         reasons.append("PROFIT_TAKING_REVIEW")
+    crossed = [r["ticker"] for r in metrics["rows"]
+               if r.get("xirr") is not None and r["xirr"] >= policy["target_xirr"]]
+    if crossed:
+        reasons.append("SECURITY_TARGET_REVIEW")
     rebalance = {"status": "NO_MATERIAL_DRIFT", "drift": drift}
     if drift >= policy["drift_limit"]:
         # benefit must be a separately validated comparable annual net estimate,
@@ -135,7 +139,10 @@ def decision(metrics, baseline, latest_weights, policy, peak, forecast=None, pro
     next_review = min(x for x in (candidate, promised) if x) if candidate or promised else None
     if next_review and next_review <= metrics["date"]:
         reasons.append("SCHEDULED_REVIEW_DUE")
+    if reasons:
+        next_review = min(next_review, metrics["date"]) if next_review else metrics["date"]
     return {"status": reasons[0] if reasons else "NO_TRIGGER_DETECTED", "reasons": reasons,
+            "target_crossed_securities": crossed,
             "next_review": next_review, "drawdown": drawdown, "rebalance": rebalance,
             "note": "No trigger is not a safety guarantee. Review signals do not submit trades."}
 
@@ -191,4 +198,3 @@ def compare_exits(baseline, prices, day, policy, metrics):
                        "orders": [{"ticker": rows[i]["ticker"], "shares": q} for i, q, _ in chosen],
                        "status": "MINIMUM_ESTIMATED_FEE_PLUS_TAX_WITHIN_CANDIDATE_GRID"})
     return output
-

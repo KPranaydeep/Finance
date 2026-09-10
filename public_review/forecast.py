@@ -3,6 +3,8 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
+METHOD = "joint-security-first-passage-v2"
+
 
 def paths(returns, days, count, block, seed):
     values = np.asarray(returns, dtype=float)
@@ -19,7 +21,9 @@ def paths(returns, days, count, block, seed):
     return out
 
 
-def estimate(baseline, prices, returns, future_dates, policy, peak, validation=None, count=None):
+def estimate(baseline, prices, returns, future_dates, policy, peak, validation=None, count=None, dividends=None):
+    if not future_dates:
+        raise ValueError("Future exits must follow entry")
     lots = baseline["lots"]
     tickers = [r["ticker"] for r in lots]
     matrix = returns[tickers].to_numpy(dtype=float)
@@ -44,6 +48,28 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     weights = gross / total[:, :, None]
     from datetime import date
     days = np.array([(date.fromisoformat(d) - date.fromisoformat(baseline["entry_date"])).days for d in future_dates])
+    if not len(days) or np.any(days <= 0):
+        raise ValueError("Future exits must follow entry")
+    # NPV at the target rate >= 0 is equivalent to crossing target XIRR
+    # for conventional cash flows. Include entry charges and dated net dividends.
+    outlays = q * cost + np.array([r["entry_charges"]["total"] for r in lots])
+    dividend_pv = np.array([sum(
+        x["net"] / (1 + policy["target_xirr"]) ** (
+            (date.fromisoformat(x["date"]) - date.fromisoformat(r["entry_date"])).days / 365)
+        for x in (dividends or []) if x["ticker"] == r["ticker"]) for r in lots])
+    security_target = (outlays - dividend_pv)[None, :] * np.power(
+        1 + policy["target_xirr"], days[:, None] / 365)
+    security_profit = gross - fees - tax >= security_target[None, :, :]
+    security_probability = np.maximum.accumulate(security_profit, axis=1).mean(axis=0)
+    security_crossings = []
+    for j, ticker in enumerate(tickers):
+        hits = np.flatnonzero(security_probability[:, j] >= policy["crossing_probability"])
+        index = int(hits[0]) if len(hits) else None
+        security_crossings.append({
+            "ticker": ticker, "crossing_date": future_dates[index] if index is not None else None,
+            "probability": float(security_probability[index, j]) if index is not None else None,
+            "horizon_probability": float(security_probability[-1, j])})
+    earliest_security = min((r["crossing_date"] for r in security_crossings if r["crossing_date"]), default=None)
     target = baseline["capital"] * np.power(1 + policy["target_xirr"], days / 365)
     profit = net >= target
     running_peak = np.maximum.accumulate(np.maximum(net, peak), axis=1)
@@ -51,19 +77,28 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             (weights.max(axis=2) > policy["concentration_limit"]))
     target_weights = np.array([baseline["weights"].get(t, 0.) for t in tickers])
     drift = np.max(np.abs(weights - target_weights), axis=2) >= policy["drift_limit"]
-    crossing = np.maximum.accumulate(profit | risk | drift, axis=1)
+    crossing = np.maximum.accumulate(profit | security_profit.any(axis=2) | risk | drift, axis=1)
     probability = crossing.mean(axis=0)
-    hit = np.flatnonzero(probability >= policy["crossing_probability"])
+    # Select an individually qualifying security, not a union of weak chances
+    # across many securities. Risk/basket triggers may require earlier review.
+    other_probability = np.maximum.accumulate(profit | risk | drift, axis=1).mean(axis=0)
+    hit = np.flatnonzero(other_probability >= policy["crossing_probability"])
     # Review one session before the first probability-limit breach, never before
     # tomorrow. No crossing -> bounded monitoring horizon, not "never".
     offset = max(0, int(hit[0]) - 1) if len(hit) else len(future_dates) - 1
     candidate = future_dates[offset]
+    if earliest_security:
+        candidate = min(candidate, earliest_security)
     approved = bool(validation and validation.get("passed") and
                     validation.get("policy_hash") == digest(policy) and
-                    validation.get("tickers") == tickers)
-    return {"method": "joint-stationary-block-first-passage-v1",
+                    validation.get("tickers") == tickers and validation.get("method") == METHOD)
+    return {"method": METHOD,
             "status": "WALK_FORWARD_CHECKS_PASSED_EXPERIMENTAL" if approved else "RESEARCH_ONLY",
             "next_review": candidate if approved else None, "research_candidate": candidate,
+            "earliest_security_crossing": earliest_security,
+            "trigger_securities": [r["ticker"] for r in security_crossings if earliest_security and r["crossing_date"] == earliest_security],
+            "security_crossings": security_crossings, "target_xirr": policy["target_xirr"],
+            "crossing_probability_threshold": policy["crossing_probability"],
             "never_crossed_fraction": float(1 - probability[-1]),
             "paths": count, "common_returns": len(matrix), "seed": policy["seed"],
             "curve": [{"date": d, "any_review_probability": float(probability[i]),
@@ -110,6 +145,7 @@ def validate(returns, baseline, prices, dates, policy):
             peak = max(peak, m["net_proceeds"])
             w = {r["ticker"]: r["gross"] / m["gross_value"] for r in m["rows"]}
             if ((m["xirr"] is not None and m["xirr"] >= policy["target_xirr"]) or
+                any(r["xirr"] is not None and r["xirr"] >= policy["target_xirr"] for r in m["rows"]) or
                 m["net_proceeds"] / peak - 1 <= -policy["drawdown_limit"] or
                 max(w.values()) > policy["concentration_limit"] or
                 max(abs(w.get(t, 0) - b["weights"].get(t, 0)) for t in w) >= policy["drift_limit"]):
@@ -132,10 +168,9 @@ def validate(returns, baseline, prices, dates, policy):
     # Require both event and non-event coverage and a nontrivial Brier threshold.
     passed = (n >= policy["validation_min_folds"] and events >= 5 and n - events >= 5 and
               brier <= policy["validation_max_brier"] and late <= weekly)
-    return {"passed": bool(passed), "policy_hash": digest(policy),
+    return {"passed": bool(passed), "policy_hash": digest(policy), "method": METHOD,
             "tickers": list(values.columns), "folds": n, "events": events, "brier": brier,
             "adaptive_late": late, "weekly_late": weekly,
             "monthly_late": sum(f["monthly_late"] for f in folds),
             "adaptive_unnecessary": sum(f["adaptive_unnecessary"] for f in folds),
             "detail": folds, "scope": "Conditional review timing only; not tax, alpha, or net-strategy-performance validation"}
-
