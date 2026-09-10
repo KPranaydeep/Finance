@@ -48,4 +48,10 @@ jobs:
           PUBLIC_REVIEW_SMTP_PASSWORD: ${{ secrets.PUBLIC_REVIEW_SMTP_PASSWORD }}
           PUBLIC_REVIEW_EMAIL_FROM: ${{ secrets.PUBLIC_REVIEW_EMAIL_FROM }}
           PUBLIC_REVIEW_EMAIL_TO: ${{ secrets.PUBLIC_REVIEW_EMAIL_TO }}
-
+      - name: Export automatically completed review policy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-public-review-policy
+          path: public_review_policy.json
+          retention-days: 7
