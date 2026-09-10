@@ -40,4 +40,3 @@ def load_policy(today=None):
     if policy["capital_inr"] is not None and (not math.isfinite(policy["capital_inr"]) or policy["capital_inr"] < 1):
         raise ValueError("INVALID_CAPITAL")
     return policy
-

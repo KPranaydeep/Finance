@@ -49,4 +49,3 @@ def append(conn, basket_id, key, kind, baseline_id, payload):
 def latest(rows, kind, baseline_id=None):
     return next((r for r in reversed(rows) if r["kind"] == kind and
                  (baseline_id is None or r["baseline_id"] == baseline_id)), None)
-

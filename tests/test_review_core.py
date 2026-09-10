@@ -117,4 +117,3 @@ class ReviewCoreTests(unittest.TestCase):
         m=evaluate(b,prices,"2026-09-09",p)
         options=compare_exits(b,prices,"2026-09-09",p,m)
         self.assertEqual(options[2]["status"],"INSUFFICIENT_NET_PROCEEDS")
-

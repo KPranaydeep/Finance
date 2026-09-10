@@ -43,4 +43,3 @@ class UiTests(unittest.TestCase):
         app.selectbox[0].set_value(1).run()
         self.assertFalse(app.exception)
         self.assertEqual(len(app.metric),4)
-

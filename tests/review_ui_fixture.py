@@ -27,4 +27,3 @@ if mode=='second':
     other=deepcopy(b); other['baseline_id']='other'; other['portfolio_version']=3; other['publication_id']='PUB-OTHER'
     events.append({'kind':'BASELINE','baseline_id':'other','seq':3,'payload':other})
 render_events(events,now=now)
-

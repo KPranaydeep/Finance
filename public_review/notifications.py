@@ -33,4 +33,3 @@ def send(message):
     else:
         raise ValueError("UNKNOWN_ALERT_CHANNEL")
     return True
-

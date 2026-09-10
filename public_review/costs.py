@@ -81,4 +81,3 @@ def sell_value(quantity, price, lot, day, policy):
                 tax_rate(lot["kind"], lot["entry_date"], day, policy))
     return {"gross": gross, "fees": fees, "tax": tax,
             "net": round(gross - fees["total"] - tax, 2)}
-
