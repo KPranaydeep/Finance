@@ -189,8 +189,19 @@ def render_review_panel(basket_id, active_publications):
             with st.spinner("Assessing security targets from available history..."):
                 preview = load_fresh_preview(basket_id, active_publications[0]["publication_id"])
             render_fresh_preview(preview)
-        except Exception:
-            st.warning("Fresh historical review is unavailable. Stored monitoring below may be older; no live review date is implied.")
+        except Exception as exc:
+            from .service import SAFE_ERRORS
+            allowed = SAFE_ERRORS | {"POLICY_APPROVAL_REQUIRED", "TARIFF_REVIEW_REQUIRED",
+                                     "UNSUPPORTED_TAX_OR_ACCOUNT_PROFILE", "NSE_CLASSIFICATION_REQUIRED",
+                                     "INTEGER_POLICY_REQUIRED", "INVALID_CAPITAL"}
+            code = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else {
+                FileNotFoundError: "POLICY_FILE_MISSING",
+                ModuleNotFoundError: "PREVIEW_MODULE_MISSING",
+                StopIteration: "PUBLICATION_NOT_FOUND",
+            }.get(type(exc), "PREVIEW_CHECK_FAILED")
+            st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
+            if code == "INSTRUMENT_CLASSIFICATION_REQUIRED":
+                st.caption("Add explicit instrument_kinds for every published ticker in public_review_policy.json. Stocks and overseas/gold ETFs have different modeled tax treatment; do not default every ticker to equity.")
     try:
         events = load_events(basket_id)
         render_events(events, {p["publication_id"] for p in active_publications},
