@@ -7,7 +7,8 @@ from .costs import KINDS
 
 
 def load_policy(today=None):
-    path = Path(os.environ.get("PUBLIC_REVIEW_POLICY_PATH", "public_review_policy.json"))
+    path = Path(os.environ.get("PUBLIC_REVIEW_POLICY_PATH",
+                               str(Path(__file__).resolve().parents[1] / "public_review_policy.json")))
     policy = json.loads(path.read_text(encoding="utf-8"))
     if policy.get("policy_approved") is not True:
         raise ValueError("POLICY_APPROVAL_REQUIRED")
