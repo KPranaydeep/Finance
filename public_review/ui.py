@@ -70,7 +70,7 @@ def render_fresh_preview(p):
     if p.get("history_coverage"):
         h = p["history_coverage"]
         st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
-    with st.expander("Earliest security target crossings"):
+    with st.expander("Earliest security target crossings", expanded=True):
         render_crossings(f)
 
 

@@ -36,7 +36,9 @@ def load_policy(today=None):
                 "validation_horizon", "validation_min_folds", "history_years", "tariff_max_age_days"):
         if not isinstance(policy[key], int):
             raise ValueError("INTEGER_POLICY_REQUIRED")
-    if any(not t.endswith(".NS") or k not in KINDS for t, k in policy["instrument_kinds"].items()):
+    if any(not ((t.endswith(".NS") and k in KINDS) or
+                (not t.endswith(".NS") and k == "foreign_us_listing"))
+           for t, k in policy["instrument_kinds"].items()):
         raise ValueError("NSE_CLASSIFICATION_REQUIRED")
     if policy["capital_inr"] is not None and (not math.isfinite(policy["capital_inr"]) or policy["capital_inr"] < 1):
         raise ValueError("INVALID_CAPITAL")

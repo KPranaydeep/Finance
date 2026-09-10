@@ -254,86 +254,6 @@ def _read_fast_info_value(fast_info, key):
     except Exception:
         return None
 
-def backfill_missing_average_prices(owner):
-    """Fill missing average prices using the latest available market price."""
-
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT symbol, yahoo_ticker
-            FROM master_holdings
-            WHERE owner = ?
-              AND (average_price IS NULL OR average_price <= 0)
-              AND yahoo_ticker IS NOT NULL
-              AND TRIM(yahoo_ticker) <> ''
-            """,
-            (owner,),
-        ).fetchall()
-
-    if not rows:
-        return 0, []
-
-    ticker_to_symbol = {
-        str(row["yahoo_ticker"]).strip().upper(): row["symbol"]
-        for row in rows
-    }
-
-    tickers = tuple(ticker_to_symbol.keys())
-
-    try:
-        price_map = get_latest_price_map(tickers)
-    except Exception:
-        price_map = {}
-
-    updated_symbols = []
-    now = datetime.now().isoformat(timespec="seconds")
-
-    with get_db_connection() as conn:
-        for ticker, symbol in ticker_to_symbol.items():
-            price = price_map.get(ticker)
-
-            # Retry individually if the bulk request missed this ticker.
-            if (
-                price is None
-                or not np.isfinite(price)
-                or price <= 0
-            ):
-                try:
-                    retry_map = get_latest_price_map((ticker,))
-                    price = retry_map.get(ticker)
-                except Exception:
-                    price = None
-
-            if (
-                price is None
-                or not np.isfinite(price)
-                or price <= 0
-            ):
-                continue
-
-            conn.execute(
-                """
-                UPDATE master_holdings
-                SET average_price = ?,
-                    updated_at = ?
-                WHERE owner = ?
-                  AND symbol = ?
-                  AND (average_price IS NULL OR average_price <= 0)
-                """,
-                (
-                    float(price),
-                    now,
-                    owner,
-                    symbol,
-                ),
-            )
-
-            updated_symbols.append(symbol)
-
-        conn.commit()
-
-    return len(updated_symbols), updated_symbols
-
 
 def _chunked(values, size):
     for idx in range(0, len(values), size):
@@ -1012,15 +932,9 @@ def repair_master_holdings_metadata(owner):
 
 
 def holdings_backup_bytes(owner):
-    """Backfill missing prices, then export holdings as a UTF-8 CSV."""
-
-    backfill_missing_average_prices(owner)
-
+    """Export the complete holdings master table as a UTF-8 CSV backup."""
     holdings = load_master_holdings(owner)
-
-    return holdings.to_csv(
-        index=False
-    ).encode("utf-8-sig")
+    return holdings.to_csv(index=False).encode("utf-8-sig")
 
 
 # Broker holdings statement column names vary a lot, so accept common aliases.
@@ -1956,6 +1870,7 @@ def convert_price_history_to_inr(prices, ticker_currency_pairs):
 
     return converted
 
+
 def add_symbols_to_master(symbols, owner):
     if not symbols:
         return [], [], [], []
@@ -1967,53 +1882,34 @@ def add_symbols_to_master(symbols, owner):
 
     for entered_symbol in symbols:
         instrument = resolve_yahoo_instrument(entered_symbol, lookup)
-
         if instrument is None:
             invalid_symbols.append(entered_symbol)
             continue
-
         symbol = instrument["symbol"]
-
         if symbol not in seen_symbols:
             instruments.append(instrument)
             seen_symbols.add(symbol)
 
     valid_symbols = [item["symbol"] for item in instruments]
-
     with get_db_connection() as conn:
         existing = {
             row["symbol"]
             for row in conn.execute(
-                """
-                SELECT symbol
-                FROM master_holdings
-                WHERE owner = ?
-                  AND symbol IN ({})
-                """.format(",".join("?" for _ in valid_symbols)),
+                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
+                    ",".join("?" for _ in valid_symbols)
+                ),
                 [owner, *valid_symbols],
             ).fetchall()
         } if valid_symbols else set()
 
-    duplicates = [
-        symbol for symbol in valid_symbols
-        if symbol in existing
-    ]
+    duplicates = [s for s in valid_symbols if s in existing]
+    new_instruments = [item for item in instruments if item["symbol"] not in existing]
 
-    new_instruments = [
-        item for item in instruments
-        if item["symbol"] not in existing
-    ]
-
-    # First attempt: fetch prices in bulk.
     ticker_price_map = {}
-
     if new_instruments:
         try:
             ticker_price_map = get_latest_price_map(
-                tuple(
-                    item["yahoo_ticker"]
-                    for item in new_instruments
-                )
+                tuple(item["yahoo_ticker"] for item in new_instruments)
             )
         except Exception:
             ticker_price_map = {}
@@ -2024,74 +1920,37 @@ def add_symbols_to_master(symbols, owner):
 
     with get_db_connection() as conn:
         for item in new_instruments:
-            ticker = str(item["yahoo_ticker"]).strip().upper()
+            ticker = item["yahoo_ticker"]
             initial_price = ticker_price_map.get(ticker)
-
-            # Second attempt: retry individually if the bulk request failed.
-            if (
-                initial_price is None
-                or not np.isfinite(initial_price)
-                or initial_price <= 0
-            ):
-                try:
-                    retry_price_map = get_latest_price_map((ticker,))
-                    initial_price = retry_price_map.get(ticker)
-                except Exception:
-                    initial_price = None
-
-            # Store NULL only if both attempts failed.
-            if (
-                initial_price is None
-                or not np.isfinite(initial_price)
-                or initial_price <= 0
-            ):
+            if initial_price is None or not np.isfinite(initial_price) or initial_price <= 0:
                 initial_price = None
                 missing_initial_price.append(item["symbol"])
-            else:
-                initial_price = float(initial_price)
 
             conn.execute(
                 """
                 INSERT INTO master_holdings
-                    (
-                        owner,
-                        symbol,
-                        stock_name,
-                        yahoo_ticker,
-                        exchange,
-                        currency,
-                        quantity,
-                        average_price,
-                        added_at,
-                        updated_at
-                    )
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    owner,
-                    item["symbol"],
-                    item["stock_name"],
-                    ticker,
-                    item["exchange"],
-                    _normalize_currency_code(item["currency"]),
-                    1.0,
-                    initial_price,
-                    now,
-                    now,
+                    owner, item["symbol"], item["stock_name"], ticker,
+                    item["exchange"], _normalize_currency_code(item["currency"]),
+                    1.0, initial_price, now, now,
                 ),
             )
-
             added.append(item["symbol"])
-
         conn.commit()
 
     return added, duplicates, invalid_symbols, missing_initial_price
 
-def add_symbols_to_universal(symbols):
-    """Add symbols to the shared universal portfolio.
 
-    Quantity is fixed at zero. The latest available native-market price
-    is stored as the initial average price.
+def add_symbols_to_universal(symbols):
+    """Add symbols to the shared universal portfolio (quantity fixed at 0).
+
+    This list is visible/editable by every user and never counts toward anyone's
+    real holdings; it exists purely as a shared reference/watchlist that any user
+    can copy into their own personal holdings.
     """
     if not symbols:
         return [], [], []
@@ -2103,124 +1962,52 @@ def add_symbols_to_universal(symbols):
 
     for entered_symbol in symbols:
         instrument = resolve_yahoo_instrument(entered_symbol, lookup)
-
         if instrument is None:
             invalid_symbols.append(entered_symbol)
             continue
-
         symbol = instrument["symbol"]
-
         if symbol not in seen_symbols:
             instruments.append(instrument)
             seen_symbols.add(symbol)
 
     valid_symbols = [item["symbol"] for item in instruments]
-
     with get_db_connection() as conn:
         existing = {
             row["symbol"]
             for row in conn.execute(
-                """
-                SELECT symbol
-                FROM master_holdings
-                WHERE owner = ?
-                  AND symbol IN ({})
-                """.format(",".join("?" for _ in valid_symbols)),
+                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
+                    ",".join("?" for _ in valid_symbols)
+                ),
                 [UNIVERSAL_OWNER, *valid_symbols],
             ).fetchall()
         } if valid_symbols else set()
 
-    duplicates = [
-        symbol
-        for symbol in valid_symbols
-        if symbol in existing
-    ]
-
-    new_instruments = [
-        item
-        for item in instruments
-        if item["symbol"] not in existing
-    ]
-
-    ticker_price_map = {}
-
-    if new_instruments:
-        try:
-            ticker_price_map = get_latest_price_map(
-                tuple(
-                    item["yahoo_ticker"]
-                    for item in new_instruments
-                )
-            )
-        except Exception:
-            ticker_price_map = {}
+    duplicates = [s for s in valid_symbols if s in existing]
+    new_instruments = [item for item in instruments if item["symbol"] not in existing]
 
     now = datetime.now().isoformat(timespec="seconds")
     added = []
 
     with get_db_connection() as conn:
         for item in new_instruments:
-            ticker = str(item["yahoo_ticker"]).strip().upper()
-            initial_price = ticker_price_map.get(ticker)
-
-            # Retry individually if the bulk request did not return a valid price.
-            if (
-                initial_price is None
-                or not np.isfinite(initial_price)
-                or initial_price <= 0
-            ):
-                try:
-                    retry_price_map = get_latest_price_map((ticker,))
-                    initial_price = retry_price_map.get(ticker)
-                except Exception:
-                    initial_price = None
-
-            if (
-                initial_price is None
-                or not np.isfinite(initial_price)
-                or initial_price <= 0
-            ):
-                initial_price = None
-            else:
-                initial_price = float(initial_price)
-
             conn.execute(
                 """
                 INSERT INTO master_holdings
-                    (
-                        owner,
-                        symbol,
-                        stock_name,
-                        yahoo_ticker,
-                        exchange,
-                        currency,
-                        quantity,
-                        average_price,
-                        added_at,
-                        updated_at
-                    )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
                 """,
                 (
-                    UNIVERSAL_OWNER,
-                    item["symbol"],
-                    item["stock_name"],
-                    ticker,
-                    item["exchange"],
-                    _normalize_currency_code(item["currency"]),
-                    initial_price,
-                    now,
-                    now,
+                    UNIVERSAL_OWNER, item["symbol"], item["stock_name"], item["yahoo_ticker"],
+                    item["exchange"], _normalize_currency_code(item["currency"]), now, now,
                 ),
             )
-
             added.append(item["symbol"])
-
         conn.commit()
 
     return added, duplicates, invalid_symbols
 
-    
+
 def remove_symbols_from_master(symbols, owner):
     if not symbols:
         return [], []
@@ -4824,6 +4611,18 @@ if run_btn:
             for ticker, weight in zip(log_returns.columns, optimal_weights)
         ])
         analysis_payload = {
+            "review_analysis_context": {
+                "schema_version": 1,
+                "price_history_start": str(meta["valid_start"]),
+                "price_history_end": str(meta["valid_end"]),
+                "return_observation_start": str(log_returns.index.min()),
+                "return_observation_end": str(log_returns.index.max()),
+                "return_observations": int(len(log_returns)),
+                "return_type": "log",
+                "currency": "INR",
+                "tickers": list(log_returns.columns),
+                "purpose": "Optimizer provenance, not a predicted target-XIRR date. Review must independently validate current common history and exit costs.",
+            },
             "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "run_id": publication_run_id,
             "holdings_analyzed": int((portfolio_df["Quantity"] > 0).sum()),

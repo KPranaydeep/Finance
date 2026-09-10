@@ -1,18 +1,36 @@
-# Step 2 — gap-safe review history and INR prices
+# Review metadata and known-cost funding update
 
-Upload all included files to the matching Finance/main paths and commit together. Then run NEW daily-trust and model-review workflows on main. Refresh Streamlit after deployment/cache expiry.
+Upload the included files into Finance at their matching paths; commit on main.
+Keep your existing public_review_policy.json and secrets. No database migration.
+Run the model-review workflow, and run the private optimizer again to produce a
+new analysis backup JSON containing review_analysis_context. Existing immutable
+publications are not rewritten. This metadata is provenance in the analysis
+backup, not yet persisted into the public publication schema or consumed as a
+replacement for fresh review history.
 
-Changes:
-- Review history uses only complete adjacent-session returns; no forward fill or multi-day moves mislabeled as daily returns. Bootstrap blocks restart at gaps, and walk-forward test windows spanning gaps are excluded.
-- Provisional review can use the prior completed session when today's common prices are incomplete, with the actual date disclosed. Frozen-model valuations still require complete entry/current prices.
-- Direct USD quotes are converted with same-date USD/INR for the price table, allocation inputs and newly calculated NAV. Unknown currencies fail rather than assuming INR. NSE-listed ETFs remain INR and are not converted twice.
-- NAV calculation version is now 7, retaining existing snapshots. Re-run the daily trust workflow to calculate new INR-based snapshots and dependent forecasts. Conversion is an end-of-day convention, not synchronized intraday valuation.
-- Actual P006 data check completed: 640 usable daily returns through 2026-09-08, rather than silently using incomplete September 9 prices. Runtime dates are not hardcoded.
+Supported NSE names are resolved from exchange metadata. US USD equity/ETF
+listings are identified using Yahoo metadata. Existing owner entries are kept;
+unknown instruments fail explicitly. The workflow resolves its checkout policy
+on each run; you do not need to commit new ticker entries. US listing identity
+does not determine domicile, ADR/partnership status or tax treatment.
 
-IMPORTANT FOR P007: it contains direct overseas listings. The review fee/tax engine remains NSE-only. It now reports FOREIGN_REVIEW_COST_MODEL_REQUIRED instead of asking you to misclassify US stocks as NSE shares. Overseas brokerage, FX/remittance spreads, withholding/ADR treatment and investor-specific taxes are not modeled. Existing allocation-cost and NAV-drag assumptions remain estimates, not verified foreign-account net costs. This release does not claim to deliver a valid foreign post-tax target-crossing date.
+The new funding card uses Tickertape Pro brokerage plus GST and HDFC FX GST.
+It is a known-charge floor on an INR100 grid, not a complete investment minimum.
+It does NOT change execution-plan defaults or authorize trades. Zero platform
+and gateway fees follow the supplied funding screenshot only. FX spread,
+regulatory fees, exit costs, TCS/taxes and subscription costs are excluded.
+The pure funding calculator supports amounts up to INR10 lakh only.
 
-78 review tests and 3 benchmark tests passed; syntax checks passed. Production DB/workflows were not executed. No policy reset or actual trades. This package retains step-1 automatic NSE classifications.
+Sources checked 2026-09-10:
+- https://www.tickertape.in/us-stocks/pricing
+- https://www.tickertape.in/blog/how-to-invest-in-us-stocks/
+- https://www.hdfc.bank.in/remittance/fees-and-charges
 
-The shared period is calculated from available public-review prices, not copied from a private optimizer export. Importing private coverage metadata remains separate.
+IMPORTANT: This is a partial integration. FOREIGN_REVIEW_COST_MODEL_REQUIRED
+remains for mixed/US portfolios. Their after-tax per-security crossing dates
+are NOT enabled by this patch. A verified foreign exit/tax model and mixed-market
+session support remain necessary. Domestic crossing tables open by default;
+dates are probabilistic research estimates, never promises of 100% XIRR.
 
-Streamlit skill guidance informed native currency/coverage captions. No custom styling changes.
+Validation: 79 review tests and 4 funding tests passed. Both edited Streamlit
+scripts passed AST syntax checks. Cloud runtime and production DB were not run.

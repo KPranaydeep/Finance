@@ -55,17 +55,39 @@ def _registry(bucket):
         raise ValueError("INSTRUMENT_METADATA_UNAVAILABLE") from None
 
 
-def complete_policy(policy, tickers, registry=None):
+@lru_cache(maxsize=512)
+def _foreign_kind(ticker, bucket):
+    # Listing identification is NOT a determination of domicile or tax treatment.
+    import yfinance as yf
+    try:
+        info = yf.Ticker(ticker).get_info()
+        if (info.get("currency") == "USD" and
+                info.get("exchange") in {"NYQ", "NMS", "NGM", "NCM", "ASE", "PCX", "BTS"} and
+                info.get("quoteType") in {"EQUITY", "ETF"}):
+            return "foreign_us_listing"
+    except Exception:
+        raise ValueError("INSTRUMENT_METADATA_UNAVAILABLE") from None
+    raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+
+
+def require_supported_review(tickers):
     if any(not t.endswith(".NS") for t in tickers):
         raise ValueError("FOREIGN_REVIEW_COST_MODEL_REQUIRED")
+
+
+def complete_policy(policy, tickers, registry=None):
     result = deepcopy(policy)
     missing = set(tickers) - set(result["instrument_kinds"])
     if not missing:
         return result
-    registry = registry if registry is not None else _registry(int(time.time() // 3600))
-    if any(t not in registry for t in missing):
+    domestic = {t for t in missing if t.endswith(".NS")}
+    bucket = int(time.time() // 3600)
+    registry = registry if registry is not None else (_registry(bucket) if domestic else {})
+    if any(t not in registry for t in domestic):
         raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
-    result["instrument_kinds"].update({t: registry[t] for t in sorted(missing)})
+    additions = {t: registry[t] for t in sorted(domestic)}
+    additions.update({t: _foreign_kind(t, bucket) for t in sorted(missing - domestic)})
+    result["instrument_kinds"].update(additions)
     return result
 
 

@@ -481,6 +481,12 @@ st.markdown(
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
     st.caption(f"Prices: latest available unadjusted close in INR · through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR. Foreign trading/remittance costs are not covered by the NSE cost model.")
+if any(item.get("source_currency") == "USD" for item in price_snapshot.values()):
+    from public_us_funding import known_cost_floor
+    funding_floor = known_cost_floor()
+    if funding_floor:
+        st.metric("US funding floor · known charges only", f"₹{funding_floor['amount_inr']:,.0f}")
+        st.caption("Tickertape Pro + integrated HDFC funding: FX GST and estimated buy brokerage including GST below 0.50%. This is a funding-cost floor, not a diversified portfolio minimum. Bank FX spread, statutory trading fees, selling costs, tax/TCS and subscription costs are excluded; check the actual quote. Platform/gateway ₹0 follows your supplied quote, not a bank-wide guarantee.")
 if entry_estimate:
     minimum_1,minimum_2=st.columns(2)
     starter=entry_estimate["starter"]
