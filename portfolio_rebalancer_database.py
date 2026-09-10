@@ -2041,20 +2041,21 @@ def add_symbols_to_universal(symbols):
                   AND symbol IN ({})
                 """.format(",".join("?" for _ in valid_symbols)),
                 [UNIVERSAL_OWNER, *valid_symbols],
-*           ).fetchall()
-        } *f valid_symbols else set()
+            ).fetchall()
+        } if valid_symbols else set()
 
     duplicates = [
-        symbol for symbol in valid_symbols
+        symbol
+        for symbol in valid_symbols
         if symbol in existing
     ]
 
     new_instruments = [
-        item for item in instruments
+        item
+        for item in instruments
         if item["symbol"] not in existing
     ]
 
-    # First attempt: fetch prices in bulk.
     ticker_price_map = {}
 
     if new_instruments:
@@ -2076,7 +2077,7 @@ def add_symbols_to_universal(symbols):
             ticker = str(item["yahoo_ticker"]).strip().upper()
             initial_price = ticker_price_map.get(ticker)
 
-            # Second attempt: retry individually if the bulk request failed.
+            # Retry individually if the bulk request did not return a valid price.
             if (
                 initial_price is None
                 or not np.isfinite(initial_price)
@@ -2088,7 +2089,6 @@ def add_symbols_to_universal(symbols):
                 except Exception:
                     initial_price = None
 
-            # Store NULL only if both attempts failed.
             if (
                 initial_price is None
                 or not np.isfinite(initial_price)
@@ -2133,6 +2133,8 @@ def add_symbols_to_universal(symbols):
         conn.commit()
 
     return added, duplicates, invalid_symbols
+
+    
 def remove_symbols_from_master(symbols, owner):
     if not symbols:
         return [], []
