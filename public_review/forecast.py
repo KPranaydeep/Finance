@@ -3,20 +3,24 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
-METHOD = "joint-security-first-passage-v2"
+METHOD = "joint-security-first-passage-gap-safe-v3"
 
 
 def paths(returns, days, count, block, seed):
+    positions = getattr(returns, "attrs", {}).get("session_positions")
     values = np.asarray(returns, dtype=float)
     if values.ndim != 2 or len(values) < 126 or not np.isfinite(values).all() or np.any(values <= -1):
         raise ValueError("Insufficient/invalid common return history")
     rng = np.random.default_rng(seed)
+    sequence = np.array([positions[d] for d in returns.index]) if positions is not None else np.arange(len(values))
     index = rng.integers(len(values), size=count)
     out = np.empty((count, days, values.shape[1]))
     for d in range(days):
         if d:
             restart = rng.random(count) < 1 / block
-            index = np.where(restart, rng.integers(len(values), size=count), (index + 1) % len(values))
+            following = (index + 1) % len(values)
+            restart |= sequence[following] != sequence[index] + 1
+            index = np.where(restart, rng.integers(len(values), size=count), following)
         out[:, d] = values[index]
     return out
 
@@ -28,7 +32,7 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     tickers = [r["ticker"] for r in lots]
     matrix = returns[tickers].to_numpy(dtype=float)
     count = count or policy["simulation_paths"]
-    shocks = paths(matrix, len(future_dates), count, policy["block_length"], policy["seed"])
+    shocks = paths(returns[tickers], len(future_dates), count, policy["block_length"], policy["seed"])
     start = np.array([prices[t] for t in tickers])
     future = start * np.cumprod(1 + shocks, axis=1)
     q = np.array([r["quantity"] for r in lots])
@@ -123,6 +127,10 @@ def validate(returns, baseline, prices, dates, policy):
     folds = []
     age = max(1, (date.fromisoformat(dates[-1]) - date.fromisoformat(baseline["entry_date"])).days)
     for cut in range(train, len(values) - horizon + 1, horizon):
+        positions = returns.attrs.get("session_positions")
+        if positions and any(positions[dates[j]] != positions[dates[j-1]] + 1
+                             for j in range(cut, cut + horizon)):
+            continue  # Never score a "daily" test path across a missing session.
         b = deepcopy(baseline)
         # Translate historical scenario calendar to supported contemporary tax
         # dates. No future returns enter the resampling distribution.

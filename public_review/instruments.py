@@ -56,6 +56,8 @@ def _registry(bucket):
 
 
 def complete_policy(policy, tickers, registry=None):
+    if any(not t.endswith(".NS") for t in tickers):
+        raise ValueError("FOREIGN_REVIEW_COST_MODEL_REQUIRED")
     result = deepcopy(policy)
     missing = set(tickers) - set(result["instrument_kinds"])
     if not missing:

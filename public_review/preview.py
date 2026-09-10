@@ -39,13 +39,23 @@ def historical_preview(publication, policy, events, now=None):
     weights = publication["weights"]
     if set(weights) - set(policy["instrument_kinds"]):
         raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
-    histories = market.fetch(list(weights), as_of, as_of, policy)
-    closes = pd.DataFrame({t: h.Close for t, h in histories.items()}).sort_index().dropna()
-    if len(closes) < 127 or not (closes > 0).all().all():
+    histories = market.fetch(list(weights), as_of, as_of, policy, allow_incomplete_end=True)
+    # Provisional estimates may use the previous completed session, explicitly
+    # dated. Never substitute old prices into an actual frozen model valuation.
+    import numpy as np
+    candidates = pd.DataFrame({t: h.Close for t, h in histories.items()}).sort_index()
+    candidates = candidates.where(np.isfinite(candidates) & (candidates > 0)).dropna()
+    eligible_days = [str(d.date()) for d in completed.index[-2:]]
+    available = [d for d in eligible_days if d in candidates.index and all(
+        "Volume" not in h or (np.isfinite(h.loc[d, "Volume"]) and h.loc[d, "Volume"] > 0)
+        for h in histories.values())]
+    if not available:
+        raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
+    as_of = available[-1]
+    from .history import common_history
+    closes, all_returns, coverage = common_history(histories, as_of, policy)
+    if len(all_returns) < 126:
         raise ValueError("INSUFFICIENT_COMMON_HISTORY")
-    expected = market.calendar(closes.index[0], as_of, policy)
-    if not {str(d.date()) for d in expected.index}.issubset(set(closes.index)):
-        raise ValueError("COMMON_HISTORY_HAS_MISSING_SESSIONS")
     prices = closes.loc[as_of].to_dict()
     # Explicit assumed entry today at the last completed close. Not an assertion
     # that these prices were executable at publication, and never persisted as BASELINE.
@@ -56,7 +66,7 @@ def historical_preview(publication, policy, events, now=None):
     capital = policy["capital_inr"] or math.ceil(max((p + 60) / weights[t] for t, p in prices.items()) / 100) * 100
     b = freeze(publication, weights, prices, entry, capital, policy["instrument_kinds"], policy, now.isoformat())
     held = [l["ticker"] for l in b["lots"]]
-    returns = closes[held].pct_change(fill_method=None).dropna()
+    returns = all_returns[held]
     v = validate(returns, b, {t: prices[t] for t in held}, list(returns.index), policy)
     f = estimate(b, prices, returns, days, policy, capital, v)
     # A research forecast must not become a validated trading recommendation.
@@ -66,6 +76,7 @@ def historical_preview(publication, policy, events, now=None):
              if r["kind"] == "PREVIEW" and r["baseline_id"] == publication["publication_id"]]
     candidate = min([candidate] + [d for d in prior if d])
     return {"provisional": True, "publication_id": publication["publication_id"],
+            "history_coverage": coverage,
             "ack_epoch": ack_epoch,
             "as_of": as_of, "checked_at": now.isoformat(), "assumed_entry_date": entry,
             "assumption": "Hypothetical entry today at latest completed close, including modeled entry charges; not earned returns.",

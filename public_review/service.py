@@ -19,6 +19,7 @@ SAFE_ERRORS = {
     "ENTRY_PRICE_REVISION_REVIEW_REQUIRED", "INCOMPLETE_SESSION_CALENDAR",
     "AWARE_PUBLICATION_TIME_REQUIRED", "AWARE_TIME_REQUIRED",
     "INSTRUMENT_METADATA_UNAVAILABLE", "INSTRUMENT_METADATA_INVALID",
+    "FOREIGN_REVIEW_COST_MODEL_REQUIRED",
 }
 
 
@@ -54,14 +55,8 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
                 dividends.append({"ticker": lot["ticker"], "date": day,
                                   "net": round(dividend * lot["quantity"] * (1 - policy["slab_rate"] * (1 + policy["surcharge_rate"]) * 1.04), 2)})
     metrics = evaluate(baseline, prices, as_of, policy, dividends)
-    closes = pd.DataFrame({t: h.Close for t, h in histories.items()}).sort_index().dropna()
-    if len(closes) < 2 or not (closes > 0).all().all():
-        raise ValueError("INSUFFICIENT_COMMON_HISTORY")
-    expected = market.calendar(closes.index[0], as_of, policy)
-    expected_days = {str(d.date()) for d in expected.index}
-    if not expected_days.issubset(set(closes.index)):
-        raise ValueError("COMMON_HISTORY_HAS_MISSING_SESSIONS")
-    returns = closes.pct_change(fill_method=None).dropna()
+    from .history import common_history
+    closes, returns, coverage = common_history(histories, as_of, policy)
     # Reconstruct peak from the same frozen model, never from unrelated NAV/backfill.
     peak = baseline["capital"]
     for d, row in closes.loc[closes.index >= baseline["entry_date"]].iterrows():
@@ -90,7 +85,7 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
         mood = {"status": "UNAVAILABLE", "role": "context_only"}
     return {"version": VERSION, "baseline_id": baseline["baseline_id"], "as_of": as_of,
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
-            "decision": assessed, "forecast": forecast, "validation": validation,
+            "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
             "comparisons": compare_exits(baseline, prices, as_of, policy, metrics) if comparisons else [],
             "mmi": mood, "price_hash": digest({t: {d: float(v) for d, v in h.Close.items()} for t, h in histories.items()}),
             "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",

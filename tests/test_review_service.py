@@ -45,5 +45,6 @@ class ServiceTests(unittest.TestCase):
     def test_interior_missing_history_is_not_filled(self):
         p=policy(); b=baseline(); h=self.histories(p)
         h['A.NS']=h['A.NS'].drop('2026-09-08')
-        with self.assertRaisesRegex(ValueError,'COMMON_HISTORY_HAS_MISSING_SESSIONS'):
-            build_assessment(b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],datetime(2026,9,9,13,tzinfo=timezone.utc))
+        result = build_assessment(b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],datetime(2026,9,9,13,tzinfo=timezone.utc))
+        self.assertIn('2026-09-08', result['history_coverage']['missing_sessions'])
+        self.assertEqual(result['history_coverage']['method'], 'complete-adjacent-session-pairs-no-fill')

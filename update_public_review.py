@@ -36,7 +36,8 @@ def main():
                       "TARIFF_REVIEW_REQUIRED", "CALENDAR_REVIEW_REQUIRED", "INTEGER_POLICY_REQUIRED",
                       "NSE_CLASSIFICATION_REQUIRED", "INVALID_CAPITAL", "DATABASE_CONFIGURATION_REQUIRED",
                       "NO_ACTIVE_PUBLICATION", "UNKNOWN_BASELINE", "INSTRUMENT_CLASSIFICATION_REQUIRED",
-                      "INSTRUMENT_METADATA_UNAVAILABLE", "POLICY_UPDATE_BUSY", "POLICY_CHANGED_RETRY"}
+                      "INSTRUMENT_METADATA_UNAVAILABLE", "POLICY_UPDATE_BUSY", "POLICY_CHANGED_RETRY",
+                      "FOREIGN_REVIEW_COST_MODEL_REQUIRED"}
         code = str(exc) if isinstance(exc, ValueError) and str(exc) in safe_codes else "REVIEW_SETUP_OR_STORAGE_FAILED"
         print(json.dumps({"status": "CANNOT_ASSESS", "reason": code,
                           "note": "No trade was submitted. Raw exceptions and credentials are not logged."}))

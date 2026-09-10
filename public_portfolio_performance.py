@@ -263,15 +263,8 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
     if not tickers:
         return {}
     try:
-        data = yf.download(
-            list(tickers), period="7d", interval="1d", auto_adjust=False,
-            progress=False, threads=True, group_by="column",
-        )
-        if data.empty:
-            return {}
-        close = data["Close"] if isinstance(data.columns, pd.MultiIndex) else data.get("Close")
-        if isinstance(close, pd.Series):
-            close = close.to_frame(name=tickers[0])
+        from public_price_currency import download_inr
+        close, currencies = download_inr(list(tickers), period="7d", auto_adjust=False)
         result = {}
         for ticker in tickers:
             if close is None or ticker not in close.columns:
@@ -280,6 +273,8 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
             if not series.empty:
                 result[ticker] = {
                     "price": float(series.iloc[-1]),
+                    "currency": "INR",
+                    "source_currency": currencies[ticker],
                     "price_as_of": pd.Timestamp(series.index[-1]).date().isoformat(),
                 }
         return result
@@ -485,7 +480,7 @@ st.markdown(
 )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
-    st.caption(f"Prices: latest available unadjusted close from Yahoo Finance · through {price_dates[-1]}")
+    st.caption(f"Prices: latest available unadjusted close in INR · through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR. Foreign trading/remittance costs are not covered by the NSE cost model.")
 if entry_estimate:
     minimum_1,minimum_2=st.columns(2)
     starter=entry_estimate["starter"]

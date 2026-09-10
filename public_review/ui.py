@@ -66,6 +66,10 @@ def render_fresh_preview(p):
     if f.get("next_review") is None:
         st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
     st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
+    st.caption("Currency: NSE-listed holdings are priced in INR, including overseas ETFs. Their INR prices already reflect FX exposure; no second USD/INR conversion is applied.")
+    if p.get("history_coverage"):
+        h = p["history_coverage"]
+        st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
     with st.expander("Earliest security target crossings"):
         render_crossings(f)
 
@@ -200,6 +204,8 @@ def render_review_panel(basket_id, active_publications):
                 StopIteration: "PUBLICATION_NOT_FOUND",
             }.get(type(exc), "PREVIEW_CHECK_FAILED")
             st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
+            if code == "FOREIGN_REVIEW_COST_MODEL_REQUIRED":
+                st.caption("This publication contains direct overseas listings. INR pricing is separate from tax classification. The review engine supports NSE delivery only; overseas brokerage, remittance charges and instrument-specific tax treatment must be integrated before net-XIRR review dates can be shown.")
             if code == "INSTRUMENT_CLASSIFICATION_REQUIRED":
                 st.caption("Add explicit instrument_kinds for every published ticker in public_review_policy.json. Stocks and overseas/gold ETFs have different modeled tax treatment; do not default every ticker to equity.")
     try:

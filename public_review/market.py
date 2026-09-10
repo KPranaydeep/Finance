@@ -1,5 +1,6 @@
 """Completed NSE sessions and strict synchronized Yahoo histories; no filling."""
 from datetime import timedelta
+import math
 import pandas as pd
 import pandas_market_calendars as mcal
 import yfinance as yf
@@ -42,7 +43,7 @@ def sessions(now, published_at, policy):
     return str(eligible.index[0].date()), str(completed.index[-1].date()), [str(d.date()) for d in future.index]
 
 
-def fetch(tickers, entry_day, as_of, policy):
+def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):
     start = min(pd.Timestamp(entry_day), pd.Timestamp(as_of) - pd.DateOffset(years=policy["history_years"]))
     result = {}
     for t in sorted(tickers):
@@ -54,9 +55,13 @@ def fetch(tickers, entry_day, as_of, policy):
         if history.empty:
             raise ValueError("MISSING_MARKET_HISTORY")
         history.index = pd.Index([str(d.date()) for d in history.index])
-        if history.index.duplicated().any() or entry_day not in history.index or as_of not in history.index:
+        if history.index.duplicated().any():
             raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
-        if history.loc[entry_day, "Open"] <= 0 or history.loc[as_of, "Close"] <= 0 or history.loc[as_of, "Volume"] <= 0:
-            raise ValueError("INVALID_OR_NONTRADING_PRICE")
+        if not allow_incomplete_end:
+            if entry_day not in history.index or as_of not in history.index:
+                raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
+            values = [history.loc[entry_day, "Open"], history.loc[as_of, "Close"], history.loc[as_of, "Volume"]]
+            if any(not math.isfinite(float(v)) or float(v) <= 0 for v in values):
+                raise ValueError("INVALID_OR_NONTRADING_PRICE")
         result[t] = history.loc[history.index <= as_of]
     return result

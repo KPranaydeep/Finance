@@ -14,7 +14,7 @@ from public_portfolio_publications import load_trust_records
 from public_portfolio_trust import common_price_window, fingerprint, versioned_model_nav
 from public_nav_snapshots import save_nav_snapshot
 
-CALCULATION_VERSION=6  # common-history backfill plus versioned rebalance transitions
+CALCULATION_VERSION=7  # INR-converted source prices; keep prior snapshots immutable
 
 
 def main() -> int:
@@ -35,9 +35,9 @@ def main() -> int:
             start=datetime.now(timezone.utc).date()-timedelta(days=max(30,math.ceil(backfill_days*1.7)+14))
         else:
             start=min(item["as_of"] for item in versions).date()-timedelta(days=7)
-        data=yf.download(sorted(tickers),start=start.isoformat(),end=(datetime.now(timezone.utc).date()+timedelta(days=1)).isoformat(),
-                         auto_adjust=True,progress=False,threads=False,group_by="column")
-        closes=data["Close"] if isinstance(data.columns,pd.MultiIndex) else data[["Close"]].rename(columns={"Close":next(iter(tickers))})
+        from public_price_currency import download_inr
+        closes,currencies=download_inr(sorted(tickers),start=start.isoformat(),
+            end=(datetime.now(timezone.utc).date()+timedelta(days=1)).isoformat(),auto_adjust=True)
         first_actual_publication_date=min(item["as_of"] for item in versions).date()
         if backfill_days:
             closes=common_price_window(
