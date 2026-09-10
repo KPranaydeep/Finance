@@ -254,6 +254,86 @@ def _read_fast_info_value(fast_info, key):
     except Exception:
         return None
 
+def backfill_missing_average_prices(owner):
+    """Fill missing average prices using the latest available market price."""
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT symbol, yahoo_ticker
+            FROM master_holdings
+            WHERE owner = ?
+              AND (average_price IS NULL OR average_price <= 0)
+              AND yahoo_ticker IS NOT NULL
+              AND TRIM(yahoo_ticker) <> ''
+            """,
+            (owner,),
+        ).fetchall()
+
+    if not rows:
+        return 0, []
+
+    ticker_to_symbol = {
+        str(row["yahoo_ticker"]).strip().upper(): row["symbol"]
+        for row in rows
+    }
+
+    tickers = tuple(ticker_to_symbol.keys())
+
+    try:
+        price_map = get_latest_price_map(tickers)
+    except Exception:
+        price_map = {}
+
+    updated_symbols = []
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with get_db_connection() as conn:
+        for ticker, symbol in ticker_to_symbol.items():
+            price = price_map.get(ticker)
+
+            # Retry individually if the bulk request missed this ticker.
+            if (
+                price is None
+                or not np.isfinite(price)
+                or price <= 0
+            ):
+                try:
+                    retry_map = get_latest_price_map((ticker,))
+                    price = retry_map.get(ticker)
+                except Exception:
+                    price = None
+
+            if (
+                price is None
+                or not np.isfinite(price)
+                or price <= 0
+            ):
+                continue
+
+            conn.execute(
+                """
+                UPDATE master_holdings
+                SET average_price = ?,
+                    updated_at = ?
+                WHERE owner = ?
+                  AND symbol = ?
+                  AND (average_price IS NULL OR average_price <= 0)
+                """,
+                (
+                    float(price),
+                    now,
+                    owner,
+                    symbol,
+                ),
+            )
+
+            updated_symbols.append(symbol)
+
+        conn.commit()
+
+    return len(updated_symbols), updated_symbols
+
 
 def _chunked(values, size):
     for idx in range(0, len(values), size):
@@ -932,9 +1012,15 @@ def repair_master_holdings_metadata(owner):
 
 
 def holdings_backup_bytes(owner):
-    """Export the complete holdings master table as a UTF-8 CSV backup."""
+    """Backfill missing prices, then export holdings as a UTF-8 CSV."""
+
+    backfill_missing_average_prices(owner)
+
     holdings = load_master_holdings(owner)
-    return holdings.to_csv(index=False).encode("utf-8-sig")
+
+    return holdings.to_csv(
+        index=False
+    ).encode("utf-8-sig")
 
 
 # Broker holdings statement column names vary a lot, so accept common aliases.
