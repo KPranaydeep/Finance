@@ -23,16 +23,21 @@ def main():
                          acknowledge=os.getenv("PUBLIC_REVIEW_ACK_BASELINE") or None)
         print(json.dumps(result))
         return 1 if result["failed"] else 0
-    except Exception:
+    except Exception as exc:
         # Workflow failure notifications remain a backup if the chosen channel fails.
         try:
             send("Public portfolio monitoring is unavailable. Check the review policy, credentials and workflow. No trade instruction was generated.")
         except Exception:
             pass
-        print(json.dumps({"status": "CANNOT_ASSESS", "reason": "Review configuration or monitoring failed; no trade was submitted"}))
+        safe_codes = {"POLICY_APPROVAL_REQUIRED", "UNSUPPORTED_TAX_OR_ACCOUNT_PROFILE",
+                      "TARIFF_REVIEW_REQUIRED", "CALENDAR_REVIEW_REQUIRED", "INTEGER_POLICY_REQUIRED",
+                      "NSE_CLASSIFICATION_REQUIRED", "INVALID_CAPITAL", "DATABASE_CONFIGURATION_REQUIRED",
+                      "NO_ACTIVE_PUBLICATION", "UNKNOWN_BASELINE"}
+        code = str(exc) if isinstance(exc, ValueError) and str(exc) in safe_codes else "REVIEW_SETUP_OR_STORAGE_FAILED"
+        print(json.dumps({"status": "CANNOT_ASSESS", "reason": code,
+                          "note": "No trade was submitted. Raw exceptions and credentials are not logged."}))
         return 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

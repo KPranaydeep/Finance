@@ -1,24 +1,31 @@
-# CI policy-test isolation fix — v47
+# Model review waiting-state fix (v48)
 
-The failing test read your real public_review_policy.json and assumed approval was
-false. Approving the real policy correctly made that assumption false. This was a
-test bug, not a reason to disable your approved production policy.
+## Deploy through GitHub
 
-Replace these two files in GitHub main, preserving paths:
+1. Extract this ZIP. Replace these four files in Finance/main, preserving folders:
+   - public_review/market.py
+   - public_review/service.py
+   - public_review/ui.py
+   - update_public_review.py
+2. Add tests/test_review_waiting.py to the existing tests folder. It uses the existing review test fixtures.
+3. Commit the files. Do not replace public_review_policy.json or change your secrets.
+4. In GitHub Actions, open Public portfolio model review and choose Run workflow on main. Start a new run so it uses this commit; rerunning an old job uses its old commit.
+5. Refresh Streamlit after deployment (the monitoring cache can take five minutes).
 
-- tests/test_review_operations.py
-- tests/review_fixtures.py
+## What changes
 
-The rejection test now supplies explicitly unapproved in-memory data to the real
-policy loader. Other tests use independent, fresh fixtures instead of reading your
-production settings. Added coverage verifies approved policies, expired tariffs,
-strict boolean approval and fixture isolation. Test dates are fixed so these tests
-do not change behavior as the calendar advances.
+- A publication awaiting its first eligible completed trading session is WAITING, not a failed check. It does not create a baseline, fetch market history, send an alert, or execute trades while waiting.
+- The page shows the eligible session and earliest assessment time in Asia/Kolkata, when available.
+- Genuine failures still fail the workflow and now expose allowlisted reason codes and the failed stage, without printing raw exception messages or credentials.
+- The empty state no longer assumes policy approval is the problem.
+- Existing immutable records are retained. Legacy waiting failures are also displayed as waiting before a baseline exists.
 
-Do not change public_review_policy.json, your secrets, or any runtime code for this
-fix. The real policy approval and freshness guards are unchanged.
+For the supplied P006 publication at 19:41 IST on 9 September 2026, the calendar test identifies 10 September at 16:00 IST as the earliest assessment (session close plus the existing 30-minute buffer), subject to price availability. Dates are derived from the publication and calendar, not hardcoded in runtime code.
 
-Commit the replacements to main and use the new push-triggered test run. Re-running
-the old failed run uses its old commit and will repeat the old failure.
+The original production failure reason was not provided. This patch fixes a confirmed waiting-state bug; if another blocker exists, the new workflow result should identify its safe reason/stage. Do not disable approval or freshness checks to force success.
 
-Based on main 75def9d0af087dcad8673dd3516d5c0739c4a711.
+## Verification
+
+52 review tests passed locally, including seven new regression tests and headless Streamlit checks. No live database was accessed, no workflow was triggered, and no production deployment was performed.
+
+Implementation uses native Streamlit status messages and captions; no custom styling or new dependencies.

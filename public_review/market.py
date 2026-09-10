@@ -5,6 +5,14 @@ import pandas_market_calendars as mcal
 import yfinance as yf
 
 
+class AwaitingMarketEntry(ValueError):
+    """Normal pending state; no usable completed entry session yet."""
+    def __init__(self, entry_date, ready_at):
+        super().__init__("AWAITING_MARKET_ENTRY")
+        self.entry_date = entry_date
+        self.ready_at = ready_at
+
+
 def calendar(start, end, policy):
     if str(end)[:10] > policy["calendar_verified_through"]:
         raise ValueError("CALENDAR_REVIEW_REQUIRED")
@@ -22,8 +30,11 @@ def sessions(now, published_at, policy):
     end = min(str(local + timedelta(days=100)), policy["calendar_verified_through"])
     schedule = calendar(published.tz_convert("Asia/Kolkata").date() - timedelta(days=7), end, policy)
     eligible = schedule[schedule.market_open > published]
-    if eligible.empty or eligible.iloc[0].market_close + pd.Timedelta(minutes=30) > now:
-        raise ValueError("AWAITING_MARKET_ENTRY")
+    if eligible.empty:
+        raise ValueError("INCOMPLETE_SESSION_CALENDAR")
+    ready_at = eligible.iloc[0].market_close + pd.Timedelta(minutes=30)
+    if ready_at > now:
+        raise AwaitingMarketEntry(str(eligible.index[0].date()), ready_at.isoformat())
     completed = schedule[schedule.market_close + pd.Timedelta(minutes=30) <= now]
     future = schedule[schedule.market_open > now].iloc[:policy["max_review_sessions"]]
     if completed.empty or len(future) < policy["max_review_sessions"]:
@@ -49,4 +60,3 @@ def fetch(tickers, entry_day, as_of, policy):
             raise ValueError("INVALID_OR_NONTRADING_PRICE")
         result[t] = history.loc[history.index <= as_of]
     return result
-

@@ -19,15 +19,44 @@ def percent(value):
     return "N/A" if value is None else f"{value:.2%}"
 
 
-def render_events(events, active_ids=None, now=None):
+def render_pending(row, now):
+    if row is None:
+        st.info("No monitoring record exists for this publication yet. Run the enabled model-review workflow; if it already ran, check that the page and workflow use the same basket and database.")
+        return
+    p = row["payload"]
+    if p.get("reason") == "AWAITING_MARKET_ENTRY":
+        st.info("Awaiting market entry—not a failure. The publication needs its first completed eligible trading session before the model can freeze an entry and calculate returns.")
+        if p.get("ready_at"):
+            ready = datetime.fromisoformat(p["ready_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
+            st.caption(f"Entry session: {p.get('entry_date')} · Earliest assessment: {ready:%d %b %Y %H:%M IST}, once prices are available. The daily workflow checks automatically when enabled.")
+    else:
+        st.warning("Cannot assess: " + p.get("reason", "MONITOR_CHECK_FAILED").replace("_", " ").lower())
+        if p.get("stage"):
+            st.caption("Check stage: " + p["stage"].replace("_", " "))
+    if p.get("checked_at"):
+        checked = datetime.fromisoformat(p["checked_at"])
+        st.caption(f"Last check: {checked.astimezone(ZoneInfo('Asia/Kolkata')):%d %b %Y %H:%M IST}")
+        if (now - checked).total_seconds() > 30 * 3600:
+            st.warning("This check is stale. Confirm the daily model-review workflow is running.")
+
+
+def render_events(events, active_ids=None, now=None, latest_publication_id=None):
     now = now or datetime.now(timezone.utc)
     baseline_rows = [r for r in events if r["kind"] == "BASELINE" and
                      (active_ids is None or r["payload"]["publication_id"] in active_ids)]
+    pending_shown = False
+    if latest_publication_id and not any(r["payload"]["publication_id"] == latest_publication_id for r in baseline_rows):
+        pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
+                        r["payload"].get("publication_id", r.get("baseline_id")) == latest_publication_id), None)
+        render_pending(pending, now)
+        pending_shown = True
+        if baseline_rows:
+            st.caption("The latest publication has no frozen entry yet. Previously created model investments remain available below.")
     if not baseline_rows:
-        st.info("Model monitoring is not ready. The owner must approve the cost/tax/risk policy and run the review workflow. No next review date is available.")
-        failures = [r for r in events if r["kind"] == "FAILURE"]
-        if failures:
-            st.caption("Latest check: " + failures[-1]["payload"]["reason"].replace("_", " ").lower())
+        if not pending_shown:
+            pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
+                            (active_ids is None or r["payload"].get("publication_id", r.get("baseline_id")) in active_ids)), None)
+            render_pending(pending, now)
         return
     baselines = sorted([r["payload"] for r in baseline_rows], key=lambda b: b["portfolio_version"], reverse=True)
     selected = st.selectbox("Model investment publication", range(len(baselines)),
@@ -105,7 +134,7 @@ def render_review_panel(basket_id, active_publications):
     st.subheader("Your next portfolio review")
     try:
         events = load_events(basket_id)
-        render_events(events, {p["publication_id"] for p in active_publications})
+        render_events(events, {p["publication_id"] for p in active_publications},
+                      latest_publication_id=active_publications[0]["publication_id"] if active_publications else None)
     except Exception:
         st.warning("Model review inspection is unavailable. No reliable review date can be shown.")
-

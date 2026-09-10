@@ -111,12 +111,15 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
     # replaces previous baselines or changes their entry clock.
     existing = {r["payload"]["publication_id"]: r["payload"] for r in history if r["kind"] == "BASELINE"}
     selected = [p for p in pubs if p["publication_id"] in existing or p == pubs[0]]
-    failures = 0
+    failures, waiting = 0, 0
+    results = []
     for publication in selected:
         baseline = existing.get(publication["publication_id"])
         baseline_id = baseline["baseline_id"] if baseline else publication["publication_id"]
+        stage = "session_calendar"
         try:
             entry, as_of, future = market.sessions(now, publication["published_at"], policy)
+            stage = "instrument_classification"
             if baseline:
                 entry = baseline["entry_date"]
                 if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in baseline["lots"]):
@@ -126,7 +129,9 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             if missing:
                 raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
             tickers = [r["ticker"] for r in baseline["lots"]] if baseline else list(weights)
+            stage = "market_history"
             data = market.fetch(tickers, entry, as_of, policy)
+            stage = "freeze_baseline"
             if baseline is None:
                 entry_prices = {t: float(h.loc[entry, "Open"]) for t, h in data.items()}
                 # Same economic concept as practical full-target entry, measured
@@ -143,6 +148,7 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 baseline = next(r["payload"] for r in history if r["event_key"] == "baseline:" + publication["publication_id"])
                 baseline_id = baseline["baseline_id"]
                 data = {t: h for t, h in data.items() if t in {r["ticker"] for r in baseline["lots"]}}
+            stage = "assessment"
             payload = build_assessment(baseline, data, as_of, future, policy, history, pubs[0]["weights"], now)
             key = "assessment:" + baseline_id + ":" + digest({"as_of": as_of, "policy": policy,
                   "prices": payload["price_hash"], "ack": (store.latest(history, "ACKNOWLEDGED", baseline_id) or {}).get("seq")})
@@ -151,20 +157,42 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                          "HEARTBEAT", baseline_id, {"at": now.isoformat(), "as_of": as_of,
                          "alerts_enabled": os.getenv("PUBLIC_REVIEW_ALERT_CHANNEL", "none") in {"email", "telegram"}})
             conn.commit()
-            if not notify_safely(conn, basket, baseline_id, payload, now):
+            stage = "notification"
+            alert_ok = notify_safely(conn, basket, baseline_id, payload, now)
+            if not alert_ok:
                 failures += 1
+            results.append({"publication_id": publication["publication_id"],
+                            "status": "ASSESSED" if alert_ok else "ALERT_FAILED",
+                            "reason": payload["decision"]["status"] if alert_ok else "ALERT_DELIVERY_FAILED"})
         except Exception as exc:
             conn.rollback()
-            failures += 1
             # Persist only allowlisted safe codes; never DB URLs, provider bodies
             # or exception traces (may contain credentials).
             code = str(exc) if isinstance(exc, ValueError) and str(exc) in SAFE_ERRORS else "MONITOR_CHECK_FAILED"
-            payload = {"status": "CANNOT_ASSESS", "reason": code, "checked_at": now.isoformat(), "model_only": True}
+            if code == "AWAITING_MARKET_ENTRY" and baseline is None:
+                waiting += 1
+                payload = {"status": "AWAITING_MARKET_ENTRY", "reason": code,
+                           "publication_id": publication["publication_id"],
+                           "checked_at": now.isoformat(), "model_only": True,
+                           "entry_date": getattr(exc, "entry_date", None),
+                           "ready_at": getattr(exc, "ready_at", None)}
+                store.append(conn, basket, "waiting:" + baseline_id + ":" + now.isoformat(),
+                             "WAITING", baseline_id, payload)
+                conn.commit()
+                results.append({"publication_id": publication["publication_id"],
+                                "status": "WAITING", "reason": code,
+                                "entry_date": payload["entry_date"], "ready_at": payload["ready_at"]})
+                continue
+            failures += 1
+            payload = {"status": "CANNOT_ASSESS", "reason": code, "checked_at": now.isoformat(),
+                       "model_only": True, "publication_id": publication["publication_id"], "stage": stage}
             store.append(conn, basket, "failure:" + baseline_id + ":" + now.isoformat() + ":" + code,
                          "FAILURE", baseline_id, payload)
             conn.commit()
             notify_safely(conn, basket, baseline_id, payload, now)
-    return {"checked": len(selected), "failed": failures}
+            results.append({"publication_id": publication["publication_id"],
+                            "status": "CANNOT_ASSESS", "reason": code, "stage": stage})
+    return {"checked": len(selected), "failed": failures, "waiting": waiting, "results": results}
 
 
 def maybe_notify(conn, basket, baseline_id, payload, now):
