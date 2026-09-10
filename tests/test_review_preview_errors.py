@@ -11,7 +11,7 @@ class PreviewErrorTests(unittest.TestCase):
         p = policy()
         p['instrument_kinds'] = {}
         pub = {'publication_id':'P006', 'weights':{'A.NS':1.}}
-        with patch('public_review.market.fetch') as fetch:
+        with patch('public_review.market.fetch') as fetch, patch('public_review.instruments._registry', return_value={}):
             with self.assertRaisesRegex(ValueError, 'INSTRUMENT_CLASSIFICATION_REQUIRED'):
                 historical_preview(pub, p, [], datetime(2026,9,10,3,30,tzinfo=timezone.utc))
         fetch.assert_not_called()

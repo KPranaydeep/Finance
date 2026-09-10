@@ -14,11 +14,14 @@ def main():
     try:
         policy = load_policy(datetime.now(timezone.utc).date())
         from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
-        from public_review.service import run
+        from public_review.service import run, publications
+        from public_review.instruments import sync_policy_file
         url = get_public_basket_database_url()
         if not url:
             raise ValueError("DATABASE_CONFIGURATION_REQUIRED")
         with connect_public_basket_db(url) as conn:
+            pubs = publications(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"))
+            policy = sync_policy_file({t for p in pubs for t in p["weights"]})
             result = run(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"), policy,
                          acknowledge=os.getenv("PUBLIC_REVIEW_ACK_BASELINE") or None)
         print(json.dumps(result))
@@ -32,7 +35,8 @@ def main():
         safe_codes = {"POLICY_APPROVAL_REQUIRED", "UNSUPPORTED_TAX_OR_ACCOUNT_PROFILE",
                       "TARIFF_REVIEW_REQUIRED", "CALENDAR_REVIEW_REQUIRED", "INTEGER_POLICY_REQUIRED",
                       "NSE_CLASSIFICATION_REQUIRED", "INVALID_CAPITAL", "DATABASE_CONFIGURATION_REQUIRED",
-                      "NO_ACTIVE_PUBLICATION", "UNKNOWN_BASELINE"}
+                      "NO_ACTIVE_PUBLICATION", "UNKNOWN_BASELINE", "INSTRUMENT_CLASSIFICATION_REQUIRED",
+                      "INSTRUMENT_METADATA_UNAVAILABLE", "POLICY_UPDATE_BUSY", "POLICY_CHANGED_RETRY"}
         code = str(exc) if isinstance(exc, ValueError) and str(exc) in safe_codes else "REVIEW_SETUP_OR_STORAGE_FAILED"
         print(json.dumps({"status": "CANNOT_ASSESS", "reason": code,
                           "note": "No trade was submitted. Raw exceptions and credentials are not logged."}))

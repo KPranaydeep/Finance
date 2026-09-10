@@ -9,6 +9,8 @@ from .forecast import estimate, validate
 
 
 def historical_preview(publication, policy, events, now=None):
+    from .instruments import complete_policy
+    policy = complete_policy(policy, publication["weights"])
     now = now or datetime.now(timezone.utc)
     local = now.astimezone(ZoneInfo("Asia/Kolkata")).date()
     ack_epoch = max((r.get("seq", 0) for r in events if r["kind"] == "ACKNOWLEDGED"), default=0)
