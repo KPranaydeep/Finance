@@ -99,18 +99,20 @@ class SecurityTargetTests(unittest.TestCase):
         publication = {'publication_id':'NEW', 'basket_id':'TEST', 'portfolio_version':6,
                        'published_at':'2026-09-09T14:11:00+00:00',
                        'weights':{'A.NS':.5, 'B.NS':.5}}
-        dates = [str(d.date()) for d in calendar('2025-06-01', '2026-09-09', p).index]
-        histories = {t: pd.DataFrame({'Close':price, 'Open':price}, index=dates)
+        dates = [str(d.date()) for d in calendar('2025-06-01', '2026-09-10', p).index]
+        histories = {t: pd.DataFrame({'Close':price, 'Open':price, 'Volume':1000.,
+                                      'Dividends':0., 'Stock Splits':0.}, index=dates)
                      for t, price in [('A.NS',100.), ('B.NS',50.)]}
         events = []
         before = deepcopy(events)
         with patch('public_review.market.fetch', return_value=histories), \
              patch('public_review.preview.validate', return_value={'passed':False}):
             result = historical_preview(publication, p, events,
-                                        datetime(2026,9,9,18,tzinfo=timezone.utc))
+                                        datetime(2026,9,10,11,tzinfo=timezone.utc))
         self.assertTrue(result['provisional'])
         self.assertNotIn('metrics', result)
         self.assertEqual(events, before)
-        self.assertEqual(result['as_of'], '2026-09-09')
-        self.assertEqual(result['decision']['next_review'], '2026-09-10')
+        self.assertEqual(result['as_of'], '2026-09-10')
+        self.assertEqual(result['assumed_entry_date'], '2026-09-10')
+        self.assertEqual(result['decision']['next_review'], '2026-09-11')
         self.assertIsNone(result['forecast']['next_review'])

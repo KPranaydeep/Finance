@@ -10,17 +10,19 @@ class PreviewErrorTests(unittest.TestCase):
     def test_empty_classifications_reproduces_failure_before_fetch(self):
         p = policy()
         p['instrument_kinds'] = {}
-        pub = {'publication_id':'P006', 'weights':{'A.NS':1.}}
+        pub = {'publication_id':'P006', 'basket_id':'TEST', 'portfolio_version':6,
+               'published_at':'2026-09-09T14:11:00+00:00', 'weights':{'A.NS':1.}}
         with patch('public_review.market.fetch') as fetch, patch('public_review.instruments._registry', return_value={}):
             with self.assertRaisesRegex(ValueError, 'INSTRUMENT_CLASSIFICATION_REQUIRED'):
                 historical_preview(pub, p, [], datetime(2026,9,10,3,30,tzinfo=timezone.utc))
         fetch.assert_not_called()
 
     def test_configured_security_reaches_price_fetch(self):
-        pub = {'publication_id':'P006', 'weights':{'A.NS':1.}}
+        pub = {'publication_id':'P006', 'basket_id':'TEST', 'portfolio_version':6,
+               'published_at':'2026-09-09T14:11:00+00:00', 'weights':{'A.NS':1.}}
         with patch('public_review.market.fetch', side_effect=ValueError('TEST_FETCH_REACHED')):
             with self.assertRaisesRegex(ValueError, 'TEST_FETCH_REACHED'):
-                historical_preview(pub, policy(), [], datetime(2026,9,10,3,30,tzinfo=timezone.utc))
+                historical_preview(pub, policy(), [], datetime(2026,9,10,11,tzinfo=timezone.utc))
 
     def test_ui_explains_missing_classifications(self):
         def app():
