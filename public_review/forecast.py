@@ -40,11 +40,26 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     gross = future * q
     # Conservative analytic envelope for simulations; exact rupee/paise-rounded
     # liquidation engine is always used for today's actionable trigger.
-    brokerage = np.minimum(20., np.minimum(np.maximum(5., gross * .001), gross * .025))
-    dp = np.where(gross >= 100, 20., 13.)
+    foreign = np.array([r["kind"] == "foreign_us_listing" for r in lots])
+    domestic_brokerage = np.minimum(20., np.minimum(np.maximum(5., gross * .001), gross * .025))
+    brokerage = np.where(foreign[None, None, :], gross * .0015, domestic_brokerage)
+    dp = np.where(foreign[None, None, :], 0., np.where(gross >= 100, 20., 13.))
     stt = np.array([.001 if r["kind"] == "equity" else .00001 if r["kind"] == "equity_etf" else 0. for r in lots])
-    regulated = gross * (.0000297 + .000001 + .000001)
+    domestic_regulated = gross * (.0000297 + .000001 + .000001)
+    foreign_regulated = gross * (.00005 + .000035 + .0000206 + .000166)
+    regulated = np.where(foreign[None, None, :], foreign_regulated, domestic_regulated)
     fees = ((brokerage + dp + regulated) * 1.18 + gross * (stt + policy["slippage_bps"] / 10000) + 1.25)
+    if foreign.any():
+        foreign_gross = (gross * foreign[None, None, :]).sum(axis=2)
+        fx_gst = np.where(
+            foreign_gross <= 100_000,
+            np.minimum(180., np.maximum(45., foreign_gross * .0018)),
+            np.where(foreign_gross <= 1_000_000,
+                     np.minimum(990., 180. + (foreign_gross - 100_000.) * .0009),
+                     np.minimum(10_800., 990. + (foreign_gross - 1_000_000.) * .00018)))
+        allocation = np.divide(gross, foreign_gross[:, :, None],
+                               out=np.zeros_like(gross), where=foreign_gross[:, :, None] > 0)
+        fees += allocation * fx_gst[:, :, None] * foreign[None, None, :]
     rates = np.array([[tax_rate(r["kind"], r["entry_date"], d, policy) for r in lots] for d in future_dates])
     tax = np.maximum(0., (future - cost) * q) * rates
     net = baseline["cash"] + (gross - fees - tax).sum(axis=2)

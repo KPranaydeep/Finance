@@ -52,18 +52,30 @@ def freeze(publication, weights, prices, entry_date, capital, kinds, policy, cap
     if not weights or any(not math.isfinite(w) or w <= 0 for w in weights.values()) or sum(weights.values()) > 1.000001:
         raise ValueError("Invalid target weights")
     lots, spent = [], 0.
+    foreign_weight = sum(weight for ticker, weight in weights.items()
+                         if kinds[ticker] == "foreign_us_listing")
+    foreign_funding_gst = 0.
+    if foreign_weight:
+        from public_us_funding import fx_gst
+        foreign_funding_gst = fx_gst(capital * foreign_weight)
     for ticker, weight in sorted(weights.items()):
         p = float(prices[ticker])
         if not math.isfinite(p) or p <= 0:
             raise ValueError("Missing/invalid entry price")
         kind = kinds[ticker]  # Explicit owner-approved classification, never guessed.
         budget = capital * weight
+        allocated_fx_gst = (foreign_funding_gst * weight / foreign_weight
+                            if kind == "foreign_us_listing" else 0.)
         q = int(budget // p)
-        while q and q * p + charges(q * p, "BUY", kind, policy)["total"] > budget:
+        while q and q * p + charges(q * p, "BUY", kind, policy)["total"] + allocated_fx_gst > budget:
             q -= 1
         if not q:
             continue
         fee = charges(q * p, "BUY", kind, policy)
+        if allocated_fx_gst:
+            allocated = round(allocated_fx_gst, 2)
+            fee["fx_gst"] = allocated
+            fee["total"] = round(fee["total"] + allocated, 2)
         lot = {"ticker": ticker, "quantity": q, "price": p, "kind": kind,
                "entry_date": entry_date, "entry_charges": fee}
         lots.append(lot)
@@ -75,6 +87,8 @@ def freeze(publication, weights, prices, entry_date, capital, kinds, policy, cap
                "published_at": str(publication["published_at"]), "entry_date": entry_date,
                "captured_at": captured_at, "capital": capital, "cash": round(capital - spent, 2),
                "weights": weights, "lots": lots, "entry_policy": policy,
+               "foreign_funding_fx_gst": round(sum(
+                   lot["entry_charges"].get("fx_gst", 0.) for lot in lots), 2),
                "basis": "RETROSPECTIVE_PUBLICATION_MODEL_NOT_ACTUAL_TRADES",
                "units": "Yahoo split-normalized at capture; subsequent corporate actions require review"}
     payload["baseline_id"] = digest(payload)
@@ -102,6 +116,24 @@ def evaluate(baseline, prices, day, policy, dividend_flows=None):
         rows.append({"ticker": lot["ticker"], "shares": lot["quantity"], "price": price,
                      "outlay": round(outlay, 2), "net_profit": round(sale["net"] + div - outlay, 2),
                      "xirr": xirr(flows), **sale})
+    foreign = [row for row, lot in zip(rows, baseline["lots"])
+               if lot["kind"] == "foreign_us_listing"]
+    if foreign:
+        from public_us_funding import fx_gst
+        conversion_gst = fx_gst(sum(row["gross"] for row in foreign))
+        foreign_gross = sum(row["gross"] for row in foreign)
+        for row in foreign:
+            share = conversion_gst * row["gross"] / foreign_gross
+            row["fees"]["fx_gst"] = round(share, 2)
+            row["fees"]["total"] = round(row["fees"]["total"] + share, 2)
+            row["net"] = round(row["net"] - share, 2)
+            row["net_profit"] = round(row["net_profit"] - share, 2)
+            # Recompute the security XIRR after its allocated conversion GST.
+            lot = next(lot for lot in baseline["lots"] if lot["ticker"] == row["ticker"])
+            security_dividends = [x for x in dividends if x["ticker"] == row["ticker"]]
+            row["xirr"] = xirr([(baseline["entry_date"], -row["outlay"])] +
+                               [(x["date"], x["net"]) for x in security_dividends] +
+                               [(day, row["net"])])
     net = baseline["cash"] + sum(r["net"] for r in rows) + sum(x["net"] for x in dividends)
     gross = baseline["cash"] + sum(r["gross"] for r in rows) + sum(x["net"] for x in dividends)
     return {"date": day, "rows": rows, "net_proceeds": round(net, 2), "gross_value": gross,

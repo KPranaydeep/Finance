@@ -12,13 +12,12 @@ ETF = "Symbol,ETF Underlying,ISINNumber\nF,GLOBAL INDICES,INF000A01012\nG,COMMOD
 
 
 class InstrumentTests(unittest.TestCase):
-    def test_foreign_identification_preserves_review_block(self):
+    def test_foreign_identification_is_supported_by_review_model(self):
         from public_review.instruments import require_supported_review
         with patch('public_review.instruments._foreign_kind', return_value='foreign_us_listing'):
             result = complete_policy(policy(), ['AXTI'])
         self.assertEqual(result['instrument_kinds']['AXTI'], 'foreign_us_listing')
-        with self.assertRaisesRegex(ValueError, 'FOREIGN_REVIEW_COST_MODEL_REQUIRED'):
-            require_supported_review(['AXTI'])
+        self.assertTrue(require_supported_review(['AXTI']))
 
     def test_explicit_metadata_categories(self):
         r = parse_registry(EQUITY, ETF)

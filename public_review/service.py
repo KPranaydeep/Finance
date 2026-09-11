@@ -133,7 +133,11 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
             tickers = [r["ticker"] for r in baseline["lots"]] if baseline else list(weights)
             stage = "market_history"
-            data = market.fetch(tickers, entry, as_of, policy)
+            mixed_markets = any(not ticker.endswith(".NS") for ticker in tickers)
+            data = market.fetch(tickers, entry, as_of, policy,
+                                allow_incomplete_end=mixed_markets)
+            entry, as_of = market.synchronized_dates(
+                data, entry, as_of, new_baseline=baseline is None)
             stage = "freeze_baseline"
             if baseline is None:
                 entry_prices = {t: float(h.loc[entry, "Open"]) for t, h in data.items()}

@@ -71,8 +71,10 @@ def _foreign_kind(ticker, bucket):
 
 
 def require_supported_review(tickers):
-    if any(not t.endswith(".NS") for t in tickers):
-        raise ValueError("FOREIGN_REVIEW_COST_MODEL_REQUIRED")
+    """Compatibility hook retained for callers; classification is checked later."""
+    if not tickers:
+        raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+    return True
 
 
 def complete_policy(policy, tickers, registry=None):

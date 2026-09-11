@@ -1,4 +1,4 @@
-"""Completed NSE sessions and strict synchronized Yahoo histories; no filling."""
+"""Completed review sessions and strict INR Yahoo histories; no filling."""
 from datetime import timedelta
 import math
 import pandas as pd
@@ -46,9 +46,18 @@ def sessions(now, published_at, policy):
 def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):
     start = min(pd.Timestamp(entry_day), pd.Timestamp(as_of) - pd.DateOffset(years=policy["history_years"]))
     result = {}
+    usd = [t for t in tickers if not t.endswith(".NS")]
+    fx = None
+    if usd:
+        fx = yf.Ticker("INR=X").history(start=str(start.date()),
+                    end=str((pd.Timestamp(as_of) + pd.Timedelta(days=1)).date()),
+                    auto_adjust=False, actions=False, repair=False, timeout=15)
+        if fx.empty:
+            raise ValueError("MISSING_MARKET_HISTORY")
+        fx.index = pd.Index([str(d.date()) for d in fx.index])
+        if fx.index.duplicated().any():
+            raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
     for t in sorted(tickers):
-        if not t.endswith(".NS"):
-            raise ValueError("ONLY_NSE_DELIVERY_SUPPORTED")
         history = yf.Ticker(t).history(start=str(start.date()),
                     end=str((pd.Timestamp(as_of) + pd.Timedelta(days=1)).date()),
                     auto_adjust=False, actions=True, repair=False, timeout=15)
@@ -57,6 +66,18 @@ def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):
         history.index = pd.Index([str(d.date()) for d in history.index])
         if history.index.duplicated().any():
             raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
+        if not t.endswith(".NS"):
+            # Exact-date conversion only. No forward fill: a missing bank-FX
+            # observation makes that security-session unusable.
+            aligned = fx.reindex(history.index)
+            for column in ("Open", "High", "Low", "Close"):
+                if column in history:
+                    rate_column = column if column in aligned else "Close"
+                    history[column] = pd.to_numeric(history[column], errors="coerce") * pd.to_numeric(aligned[rate_column], errors="coerce")
+            if "Dividends" in history:
+                history["Dividends"] = pd.to_numeric(history["Dividends"], errors="coerce") * pd.to_numeric(aligned["Close"], errors="coerce")
+            history.attrs["quote_currency"] = "USD"
+            history.attrs["valuation_currency"] = "INR"
         if not allow_incomplete_end:
             if entry_day not in history.index or as_of not in history.index:
                 raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
@@ -65,3 +86,30 @@ def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):
                 raise ValueError("INVALID_OR_NONTRADING_PRICE")
         result[t] = history.loc[history.index <= as_of]
     return result
+
+
+def synchronized_dates(histories, entry_day, as_of, *, new_baseline):
+    """Choose completed dates shared by NSE, US listings and USD/INR.
+
+    A mixed basket checked after the NSE close normally uses the preceding US
+    close. This is deliberate and is surfaced through the returned as-of date.
+    """
+    common = None
+    for history in histories.values():
+        valid = set(history.index[pd.to_numeric(history["Close"], errors="coerce").map(
+            lambda value: math.isfinite(float(value)) and float(value) > 0)])
+        common = valid if common is None else common & valid
+    common = sorted(d for d in (common or set()) if entry_day <= d <= as_of)
+    if not common:
+        if new_baseline:
+            raise AwaitingMarketEntry(entry_day, None)
+        raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
+    entry = common[0] if new_baseline else entry_day
+    if entry not in common:
+        raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
+    for history in histories.values():
+        values = (history.loc[entry, "Open"], history.loc[common[-1], "Close"],
+                  history.loc[common[-1], "Volume"])
+        if any(not math.isfinite(float(value)) or float(value) <= 0 for value in values):
+            raise ValueError("INVALID_OR_NONTRADING_PRICE")
+    return entry, common[-1]

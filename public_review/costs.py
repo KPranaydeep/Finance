@@ -1,4 +1,4 @@
-"""Versioned conservative regular-resident NSE delivery cost envelope.
+"""Versioned conservative regular-resident delivery cost envelope.
 
 Not a contract note or tax return. No exemptions, loss offsets or fee tax deductions
 are credited: this intentionally overestimates capital-gains tax. Instrument tax
@@ -9,9 +9,13 @@ from decimal import Decimal, ROUND_CEILING
 import math
 
 SOURCES = ["https://groww.in/pricing", "https://zerodha.com/charges/",
-           "https://www.amfiindia.com/investor/knowledge-center-info?zoneName=TaxRegimeForMutualFunds"]
-TARIFF_VERSION = "groww-zerodha-nse-delivery-2026-09-09"
-KINDS = {"equity", "equity_etf", "listed_non_equity_etf", "specified_debt_etf"}
+           "https://www.amfiindia.com/investor/knowledge-center-info?zoneName=TaxRegimeForMutualFunds",
+           "https://www.tickertape.in/us-stocks/pricing",
+           "https://www.hdfc.bank.in/remittance/fees-and-charges"]
+TARIFF_VERSION = "groww-zerodha-tickertape-pro-hdfc-2026-09-11"
+FOREIGN_KIND = "foreign_us_listing"
+KINDS = {"equity", "equity_etf", "listed_non_equity_etf", "specified_debt_etf",
+         FOREIGN_KIND}
 
 
 def money(x):
@@ -32,6 +36,22 @@ def charges(gross, side, kind, policy):
     if not gross:
         return {"brokerage": 0., "dp": 0., "stt": 0., "stamp": 0., "exchange": 0.,
                 "sebi": 0., "ipft": 0., "gst": 0., "slippage": 0., "total": 0.}
+    if kind == FOREIGN_KIND:
+        # Tickertape Pro tariff. The published $25 brokerage cap is deliberately
+        # not applied without the execution-time bank FX rate, making this an
+        # upper envelope rather than understating a large order's cost.
+        brokerage = money(gross * .0015)
+        regulatory_rate = .00005 + .000035
+        if side == "SELL":
+            regulatory_rate += .0000206 + .000166
+        regulated = money(gross * regulatory_rate)
+        parts = {"brokerage": brokerage, "dp": 0., "stt": 0., "stamp": 0.,
+                 "exchange": 0., "sebi": 0., "ipft": 0.,
+                 "us_regulatory": regulated}
+        parts["gst"] = money(.18 * (brokerage + regulated))
+        parts["slippage"] = money(gross * policy["slippage_bps"] / 10000)
+        parts["total"] = money(sum(parts.values()))
+        return parts
     # Groww normal plan vs Zerodha zero delivery brokerage; enforce value cap.
     brokerage = min(20., max(5., gross * .001), gross * .025)
     # Higher DP base: Groww male-depository tariff vs Zerodha 13 before GST.
@@ -49,11 +69,11 @@ def charges(gross, side, kind, policy):
     return parts
 
 
-def anniversary(d):
+def anniversary(d, years=1):
     try:
-        return d.replace(year=d.year + 1)
+        return d.replace(year=d.year + years)
     except ValueError:
-        return d.replace(year=d.year + 1, day=28)
+        return d.replace(year=d.year + years, day=28)
 
 
 def tax_rate(kind, bought, sold, policy):
@@ -63,11 +83,11 @@ def tax_rate(kind, bought, sold, policy):
     # No historical tax regime inference. This version supports new model lots only.
     if bought < date(2026, 4, 1) or sold < bought:
         raise ValueError("Unsupported tax date/regime")
-    long_term = sold > anniversary(bought)
+    long_term = sold > anniversary(bought, 2 if kind == FOREIGN_KIND else 1)
     if kind in {"equity", "equity_etf"}:
         base = .125 if long_term else .20
         surcharge = min(policy["surcharge_rate"], .15)
-    elif kind == "listed_non_equity_etf" and long_term:
+    elif kind in {"listed_non_equity_etf", FOREIGN_KIND} and long_term:
         base, surcharge = .125, min(policy["surcharge_rate"], .15)
     else:
         base, surcharge = policy["slab_rate"], policy["surcharge_rate"]

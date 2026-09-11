@@ -8,9 +8,14 @@ import math
 
 
 def fx_gst(amount):
-    if not math.isfinite(amount) or not 0 < amount <= 1_000_000:
-        raise ValueError("Funding estimate supports INR 1 to 10 lakh only")
-    return max(45., amount * .0018) if amount <= 100_000 else 180 + (amount - 100_000) * .0009
+    """GST on the INR value of foreign currency exchanged (HDFC slab formula)."""
+    if not math.isfinite(amount) or amount <= 0:
+        raise ValueError("Positive finite currency-exchange amount required")
+    if amount <= 100_000:
+        return min(180., max(45., amount * .0018))
+    if amount <= 1_000_000:
+        return min(990., 180. + (amount - 100_000.) * .0009)
+    return min(10_800., 990. + (amount - 1_000_000.) * .00018)
 
 
 def pro_brokerage(order_inr, usd_inr):
