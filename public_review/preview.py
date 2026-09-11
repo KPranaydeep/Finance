@@ -31,7 +31,15 @@ def historical_preview(publication, policy, events, now=None):
         b = row["payload"]
         if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in b["lots"]):
             raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
-        histories = market.fetch([l["ticker"] for l in b["lots"]], b["entry_date"], as_of, policy)
+        tickers = [l["ticker"] for l in b["lots"]]
+        mixed_markets = any(not ticker.endswith(".NS") for ticker in tickers)
+        histories = market.fetch(tickers, b["entry_date"], as_of, policy,
+                                 allow_incomplete_end=mixed_markets)
+        _, as_of = market.synchronized_dates(
+            histories, b["entry_date"], as_of, new_baseline=False)
+        days = [day for day in days if day > as_of]
+        if not days:
+            raise ValueError("INCOMPLETE_SESSION_CALENDAR")
         p = build_assessment(b, histories, as_of, days, policy, events, publication["weights"],
                              now, comparisons=False)
         return {"provisional": False, "as_of": as_of, "checked_at": now.isoformat(),

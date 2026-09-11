@@ -179,7 +179,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
         st.json(p["validation"])
         st.json(p["policy"])
         st.caption(p["dividend_assumption"])
-        st.caption("Tariff scope: normal funded resident-individual NSE delivery, Groww/Zerodha component-wise conservative envelope. No annual exemption or loss-offset credit. Not a SEBI certification or a personal tax calculation. MMI is context only.")
+        st.caption("Tariff scope: normal funded resident-individual delivery. NSE holdings use the Groww/Zerodha conservative envelope; direct US listings use Tickertape Pro trading charges and HDFC FX-GST assumptions. No annual exemption or loss-offset credit. Not a SEBI certification or a personal tax calculation. MMI is context only.")
         st.json(p["mmi"])
         st.download_button("Download model review evidence (.json)", json.dumps({"baseline": baseline, "assessment": p,
                             "assessment_hash": last["event_hash"]}, indent=2),

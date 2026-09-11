@@ -480,7 +480,7 @@ st.markdown(
 )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
-    st.caption(f"Prices: latest available unadjusted close in INR · through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR. Foreign trading/remittance costs are not covered by the NSE cost model.")
+    st.caption(f"Prices: latest available unadjusted close in INR · through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR. Direct-US review estimates use the versioned Tickertape Pro and HDFC cost assumptions; displayed closes are not executable quotes.")
 if any(item.get("source_currency") == "USD" for item in price_snapshot.values()):
     from public_us_funding import known_cost_floor
     funding_floor = known_cost_floor()
