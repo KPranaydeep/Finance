@@ -116,10 +116,11 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
     for publication in selected:
         baseline = existing.get(publication["publication_id"])
         baseline_id = baseline["baseline_id"] if baseline else publication["publication_id"]
-        stage = "session_calendar"
+        stage = "instrument_cost_model"
         try:
             from .instruments import require_supported_review
             require_supported_review(publication["weights"])
+            stage = "session_calendar"
             entry, as_of, future = market.sessions(now, publication["published_at"], policy)
             stage = "instrument_classification"
             if baseline:

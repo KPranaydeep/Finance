@@ -1,36 +1,27 @@
-# Review metadata and known-cost funding update
+# Manual stocks and FX update
 
-Upload the included files into Finance at their matching paths; commit on main.
-Keep your existing public_review_policy.json and secrets. No database migration.
-Run the model-review workflow, and run the private optimizer again to produce a
-new analysis backup JSON containing review_analysis_context. Existing immutable
-publications are not rewritten. This metadata is provenance in the analysis
-backup, not yet persisted into the public publication schema or consumed as a
-replacement for fresh review history.
+Upload the included Python files to the matching Finance repository paths and
+commit on main. No secrets, policy JSON or database migration changes are needed.
 
-Supported NSE names are resolved from exchange metadata. US USD equity/ETF
-listings are identified using Yahoo metadata. Existing owner entries are kept;
-unknown instruments fail explicitly. The workflow resolves its checkout policy
-on each run; you do not need to commit new ticker entries. US listing identity
-does not determine domicile, ADR/partnership status or tax treatment.
+In the private optimizer, open Master Holdings > Add stocks manually. Enter
+comma/newline-separated Yahoo tickers, then Add to my holdings. New rows start
+at quantity 1 and a Yahoo native-currency price placeholder. Use Edit quantity
+and average price to replace these with your actual holdings before analysis.
+Existing rows are never reset. Unresolved tickers and missing prices are reported.
 
-The new funding card uses Tickertape Pro brokerage plus GST and HDFC FX GST.
-It is a known-charge floor on an INR100 grid, not a complete investment minimum.
-It does NOT change execution-plan defaults or authorize trades. Zero platform
-and gateway fees follow the supplied funding screenshot only. FX spread,
-regulatory fees, exit costs, TCS/taxes and subscription costs are excluded.
-The pure funding calculator supports amounts up to INR10 lakh only.
+The holdings table now shows reference FX and entered cost converted to INR.
+Average Price remains in its native currency. This prevents double conversion.
+The INR equivalent is not a reconstruction of historical INR purchase cost.
+FX and latest-price caches expire after five minutes. Refresh FX to INR clears
+the FX cache explicitly; new additions also clear price and FX caches.
+The existing optimization calculations already convert foreign histories to INR.
 
-Sources checked 2026-09-10:
-- https://www.tickertape.in/us-stocks/pricing
-- https://www.tickertape.in/blog/how-to-invest-in-us-stocks/
-- https://www.hdfc.bank.in/remittance/fees-and-charges
+The attached service.py fixes the diagnostic stage from session_calendar to
+instrument_cost_model. It DOES NOT remove FOREIGN_REVIEW_COST_MODEL_REQUIRED.
+The US tax/exit model and mixed-market calendar integration remain pending.
+Funding GST and Pro brokerage alone do not complete that model. This patch does
+not generate unsupported post-tax target dates or turn a failed review green.
 
-IMPORTANT: This is a partial integration. FOREIGN_REVIEW_COST_MODEL_REQUIRED
-remains for mixed/US portfolios. Their after-tax per-security crossing dates
-are NOT enabled by this patch. A verified foreign exit/tax model and mixed-market
-session support remain necessary. Domestic crossing tables open by default;
-dates are probabilistic research estimates, never promises of 100% XIRR.
-
-Validation: 79 review tests and 4 funding tests passed. Both edited Streamlit
-scripts passed AST syntax checks. Cloud runtime and production DB were not run.
+Manual persistence tests use an isolated in-memory SQLite database, not your
+holdings or production PostgreSQL. The main script passed syntax validation.
+The main GitHub optimizer matched the previously delivered file before editing.

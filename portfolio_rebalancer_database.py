@@ -1756,7 +1756,7 @@ def _currency_major_and_unit_factor(currency):
     return currency, 1.0
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300, max_entries=64)
 def _latest_fx_rate_to_inr(currency):
     """Return INR per one quoted currency unit (including pence handling)."""
     major, unit_factor = _currency_major_and_unit_factor(currency)
@@ -3350,7 +3350,7 @@ def style_holdings_action_summary(df):
     }
     return df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300, max_entries=32)
 def get_latest_price_map(latest_prices):
     tickers = tuple(dict.fromkeys(str(t).strip().upper() for t in latest_prices if str(t).strip()))
     if not tickers:
@@ -4277,12 +4277,62 @@ sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
 render_saved_analysis(saved_analysis_placeholder, CURRENT_USER)
 
 st.subheader("Master Holdings")
+with st.expander("Add stocks manually", expanded=False):
+    st.caption("Enter symbols or Yahoo tickers, separated by commas or new lines (for example RELIANCE.NS, AXTI, VT). New rows start with quantity 1 and a Yahoo native-currency price as a placeholder—not your actual purchase cost. Edit both below before running optimization. Existing holdings are not overwritten.")
+    with st.form("manual_holdings_add"):
+        manual_symbols = st.text_area("Stocks to add", key="manual_holdings_symbols")
+        manual_add = st.form_submit_button("Add to my holdings")
+    if manual_add:
+        symbols = parse_symbol_input(manual_symbols)
+        if not symbols:
+            st.warning("Enter at least one ticker.")
+        elif len(symbols) > 50:
+            st.warning("Add up to 50 symbols at a time.")
+        else:
+            try:
+                get_latest_price_map.clear()
+                _latest_fx_rate_to_inr.clear()
+                added, duplicates, invalid, missing_prices = add_symbols_to_master(symbols, CURRENT_USER)
+                if added:
+                    st.session_state["holdings_editor_version"] += 1
+                    clear_drop_bottom_coverage_preview()
+                    st.session_state.pop("drop_bottom_auto_result", None)
+                    st.session_state.pop("drop_bottom_auto_error", None)
+                    st.session_state["holdings_flash_success"] = "Added with quantity 1: " + ", ".join(added)
+                notices = []
+                if duplicates:
+                    notices.append("Already held (unchanged): " + ", ".join(duplicates))
+                if invalid:
+                    notices.append("Could not resolve: " + ", ".join(invalid))
+                if missing_prices:
+                    notices.append("Price unavailable; enter native Average Price manually: " + ", ".join(missing_prices))
+                if notices:
+                    st.session_state["holdings_flash_warning"] = " · ".join(notices)
+                st.rerun()
+            except Exception:
+                st.error("Could not complete the addition. Refresh the holdings list before retrying; check ticker spelling and Yahoo availability.")
+
+if st.button("Refresh FX to INR", key="refresh_holdings_fx"):
+    _latest_fx_rate_to_inr.clear()
 master_df = load_master_holdings(CURRENT_USER)
 
 if master_df.empty:
     st.info("The master holdings table is empty. Add symbols from the sidebar.")
 else:
-    st.dataframe(master_df, width="stretch", hide_index=True)
+    display_master = master_df.copy()
+    try:
+        fx = get_fx_to_inr_map(master_df["Currency"])
+        display_master["FX to INR"] = master_df["Currency"].map(_normalize_currency_code).map(fx)
+        display_master["Average Price INR"] = pd.to_numeric(master_df["Average Price"], errors="coerce") * display_master["FX to INR"]
+        display_master["Value at entered cost INR"] = pd.to_numeric(master_df["Quantity"], errors="coerce") * display_master["Average Price INR"]
+        st.caption("Average Price stays in the quoted currency. INR columns use Yahoo reference FX, refreshed at most every five minutes or with Refresh FX. This is current-FX conversion of entered cost, not historical INR purchase cost or live market value.")
+    except Exception:
+        st.warning("FX unavailable: INR equivalents are not shown. No 1:1 conversion is assumed; your native holdings are unchanged.")
+    st.dataframe(display_master, width="stretch", hide_index=True, column_config={
+        "FX to INR": st.column_config.NumberColumn(format="%.4f"),
+        "Average Price INR": st.column_config.NumberColumn(format="₹%.2f"),
+        "Value at entered cost INR": st.column_config.NumberColumn(format="₹%.2f"),
+    })
 
     with st.expander("Edit quantity and average price", expanded=False):
         st.caption(
