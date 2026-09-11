@@ -2,8 +2,10 @@ name: Public portfolio model review
 
 on:
   schedule:
-    # Daily, including weekends/special sessions: stale heartbeat and alert checks
-    # must work independently of NAV/forecast workflow failures.
+    # Check after the supported NSE/NYSE opens and closes. Both US daylight
+    # and standard-time windows are covered; the engine uses actual calendars.
+    - cron: "15 4,10,14,15,20,21 * * 1-5"
+    # Preserve a daily heartbeat on weekends and holidays.
     - cron: "45 12 * * *"
   workflow_dispatch:
     inputs:
@@ -55,3 +57,4 @@ jobs:
           name: resolved-public-review-policy
           path: public_review_policy.json
           retention-days: 7
+
