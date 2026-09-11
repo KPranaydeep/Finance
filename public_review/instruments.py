@@ -1,14 +1,10 @@
 """Explicit NSE metadata -> existing review-model categories. No ticker guessing."""
 import csv
 import io
-import json
-import os
 import re
-import tempfile
 import time
 from copy import deepcopy
 from functools import lru_cache
-from pathlib import Path
 from urllib.request import Request, urlopen
 
 EQUITIES = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
@@ -78,49 +74,30 @@ def require_supported_review(tickers):
 
 
 def complete_policy(policy, tickers, registry=None):
+    """Return an ephemeral policy with every requested ticker classified.
+
+    ``instrument_kinds`` is deliberately absent from the owner policy file.
+    A legacy in-memory mapping is still honoured as an explicit override so a
+    rolling deployment cannot silently change an already supplied category.
+    """
     result = deepcopy(policy)
-    missing = set(tickers) - set(result["instrument_kinds"])
+    configured = dict(result.pop("instrument_kinds", {}))
+    missing = set(tickers) - set(configured)
     if not missing:
+        result["instrument_kinds"] = {ticker: configured[ticker] for ticker in tickers}
         return result
     domestic = {t for t in missing if t.endswith(".NS")}
     bucket = int(time.time() // 3600)
     registry = registry if registry is not None else (_registry(bucket) if domestic else {})
     if any(t not in registry for t in domestic):
         raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
-    additions = {t: registry[t] for t in sorted(domestic)}
-    additions.update({t: _foreign_kind(t, bucket) for t in sorted(missing - domestic)})
-    result["instrument_kinds"].update(additions)
+    configured.update({t: registry[t] for t in sorted(domestic)})
+    configured.update({t: _foreign_kind(t, bucket) for t in sorted(missing - domestic)})
+    result["instrument_kinds"] = {ticker: configured[ticker] for ticker in tickers}
     return result
 
 
 def sync_policy_file(tickers):
-    """Update only missing kinds. Exclusive lock + atomic replacement; keep approval."""
+    """Compatibility entry point: resolve kinds without modifying owner policy."""
     from .config import load_policy
-    path = Path(os.environ.get("PUBLIC_REVIEW_POLICY_PATH",
-                               str(Path(__file__).resolve().parents[1] / "public_review_policy.json")))
-    original = load_policy()
-    updated = complete_policy(original, tickers)
-    if updated == original:
-        return updated
-    lock = path.with_suffix(path.suffix + ".lock")
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        raise ValueError("POLICY_UPDATE_BUSY") from None
-    temporary = None
-    try:
-        os.close(fd)
-        if json.loads(path.read_text(encoding="utf-8")) != original:
-            raise ValueError("POLICY_CHANGED_RETRY")
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix=path.name + ".", suffix=".tmp", delete=False) as f:
-            temporary = f.name
-            json.dump(updated, f, indent=2, allow_nan=False)
-            f.write("\n")
-        os.replace(temporary, path)
-        temporary = None
-    finally:
-        if temporary:
-            Path(temporary).unlink(missing_ok=True)
-        lock.unlink(missing_ok=True)
-    return updated
+    return complete_policy(load_policy(), tickers)

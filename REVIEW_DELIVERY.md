@@ -59,7 +59,7 @@ personal recommendations. Do not simply switch approval on without checking them
 | `drift_limit` | Proposed five-percentage-point allocation drift inspection boundary |
 | `crossing_probability` | Proposed 20% cumulative probability limit used to schedule a review |
 | `max_review_sessions` | A 20-session uncertainty ceiling; does not force a trade or a calendar-based date |
-| `instrument_kinds` | Every target ticker must be explicitly classified; missing/new tickers block assessment |
+| Automatic instrument classification | Every target ticker is resolved from NSE/Yahoo metadata at runtime; unknown categories fail closed |
 | `tariff_verified_on` | Change only after actually rechecking the referenced current tariffs and implemented numbers |
 | `calendar_verified_through` | Verify exchange calendar coverage, including special sessions, before extending |
 

@@ -1,8 +1,4 @@
-import json
-import os
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 from public_review.instruments import parse_registry, complete_policy, sync_policy_file
 from review_fixtures import policy
@@ -46,17 +42,21 @@ class InstrumentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'INSTRUMENT_METADATA_INVALID'):
             parse_registry('<html>blocked</html>', ETF)
 
-    def test_file_sync_changes_only_kinds_and_is_idempotent(self):
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / 'policy.json'
-            p = policy()
-            path.write_text(json.dumps(p), encoding='utf-8')
-            with patch.dict(os.environ, {'PUBLIC_REVIEW_POLICY_PATH': str(path)}), \
-                 patch('public_review.instruments._registry', return_value={'NEW.NS':'equity'}):
-                first = sync_policy_file(['NEW.NS'])
-                second = sync_policy_file(['NEW.NS'])
-            self.assertEqual(first, second)
-            persisted = json.loads(path.read_text(encoding='utf-8'))
-            self.assertEqual(persisted.pop('instrument_kinds')['NEW.NS'], 'equity')
-            p.pop('instrument_kinds')
-            self.assertEqual(persisted, p)
+    def test_compatibility_entry_point_resolves_without_policy_write(self):
+        p = policy()
+        p.pop('instrument_kinds')
+        with patch('public_review.instruments.load_policy', create=True), \
+             patch('public_review.config.load_policy', return_value=p), \
+             patch('public_review.instruments._registry', return_value={'NEW.NS':'equity'}):
+            result = sync_policy_file(['NEW.NS'])
+        self.assertEqual(result['instrument_kinds'], {'NEW.NS':'equity'})
+        self.assertNotIn('instrument_kinds', p)
+
+    def test_policy_without_registry_is_fully_resolved(self):
+        p = policy()
+        p.pop('instrument_kinds')
+        result = complete_policy(p, ['A.NS', 'F.NS'],
+                                 {'A.NS':'equity', 'F.NS':'listed_non_equity_etf'})
+        self.assertEqual(result['instrument_kinds'],
+                         {'A.NS':'equity', 'F.NS':'listed_non_equity_etf'})
+        self.assertNotIn('instrument_kinds', p)

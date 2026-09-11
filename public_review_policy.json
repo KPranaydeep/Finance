@@ -27,22 +27,5 @@
   "validation_horizon": 20,
   "validation_min_folds": 20,
   "validation_max_brier": 0.2,
-  "history_years": 3,
-  "instrument_kinds": {
-    "SIGMAADV.NS": "equity",
-    "MONQ50.NS": "listed_non_equity_etf",
-    "TATAGOLD.NS": "listed_non_equity_etf",
-    "MAFANG.NS": "listed_non_equity_etf",
-    "BAFNAPH.NS": "equity",
-    "LAURUSLABS.NS": "equity",
-    "MTARTECH.NS": "equity",
-    "NAVINFLUOR.NS": "equity",
-    "SAKAR.NS": "equity",
-    "SBC.NS": "equity",
-    "WELCORP.NS": "equity",
-    "BLISSGVS.NS": "equity",
-    "ASTERDM.NS": "equity",
-    "INDSWFTLAB.NS": "equity",
-    "LUMAXTECH.NS": "equity"
-  }
+  "history_years": 3
 }

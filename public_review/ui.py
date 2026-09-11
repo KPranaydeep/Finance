@@ -236,7 +236,7 @@ def render_review_panel(basket_id, active_publications):
             if code == "FOREIGN_REVIEW_COST_MODEL_REQUIRED":
                 st.caption("This publication contains direct overseas listings. INR pricing is separate from tax classification. The review engine supports NSE delivery only; overseas brokerage, remittance charges and instrument-specific tax treatment must be integrated before net-XIRR review dates can be shown.")
             if code == "INSTRUMENT_CLASSIFICATION_REQUIRED":
-                st.caption("Add explicit instrument_kinds for every published ticker in public_review_policy.json. Stocks and overseas/gold ETFs have different modeled tax treatment; do not default every ticker to equity.")
+                st.caption("Automatic classification could not safely identify one or more published instruments. The owner policy does not require a ticker list; retry after the NSE/Yahoo metadata source is available or add support for the unrecognized instrument category in code.")
     try:
         events = load_events(basket_id)
         render_events(events, {p["publication_id"] for p in active_publications},

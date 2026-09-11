@@ -43,9 +43,12 @@ def load_policy(today=None):
             raise ValueError("INTEGER_POLICY_REQUIRED")
     if policy.get("entry_quote_interval") != "1m":
         raise ValueError("INVALID_POLICY_ENTRY_QUOTE_INTERVAL")
+    # ``instrument_kinds`` is a resolved runtime field, not owner policy.
+    # Accept it temporarily for backward-compatible tests/old deployments, but
+    # production policy files no longer need or maintain a ticker registry.
     if any(not ((t.endswith(".NS") and k in KINDS) or
                 (not t.endswith(".NS") and k == "foreign_us_listing"))
-           for t, k in policy["instrument_kinds"].items()):
+           for t, k in policy.get("instrument_kinds", {}).items()):
         raise ValueError("NSE_CLASSIFICATION_REQUIRED")
     if policy["capital_inr"] is not None and (not math.isfinite(policy["capital_inr"]) or policy["capital_inr"] < 1):
         raise ValueError("INVALID_CAPITAL")
