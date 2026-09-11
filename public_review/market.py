@@ -24,12 +24,12 @@ class AwaitingMarketEntry(ValueError):
         self.ready_at = ready_at
 
 
-def _data_retry(entry, now, ticker):
+def _data_retry(entry, now, ticker, reason="ENTRY_DATA_RETRY"):
     pending = AwaitingMarketEntry(
         entry["entry_date"],
         (pd.Timestamp(now) + pd.Timedelta(minutes=30)).isoformat())
     pending.planned_entry = entry
-    pending.wait_reason = "ENTRY_DATA_RETRY"
+    pending.wait_reason = reason
     pending.pending_ticker = ticker
     return pending
 
@@ -223,6 +223,24 @@ def _intraday_frame(ticker, requested):
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE") from None
 
 
+def _fx_rate_at_or_before(frame, quote_at, max_age_minutes):
+    """Use only FX information observable when the security trade occurred."""
+    if frame.empty or "Open" not in frame.columns:
+        raise ValueError("FX_ENTRY_QUOTE_UNAVAILABLE")
+    frame = frame.copy()
+    frame.index = pd.to_datetime(frame.index, utc=True)
+    quote_at = pd.Timestamp(quote_at)
+    prices = pd.to_numeric(frame["Open"], errors="coerce")
+    valid = frame[(frame.index <= quote_at) & prices.map(
+        lambda value: math.isfinite(float(value)) and float(value) > 0)]
+    if valid.empty:
+        raise ValueError("FX_ENTRY_QUOTE_UNAVAILABLE")
+    fx_at = valid.index[-1]
+    if quote_at - fx_at > pd.Timedelta(minutes=max_age_minutes):
+        raise ValueError("FX_ENTRY_QUOTE_UNAVAILABLE")
+    return float(valid.iloc[-1]["Open"]), fx_at
+
+
 def _next_session_entry(entry, policy):
     close = pd.Timestamp(entry["session_close_at"])
     schedule = calendar(close.date(), close.date() + timedelta(days=14), policy,
@@ -281,29 +299,28 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
     else:
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     fx_rate = 1.0
+    fx_at = None
     if not ticker.endswith(".NS"):
         try:
             fx = _intraday_frame("INR=X", quote_at)
         except ValueError as exc:
             if str(exc) == "ENTRY_INTRADAY_HISTORY_UNAVAILABLE":
-                raise _data_retry(candidate, now, ticker)
+                raise _data_retry(candidate, now, ticker, "FX_DATA_RETRY")
             raise
-        # FX volume is commonly absent/zero, so validate only its price.
-        if fx.empty:
-            raise _data_retry(candidate, now, ticker)
-        fx.index = pd.to_datetime(fx.index, utc=True)
-        eligible_fx = fx[fx.index >= quote_at]
-        eligible_fx = eligible_fx[pd.to_numeric(eligible_fx["Open"], errors="coerce") > 0]
-        if eligible_fx.empty:
-            raise _data_retry(candidate, now, ticker)
-        fx_at = eligible_fx.index[0]
-        if fx_at > quote_at + pd.Timedelta(minutes=5):
-            raise _data_retry(candidate, now, ticker)
-        fx_rate = float(eligible_fx.iloc[0]["Open"])
+        # Yahoo FX bars can be sparse. Freeze the latest quote observable at
+        # trade time, bounded by owner policy; never use future information.
+        try:
+            fx_rate, fx_at = _fx_rate_at_or_before(
+                fx, quote_at, policy["fx_quote_max_age_minutes"])
+        except ValueError as exc:
+            if str(exc) == "FX_ENTRY_QUOTE_UNAVAILABLE":
+                raise _data_retry(candidate, now, ticker, "FX_DATA_RETRY")
+            raise
     return {**candidate, "ready": True, "price_inr": price * fx_rate,
             "native_price": price, "fx_to_inr": fx_rate,
+            "fx_quote_at": pd.Timestamp(fx_at).isoformat() if fx_at is not None else None,
             "quote_at": pd.Timestamp(quote_at).isoformat(),
-            "source": "Yahoo Finance one-minute bar Open; first positive-volume trade at or after eligibility"}
+            "source": "Yahoo Finance one-minute security Open and latest policy-fresh FX Open observable at trade time"}
 
 
 def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):

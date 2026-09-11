@@ -1,5 +1,5 @@
 {
-  "policy_version": "owner-review-policy-v2",
+  "policy_version": "owner-review-policy-v3",
   "policy_approved": true,
   "tax_profile": "resident_individual_regular_delivery",
   "tariff_verified_on": "2026-09-09",
@@ -9,6 +9,7 @@
   "entry_wait_after_open_minutes": 60,
   "entry_quote_interval": "1m",
   "entry_max_quote_delay_minutes": 330,
+  "fx_quote_max_age_minutes": 360,
   "assessment_wait_after_close_minutes": 30,
   "slab_rate": 0.3,
   "surcharge_rate": 0,
@@ -19,7 +20,7 @@
   "drift_limit": 0.05,
   "min_annual_improvement": 0.06,
   "crossing_probability": 0.2,
-  "max_review_sessions": 60,
+  "max_review_sessions": 20,
   "simulation_paths": 1000,
   "block_length": 5,
   "seed": 19473,

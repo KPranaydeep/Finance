@@ -14,6 +14,7 @@ def policy():
         "entry_wait_after_open_minutes": 60,
         "entry_quote_interval": "1m",
         "entry_max_quote_delay_minutes": 330,
+        "fx_quote_max_age_minutes": 360,
         "assessment_wait_after_close_minutes": 30,
         "slab_rate": .30,
         "surcharge_rate": 0.,

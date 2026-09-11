@@ -89,6 +89,9 @@ def render_pending(row, now):
         if p.get("wait_reason") == "ENTRY_DATA_RETRY":
             ticker = p.get("pending_ticker") or "A pending security"
             st.caption(f"{ticker}: the intraday provider did not return usable data. No price was invented; the next workflow run will retry.")
+        if p.get("wait_reason") == "FX_DATA_RETRY":
+            ticker = p.get("pending_ticker") or "A pending overseas security"
+            st.caption(f"{ticker}: a sufficiently recent USD/INR quote was unavailable at its entry trade. No FX rate was invented; the next workflow run will retry.")
         if p.get("ready_at"):
             ready = datetime.fromisoformat(p["ready_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
             st.caption(f"Next pending entry check: {ready:%d %b %Y %H:%M IST}. The workflow checks automatically when enabled.")
@@ -272,6 +275,10 @@ def render_review_panel(basket_id, active_publications):
                     st.caption("Intraday data is temporarily unavailable for " +
                                str(getattr(exc, "pending_ticker", "a pending security")) +
                                ". No price was invented; the workflow will retry.")
+                if getattr(exc, "wait_reason", None) == "FX_DATA_RETRY":
+                    st.caption("A sufficiently recent USD/INR quote is temporarily unavailable for " +
+                               str(getattr(exc, "pending_ticker", "a pending overseas security")) +
+                               ". No FX rate was invented; the workflow will retry.")
             else:
                 st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
             if code == "FOREIGN_REVIEW_COST_MODEL_REQUIRED":

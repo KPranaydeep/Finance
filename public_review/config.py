@@ -30,6 +30,7 @@ def load_policy(today=None):
               "history_years": (1, 10), "tariff_max_age_days": (1, 180),
               "entry_wait_after_open_minutes": (0, 240),
               "entry_max_quote_delay_minutes": (1, 720),
+              "fx_quote_max_age_minutes": (1, 1440),
               "assessment_wait_after_close_minutes": (0, 180)}
     for key, (low, high) in ranges.items():
         value = policy[key]
@@ -38,6 +39,7 @@ def load_policy(today=None):
     for key in ("max_review_sessions", "simulation_paths", "block_length", "seed", "validation_train",
                 "validation_horizon", "validation_min_folds", "history_years", "tariff_max_age_days",
                 "entry_wait_after_open_minutes", "entry_max_quote_delay_minutes",
+                "fx_quote_max_age_minutes",
                 "assessment_wait_after_close_minutes"):
         if not isinstance(policy[key], int):
             raise ValueError("INTEGER_POLICY_REQUIRED")

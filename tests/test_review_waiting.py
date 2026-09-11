@@ -6,7 +6,7 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 from public_review.market import (sessions, entry_session, security_entry_schedule,
                                   AwaitingMarketEntry, _first_traded_intraday_bar,
-                                  fetch_entry_quote)
+                                  _fx_rate_at_or_before, fetch_entry_quote)
 from public_review.service import run
 from review_fixtures import policy
 from test_review_operations import FakeDB
@@ -154,6 +154,46 @@ class WaitingTests(unittest.TestCase):
         self.assertEqual(caught.exception.wait_reason, 'ENTRY_DATA_RETRY')
         self.assertEqual(caught.exception.pending_ticker, 'A.NS')
         self.assertEqual(caught.exception.ready_at, '2026-09-11T14:30:00+00:00')
+
+    def test_fx_uses_latest_observation_available_at_trade_time(self):
+        frame = pd.DataFrame(
+            {'Open': [95.40, 95.43, 95.50], 'Volume': [0, 0, 0]},
+            index=pd.to_datetime(['2026-09-10T10:04:00Z',
+                                  '2026-09-10T13:07:00Z',
+                                  '2026-09-10T15:59:00Z']))
+        rate, observed_at = _fx_rate_at_or_before(
+            frame, pd.Timestamp('2026-09-10T14:30:00Z'), 360)
+        self.assertEqual(rate, 95.43)
+        self.assertEqual(observed_at, pd.Timestamp('2026-09-10T13:07:00Z'))
+
+    def test_fx_never_uses_future_observation(self):
+        frame = pd.DataFrame(
+            {'Open': [95.50], 'Volume': [0]},
+            index=pd.to_datetime(['2026-09-10T15:59:00Z']))
+        with self.assertRaisesRegex(ValueError, 'FX_ENTRY_QUOTE_UNAVAILABLE'):
+            _fx_rate_at_or_before(
+                frame, pd.Timestamp('2026-09-10T14:30:00Z'), 360)
+
+    def test_stale_fx_becomes_specific_retriable_wait(self):
+        planned = {'ticker':'ASX', 'kind':'foreign_us_listing', 'market':'NYSE',
+                   'requested_entry_at':'2026-09-10T14:30:00+00:00',
+                   'session_open_at':'2026-09-10T13:30:00+00:00',
+                   'session_close_at':'2026-09-10T20:00:00+00:00',
+                   'entry_date':'2026-09-10', 'basis':'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                   'ready':True}
+        security = pd.DataFrame(
+            {'Open':[39.9], 'Volume':[100]},
+            index=pd.to_datetime(['2026-09-10T14:30:00Z']))
+        stale_fx = pd.DataFrame(
+            {'Open':[95.4], 'Volume':[0]},
+            index=pd.to_datetime(['2026-09-10T01:00:00Z']))
+        with patch('public_review.market._intraday_frame',
+                   side_effect=[security, stale_fx]):
+            with self.assertRaises(AwaitingMarketEntry) as caught:
+                fetch_entry_quote('ASX', planned, policy(),
+                                  now=datetime(2026,9,11,14,tzinfo=timezone.utc))
+        self.assertEqual(caught.exception.wait_reason, 'FX_DATA_RETRY')
+        self.assertEqual(caught.exception.pending_ticker, 'ASX')
 
     def test_baseline_freezes_before_first_assessment(self):
         db = FakeDB()
