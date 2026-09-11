@@ -164,6 +164,21 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                     captured[ticker] = quote
                 missing_entries = sorted(set(tickers) - set(captured))
                 if missing_entries:
+                    from .partial import estimate_captured_security, METHOD as PARTIAL_METHOD
+                    for captured_ticker, captured_entry in sorted(captured.items()):
+                        try:
+                            partial = estimate_captured_security(publication, captured_entry,
+                                                                 policy, now)
+                            partial_key = ("partial-security-review:" + PARTIAL_METHOD + ":" +
+                                           publication["publication_id"] + ":" + captured_ticker +
+                                           ":" + partial["as_of"] + ":" + digest(policy))
+                            store.append(conn, basket, partial_key, "SECURITY_REVIEW_PREVIEW",
+                                         publication["publication_id"], partial)
+                            conn.commit()
+                        except Exception:
+                            # Entry capture must never be blocked by an optional
+                            # provisional forecast. The final baseline remains authoritative.
+                            conn.rollback()
                     pending = [schedule[ticker] for ticker in missing_entries]
                     next_entry = min(pending, key=lambda row: row["requested_entry_at"])
                     exc = entry_waits.get(next_entry["ticker"]) or market.AwaitingMarketEntry(

@@ -105,7 +105,28 @@ def render_pending(row, now):
             st.warning("This check is stale. Confirm the daily model-review workflow is running.")
 
 
-def render_events(events, active_ids=None, now=None, latest_publication_id=None):
+def render_partial_security_reviews(events, publication_id):
+    latest = {}
+    for row in events:
+        if (row["kind"] == "SECURITY_REVIEW_PREVIEW" and
+                row["payload"].get("publication_id") == publication_id):
+            latest[row["payload"]["ticker"]] = row["payload"]
+    if not latest:
+        return
+    st.markdown("#### Provisional security review estimates")
+    st.caption("Available for captured entries while the basket is incomplete. One-share, fully costed security-only estimates; the completed basket baseline will supersede them.")
+    st.table(pd.DataFrame([{
+        "Security": payload["ticker"],
+        "Entry price": f"₹{payload['entry_price_inr']:,.2f}",
+        "Data through": payload["as_of"],
+        "Estimated target crossing": payload.get("estimated_crossing_date") or "Not reached in horizon",
+        "Probability": percent(payload.get("crossing_probability")),
+    } for payload in sorted(latest.values(), key=lambda item: item["ticker"])]))
+    st.caption("Research estimates—not sell dates or recommendations. Fixed costs are conservative at one share; results may change when final basket quantities are known.")
+
+
+def render_events(events, active_ids=None, now=None, latest_publication_id=None,
+                  suppress_latest_failure=False):
     now = now or datetime.now(timezone.utc)
     baseline_by_publication = {}
     for row in events:
@@ -116,18 +137,24 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
     pending_shown = False
     if latest_publication_id and not any(r["payload"]["publication_id"] == latest_publication_id for r in baseline_rows):
         pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
+                        (not suppress_latest_failure or r["kind"] != "FAILURE") and
                         (r["kind"] != "WAITING" or r["payload"].get("entry_model_version") == ENTRY_MODEL_VERSION) and
                         r["payload"].get("publication_id", r.get("baseline_id")) == latest_publication_id), None)
-        render_pending(pending, now)
+        if pending is not None or not suppress_latest_failure:
+            render_pending(pending, now)
         pending_shown = True
         if baseline_rows:
             st.caption("The latest publication has no frozen entry yet. Previously created model investments remain available below.")
+            render_partial_security_reviews(events, latest_publication_id)
     if not baseline_rows:
         if not pending_shown:
             pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
+                            (not suppress_latest_failure or r["kind"] != "FAILURE") and
                             (r["kind"] != "WAITING" or r["payload"].get("entry_model_version") == ENTRY_MODEL_VERSION) and
                             (active_ids is None or r["payload"].get("publication_id", r.get("baseline_id")) in active_ids)), None)
             render_pending(pending, now)
+        if latest_publication_id:
+            render_partial_security_reviews(events, latest_publication_id)
         return
     baselines = sorted([r["payload"] for r in baseline_rows], key=lambda b: b["portfolio_version"], reverse=True)
     selected = st.selectbox("Model investment publication", range(len(baselines)),
@@ -221,6 +248,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
 
 def render_review_panel(basket_id, active_publications):
     st.subheader("Your next portfolio review")
+    fresh_waiting = False
     if active_publications:
         try:
             with st.spinner("Assessing security targets from available history..."):
@@ -238,6 +266,7 @@ def render_review_panel(basket_id, active_publications):
                 StopIteration: "PUBLICATION_NOT_FOUND",
             }.get(type(exc), "PREVIEW_CHECK_FAILED")
             if code == "AWAITING_MARKET_ENTRY":
+                fresh_waiting = True
                 st.info("Opening-price entry is waiting for every represented market to open, or has been established while the first completed-session assessment is still pending.")
                 if getattr(exc, "wait_reason", None) == "ENTRY_DATA_RETRY":
                     st.caption("Intraday data is temporarily unavailable for " +
@@ -252,6 +281,7 @@ def render_review_panel(basket_id, active_publications):
     try:
         events = load_events(basket_id)
         render_events(events, {p["publication_id"] for p in active_publications},
-                      latest_publication_id=active_publications[0]["publication_id"] if active_publications else None)
+                      latest_publication_id=active_publications[0]["publication_id"] if active_publications else None,
+                      suppress_latest_failure=fresh_waiting)
     except Exception:
         st.warning("Model review inspection is unavailable. No reliable review date can be shown.")
