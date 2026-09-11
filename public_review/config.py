@@ -45,6 +45,8 @@ def load_policy(today=None):
             raise ValueError("INTEGER_POLICY_REQUIRED")
     if policy.get("entry_quote_interval") != "1m":
         raise ValueError("INVALID_POLICY_ENTRY_QUOTE_INTERVAL")
+    if policy.get("profit_review_rule") != "ROUND_TRIP_BREAK_EVEN_AND_TARGET_XIRR":
+        raise ValueError("INVALID_POLICY_PROFIT_REVIEW_RULE")
     # ``instrument_kinds`` is a resolved runtime field, not owner policy.
     # Accept it temporarily for backward-compatible tests/old deployments, but
     # production policy files no longer need or maintain a ticker registry.

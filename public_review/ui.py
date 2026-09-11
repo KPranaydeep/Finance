@@ -39,7 +39,7 @@ def render_crossings(forecast):
     rows = forecast.get("security_crossings", [])
     if not rows:
         return
-    st.caption(f"Net annualized target: {percent(forecast['target_xirr'])} · "
+    st.caption(f"Profit gate: fully loaded round-trip break-even and net annualized target of {percent(forecast['target_xirr'])} · "
                f"Crossing probability threshold: {percent(forecast['crossing_probability_threshold'])}. "
                "A probability threshold is not statistical confidence or a guaranteed exit date.")
     st.table(pd.DataFrame([{"Security": r["ticker"],
@@ -263,7 +263,8 @@ def render_review_panel(basket_id, active_publications):
             allowed = SAFE_ERRORS | {"POLICY_APPROVAL_REQUIRED", "TARIFF_REVIEW_REQUIRED",
                                      "UNSUPPORTED_TAX_OR_ACCOUNT_PROFILE", "NSE_CLASSIFICATION_REQUIRED",
                                      "INTEGER_POLICY_REQUIRED", "INVALID_CAPITAL",
-                                     "INVALID_POLICY_ENTRY_QUOTE_INTERVAL"}
+                                     "INVALID_POLICY_ENTRY_QUOTE_INTERVAL",
+                                     "INVALID_POLICY_PROFIT_REVIEW_RULE"}
             code = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else {
                 FileNotFoundError: "POLICY_FILE_MISSING",
                 ModuleNotFoundError: "PREVIEW_MODULE_MISSING",

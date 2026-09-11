@@ -20,6 +20,7 @@ def policy():
         "surcharge_rate": 0.,
         "slippage_bps": 10.,
         "target_xirr": 1.,
+        "profit_review_rule": "ROUND_TRIP_BREAK_EVEN_AND_TARGET_XIRR",
         "drawdown_limit": .15,
         "concentration_limit": .50,
         "drift_limit": .05,

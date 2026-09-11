@@ -167,10 +167,14 @@ def decision(metrics, baseline, latest_weights, policy, peak, forecast=None, pro
     drawdown = metrics["net_proceeds"] / max(peak, metrics["net_proceeds"]) - 1
     if drawdown <= -policy["drawdown_limit"] or max(weights.values(), default=0) > policy["concentration_limit"]:
         reasons.append("RISK_REVIEW")
-    if metrics["xirr"] is not None and metrics["xirr"] >= policy["target_xirr"]:
+    portfolio_profit_gate = (metrics["net_profit"] >= 0 and
+                             metrics["xirr"] is not None and
+                             metrics["xirr"] >= policy["target_xirr"])
+    if portfolio_profit_gate:
         reasons.append("PROFIT_TAKING_REVIEW")
     crossed = [r["ticker"] for r in metrics["rows"]
-               if r.get("xirr") is not None and r["xirr"] >= policy["target_xirr"]]
+               if (r["net_profit"] >= 0 and r.get("xirr") is not None and
+                   r["xirr"] >= policy["target_xirr"])]
     if crossed:
         reasons.append("SECURITY_TARGET_REVIEW")
     rebalance = {"status": "NO_MATERIAL_DRIFT", "drift": drift}
@@ -190,6 +194,7 @@ def decision(metrics, baseline, latest_weights, policy, peak, forecast=None, pro
         next_review = min(next_review, metrics["date"]) if next_review else metrics["date"]
     return {"status": reasons[0] if reasons else "NO_TRIGGER_DETECTED", "reasons": reasons,
             "target_crossed_securities": crossed,
+            "profit_review_rule": policy["profit_review_rule"],
             "next_review": next_review, "drawdown": drawdown, "rebalance": rebalance,
             "note": "No trigger is not a safety guarantee. Review signals do not submit trades."}
 

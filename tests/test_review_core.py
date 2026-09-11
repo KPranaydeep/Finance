@@ -112,6 +112,17 @@ class ReviewCoreTests(unittest.TestCase):
         self.assertIn("PROFIT_TAKING_REVIEW",d["reasons"])
         self.assertIn("RISK_REVIEW",d["reasons"])
 
+    def test_profit_review_requires_break_even_and_target_xirr(self):
+        b=baseline(); m=evaluate(b,{"A.NS":500,"B.NS":250},"2026-09-09",policy())
+        # Deliberately inconsistent input proves the explicit break-even guard
+        # cannot be bypassed by an XIRR value alone.
+        m["net_profit"]=-.01
+        for row in m["rows"]:
+            row["net_profit"]=-.01
+        d=decision(m,b,b["weights"],policy(),10000)
+        self.assertNotIn("PROFIT_TAKING_REVIEW",d["reasons"])
+        self.assertNotIn("SECURITY_TARGET_REVIEW",d["reasons"])
+
     def test_no_rebalance_without_benefit_evidence(self):
         b=baseline(); m=evaluate(b,{"A.NS":100,"B.NS":50},"2026-09-09",policy())
         d=decision(m,b,{"A.NS":.8,"B.NS":.2},policy(),10000)
