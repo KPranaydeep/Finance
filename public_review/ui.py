@@ -67,6 +67,17 @@ def render_fresh_preview(p):
     if f.get("next_review") is None:
         st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
     st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
+    if p.get("valuation_timing"):
+        timing = p["valuation_timing"]
+        label = "Synchronized" if timing.get("all_prices_synchronized") else "Mixed-time provisional"
+        with st.expander("Valuation timing · " + label):
+            st.caption("Audit detail: every price was observable by the assessment time. Frozen entry prices are never overwritten.")
+            st.table(pd.DataFrame([{
+                "Security": row["ticker"],
+                "Price basis": row["price_source"].replace("_", " ").lower(),
+                "Observed at": row["price_observed_at"],
+                "Chronology valid": "Yes" if row["chronology_valid"] else "No",
+            } for row in timing.get("rows", [])]))
     st.caption("Currency: NSE-listed holdings are priced in INR, including overseas ETFs. Their INR prices already reflect FX exposure; no second USD/INR conversion is applied.")
     if p.get("history_coverage"):
         h = p["history_coverage"]

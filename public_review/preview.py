@@ -1,9 +1,86 @@
 """Read-only, cached-by-caller historical review; never freezes ledger entries."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import math
+import pandas as pd
 from . import market
 from .core import freeze
 from .forecast import estimate, validate
+
+
+def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_epoch):
+    """Forecast immediately from chronology-safe marks before global close.
+
+    Entry evidence remains immutable. Each holding uses its latest completed
+    post-entry close when available, otherwise its frozen entry price. A later
+    synchronized assessment supersedes this read-only preview.
+    """
+    from .history import common_history
+    tickers = [lot["ticker"] for lot in baseline["lots"]]
+    local_day = pd.Timestamp(now).tz_convert("Asia/Kolkata").date()
+    histories = market.fetch(tickers, baseline["entry_date"], str(local_day),
+                             policy, allow_incomplete_end=True)
+    buffer = pd.Timedelta(minutes=policy["assessment_wait_after_close_minutes"])
+    marks, timing, completed_cutoffs = {}, [], []
+    for lot in baseline["lots"]:
+        ticker = lot["ticker"]
+        market_name = market.KIND_CALENDARS[lot["kind"]]
+        schedule = market.calendar(
+            pd.Timestamp(lot["entry_date"]) - pd.Timedelta(days=10),
+            local_day + timedelta(days=1), policy, market_name)
+        completed = schedule[schedule.market_close + buffer <= pd.Timestamp(now)]
+        if not completed.empty:
+            completed_cutoffs.append(str(completed.index[-1].date()))
+        post_entry = [str(day.date()) for day in completed.index
+                      if str(day.date()) >= lot["entry_date"] and
+                      str(day.date()) in histories[ticker].index]
+        if post_entry:
+            price_date = post_entry[-1]
+            price = float(histories[ticker].loc[price_date, "Close"])
+            mode = "LATEST_COMPLETED_POST_ENTRY_CLOSE"
+            observed_at = price_date
+        else:
+            price = float(lot["price"])
+            mode = "FROZEN_ENTRY_PRICE_PENDING_FIRST_CLOSE"
+            observed_at = lot.get("entry_quote_at") or lot.get("entry_at") or lot["entry_date"]
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError("INVALID_OR_NONTRADING_PRICE")
+        marks[ticker] = price
+        timing.append({"ticker": ticker, "price_source": mode,
+                       "price_observed_at": str(observed_at),
+                       "chronology_valid": True})
+    if not completed_cutoffs:
+        raise market.AwaitingMarketEntry(baseline["entry_date"], None)
+    history_as_of = min(completed_cutoffs)
+    _, returns, coverage = common_history(histories, history_as_of, policy)
+    returns = returns[tickers]
+    if len(returns) < 126:
+        raise ValueError("INSUFFICIENT_COMMON_HISTORY")
+    kinds = {lot["ticker"]: lot["kind"] for lot in baseline["lots"]}
+    schedule = market.joint_calendar(local_day, policy["calendar_verified_through"],
+                                     policy, kinds)
+    future = [str(day.date()) for day, session in schedule.iterrows()
+              if session.market_open > pd.Timestamp(now)][:policy["max_review_sessions"]]
+    if len(future) < policy["max_review_sessions"]:
+        raise ValueError("INCOMPLETE_SESSION_CALENDAR")
+    validation = validate(returns, baseline, marks, list(returns.index), policy)
+    forecast = estimate(baseline, marks, returns, future, policy,
+                        baseline["capital"], validation)
+    candidate = forecast.get("next_review") or forecast.get("research_candidate") or future[0]
+    prior = [r["payload"].get("decision", {}).get("next_review") for r in events
+             if r["kind"] == "PREVIEW" and r["baseline_id"] == baseline["baseline_id"]]
+    candidate = min([candidate] + [day for day in prior if day])
+    price_dates = {row["price_observed_at"][:10] for row in timing}
+    return {"provisional": True, "publication_id": publication["publication_id"],
+            "history_coverage": coverage, "ack_epoch": ack_epoch,
+            "as_of": "mixed chronology-safe marks", "checked_at": pd.Timestamp(now).isoformat(),
+            "assumption": "Immediate entry-time forecast. Frozen entry prices are used until each market supplies a completed post-entry close; entry evidence is never revised.",
+            "valuation_timing": {"mode": "ASYNCHRONOUS_CHRONOLOGY_SAFE",
+                                  "all_prices_synchronized": len(price_dates) == 1,
+                                  "rows": timing},
+            "forecast": forecast,
+            "decision": {"next_review": candidate, "reasons": [],
+                         "target_crossed_securities": [],
+                         "basis": "PROVISIONAL_ENTRY_TIME_FORECAST"}}
 
 
 def historical_preview(publication, policy, events, now=None):
@@ -16,13 +93,17 @@ def historical_preview(publication, policy, events, now=None):
     row = next((r for r in reversed(events) if r["kind"] == "BASELINE" and
                 r["payload"]["publication_id"] == publication["publication_id"]), None)
     if row:
-        _, as_of, days = market.sessions(
-            now, publication["published_at"], policy, kinds)
         # Actual frozen model, but read-only: no orders, acknowledgment or DB writes.
         from .service import build_assessment
         b = row["payload"]
         if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in b["lots"]):
             raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
+        try:
+            _, as_of, days = market.sessions(
+                now, publication["published_at"], policy, kinds)
+        except market.AwaitingMarketEntry:
+            return _immediate_baseline_preview(
+                publication, b, policy, events, now, ack_epoch)
         tickers = [l["ticker"] for l in b["lots"]]
         mixed_markets = any(not ticker.endswith(".NS") for ticker in tickers)
         histories = market.fetch(tickers, b["entry_date"], as_of, policy,
