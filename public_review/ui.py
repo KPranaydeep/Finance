@@ -117,7 +117,7 @@ def render_partial_security_reviews(events, publication_id):
     if not latest:
         return
     st.markdown("#### Provisional security review estimates")
-    st.caption("Available for captured entries while the basket is incomplete. One-share, fully costed security-only estimates; the completed basket baseline will supersede them.")
+    st.caption("Available from captured entries until the first complete basket assessment. One-share, fully costed security-only estimates; complete basket results will supersede them.")
     st.table(pd.DataFrame([{
         "Security": payload["ticker"],
         "Entry price": f"₹{payload['entry_price_inr']:,.2f}",
@@ -189,6 +189,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
             st.info(message)
         else:
             st.warning("Cannot assess: " + (failure["payload"]["reason"].replace("_", " ").lower() if failure else "awaiting first assessment"))
+        render_partial_security_reviews(events, baseline["publication_id"])
         return
     p = last["payload"]
     checked_at = heartbeat["payload"]["at"] if heartbeat else p["checked_at"]

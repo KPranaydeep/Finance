@@ -102,6 +102,34 @@ class PartialSecurityReviewTests(unittest.TestCase):
         self.assertFalse(at.warning)
         self.assertFalse(any('No monitoring record' in item.value for item in at.info))
 
+    def test_partial_dates_remain_visible_until_first_complete_assessment(self):
+        def app():
+            from datetime import datetime, timezone
+            from public_review.ui import render_events
+            events = [
+                {'kind':'SECURITY_REVIEW_PREVIEW', 'baseline_id':'PUB-PARTIAL',
+                 'seq':1, 'payload':{'publication_id':'PUB-PARTIAL',
+                 'ticker':'A.NS', 'entry_price_inr':100., 'as_of':'2026-09-11',
+                 'estimated_crossing_date':'2026-09-21',
+                 'crossing_probability':.2}},
+                {'kind':'BASELINE', 'baseline_id':'BASE-PARTIAL', 'seq':2,
+                 'payload':{'publication_id':'PUB-PARTIAL',
+                 'baseline_id':'BASE-PARTIAL', 'portfolio_version':7,
+                 'entry_date':'2026-09-11', 'capital':1000., 'lots':[]}},
+                {'kind':'WAITING', 'baseline_id':'BASE-PARTIAL', 'seq':3,
+                 'payload':{'publication_id':'PUB-PARTIAL',
+                 'reason':'AWAITING_MARKET_ENTRY', 'entry_frozen':True,
+                 'ready_at':'2026-09-11T20:30:00+00:00',
+                 'checked_at':'2026-09-11T15:00:00+00:00'}},
+            ]
+            render_events(events, {'PUB-PARTIAL'},
+                          datetime(2026,9,11,15,tzinfo=timezone.utc),
+                          latest_publication_id='PUB-PARTIAL')
+        at = AppTest.from_function(app, default_timeout=20).run()
+        self.assertFalse(at.exception)
+        self.assertTrue(any('Provisional security review estimates' in item.value
+                            for item in at.markdown))
+
 
 if __name__ == '__main__':
     unittest.main()
