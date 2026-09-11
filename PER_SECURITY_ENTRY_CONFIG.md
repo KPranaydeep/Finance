@@ -13,9 +13,11 @@ silently rewriting an earlier result.
     delay.
 - `entry_quote_interval`: `1m`
   - Fixed to one-minute Yahoo bars by validation.
-- `entry_quote_tolerance_minutes`: `5`
-  - Maximum distance between requested entry time and the price bar. Lower is
-    stricter and may delay/fail capture; higher is less faithful to the rule.
+- `entry_max_quote_delay_minutes`: `330`
+  - After eligibility, use the first positive-volume one-minute trade, never a
+    preceding bar. The search ends at the earlier of this delay or exchange
+    close. If no trade occurs, the security moves to its next session and the
+    open-plus-wait rule is applied again.
 - `assessment_wait_after_close_minutes`: `30`
   - Data-availability buffer for completed-session assessments. It does not
     delay another security's entry.

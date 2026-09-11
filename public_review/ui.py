@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import streamlit as st
 from . import store
+from .market import ENTRY_MODEL_VERSION
 
 
 @st.cache_data(ttl=300, max_entries=16, show_spinner=False)
@@ -88,6 +89,8 @@ def render_pending(row, now):
         if p.get("ready_at"):
             ready = datetime.fromisoformat(p["ready_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
             st.caption(f"Next pending entry check: {ready:%d %b %Y %H:%M IST}. The workflow checks automatically when enabled.")
+        if p.get("pending_tickers"):
+            st.caption("Pending securities: " + ", ".join(p["pending_tickers"]))
     else:
         st.warning("Cannot assess: " + p.get("reason", "MONITOR_CHECK_FAILED").replace("_", " ").lower())
         if p.get("stage"):
@@ -110,6 +113,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
     pending_shown = False
     if latest_publication_id and not any(r["payload"]["publication_id"] == latest_publication_id for r in baseline_rows):
         pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
+                        (r["kind"] != "WAITING" or r["payload"].get("entry_model_version") == ENTRY_MODEL_VERSION) and
                         r["payload"].get("publication_id", r.get("baseline_id")) == latest_publication_id), None)
         render_pending(pending, now)
         pending_shown = True
@@ -118,6 +122,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
     if not baseline_rows:
         if not pending_shown:
             pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
+                            (r["kind"] != "WAITING" or r["payload"].get("entry_model_version") == ENTRY_MODEL_VERSION) and
                             (active_ids is None or r["payload"].get("publication_id", r.get("baseline_id")) in active_ids)), None)
             render_pending(pending, now)
         return

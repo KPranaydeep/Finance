@@ -147,11 +147,11 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                         continue
                     stage = "entry_market_data"
                     try:
-                        quote = market.fetch_entry_quote(ticker, planned, policy)
+                        quote = market.fetch_entry_quote(ticker, planned, policy, now=now)
+                    except market.AwaitingMarketEntry as exc:
+                        schedule[ticker] = exc.planned_entry
+                        continue
                     except ValueError as exc:
-                        if str(exc) in {"ENTRY_INTRADAY_HISTORY_UNAVAILABLE",
-                                       "INVALID_OR_NONTRADING_PRICE"}:
-                            continue
                         raise
                     quote["publication_id"] = publication["publication_id"]
                     store.append(conn, basket,
@@ -226,6 +226,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 reason = "AWAITING_FIRST_ASSESSMENT" if baseline is not None else code
                 payload = {"status": "AWAITING_MARKET_ENTRY", "reason": code,
                            "publication_id": publication["publication_id"],
+                           "entry_model_version": market.ENTRY_MODEL_VERSION,
+                           "policy_version": policy["policy_version"],
                            "checked_at": now.isoformat(), "model_only": True,
                            "entry_frozen": baseline is not None,
                            "waiting_for": reason,

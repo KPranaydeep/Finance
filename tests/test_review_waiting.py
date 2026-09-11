@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import pandas as pd
 from streamlit.testing.v1 import AppTest
-from public_review.market import sessions, entry_session, security_entry_schedule, AwaitingMarketEntry
+from public_review.market import (sessions, entry_session, security_entry_schedule,
+                                  AwaitingMarketEntry, _first_traded_intraday_bar,
+                                  fetch_entry_quote)
 from public_review.service import run
 from review_fixtures import policy
 from test_review_operations import FakeDB
@@ -79,6 +81,39 @@ class WaitingTests(unittest.TestCase):
         self.assertEqual(entries['A.NS']['requested_entry_at'], '2026-09-11T04:45:00+00:00')
         self.assertEqual(entries['A.NS']['basis'], 'NEXT_OPEN_PLUS_CONFIGURED_WAIT')
 
+    def test_entry_uses_first_trade_after_requested_time(self):
+        index = pd.to_datetime(['2026-09-11T04:44:00Z', '2026-09-11T04:45:00Z',
+                                '2026-09-11T04:52:00Z'])
+        bars = pd.DataFrame({'Open': [99., 100., 101.], 'Volume': [10., 0., 20.]}, index=index)
+        price, quote_at = _first_traded_intraday_bar(
+            bars, pd.Timestamp('2026-09-11T04:45:00Z'),
+            pd.Timestamp('2026-09-11T10:00:00Z'))
+        self.assertEqual(price, 101.)
+        self.assertEqual(quote_at, pd.Timestamp('2026-09-11T04:52:00Z'))
+
+    def test_no_trade_defers_to_next_security_session(self):
+        planned = {'ticker':'A.NS', 'kind':'equity', 'market':'NSE',
+                   'requested_entry_at':'2026-09-11T04:45:00+00:00',
+                   'session_open_at':'2026-09-11T03:45:00+00:00',
+                   'session_close_at':'2026-09-11T10:00:00+00:00',
+                   'entry_date':'2026-09-11', 'basis':'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                   'ready':True}
+        bars = pd.DataFrame({'Open':[99.], 'Volume':[10.]},
+                            index=pd.to_datetime(['2026-09-11T04:44:00Z']))
+        deferred = {**planned, 'requested_entry_at':'2026-09-14T04:45:00+00:00',
+                    'session_open_at':'2026-09-14T03:45:00+00:00',
+                    'session_close_at':'2026-09-14T10:00:00+00:00',
+                    'entry_date':'2026-09-14',
+                    'basis':'DEFERRED_NEXT_OPEN_PLUS_CONFIGURED_WAIT', 'ready':False}
+        with patch('public_review.market._intraday_frame', return_value=bars), \
+             patch('public_review.market._next_session_entry', return_value=deferred):
+            with self.assertRaises(AwaitingMarketEntry) as caught:
+                fetch_entry_quote('A.NS', planned, policy(),
+                                  now=datetime(2026,9,11,11,tzinfo=timezone.utc))
+        self.assertEqual(caught.exception.ready_at, '2026-09-14T04:45:00+00:00')
+        self.assertEqual(caught.exception.planned_entry['basis'],
+                         'DEFERRED_NEXT_OPEN_PLUS_CONFIGURED_WAIT')
+
     def test_baseline_freezes_before_first_assessment(self):
         db = FakeDB()
         schedule = {ticker: {'ticker': ticker, 'kind': kind, 'market': 'NSE',
@@ -86,7 +121,7 @@ class WaitingTests(unittest.TestCase):
                     'entry_date': '2026-09-10', 'basis': 'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
                     'ready': True} for ticker, kind in policy()['instrument_kinds'].items()}
         prices = {'A.NS': 100., 'B.NS': 50.}
-        quote = lambda ticker, planned, p: {**planned, 'price_inr': prices[ticker],
+        quote = lambda ticker, planned, p, now=None: {**planned, 'price_inr': prices[ticker],
                     'native_price': prices[ticker], 'fx_to_inr': 1.,
                     'quote_at': planned['requested_entry_at'], 'source': 'test'}
         pending = AwaitingMarketEntry('2026-09-10', '2026-09-10T10:30:00+00:00')
@@ -107,7 +142,7 @@ class WaitingTests(unittest.TestCase):
                     'entry_date': '2026-09-10', 'basis': 'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
                     'ready': True} for ticker, kind in policy()['instrument_kinds'].items()}
         prices = {'A.NS': 100., 'B.NS': 50.}
-        quote = lambda ticker, planned, p: {**planned, 'price_inr': prices[ticker],
+        quote = lambda ticker, planned, p, now=None: {**planned, 'price_inr': prices[ticker],
                     'native_price': prices[ticker], 'fx_to_inr': 1.,
                     'quote_at': planned['requested_entry_at'], 'source': 'test'}
         with patch('public_review.service.publications', return_value=[self.publication()]), \
@@ -138,6 +173,7 @@ class WaitingTests(unittest.TestCase):
             from public_review.ui import render_events
             events = [{'kind': 'WAITING', 'baseline_id': 'PUB-P006', 'seq': 1, 'payload': {
                 'publication_id': 'PUB-P006', 'reason': 'AWAITING_MARKET_ENTRY',
+                'entry_model_version': 'per-security-publication-or-open-plus-wait-v1',
                 'entry_date': '2026-09-10', 'ready_at': '2026-09-10T10:30:00+00:00',
                 'checked_at': '2026-09-09T18:00:00+00:00'}}]
             render_events(events, {'PUB-P006'}, datetime(2026, 9, 9, 18, tzinfo=timezone.utc),

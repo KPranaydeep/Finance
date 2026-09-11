@@ -1,5 +1,5 @@
 """Completed review sessions and strict INR Yahoo histories; no filling."""
-from datetime import timedelta
+from datetime import datetime, timezone, timedelta
 import math
 import pandas as pd
 import pandas_market_calendars as mcal
@@ -160,55 +160,113 @@ def security_entry_schedule(now, published_at, policy, instrument_kinds):
             basis = "NEXT_OPEN_PLUS_CONFIGURED_WAIT"
         result[ticker] = {"ticker": ticker, "kind": kind,
                           "market": market, "requested_entry_at": requested.isoformat(),
+                          "session_open_at": active.iloc[0].market_open.isoformat() if not active.empty
+                          else future.iloc[0].market_open.isoformat(),
+                          "session_close_at": active.iloc[0].market_close.isoformat() if not active.empty
+                          else future.iloc[0].market_close.isoformat(),
                           "entry_date": str(requested.date()), "basis": basis,
                           "ready": bool(requested <= now)}
     return result
 
 
-def _nearest_intraday_bar(frame, requested, tolerance_minutes):
+def _first_traded_intraday_bar(frame, requested, deadline):
     if frame.empty:
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     frame = frame.copy()
     frame.index = pd.to_datetime(frame.index, utc=True)
     requested = pd.Timestamp(requested)
-    distances = (frame.index - requested).to_series(index=frame.index).abs()
-    quote_at = distances.idxmin()
-    if distances.loc[quote_at] > pd.Timedelta(minutes=tolerance_minutes):
+    deadline = pd.Timestamp(deadline)
+    price = pd.to_numeric(frame.get("Open"), errors="coerce")
+    volume = pd.to_numeric(frame.get("Volume"), errors="coerce")
+    valid = frame[(frame.index >= requested) & (frame.index <= deadline) &
+                  price.map(lambda value: math.isfinite(float(value)) and float(value) > 0) &
+                  volume.map(lambda value: math.isfinite(float(value)) and float(value) > 0)]
+    if valid.empty:
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
-    row = frame.loc[quote_at]
-    price = float(row["Open"])
-    if not math.isfinite(price) or price <= 0:
-        raise ValueError("INVALID_OR_NONTRADING_PRICE")
-    if "Volume" in row and (not math.isfinite(float(row["Volume"])) or float(row["Volume"]) <= 0):
-        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
-    return price, quote_at
+    quote_at = valid.index[0]
+    return float(valid.iloc[0]["Open"]), quote_at
 
 
-def fetch_entry_quote(ticker, entry, policy):
-    """Return a one-minute Yahoo entry proxy, converted to INR when required."""
-    requested = pd.Timestamp(entry["requested_entry_at"])
+def _intraday_frame(ticker, requested):
     start = str(requested.date())
     end = str((requested + pd.Timedelta(days=1)).date())
-    interval = policy["entry_quote_interval"]
-    tolerance = policy["entry_quote_tolerance_minutes"]
-    bars = yf.Ticker(ticker).history(start=start, end=end, interval=interval,
+    return yf.Ticker(ticker).history(start=start, end=end, interval="1m",
                                      auto_adjust=False, actions=False,
                                      repair=False, timeout=15)
-    price, quote_at = _nearest_intraday_bar(bars, requested, tolerance)
+
+
+def _next_session_entry(entry, policy):
+    close = pd.Timestamp(entry["session_close_at"])
+    schedule = calendar(close.date(), close.date() + timedelta(days=14), policy,
+                        entry["market"])
+    future = schedule[schedule.market_open > close]
+    if future.empty:
+        raise ValueError("INCOMPLETE_SESSION_CALENDAR")
+    row = future.iloc[0]
+    requested = row.market_open + pd.Timedelta(minutes=policy["entry_wait_after_open_minutes"])
+    return {**entry, "requested_entry_at": requested.isoformat(),
+            "session_open_at": row.market_open.isoformat(),
+            "session_close_at": row.market_close.isoformat(),
+            "entry_date": str(requested.date()),
+            "basis": "DEFERRED_NEXT_OPEN_PLUS_CONFIGURED_WAIT",
+            "ready": False}
+
+
+def fetch_entry_quote(ticker, entry, policy, now=None):
+    """Capture the first actual trade after eligibility, never an earlier bar.
+
+    If no qualifying trade occurs before the configured deadline/session close,
+    advance to the same rule on that security's next exchange session.
+    """
+    now = pd.Timestamp(now or datetime.now(timezone.utc))
+    candidate = dict(entry)
+    for _ in range(15):
+        requested = pd.Timestamp(candidate["requested_entry_at"])
+        if requested > now:
+            pending = AwaitingMarketEntry(candidate["entry_date"], requested.isoformat())
+            pending.planned_entry = candidate
+            raise pending
+        session_close = pd.Timestamp(candidate["session_close_at"])
+        deadline = min(session_close, requested + pd.Timedelta(
+            minutes=policy["entry_max_quote_delay_minutes"]))
+        bars = _intraday_frame(ticker, requested)
+        try:
+            price, quote_at = _first_traded_intraday_bar(bars, requested, deadline)
+            break
+        except ValueError as exc:
+            if str(exc) != "ENTRY_INTRADAY_HISTORY_UNAVAILABLE":
+                raise
+            # Do not declare the window empty while it can still receive a trade.
+            if now <= deadline:
+                pending = AwaitingMarketEntry(candidate["entry_date"], deadline.isoformat())
+                pending.planned_entry = candidate
+                raise pending
+            # An entirely empty response indicates unavailable source history,
+            # not proven illiquidity; retry instead of silently shifting entry.
+            if bars.empty:
+                raise
+            candidate = _next_session_entry(candidate, policy)
+    else:
+        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     fx_rate = 1.0
     if not ticker.endswith(".NS"):
-        fx = yf.Ticker("INR=X").history(start=start, end=end, interval=interval,
-                                        auto_adjust=False, actions=False,
-                                        repair=False, timeout=15)
+        fx = _intraday_frame("INR=X", quote_at)
         # FX volume is commonly absent/zero, so validate only its price.
-        fx = fx.drop(columns=["Volume"], errors="ignore")
-        fx_rate, fx_at = _nearest_intraday_bar(fx, quote_at, tolerance)
-        if abs(pd.Timestamp(fx_at) - pd.Timestamp(quote_at)) > pd.Timedelta(minutes=tolerance):
+        if fx.empty:
             raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
-    return {**entry, "price_inr": price * fx_rate,
+        fx.index = pd.to_datetime(fx.index, utc=True)
+        eligible_fx = fx[fx.index >= quote_at]
+        eligible_fx = eligible_fx[pd.to_numeric(eligible_fx["Open"], errors="coerce") > 0]
+        if eligible_fx.empty:
+            raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+        fx_at = eligible_fx.index[0]
+        if fx_at > quote_at + pd.Timedelta(minutes=5):
+            raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+        fx_rate = float(eligible_fx.iloc[0]["Open"])
+    return {**candidate, "ready": True, "price_inr": price * fx_rate,
             "native_price": price, "fx_to_inr": fx_rate,
             "quote_at": pd.Timestamp(quote_at).isoformat(),
-            "source": "Yahoo Finance one-minute bar Open; nearest timestamp within configured tolerance"}
+            "source": "Yahoo Finance one-minute bar Open; first positive-volume trade at or after eligibility"}
 
 
 def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):

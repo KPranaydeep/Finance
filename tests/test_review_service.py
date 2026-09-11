@@ -25,7 +25,7 @@ class ServiceTests(unittest.TestCase):
                   'entry_date':'2026-05-04','basis':'NEXT_OPEN_PLUS_CONFIGURED_WAIT','ready':True}
                   for ticker in pub['weights']}
         prices={'A.NS':100.,'B.NS':50.}
-        quote=lambda ticker,planned,policy_: {**planned,'price_inr':prices[ticker],
+        quote=lambda ticker,planned,policy_,now=None: {**planned,'price_inr':prices[ticker],
               'native_price':prices[ticker],'fx_to_inr':1.,
               'quote_at':planned['requested_entry_at'],'source':'test'}
         with patch('public_review.service.publications',return_value=[pub]), \

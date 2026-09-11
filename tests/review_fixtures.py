@@ -13,7 +13,7 @@ def policy():
         "capital_inr": None,
         "entry_wait_after_open_minutes": 60,
         "entry_quote_interval": "1m",
-        "entry_quote_tolerance_minutes": 5,
+        "entry_max_quote_delay_minutes": 330,
         "assessment_wait_after_close_minutes": 30,
         "slab_rate": .30,
         "surcharge_rate": 0.,

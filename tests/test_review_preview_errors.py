@@ -20,7 +20,7 @@ class PreviewErrorTests(unittest.TestCase):
     def test_configured_security_reaches_price_fetch(self):
         pub = {'publication_id':'P006', 'basket_id':'TEST', 'portfolio_version':6,
                'published_at':'2026-09-09T14:11:00+00:00', 'weights':{'A.NS':1.}}
-        quote = lambda ticker, entry, policy_: {**entry, 'price_inr':100., 'native_price':100.,
+        quote = lambda ticker, entry, policy_, now=None: {**entry, 'price_inr':100., 'native_price':100.,
                 'fx_to_inr':1., 'quote_at':entry['requested_entry_at'], 'source':'test'}
         with patch('public_review.market.fetch_entry_quote', side_effect=quote), \
              patch('public_review.market.fetch', side_effect=ValueError('TEST_FETCH_REACHED')):

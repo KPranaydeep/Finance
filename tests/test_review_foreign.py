@@ -73,8 +73,16 @@ class ForeignReviewTests(unittest.TestCase):
         }
         with patch("public_review.service.publications", return_value=[publication]), \
              patch("public_review.market.sessions", return_value=("2026-09-11", "2026-09-11", ["2026-09-14"])), \
+             patch("public_review.market.fetch_entry_quote", return_value={
+                 "ticker": "A.NS", "kind": "equity", "market": "NSE",
+                 "requested_entry_at": "2026-09-11T04:45:00+00:00",
+                 "session_open_at": "2026-09-11T03:45:00+00:00",
+                 "session_close_at": "2026-09-11T10:00:00+00:00",
+                 "entry_date": "2026-09-11", "basis": "NEXT_OPEN_PLUS_CONFIGURED_WAIT",
+                 "ready": True, "price_inr": 100., "native_price": 100., "fx_to_inr": 1.,
+                 "quote_at": "2026-09-11T04:45:00+00:00", "source": "test"}), \
              patch("public_review.market.fetch", return_value=histories):
-            result = run(FakeDB(), "B", p, now=datetime(2026, 9, 11, 13, tzinfo=timezone.utc))
+            result = run(FakeDB(), "B", p, now=datetime(2026, 9, 10, 13, tzinfo=timezone.utc))
         self.assertEqual((result["failed"], result["waiting"]), (0, 1))
         self.assertEqual(result["results"][0]["status"], "WAITING")
 

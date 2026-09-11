@@ -47,7 +47,7 @@ def historical_preview(publication, policy, events, now=None):
         next_entry = min(pending, key=lambda item: item["requested_entry_at"])
         raise market.AwaitingMarketEntry(next_entry["entry_date"],
                                          next_entry["requested_entry_at"])
-    entry_records = {ticker: market.fetch_entry_quote(ticker, entry, policy)
+    entry_records = {ticker: market.fetch_entry_quote(ticker, entry, policy, now=now)
                      for ticker, entry in entry_records.items()}
     planned_entry = min(row["entry_date"] for row in entry_records.values())
     fully_invested = max(row["entry_date"] for row in entry_records.values())
