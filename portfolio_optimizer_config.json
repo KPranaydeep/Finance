@@ -1,0 +1,7 @@
+{
+  "config_version": "portfolio-optimizer-config-v1",
+  "risk_free_rate_annual": 0.112,
+  "trading_days_per_year": 250,
+  "max_weight_per_asset": 0.5,
+  "history_start_date": "2000-01-01"
+}

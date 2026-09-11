@@ -24,6 +24,14 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
+from portfolio_optimizer_config import (
+    DEFAULT_HISTORY_START_DATE,
+    MAX_WEIGHT_PER_ASSET,
+    OPTIMIZER_CONFIG,
+    OPTIMIZER_CONFIG_VERSION,
+    RISK_FREE_RATE_ANNUAL,
+    TRADING_DAYS_PER_YEAR,
+)
 
 
 def _percent_drop_count(total_tickers, drop_bottom_pct=0.2, min_tickers_to_keep=1):
@@ -2486,7 +2494,7 @@ def auto_history_buffer_days(now=None):
 @st.cache_data(show_spinner=False)
 def download_close_history(
     symbols,
-    start_date="2000-01-01",
+    start_date=DEFAULT_HISTORY_START_DATE,
     end_date=None,
     buffer_days=0,
 ):
@@ -2517,7 +2525,7 @@ def download_close_history(
 @st.cache_data(show_spinner=False)
 def download_volume_history(
     symbols,
-    start_date="2000-01-01",
+    start_date=DEFAULT_HISTORY_START_DATE,
     end_date=None,
     buffer_days=0,
 ):
@@ -2546,12 +2554,12 @@ def download_volume_history(
 @st.cache_data(show_spinner=False)
 def find_drop_bottom_pct_nearest_target(
     symbols,
-    target_trading_days=252,
-    start_date="2000-01-01",
+    target_trading_days=TRADING_DAYS_PER_YEAR,
+    start_date=DEFAULT_HISTORY_START_DATE,
     end_date=None,
     buffer_days=0,
 ):
-    """Return the 0.01 drop fraction producing trading days nearest to 252+.
+    """Return the 0.01 drop fraction producing days nearest the configured year.
 
     Values from 0.00 through 0.95 are tested, matching the Streamlit control.
     A result at or above the target is preferred. If the target cannot be
@@ -2730,7 +2738,7 @@ def get_daily_log_returns(
     end_date, _ = _resolve_history_window_end(end_date, buffer_days)
 
     if start_date is None:
-        start_date = "2000-01-01"
+        start_date = DEFAULT_HISTORY_START_DATE
 
     requested_tickers = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
 
@@ -2818,9 +2826,6 @@ def get_daily_log_returns(
 # Cap on any single asset's optimized weight. Sample-estimate mean-variance
 # optimization concentrates into whichever names had the luckiest realized mean,
 # so an explicit cap is what keeps the result diversified.
-MAX_WEIGHT_PER_ASSET = 0.50
-
-
 def shrunk_covariance(log_returns):
     """Ledoit-Wolf (2004) shrinkage of the sample covariance toward a scaled identity.
 
@@ -2863,8 +2868,7 @@ def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1
     num_assets = len(mean_returns)
 
     def negative_sharpe(weights):
-        risk_free_rate_annual = 0.1171
-        risk_free_rate_daily = risk_free_rate_annual / 250
+        risk_free_rate_daily = RISK_FREE_RATE_ANNUAL / TRADING_DAYS_PER_YEAR
         port_return = np.dot(weights, mean_returns)
         excess_return = port_return - risk_free_rate_daily
         port_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
@@ -2897,7 +2901,7 @@ def optimize_max_sharpe_ratio(log_returns):
     num_assets = len(mean_returns)
 
     def negative_sharpe(weights):
-        risk_free_rate = 0.112 / 250
+        risk_free_rate = RISK_FREE_RATE_ANNUAL / TRADING_DAYS_PER_YEAR
         port_return = np.dot(weights, mean_returns)
         excess_return = port_return - risk_free_rate
         port_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
@@ -2943,18 +2947,17 @@ def portfolio_stats(weights, log_returns):
     portfolio_returns = log_returns @ weights
     mean = portfolio_returns.mean()
     std = portfolio_returns.std()
-    annualized_return = mean * 250
-    annualized_vol = std * np.sqrt(250)
+    annualized_return = mean * TRADING_DAYS_PER_YEAR
+    annualized_vol = std * np.sqrt(TRADING_DAYS_PER_YEAR)
 
     s = skew(portfolio_returns)
     k = kurtosis(portfolio_returns, fisher=True)
     alpha = 0.05
     z = norm.ppf(alpha)
     z_cf = z + (1/6)*(z**2 - 1)*s + (1/24)*(z**3 - 3*z)*k - (1/36)*(2*z**3 - 5*z)*s**2
-    cvar_cf = -(mean + z_cf * std) * 250
+    cvar_cf = -(mean + z_cf * std) * TRADING_DAYS_PER_YEAR
 
-    risk_free_rate_annual = 0.112
-    excess_return = annualized_return - risk_free_rate_annual
+    excess_return = annualized_return - RISK_FREE_RATE_ANNUAL
     sharpe = excess_return / annualized_vol if annualized_vol != 0 else 0
 
     return {
@@ -3182,8 +3185,8 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     # Rank the trades by expected annual return lift from moving the portfolio
     # toward the optimized weights. This is expressed in percentage-point return
     # terms, which is easier to interpret than an abstract trade score.
-    annualized_mean = log_returns[common_tickers].mean().to_numpy() * 250.0
-    annualized_vol = log_returns[common_tickers].std(ddof=1).to_numpy() * np.sqrt(250.0)
+    annualized_mean = log_returns[common_tickers].mean().to_numpy() * TRADING_DAYS_PER_YEAR
+    annualized_vol = log_returns[common_tickers].std(ddof=1).to_numpy() * np.sqrt(TRADING_DAYS_PER_YEAR)
     target_gap = np.abs(change_weights)
 
     # Estimate annual return lift from the target-gap, and penalise high-volatility
@@ -4663,6 +4666,10 @@ if run_btn:
         analysis_payload = {
             "review_analysis_context": {
                 "schema_version": 1,
+                "optimizer_config_version": OPTIMIZER_CONFIG_VERSION,
+                "risk_free_rate_annual": RISK_FREE_RATE_ANNUAL,
+                "trading_days_per_year": TRADING_DAYS_PER_YEAR,
+                "max_weight_per_asset": MAX_WEIGHT_PER_ASSET,
                 "price_history_start": str(meta["valid_start"]),
                 "price_history_end": str(meta["valid_end"]),
                 "return_observation_start": str(log_returns.index.min()),
@@ -4679,6 +4686,7 @@ if run_btn:
             "total_invested": float(total_invested),
             "executable_trade_count": int(len(rebal_df)),
             "settings": {
+                "optimizer_config": dict(OPTIMIZER_CONFIG),
                 "days_to_flip": int(days_to_flip),
                 "max_drawdown_input_pct": float(max_dd_pct),
                 "internal_max_dd": float(max_dd),

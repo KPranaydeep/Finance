@@ -77,6 +77,8 @@ class EventDrivenOptimizerAdapterTests(unittest.TestCase):
         self.assertEqual(result["decision_status"], "REBALANCED")
         self.assertEqual(result["signal_output"][0]["Executable Quantity"], 2)
         self.assertNotIn("scheduled_session_date", result["settings"])
+        self.assertEqual(result["settings"]["optimizer_config"]["risk_free_rate_annual"], 0.112)
+        self.assertEqual(result["settings"]["optimizer_config"]["max_weight_per_asset"], 0.5)
 
     def test_rejects_naive_data_as_of(self):
         with self.assertRaisesRegex(ValueError, "data_as_of must include a timezone"):

@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from portfolio_optimizer_config import OPTIMIZER_CONFIG
 
 
 STRATEGY_VERSION = "portfolio-rebalancer-v1"
@@ -312,6 +313,7 @@ def build_public_signal(
 
     frozen_settings = {
         **settings,
+        "optimizer_config": dict(OPTIMIZER_CONFIG),
         "data_as_of": data_as_of.isoformat(),
         "market_data_cutoff": payload.get("market_data_cutoff"),
         "input_created_at": payload.get("input_created_at"),
