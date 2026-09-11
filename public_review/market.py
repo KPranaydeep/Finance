@@ -173,6 +173,8 @@ def _first_traded_intraday_bar(frame, requested, deadline):
     if frame.empty:
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     frame = frame.copy()
+    if not {"Open", "Volume"}.issubset(frame.columns):
+        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     frame.index = pd.to_datetime(frame.index, utc=True)
     requested = pd.Timestamp(requested)
     deadline = pd.Timestamp(deadline)
@@ -190,9 +192,25 @@ def _first_traded_intraday_bar(frame, requested, deadline):
 def _intraday_frame(ticker, requested):
     start = str(requested.date())
     end = str((requested + pd.Timedelta(days=1)).date())
-    return yf.Ticker(ticker).history(start=start, end=end, interval="1m",
-                                     auto_adjust=False, actions=False,
-                                     repair=False, timeout=15)
+    try:
+        instrument = yf.Ticker(ticker)
+        frame = instrument.history(start=start, end=end, interval="1m",
+                                   auto_adjust=False, actions=False,
+                                   repair=False, timeout=15)
+        if not frame.empty:
+            return frame
+        # Yahoo occasionally returns an empty start/end response for a valid
+        # recent intraday date. Retry through its rolling intraday endpoint,
+        # then retain only the requested UTC date.
+        frame = instrument.history(period="5d", interval="1m", auto_adjust=False,
+                                   actions=False, repair=False, timeout=15)
+        if frame.empty:
+            return frame
+        utc_index = pd.to_datetime(frame.index, utc=True)
+        wanted = pd.Timestamp(requested).date()
+        return frame[utc_index.date == wanted]
+    except Exception:
+        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE") from None
 
 
 def _next_session_entry(entry, policy):
@@ -241,10 +259,9 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
                 pending = AwaitingMarketEntry(candidate["entry_date"], deadline.isoformat())
                 pending.planned_entry = candidate
                 raise pending
-            # An entirely empty response indicates unavailable source history,
-            # not proven illiquidity; retry instead of silently shifting entry.
-            if bars.empty:
-                raise
+            # Empty and sparse frames both mean that no verifiable trade was
+            # observed in the completed eligible window. Never invent a price:
+            # apply the entry rule again on this security's next session.
             candidate = _next_session_entry(candidate, policy)
     else:
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")

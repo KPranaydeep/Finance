@@ -114,6 +114,31 @@ class WaitingTests(unittest.TestCase):
         self.assertEqual(caught.exception.planned_entry['basis'],
                          'DEFERRED_NEXT_OPEN_PLUS_CONFIGURED_WAIT')
 
+    def test_empty_completed_session_also_defers_without_inventing_price(self):
+        planned = {'ticker':'A.NS', 'kind':'equity', 'market':'NSE',
+                   'requested_entry_at':'2026-09-11T04:45:00+00:00',
+                   'session_open_at':'2026-09-11T03:45:00+00:00',
+                   'session_close_at':'2026-09-11T10:00:00+00:00',
+                   'entry_date':'2026-09-11', 'basis':'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                   'ready':True}
+        deferred = {**planned, 'requested_entry_at':'2026-09-14T04:45:00+00:00',
+                    'session_open_at':'2026-09-14T03:45:00+00:00',
+                    'session_close_at':'2026-09-14T10:00:00+00:00',
+                    'entry_date':'2026-09-14',
+                    'basis':'DEFERRED_NEXT_OPEN_PLUS_CONFIGURED_WAIT', 'ready':False}
+        with patch('public_review.market._intraday_frame', return_value=pd.DataFrame()), \
+             patch('public_review.market._next_session_entry', return_value=deferred):
+            with self.assertRaises(AwaitingMarketEntry) as caught:
+                fetch_entry_quote('A.NS', planned, policy(),
+                                  now=datetime(2026,9,11,11,tzinfo=timezone.utc))
+        self.assertEqual(caught.exception.ready_at, '2026-09-14T04:45:00+00:00')
+
+    def test_intraday_provider_exception_is_safe_error(self):
+        from public_review.market import _intraday_frame
+        with patch('public_review.market.yf.Ticker', side_effect=RuntimeError('provider body')):
+            with self.assertRaisesRegex(ValueError, 'ENTRY_INTRADAY_HISTORY_UNAVAILABLE'):
+                _intraday_frame('A.NS', pd.Timestamp('2026-09-11T04:45:00Z'))
+
     def test_baseline_freezes_before_first_assessment(self):
         db = FakeDB()
         schedule = {ticker: {'ticker': ticker, 'kind': kind, 'market': 'NSE',
