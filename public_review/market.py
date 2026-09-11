@@ -6,6 +6,17 @@ import pandas_market_calendars as mcal
 import yfinance as yf
 
 
+ENTRY_DATA_BUFFER_MINUTES = 15
+ASSESSMENT_DATA_BUFFER_MINUTES = 30
+KIND_CALENDARS = {
+    "equity": "NSE",
+    "equity_etf": "NSE",
+    "listed_non_equity_etf": "NSE",
+    "specified_debt_etf": "NSE",
+    "foreign_us_listing": "NYSE",
+}
+
+
 class AwaitingMarketEntry(ValueError):
     """Normal pending state; no usable completed entry session yet."""
     def __init__(self, entry_date, ready_at):
@@ -14,13 +25,42 @@ class AwaitingMarketEntry(ValueError):
         self.ready_at = ready_at
 
 
-def calendar(start, end, policy):
+def calendar(start, end, policy, market="NSE"):
     if str(end)[:10] > policy["calendar_verified_through"]:
         raise ValueError("CALENDAR_REVIEW_REQUIRED")
-    return mcal.get_calendar("NSE").schedule(start_date=start, end_date=end)
+    return mcal.get_calendar(market).schedule(start_date=start, end_date=end)
 
 
-def sessions(now, published_at, policy):
+def joint_calendar(start, end, policy, instrument_kinds=None):
+    """Sessions shared by every market represented in the portfolio.
+
+    ``market_open`` is the first opening and ``all_markets_open`` the last
+    opening on the shared date. ``market_close`` is the last closing. This
+    lets entry and assessment use separate, globally correct readiness gates.
+    """
+    markets = {KIND_CALENDARS.get(kind) for kind in (instrument_kinds or {}).values()}
+    if None in markets:
+        raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+    markets = markets or {"NSE"}
+    schedules = [calendar(start, end, policy, market) for market in sorted(markets)]
+    common = set(str(day.date()) for day in schedules[0].index)
+    for schedule in schedules[1:]:
+        common &= {str(day.date()) for day in schedule.index}
+    rows = []
+    for day in sorted(common):
+        sessions = [schedule.loc[next(index for index in schedule.index
+                                     if str(index.date()) == day)] for schedule in schedules]
+        rows.append({"date": day,
+                     "market_open": min(row.market_open for row in sessions),
+                     "all_markets_open": max(row.market_open for row in sessions),
+                     "market_close": max(row.market_close for row in sessions)})
+    if not rows:
+        return pd.DataFrame(columns=["market_open", "all_markets_open", "market_close"])
+    return pd.DataFrame(rows).set_index(pd.to_datetime([row["date"] for row in rows]))
+
+
+def entry_session(now, published_at, policy, instrument_kinds=None):
+    """Return the first shared session once every required market has opened."""
     now = pd.Timestamp(now)
     if now.tzinfo is None:
         raise ValueError("AWARE_TIME_REQUIRED")
@@ -29,18 +69,55 @@ def sessions(now, published_at, policy):
         raise ValueError("AWARE_PUBLICATION_TIME_REQUIRED")
     local = now.tz_convert("Asia/Kolkata").date()
     end = min(str(local + timedelta(days=100)), policy["calendar_verified_through"])
-    schedule = calendar(published.tz_convert("Asia/Kolkata").date() - timedelta(days=7), end, policy)
+    schedule = joint_calendar(published.date() - timedelta(days=7), end, policy,
+                              instrument_kinds)
+    # Every constituent must have been tradable after publication. Comparing
+    # against the earliest opening excludes a partially elapsed global date.
     eligible = schedule[schedule.market_open > published]
     if eligible.empty:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
-    ready_at = eligible.iloc[0].market_close + pd.Timedelta(minutes=30)
+    row = eligible.iloc[0]
+    ready_at = row.all_markets_open + pd.Timedelta(minutes=ENTRY_DATA_BUFFER_MINUTES)
+    entry_date = str(eligible.index[0].date())
+    if ready_at > now:
+        raise AwaitingMarketEntry(entry_date, ready_at.isoformat())
+    return entry_date, ready_at.isoformat()
+
+
+def sessions(now, published_at, policy, instrument_kinds=None):
+    now = pd.Timestamp(now)
+    if now.tzinfo is None:
+        raise ValueError("AWARE_TIME_REQUIRED")
+    published = pd.Timestamp(published_at)
+    if published.tzinfo is None:
+        raise ValueError("AWARE_PUBLICATION_TIME_REQUIRED")
+    local = now.tz_convert("Asia/Kolkata").date()
+    end = min(str(local + timedelta(days=100)), policy["calendar_verified_through"])
+    schedule = joint_calendar(published.date() - timedelta(days=7), end, policy,
+                              instrument_kinds)
+    eligible = schedule[schedule.market_open > published]
+    if eligible.empty:
+        raise ValueError("INCOMPLETE_SESSION_CALENDAR")
+    ready_at = eligible.iloc[0].market_close + pd.Timedelta(minutes=ASSESSMENT_DATA_BUFFER_MINUTES)
     if ready_at > now:
         raise AwaitingMarketEntry(str(eligible.index[0].date()), ready_at.isoformat())
-    completed = schedule[schedule.market_close + pd.Timedelta(minutes=30) <= now]
+    completed = schedule[schedule.market_close + pd.Timedelta(minutes=ASSESSMENT_DATA_BUFFER_MINUTES) <= now]
     future = schedule[schedule.market_open > now].iloc[:policy["max_review_sessions"]]
     if completed.empty or len(future) < policy["max_review_sessions"]:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     return str(eligible.index[0].date()), str(completed.index[-1].date()), [str(d.date()) for d in future.index]
+
+
+def fetch_entry(tickers, entry_day, policy, ready_at=None):
+    """Fetch a verifiable opening price without requiring the session close."""
+    histories = fetch(tickers, entry_day, entry_day, policy, allow_incomplete_end=True)
+    for history in histories.values():
+        if entry_day not in history.index:
+            raise AwaitingMarketEntry(entry_day, ready_at)
+        values = (history.loc[entry_day, "Open"], history.loc[entry_day, "Volume"])
+        if any(not math.isfinite(float(value)) or float(value) <= 0 for value in values):
+            raise AwaitingMarketEntry(entry_day, ready_at)
+    return histories
 
 
 def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):

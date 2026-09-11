@@ -120,26 +120,22 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
         try:
             from .instruments import require_supported_review
             require_supported_review(publication["weights"])
-            stage = "session_calendar"
-            entry, as_of, future = market.sessions(now, publication["published_at"], policy)
             stage = "instrument_classification"
-            if baseline:
-                entry = baseline["entry_date"]
-                if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in baseline["lots"]):
-                    raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
             weights = publication["weights"]
             missing = set(weights) - set(policy["instrument_kinds"])
             if missing:
                 raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+            kinds = {ticker: policy["instrument_kinds"][ticker] for ticker in weights}
+            if baseline:
+                if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in baseline["lots"]):
+                    raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
             tickers = [r["ticker"] for r in baseline["lots"]] if baseline else list(weights)
-            stage = "market_history"
-            mixed_markets = any(not ticker.endswith(".NS") for ticker in tickers)
-            data = market.fetch(tickers, entry, as_of, policy,
-                                allow_incomplete_end=mixed_markets)
-            entry, as_of = market.synchronized_dates(
-                data, entry, as_of, new_baseline=baseline is None)
-            stage = "freeze_baseline"
             if baseline is None:
+                stage = "entry_calendar"
+                entry, entry_ready_at = market.entry_session(
+                    now, publication["published_at"], policy, kinds)
+                stage = "entry_market_data"
+                data = market.fetch_entry(tickers, entry, policy, entry_ready_at)
                 entry_prices = {t: float(h.loc[entry, "Open"]) for t, h in data.items()}
                 # Same economic concept as practical full-target entry, measured
                 # using ENTRY prices, not today's prices; reserve fees explicitly.
@@ -154,7 +150,19 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 # the committed baseline, not the losing allocation.
                 baseline = next(r["payload"] for r in history if r["event_key"] == "baseline:" + publication["publication_id"])
                 baseline_id = baseline["baseline_id"]
+                tickers = [row["ticker"] for row in baseline["lots"]]
                 data = {t: h for t, h in data.items() if t in {r["ticker"] for r in baseline["lots"]}}
+            stage = "session_calendar"
+            entry, as_of, future = market.sessions(
+                now, publication["published_at"], policy, kinds)
+            if baseline:
+                entry = baseline["entry_date"]
+            stage = "market_history"
+            mixed_markets = any(not ticker.endswith(".NS") for ticker in tickers)
+            data = market.fetch(tickers, entry, as_of, policy,
+                                allow_incomplete_end=mixed_markets)
+            entry, as_of = market.synchronized_dates(
+                data, entry, as_of, new_baseline=False)
             stage = "assessment"
             payload = build_assessment(baseline, data, as_of, future, policy, history, pubs[0]["weights"], now)
             key = "assessment:" + baseline_id + ":" + digest({"method": METHOD, "as_of": as_of, "policy": policy,
@@ -176,18 +184,21 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             # Persist only allowlisted safe codes; never DB URLs, provider bodies
             # or exception traces (may contain credentials).
             code = str(exc) if isinstance(exc, ValueError) and str(exc) in SAFE_ERRORS else "MONITOR_CHECK_FAILED"
-            if code == "AWAITING_MARKET_ENTRY" and baseline is None:
+            if code == "AWAITING_MARKET_ENTRY":
                 waiting += 1
+                reason = "AWAITING_FIRST_ASSESSMENT" if baseline is not None else code
                 payload = {"status": "AWAITING_MARKET_ENTRY", "reason": code,
                            "publication_id": publication["publication_id"],
                            "checked_at": now.isoformat(), "model_only": True,
+                           "entry_frozen": baseline is not None,
+                           "waiting_for": reason,
                            "entry_date": getattr(exc, "entry_date", None),
                            "ready_at": getattr(exc, "ready_at", None)}
                 store.append(conn, basket, "waiting:" + baseline_id + ":" + now.isoformat(),
                              "WAITING", baseline_id, payload)
                 conn.commit()
                 results.append({"publication_id": publication["publication_id"],
-                                "status": "WAITING", "reason": code,
+                                "status": "WAITING", "reason": reason,
                                 "entry_date": payload["entry_date"], "ready_at": payload["ready_at"]})
                 continue
             failures += 1

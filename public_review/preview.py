@@ -12,7 +12,9 @@ def historical_preview(publication, policy, events, now=None):
     require_supported_review(publication["weights"])
     now = now or datetime.now(timezone.utc)
     ack_epoch = max((r.get("seq", 0) for r in events if r["kind"] == "ACKNOWLEDGED"), default=0)
-    planned_entry, as_of, days = market.sessions(now, publication["published_at"], policy)
+    kinds = {ticker: policy["instrument_kinds"][ticker] for ticker in publication["weights"]}
+    planned_entry, as_of, days = market.sessions(
+        now, publication["published_at"], policy, kinds)
     row = next((r for r in reversed(events) if r["kind"] == "BASELINE" and
                 r["payload"]["publication_id"] == publication["publication_id"]), None)
     if row:
@@ -53,8 +55,8 @@ def historical_preview(publication, policy, events, now=None):
     prices = closes.loc[as_of].to_dict()
     entry_prices = {ticker: float(history.loc[entry, "Open"])
                     for ticker, history in histories.items()}
-    # Same hypothetical entry rule as the durable workflow: first jointly
-    # completed session after publication, at that session's opening prices.
+    # Same hypothetical entry rule as the durable workflow: first shared
+    # session after publication, at that session's verified opening prices.
     capital = policy["capital_inr"] or math.ceil(max(
         (price + 60) / weights[ticker] for ticker, price in entry_prices.items()) / 100) * 100
     b = freeze(publication, weights, entry_prices, entry, capital,
@@ -73,6 +75,6 @@ def historical_preview(publication, policy, events, now=None):
             "history_coverage": coverage,
             "ack_epoch": ack_epoch,
             "as_of": as_of, "checked_at": now.isoformat(), "assumed_entry_date": entry,
-            "assumption": "Hypothetical entry at the first jointly completed market session after publication, using that session's opening prices and modeled entry charges; not an actual trade.",
+            "assumption": "Hypothetical entry at the first eligible shared market session after publication, using verified opening prices and modeled entry charges; not an actual trade.",
             "forecast": f, "decision": {"next_review": candidate, "reasons": [],
             "target_crossed_securities": [], "basis": "VALIDATED_FORECAST" if f["next_review"] else "NEXT_SESSION_RISK_CHECK"}}

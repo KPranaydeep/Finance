@@ -80,10 +80,10 @@ def render_pending(row, now):
         return
     p = row["payload"]
     if p.get("reason") == "AWAITING_MARKET_ENTRY":
-        st.info("Awaiting market entry—not a failure. The publication needs its first completed eligible trading session before the model can freeze an entry and calculate returns.")
+        st.info("Awaiting market entry—not a failure. The model will freeze verified opening prices once every market represented in the portfolio has opened on the first eligible shared session.")
         if p.get("ready_at"):
             ready = datetime.fromisoformat(p["ready_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
-            st.caption(f"Entry session: {p.get('entry_date')} · Earliest assessment: {ready:%d %b %Y %H:%M IST}, once prices are available. The daily workflow checks automatically when enabled.")
+            st.caption(f"Entry session: {p.get('entry_date')} · Earliest entry check: {ready:%d %b %Y %H:%M IST}, once opening prices are available. The workflow checks automatically when enabled.")
     else:
         st.warning("Cannot assess: " + p.get("reason", "MONITOR_CHECK_FAILED").replace("_", " ").lower())
         if p.get("stage"):
@@ -121,11 +121,20 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
     bid = baseline["baseline_id"]
     last = store.latest(events, "ASSESSMENT", bid)
     failure = store.latest(events, "FAILURE", bid)
+    waiting = store.latest(events, "WAITING", bid)
     heartbeat = store.latest(events, "HEARTBEAT", bid)
     st.caption(f"Frozen model capital ₹{baseline['capital']:,.2f} · Publication-based estimate, not your broker account. Selecting a version does not reset any investment.")
     successful_seq = max((last or {}).get("seq", 0), (heartbeat or {}).get("seq", 0))
     if not last or (failure and failure["seq"] > successful_seq):
-        st.warning("Cannot assess: " + (failure["payload"]["reason"].replace("_", " ").lower() if failure else "awaiting first assessment"))
+        if waiting and waiting["payload"].get("entry_frozen"):
+            message = "Entry established from verified opening prices; awaiting the first completed global assessment session."
+            ready_at = waiting["payload"].get("ready_at")
+            if ready_at:
+                ready = datetime.fromisoformat(ready_at).astimezone(ZoneInfo("Asia/Kolkata"))
+                message += f" Earliest assessment: {ready:%d %b %Y %H:%M IST}."
+            st.info(message)
+        else:
+            st.warning("Cannot assess: " + (failure["payload"]["reason"].replace("_", " ").lower() if failure else "awaiting first assessment"))
         return
     p = last["payload"]
     checked_at = heartbeat["payload"]["at"] if heartbeat else p["checked_at"]
@@ -203,7 +212,10 @@ def render_review_panel(basket_id, active_publications):
                 ModuleNotFoundError: "PREVIEW_MODULE_MISSING",
                 StopIteration: "PUBLICATION_NOT_FOUND",
             }.get(type(exc), "PREVIEW_CHECK_FAILED")
-            st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
+            if code == "AWAITING_MARKET_ENTRY":
+                st.info("Opening-price entry is waiting for every represented market to open, or has been established while the first completed-session assessment is still pending.")
+            else:
+                st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
             if code == "FOREIGN_REVIEW_COST_MODEL_REQUIRED":
                 st.caption("This publication contains direct overseas listings. INR pricing is separate from tax classification. The review engine supports NSE delivery only; overseas brokerage, remittance charges and instrument-specific tax treatment must be integrated before net-XIRR review dates can be shown.")
             if code == "INSTRUMENT_CLASSIFICATION_REQUIRED":
