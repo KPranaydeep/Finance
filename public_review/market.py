@@ -24,6 +24,16 @@ class AwaitingMarketEntry(ValueError):
         self.ready_at = ready_at
 
 
+def _data_retry(entry, now, ticker):
+    pending = AwaitingMarketEntry(
+        entry["entry_date"],
+        (pd.Timestamp(now) + pd.Timedelta(minutes=30)).isoformat())
+    pending.planned_entry = entry
+    pending.wait_reason = "ENTRY_DATA_RETRY"
+    pending.pending_ticker = ticker
+    return pending
+
+
 def calendar(start, end, policy, market="NSE"):
     if str(end)[:10] > policy["calendar_verified_through"]:
         raise ValueError("CALENDAR_REVIEW_REQUIRED")
@@ -247,7 +257,12 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
         session_close = pd.Timestamp(candidate["session_close_at"])
         deadline = min(session_close, requested + pd.Timedelta(
             minutes=policy["entry_max_quote_delay_minutes"]))
-        bars = _intraday_frame(ticker, requested)
+        try:
+            bars = _intraday_frame(ticker, requested)
+        except ValueError as exc:
+            if str(exc) == "ENTRY_INTRADAY_HISTORY_UNAVAILABLE":
+                raise _data_retry(candidate, now, ticker)
+            raise
         try:
             price, quote_at = _first_traded_intraday_bar(bars, requested, deadline)
             break
@@ -267,18 +282,23 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     fx_rate = 1.0
     if not ticker.endswith(".NS"):
-        fx = _intraday_frame("INR=X", quote_at)
+        try:
+            fx = _intraday_frame("INR=X", quote_at)
+        except ValueError as exc:
+            if str(exc) == "ENTRY_INTRADAY_HISTORY_UNAVAILABLE":
+                raise _data_retry(candidate, now, ticker)
+            raise
         # FX volume is commonly absent/zero, so validate only its price.
         if fx.empty:
-            raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+            raise _data_retry(candidate, now, ticker)
         fx.index = pd.to_datetime(fx.index, utc=True)
         eligible_fx = fx[fx.index >= quote_at]
         eligible_fx = eligible_fx[pd.to_numeric(eligible_fx["Open"], errors="coerce") > 0]
         if eligible_fx.empty:
-            raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+            raise _data_retry(candidate, now, ticker)
         fx_at = eligible_fx.index[0]
         if fx_at > quote_at + pd.Timedelta(minutes=5):
-            raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+            raise _data_retry(candidate, now, ticker)
         fx_rate = float(eligible_fx.iloc[0]["Open"])
     return {**candidate, "ready": True, "price_inr": price * fx_rate,
             "native_price": price, "fx_to_inr": fx_rate,

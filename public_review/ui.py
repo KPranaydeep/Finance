@@ -86,6 +86,9 @@ def render_pending(row, now):
             st.info(f"Security entries captured: {captured} of {total}. Each security enters independently according to its own exchange session.")
         else:
             st.info("Awaiting market entry—not a failure. Each security enters at publication when its exchange is trading, or after its own next open plus the configured wait.")
+        if p.get("wait_reason") == "ENTRY_DATA_RETRY":
+            ticker = p.get("pending_ticker") or "A pending security"
+            st.caption(f"{ticker}: the intraday provider did not return usable data. No price was invented; the next workflow run will retry.")
         if p.get("ready_at"):
             ready = datetime.fromisoformat(p["ready_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
             st.caption(f"Next pending entry check: {ready:%d %b %Y %H:%M IST}. The workflow checks automatically when enabled.")
@@ -236,6 +239,10 @@ def render_review_panel(basket_id, active_publications):
             }.get(type(exc), "PREVIEW_CHECK_FAILED")
             if code == "AWAITING_MARKET_ENTRY":
                 st.info("Opening-price entry is waiting for every represented market to open, or has been established while the first completed-session assessment is still pending.")
+                if getattr(exc, "wait_reason", None) == "ENTRY_DATA_RETRY":
+                    st.caption("Intraday data is temporarily unavailable for " +
+                               str(getattr(exc, "pending_ticker", "a pending security")) +
+                               ". No price was invented; the workflow will retry.")
             else:
                 st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
             if code == "FOREIGN_REVIEW_COST_MODEL_REQUIRED":

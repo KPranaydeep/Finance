@@ -139,6 +139,7 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 stage = "entry_calendar"
                 schedule = market.security_entry_schedule(
                     now, publication["published_at"], policy, kinds)
+                entry_waits = {}
                 captured = {row["payload"]["ticker"]: row["payload"] for row in history
                             if row["kind"] == "SECURITY_ENTRY" and
                             row["payload"].get("publication_id") == publication["publication_id"]}
@@ -150,6 +151,7 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                         quote = market.fetch_entry_quote(ticker, planned, policy, now=now)
                     except market.AwaitingMarketEntry as exc:
                         schedule[ticker] = exc.planned_entry
+                        entry_waits[ticker] = exc
                         continue
                     except ValueError as exc:
                         raise
@@ -164,8 +166,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 if missing_entries:
                     pending = [schedule[ticker] for ticker in missing_entries]
                     next_entry = min(pending, key=lambda row: row["requested_entry_at"])
-                    exc = market.AwaitingMarketEntry(next_entry["entry_date"],
-                                                     next_entry["requested_entry_at"])
+                    exc = entry_waits.get(next_entry["ticker"]) or market.AwaitingMarketEntry(
+                        next_entry["entry_date"], next_entry["requested_entry_at"])
                     exc.captured_entries = len(captured)
                     exc.total_entries = len(tickers)
                     exc.pending_tickers = missing_entries
@@ -234,6 +236,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                            "captured_entries": getattr(exc, "captured_entries", None),
                            "total_entries": getattr(exc, "total_entries", None),
                            "pending_tickers": getattr(exc, "pending_tickers", None),
+                           "pending_ticker": getattr(exc, "pending_ticker", None),
+                           "wait_reason": getattr(exc, "wait_reason", None),
                            "entry_date": getattr(exc, "entry_date", None),
                            "ready_at": getattr(exc, "ready_at", None)}
                 store.append(conn, basket, "waiting:" + baseline_id + ":" + now.isoformat(),

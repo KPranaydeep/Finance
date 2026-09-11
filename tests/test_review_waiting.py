@@ -139,6 +139,22 @@ class WaitingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'ENTRY_INTRADAY_HISTORY_UNAVAILABLE'):
                 _intraday_frame('A.NS', pd.Timestamp('2026-09-11T04:45:00Z'))
 
+    def test_provider_failure_becomes_retriable_wait(self):
+        planned = {'ticker':'A.NS', 'kind':'equity', 'market':'NSE',
+                   'requested_entry_at':'2026-09-11T04:45:00+00:00',
+                   'session_open_at':'2026-09-11T03:45:00+00:00',
+                   'session_close_at':'2026-09-11T10:00:00+00:00',
+                   'entry_date':'2026-09-11', 'basis':'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                   'ready':True}
+        with patch('public_review.market._intraday_frame',
+                   side_effect=ValueError('ENTRY_INTRADAY_HISTORY_UNAVAILABLE')):
+            with self.assertRaises(AwaitingMarketEntry) as caught:
+                fetch_entry_quote('A.NS', planned, policy(),
+                                  now=datetime(2026,9,11,14,tzinfo=timezone.utc))
+        self.assertEqual(caught.exception.wait_reason, 'ENTRY_DATA_RETRY')
+        self.assertEqual(caught.exception.pending_ticker, 'A.NS')
+        self.assertEqual(caught.exception.ready_at, '2026-09-11T14:30:00+00:00')
+
     def test_baseline_freezes_before_first_assessment(self):
         db = FakeDB()
         schedule = {ticker: {'ticker': ticker, 'kind': kind, 'market': 'NSE',
