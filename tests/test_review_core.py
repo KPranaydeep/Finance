@@ -60,6 +60,25 @@ class ReviewCoreTests(unittest.TestCase):
         self.assertAlmostEqual(spent+b["cash"], b["capital"])
         self.assertTrue(all(isinstance(l["quantity"],int) for l in b["lots"]))
 
+    def test_baseline_preserves_per_security_entry_dates(self):
+        p = policy()
+        records = {
+            'A.NS': {'entry_date': '2026-05-04', 'requested_entry_at': '2026-05-04T05:00:00+00:00',
+                     'quote_at': '2026-05-04T05:00:00+00:00', 'basis': 'PUBLICATION_DURING_MARKET',
+                     'source': 'test'},
+            'B.NS': {'entry_date': '2026-05-05', 'requested_entry_at': '2026-05-05T04:45:00+00:00',
+                     'quote_at': '2026-05-05T04:45:00+00:00', 'basis': 'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                     'source': 'test'},
+        }
+        b = freeze({'publication_id':'P','basket_id':'B','portfolio_version':1,
+                    'published_at':'2026-05-04T05:00:00+00:00'},
+                   {'A.NS':.5,'B.NS':.5},{'A.NS':100.,'B.NS':50.},'2026-05-04',
+                   10000.,p['instrument_kinds'],p,'2026-05-05T05:00:00+00:00',records)
+        self.assertEqual(b['entry_date'], '2026-05-04')
+        self.assertEqual(b['fully_invested_date'], '2026-05-05')
+        self.assertEqual({lot['ticker']:lot['entry_date'] for lot in b['lots']},
+                         {'A.NS':'2026-05-04','B.NS':'2026-05-05'})
+
     def test_basket_return_not_security_average(self):
         b = baseline(); before = digest(b)
         m = evaluate(b, {"A.NS": 130, "B.NS": 45}, "2026-09-09", policy())

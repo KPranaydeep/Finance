@@ -46,7 +46,8 @@ def xirr(flows):
     return math.expm1((low + high) / 2)
 
 
-def freeze(publication, weights, prices, entry_date, capital, kinds, policy, captured_at):
+def freeze(publication, weights, prices, entry_date, capital, kinds, policy, captured_at,
+           entry_records=None):
     if not math.isfinite(capital) or capital < 1:
         raise ValueError("Capital must be finite and at least INR 1")
     if not weights or any(not math.isfinite(w) or w <= 0 for w in weights.values()) or sum(weights.values()) > 1.000001:
@@ -76,15 +77,28 @@ def freeze(publication, weights, prices, entry_date, capital, kinds, policy, cap
             allocated = round(allocated_fx_gst, 2)
             fee["fx_gst"] = allocated
             fee["total"] = round(fee["total"] + allocated, 2)
+        record = (entry_records or {}).get(ticker, {})
+        lot_entry_date = record.get("entry_date", entry_date)
         lot = {"ticker": ticker, "quantity": q, "price": p, "kind": kind,
-               "entry_date": entry_date, "entry_charges": fee}
+               "entry_date": lot_entry_date,
+               "entry_at": record.get("requested_entry_at"),
+               "entry_quote_at": record.get("quote_at"),
+               "entry_basis": record.get("basis", "LEGACY_SHARED_SESSION_OPEN"),
+               "entry_source": record.get("source"),
+               "entry_charges": fee}
         lots.append(lot)
         spent += q * p + fee["total"]
     if not lots:
         raise ValueError("Capital cannot fund any whole-share position after entry costs")
+    lot_dates = [lot["entry_date"] for lot in lots]
+    entry_date = min(lot_dates)
+    fully_invested_date = max(lot_dates)
     payload = {"publication_id": publication["publication_id"], "basket_id": publication["basket_id"],
                "portfolio_version": int(publication["portfolio_version"]),
                "published_at": str(publication["published_at"]), "entry_date": entry_date,
+               "fully_invested_date": fully_invested_date,
+               "entry_model_version": ("per-security-publication-or-open-plus-wait-v1"
+                                       if entry_records else "legacy-shared-session-open"),
                "captured_at": captured_at, "capital": capital, "cash": round(capital - spent, 2),
                "weights": weights, "lots": lots, "entry_policy": policy,
                "foreign_funding_fx_gst": round(sum(
@@ -99,7 +113,8 @@ def evaluate(baseline, prices, day, policy, dividend_flows=None):
     dividends = dividend_flows or []  # Net, dated, retained as basket cash.
     owned = {r["ticker"] for r in baseline["lots"]}
     for flow in dividends:
-        if (flow["ticker"] not in owned or not baseline["entry_date"] < flow["date"] <= day or
+        lot = next((row for row in baseline["lots"] if row["ticker"] == flow["ticker"]), None)
+        if (lot is None or not lot["entry_date"] < flow["date"] <= day or
                 not math.isfinite(flow["net"]) or flow["net"] < 0):
             raise ValueError("Invalid dated model distribution")
     rows = []
@@ -110,7 +125,7 @@ def evaluate(baseline, prices, day, policy, dividend_flows=None):
         sale = sell_value(lot["quantity"], price, lot, day, policy)
         outlay = lot["quantity"] * lot["price"] + lot["entry_charges"]["total"]
         div = sum(x["net"] for x in dividends if x["ticker"] == lot["ticker"])
-        flows = [(baseline["entry_date"], -outlay)] + [
+        flows = [(lot["entry_date"], -outlay)] + [
             (x["date"], x["net"]) for x in dividends if x["ticker"] == lot["ticker"]]
         flows.append((day, sale["net"]))
         rows.append({"ticker": lot["ticker"], "shares": lot["quantity"], "price": price,
@@ -131,7 +146,7 @@ def evaluate(baseline, prices, day, policy, dividend_flows=None):
             # Recompute the security XIRR after its allocated conversion GST.
             lot = next(lot for lot in baseline["lots"] if lot["ticker"] == row["ticker"])
             security_dividends = [x for x in dividends if x["ticker"] == row["ticker"]]
-            row["xirr"] = xirr([(baseline["entry_date"], -row["outlay"])] +
+            row["xirr"] = xirr([(lot["entry_date"], -row["outlay"])] +
                                [(x["date"], x["net"]) for x in security_dividends] +
                                [(day, row["net"])])
     net = baseline["cash"] + sum(r["net"] for r in rows) + sum(x["net"] for x in dividends)

@@ -20,7 +20,17 @@ class ServiceTests(unittest.TestCase):
         b=baseline(); db=FakeDB(); histories=self.histories(p)
         pub={k:b[k] for k in ['publication_id','basket_id','portfolio_version','published_at','weights']}
         now=datetime(2026,9,9,13,tzinfo=timezone.utc)
+        schedule={ticker:{'ticker':ticker,'kind':p['instrument_kinds'][ticker],
+                  'market':'NSE','requested_entry_at':'2026-05-04T04:45:00+00:00',
+                  'entry_date':'2026-05-04','basis':'NEXT_OPEN_PLUS_CONFIGURED_WAIT','ready':True}
+                  for ticker in pub['weights']}
+        prices={'A.NS':100.,'B.NS':50.}
+        quote=lambda ticker,planned,policy_: {**planned,'price_inr':prices[ticker],
+              'native_price':prices[ticker],'fx_to_inr':1.,
+              'quote_at':planned['requested_entry_at'],'source':'test'}
         with patch('public_review.service.publications',return_value=[pub]), \
+             patch('public_review.market.security_entry_schedule',return_value=schedule), \
+             patch('public_review.market.fetch_entry_quote',side_effect=quote), \
              patch('public_review.market.fetch',return_value=histories), \
              patch('public_market_mood.fetch_mmi',return_value={'status':'UNAVAILABLE'}), \
              patch('public_review.service.send',return_value=False):

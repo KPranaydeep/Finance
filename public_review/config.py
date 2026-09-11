@@ -27,15 +27,22 @@ def load_policy(today=None):
               "simulation_paths": (100, 5000), "block_length": (1, 30),
               "validation_train": (126, 756), "validation_horizon": (5, 60),
               "validation_min_folds": (20, 100), "validation_max_brier": (.01, .25),
-              "history_years": (1, 10), "tariff_max_age_days": (1, 180)}
+              "history_years": (1, 10), "tariff_max_age_days": (1, 180),
+              "entry_wait_after_open_minutes": (0, 240),
+              "entry_quote_tolerance_minutes": (1, 30),
+              "assessment_wait_after_close_minutes": (0, 180)}
     for key, (low, high) in ranges.items():
         value = policy[key]
         if isinstance(value, bool) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError("INVALID_POLICY_" + key.upper())
     for key in ("max_review_sessions", "simulation_paths", "block_length", "seed", "validation_train",
-                "validation_horizon", "validation_min_folds", "history_years", "tariff_max_age_days"):
+                "validation_horizon", "validation_min_folds", "history_years", "tariff_max_age_days",
+                "entry_wait_after_open_minutes", "entry_quote_tolerance_minutes",
+                "assessment_wait_after_close_minutes"):
         if not isinstance(policy[key], int):
             raise ValueError("INTEGER_POLICY_REQUIRED")
+    if policy.get("entry_quote_interval") != "1m":
+        raise ValueError("INVALID_POLICY_ENTRY_QUOTE_INTERVAL")
     if any(not ((t.endswith(".NS") and k in KINDS) or
                 (not t.endswith(".NS") and k == "foreign_us_listing"))
            for t, k in policy["instrument_kinds"].items()):

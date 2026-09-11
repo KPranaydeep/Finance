@@ -13,11 +13,11 @@ def historical_preview(publication, policy, events, now=None):
     now = now or datetime.now(timezone.utc)
     ack_epoch = max((r.get("seq", 0) for r in events if r["kind"] == "ACKNOWLEDGED"), default=0)
     kinds = {ticker: policy["instrument_kinds"][ticker] for ticker in publication["weights"]}
-    planned_entry, as_of, days = market.sessions(
-        now, publication["published_at"], policy, kinds)
     row = next((r for r in reversed(events) if r["kind"] == "BASELINE" and
                 r["payload"]["publication_id"] == publication["publication_id"]), None)
     if row:
+        _, as_of, days = market.sessions(
+            now, publication["published_at"], policy, kinds)
         # Actual frozen model, but read-only: no orders, acknowledgment or DB writes.
         from .service import build_assessment
         b = row["payload"]
@@ -40,11 +40,23 @@ def historical_preview(publication, policy, events, now=None):
     weights = publication["weights"]
     if set(weights) - set(policy["instrument_kinds"]):
         raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+    entry_records = market.security_entry_schedule(
+        now, publication["published_at"], policy, kinds)
+    pending = [row for row in entry_records.values() if not row["ready"]]
+    if pending:
+        next_entry = min(pending, key=lambda item: item["requested_entry_at"])
+        raise market.AwaitingMarketEntry(next_entry["entry_date"],
+                                         next_entry["requested_entry_at"])
+    entry_records = {ticker: market.fetch_entry_quote(ticker, entry, policy)
+                     for ticker, entry in entry_records.items()}
+    planned_entry = min(row["entry_date"] for row in entry_records.values())
+    fully_invested = max(row["entry_date"] for row in entry_records.values())
+    _, as_of, days = market.sessions(now, publication["published_at"], policy, kinds)
     mixed_markets = any(not ticker.endswith(".NS") for ticker in weights)
-    histories = market.fetch(list(weights), planned_entry, as_of, policy,
+    histories = market.fetch(list(weights), fully_invested, as_of, policy,
                              allow_incomplete_end=mixed_markets)
     entry, as_of = market.synchronized_dates(
-        histories, planned_entry, as_of, new_baseline=True)
+        histories, fully_invested, as_of, new_baseline=False)
     days = [day for day in days if day > as_of]
     if not days:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
@@ -53,14 +65,14 @@ def historical_preview(publication, policy, events, now=None):
     if len(all_returns) < 126:
         raise ValueError("INSUFFICIENT_COMMON_HISTORY")
     prices = closes.loc[as_of].to_dict()
-    entry_prices = {ticker: float(history.loc[entry, "Open"])
-                    for ticker, history in histories.items()}
+    entry_prices = {ticker: float(record["price_inr"])
+                    for ticker, record in entry_records.items()}
     # Same hypothetical entry rule as the durable workflow: first shared
     # session after publication, at that session's verified opening prices.
     capital = policy["capital_inr"] or math.ceil(max(
         (price + 60) / weights[ticker] for ticker, price in entry_prices.items()) / 100) * 100
-    b = freeze(publication, weights, entry_prices, entry, capital,
-               policy["instrument_kinds"], policy, now.isoformat())
+    b = freeze(publication, weights, entry_prices, planned_entry, capital,
+               policy["instrument_kinds"], policy, now.isoformat(), entry_records)
     held = [l["ticker"] for l in b["lots"]]
     returns = all_returns[held]
     v = validate(returns, b, {t: prices[t] for t in held}, list(returns.index), policy)

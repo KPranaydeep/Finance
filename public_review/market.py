@@ -6,8 +6,6 @@ import pandas_market_calendars as mcal
 import yfinance as yf
 
 
-ENTRY_DATA_BUFFER_MINUTES = 15
-ASSESSMENT_DATA_BUFFER_MINUTES = 30
 KIND_CALENDARS = {
     "equity": "NSE",
     "equity_etf": "NSE",
@@ -15,6 +13,7 @@ KIND_CALENDARS = {
     "specified_debt_etf": "NSE",
     "foreign_us_listing": "NYSE",
 }
+ENTRY_MODEL_VERSION = "per-security-publication-or-open-plus-wait-v1"
 
 
 class AwaitingMarketEntry(ValueError):
@@ -77,7 +76,8 @@ def entry_session(now, published_at, policy, instrument_kinds=None):
     if eligible.empty:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     row = eligible.iloc[0]
-    ready_at = row.all_markets_open + pd.Timedelta(minutes=ENTRY_DATA_BUFFER_MINUTES)
+    ready_at = row.all_markets_open + pd.Timedelta(
+        minutes=policy["entry_wait_after_open_minutes"])
     entry_date = str(eligible.index[0].date())
     if ready_at > now:
         raise AwaitingMarketEntry(entry_date, ready_at.isoformat())
@@ -98,10 +98,11 @@ def sessions(now, published_at, policy, instrument_kinds=None):
     eligible = schedule[schedule.market_open > published]
     if eligible.empty:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
-    ready_at = eligible.iloc[0].market_close + pd.Timedelta(minutes=ASSESSMENT_DATA_BUFFER_MINUTES)
+    assessment_buffer = pd.Timedelta(minutes=policy["assessment_wait_after_close_minutes"])
+    ready_at = eligible.iloc[0].market_close + assessment_buffer
     if ready_at > now:
         raise AwaitingMarketEntry(str(eligible.index[0].date()), ready_at.isoformat())
-    completed = schedule[schedule.market_close + pd.Timedelta(minutes=ASSESSMENT_DATA_BUFFER_MINUTES) <= now]
+    completed = schedule[schedule.market_close + assessment_buffer <= now]
     future = schedule[schedule.market_open > now].iloc[:policy["max_review_sessions"]]
     if completed.empty or len(future) < policy["max_review_sessions"]:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
@@ -118,6 +119,96 @@ def fetch_entry(tickers, entry_day, policy, ready_at=None):
         if any(not math.isfinite(float(value)) or float(value) <= 0 for value in values):
             raise AwaitingMarketEntry(entry_day, ready_at)
     return histories
+
+
+def security_entry_schedule(now, published_at, policy, instrument_kinds):
+    """Return each ticker's immutable requested entry timestamp.
+
+    If its exchange is trading at publication, the publication timestamp is
+    used. Otherwise the timestamp is the next exchange open plus the configured
+    waiting period. No shared-market delay is introduced here.
+    """
+    now = pd.Timestamp(now)
+    published = pd.Timestamp(published_at)
+    if now.tzinfo is None:
+        raise ValueError("AWARE_TIME_REQUIRED")
+    if published.tzinfo is None:
+        raise ValueError("AWARE_PUBLICATION_TIME_REQUIRED")
+    end = min(str(now.tz_convert("Asia/Kolkata").date() + timedelta(days=100)),
+              policy["calendar_verified_through"])
+    schedules = {}
+    result = {}
+    for ticker, kind in sorted(instrument_kinds.items()):
+        market = KIND_CALENDARS.get(kind)
+        if market is None:
+            raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+        if market not in schedules:
+            schedules[market] = calendar(published.date() - timedelta(days=7), end,
+                                         policy, market)
+        schedule = schedules[market]
+        active = schedule[(schedule.market_open <= published) &
+                          (schedule.market_close > published)]
+        if not active.empty:
+            requested = published
+            basis = "PUBLICATION_DURING_MARKET"
+        else:
+            future = schedule[schedule.market_open > published]
+            if future.empty:
+                raise ValueError("INCOMPLETE_SESSION_CALENDAR")
+            requested = future.iloc[0].market_open + pd.Timedelta(
+                minutes=policy["entry_wait_after_open_minutes"])
+            basis = "NEXT_OPEN_PLUS_CONFIGURED_WAIT"
+        result[ticker] = {"ticker": ticker, "kind": kind,
+                          "market": market, "requested_entry_at": requested.isoformat(),
+                          "entry_date": str(requested.date()), "basis": basis,
+                          "ready": bool(requested <= now)}
+    return result
+
+
+def _nearest_intraday_bar(frame, requested, tolerance_minutes):
+    if frame.empty:
+        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+    frame = frame.copy()
+    frame.index = pd.to_datetime(frame.index, utc=True)
+    requested = pd.Timestamp(requested)
+    distances = (frame.index - requested).to_series(index=frame.index).abs()
+    quote_at = distances.idxmin()
+    if distances.loc[quote_at] > pd.Timedelta(minutes=tolerance_minutes):
+        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+    row = frame.loc[quote_at]
+    price = float(row["Open"])
+    if not math.isfinite(price) or price <= 0:
+        raise ValueError("INVALID_OR_NONTRADING_PRICE")
+    if "Volume" in row and (not math.isfinite(float(row["Volume"])) or float(row["Volume"]) <= 0):
+        raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+    return price, quote_at
+
+
+def fetch_entry_quote(ticker, entry, policy):
+    """Return a one-minute Yahoo entry proxy, converted to INR when required."""
+    requested = pd.Timestamp(entry["requested_entry_at"])
+    start = str(requested.date())
+    end = str((requested + pd.Timedelta(days=1)).date())
+    interval = policy["entry_quote_interval"]
+    tolerance = policy["entry_quote_tolerance_minutes"]
+    bars = yf.Ticker(ticker).history(start=start, end=end, interval=interval,
+                                     auto_adjust=False, actions=False,
+                                     repair=False, timeout=15)
+    price, quote_at = _nearest_intraday_bar(bars, requested, tolerance)
+    fx_rate = 1.0
+    if not ticker.endswith(".NS"):
+        fx = yf.Ticker("INR=X").history(start=start, end=end, interval=interval,
+                                        auto_adjust=False, actions=False,
+                                        repair=False, timeout=15)
+        # FX volume is commonly absent/zero, so validate only its price.
+        fx = fx.drop(columns=["Volume"], errors="ignore")
+        fx_rate, fx_at = _nearest_intraday_bar(fx, quote_at, tolerance)
+        if abs(pd.Timestamp(fx_at) - pd.Timestamp(quote_at)) > pd.Timedelta(minutes=tolerance):
+            raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
+    return {**entry, "price_inr": price * fx_rate,
+            "native_price": price, "fx_to_inr": fx_rate,
+            "quote_at": pd.Timestamp(quote_at).isoformat(),
+            "source": "Yahoo Finance one-minute bar Open; nearest timestamp within configured tolerance"}
 
 
 def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):

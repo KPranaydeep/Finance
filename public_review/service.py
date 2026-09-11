@@ -20,6 +20,7 @@ SAFE_ERRORS = {
     "AWARE_PUBLICATION_TIME_REQUIRED", "AWARE_TIME_REQUIRED",
     "INSTRUMENT_METADATA_UNAVAILABLE", "INSTRUMENT_METADATA_INVALID",
     "FOREIGN_REVIEW_COST_MODEL_REQUIRED",
+    "ENTRY_INTRADAY_HISTORY_UNAVAILABLE", "INVALID_POLICY_ENTRY_QUOTE_INTERVAL",
 }
 
 
@@ -44,12 +45,10 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
         h = histories[lot["ticker"]]
         # Yahoo historical closes are split-normalized. A subsequent split makes
         # frozen units incomparable; do not silently use the wrong quantities.
-        after_capture = h.loc[h.index > baseline["captured_at"][:10]]
+        after_capture = h.loc[h.index > lot["entry_date"]]
         if "Stock Splits" in after_capture and (after_capture["Stock Splits"] != 0).any():
             raise ValueError("CORPORATE_ACTION_REVIEW_REQUIRED")
-        if not math.isclose(float(h.loc[baseline["entry_date"], "Open"]), lot["price"], rel_tol=.005):
-            raise ValueError("ENTRY_PRICE_REVISION_REVIEW_REQUIRED")
-        for day, row in h.loc[h.index > baseline["entry_date"]].iterrows():
+        for day, row in h.loc[h.index > lot["entry_date"]].iterrows():
             dividend = float(row.get("Dividends", 0.))
             if dividend:
                 dividends.append({"ticker": lot["ticker"], "date": day,
@@ -59,7 +58,7 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
     closes, returns, coverage = common_history(histories, as_of, policy)
     # Reconstruct peak from the same frozen model, never from unrelated NAV/backfill.
     peak = baseline["capital"]
-    for d, row in closes.loc[closes.index >= baseline["entry_date"]].iterrows():
+    for d, row in closes.loc[closes.index >= baseline.get("fully_invested_date", baseline["entry_date"])].iterrows():
         m = evaluate(baseline, row.to_dict(), d, policy, [x for x in dividends if x["date"] <= d])
         peak = max(peak, m["net_proceeds"])
     validation = {"passed": False, "reason": "INSUFFICIENT_COMMON_HISTORY"}
@@ -110,6 +109,12 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
     # Continue monitoring already-created investments. Latest is added, never
     # replaces previous baselines or changes their entry clock.
     existing = {r["payload"]["publication_id"]: r["payload"] for r in history if r["kind"] == "BASELINE"}
+    latest_publication_id = pubs[0]["publication_id"]
+    if (latest_publication_id in existing and
+            existing[latest_publication_id].get("entry_model_version") != market.ENTRY_MODEL_VERSION):
+        # Preserve the immutable legacy baseline, but replace it operationally
+        # for the latest publication under the explicitly versioned entry rule.
+        existing.pop(latest_publication_id)
     selected = [p for p in pubs if p["publication_id"] in existing or p == pubs[0]]
     failures, waiting = 0, 0
     results = []
@@ -132,31 +137,63 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             tickers = [r["ticker"] for r in baseline["lots"]] if baseline else list(weights)
             if baseline is None:
                 stage = "entry_calendar"
-                entry, entry_ready_at = market.entry_session(
+                schedule = market.security_entry_schedule(
                     now, publication["published_at"], policy, kinds)
-                stage = "entry_market_data"
-                data = market.fetch_entry(tickers, entry, policy, entry_ready_at)
-                entry_prices = {t: float(h.loc[entry, "Open"]) for t, h in data.items()}
+                captured = {row["payload"]["ticker"]: row["payload"] for row in history
+                            if row["kind"] == "SECURITY_ENTRY" and
+                            row["payload"].get("publication_id") == publication["publication_id"]}
+                for ticker, planned in schedule.items():
+                    if ticker in captured or not planned["ready"]:
+                        continue
+                    stage = "entry_market_data"
+                    try:
+                        quote = market.fetch_entry_quote(ticker, planned, policy)
+                    except ValueError as exc:
+                        if str(exc) in {"ENTRY_INTRADAY_HISTORY_UNAVAILABLE",
+                                       "INVALID_OR_NONTRADING_PRICE"}:
+                            continue
+                        raise
+                    quote["publication_id"] = publication["publication_id"]
+                    store.append(conn, basket,
+                                 "security-entry:" + market.ENTRY_MODEL_VERSION + ":" +
+                                 publication["publication_id"] + ":" + ticker,
+                                 "SECURITY_ENTRY", publication["publication_id"], quote)
+                    conn.commit()
+                    captured[ticker] = quote
+                missing_entries = sorted(set(tickers) - set(captured))
+                if missing_entries:
+                    pending = [schedule[ticker] for ticker in missing_entries]
+                    next_entry = min(pending, key=lambda row: row["requested_entry_at"])
+                    exc = market.AwaitingMarketEntry(next_entry["entry_date"],
+                                                     next_entry["requested_entry_at"])
+                    exc.captured_entries = len(captured)
+                    exc.total_entries = len(tickers)
+                    exc.pending_tickers = missing_entries
+                    raise exc
+                entry_prices = {ticker: float(captured[ticker]["price_inr"])
+                                for ticker in tickers}
+                entry = min(row["entry_date"] for row in captured.values())
                 # Same economic concept as practical full-target entry, measured
-                # using ENTRY prices, not today's prices; reserve fees explicitly.
+                # using immutable per-security entry prices; reserve fees explicitly.
                 capital = policy["capital_inr"] or math.ceil(max((p + 60) / weights[t] for t, p in entry_prices.items()) / 100) * 100
                 baseline = freeze(publication, weights, entry_prices, entry, capital,
-                                  policy["instrument_kinds"], policy, now.isoformat())
+                                  policy["instrument_kinds"], policy, now.isoformat(), captured)
                 baseline_id = baseline["baseline_id"]
-                store.append(conn, basket, "baseline:" + publication["publication_id"], "BASELINE", baseline_id, baseline)
+                baseline_key = ("baseline:" + market.ENTRY_MODEL_VERSION + ":" +
+                                publication["publication_id"])
+                store.append(conn, basket, baseline_key, "BASELINE", baseline_id, baseline)
                 conn.commit()
                 history = store.read(conn, basket)
                 # If another worker created this publication concurrently, use
                 # the committed baseline, not the losing allocation.
-                baseline = next(r["payload"] for r in history if r["event_key"] == "baseline:" + publication["publication_id"])
+                baseline = next(r["payload"] for r in history if r["event_key"] == baseline_key)
                 baseline_id = baseline["baseline_id"]
                 tickers = [row["ticker"] for row in baseline["lots"]]
-                data = {t: h for t, h in data.items() if t in {r["ticker"] for r in baseline["lots"]}}
             stage = "session_calendar"
             entry, as_of, future = market.sessions(
                 now, publication["published_at"], policy, kinds)
             if baseline:
-                entry = baseline["entry_date"]
+                entry = baseline.get("fully_invested_date", baseline["entry_date"])
             stage = "market_history"
             mixed_markets = any(not ticker.endswith(".NS") for ticker in tickers)
             data = market.fetch(tickers, entry, as_of, policy,
@@ -192,6 +229,9 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                            "checked_at": now.isoformat(), "model_only": True,
                            "entry_frozen": baseline is not None,
                            "waiting_for": reason,
+                           "captured_entries": getattr(exc, "captured_entries", None),
+                           "total_entries": getattr(exc, "total_entries", None),
+                           "pending_tickers": getattr(exc, "pending_tickers", None),
                            "entry_date": getattr(exc, "entry_date", None),
                            "ready_at": getattr(exc, "ready_at", None)}
                 store.append(conn, basket, "waiting:" + baseline_id + ":" + now.isoformat(),

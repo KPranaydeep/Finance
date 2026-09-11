@@ -105,7 +105,12 @@ class SecurityTargetTests(unittest.TestCase):
                      for t, price in [('A.NS',100.), ('B.NS',50.)]}
         events = []
         before = deepcopy(events)
-        with patch('public_review.market.fetch', return_value=histories), \
+        prices = {'A.NS':100., 'B.NS':50.}
+        quote = lambda ticker, entry, policy_: {**entry, 'price_inr':prices[ticker],
+                'native_price':prices[ticker], 'fx_to_inr':1.,
+                'quote_at':entry['requested_entry_at'], 'source':'test'}
+        with patch('public_review.market.fetch_entry_quote', side_effect=quote), \
+             patch('public_review.market.fetch', return_value=histories), \
              patch('public_review.preview.validate', return_value={'passed':False}):
             result = historical_preview(publication, p, events,
                                         datetime(2026,9,10,11,tzinfo=timezone.utc))

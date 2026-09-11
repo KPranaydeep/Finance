@@ -80,10 +80,14 @@ def render_pending(row, now):
         return
     p = row["payload"]
     if p.get("reason") == "AWAITING_MARKET_ENTRY":
-        st.info("Awaiting market entry—not a failure. The model will freeze verified opening prices once every market represented in the portfolio has opened on the first eligible shared session.")
+        captured, total = p.get("captured_entries"), p.get("total_entries")
+        if captured is not None and total:
+            st.info(f"Security entries captured: {captured} of {total}. Each security enters independently according to its own exchange session.")
+        else:
+            st.info("Awaiting market entry—not a failure. Each security enters at publication when its exchange is trading, or after its own next open plus the configured wait.")
         if p.get("ready_at"):
             ready = datetime.fromisoformat(p["ready_at"]).astimezone(ZoneInfo("Asia/Kolkata"))
-            st.caption(f"Entry session: {p.get('entry_date')} · Earliest entry check: {ready:%d %b %Y %H:%M IST}, once opening prices are available. The workflow checks automatically when enabled.")
+            st.caption(f"Next pending entry check: {ready:%d %b %Y %H:%M IST}. The workflow checks automatically when enabled.")
     else:
         st.warning("Cannot assess: " + p.get("reason", "MONITOR_CHECK_FAILED").replace("_", " ").lower())
         if p.get("stage"):
@@ -97,8 +101,12 @@ def render_pending(row, now):
 
 def render_events(events, active_ids=None, now=None, latest_publication_id=None):
     now = now or datetime.now(timezone.utc)
-    baseline_rows = [r for r in events if r["kind"] == "BASELINE" and
-                     (active_ids is None or r["payload"]["publication_id"] in active_ids)]
+    baseline_by_publication = {}
+    for row in events:
+        if (row["kind"] == "BASELINE" and
+                (active_ids is None or row["payload"]["publication_id"] in active_ids)):
+            baseline_by_publication[row["payload"]["publication_id"]] = row
+    baseline_rows = list(baseline_by_publication.values())
     pending_shown = False
     if latest_publication_id and not any(r["payload"]["publication_id"] == latest_publication_id for r in baseline_rows):
         pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
@@ -124,6 +132,14 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None)
     waiting = store.latest(events, "WAITING", bid)
     heartbeat = store.latest(events, "HEARTBEAT", bid)
     st.caption(f"Frozen model capital ₹{baseline['capital']:,.2f} · Publication-based estimate, not your broker account. Selecting a version does not reset any investment.")
+    with st.expander("Security entry evidence"):
+        st.table(pd.DataFrame([{
+            "Security": lot["ticker"],
+            "Requested entry": lot.get("entry_at") or lot["entry_date"],
+            "Price timestamp": lot.get("entry_quote_at") or "Legacy daily open",
+            "Entry price": f"₹{lot['price']:,.2f}",
+            "Basis": lot.get("entry_basis", "Legacy shared session open").replace("_", " ").lower(),
+        } for lot in baseline["lots"]]))
     successful_seq = max((last or {}).get("seq", 0), (heartbeat or {}).get("seq", 0))
     if not last or (failure and failure["seq"] > successful_seq):
         if waiting and waiting["payload"].get("entry_frozen"):
@@ -206,7 +222,8 @@ def render_review_panel(basket_id, active_publications):
             from .service import SAFE_ERRORS
             allowed = SAFE_ERRORS | {"POLICY_APPROVAL_REQUIRED", "TARIFF_REVIEW_REQUIRED",
                                      "UNSUPPORTED_TAX_OR_ACCOUNT_PROFILE", "NSE_CLASSIFICATION_REQUIRED",
-                                     "INTEGER_POLICY_REQUIRED", "INVALID_CAPITAL"}
+                                     "INTEGER_POLICY_REQUIRED", "INVALID_CAPITAL",
+                                     "INVALID_POLICY_ENTRY_QUOTE_INTERVAL"}
             code = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else {
                 FileNotFoundError: "POLICY_FILE_MISSING",
                 ModuleNotFoundError: "PREVIEW_MODULE_MISSING",

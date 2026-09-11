@@ -3,7 +3,7 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
-METHOD = "joint-security-first-passage-gap-safe-v3"
+METHOD = "per-security-entry-first-passage-gap-safe-v4"
 
 
 def paths(returns, days, count, block, seed):
@@ -69,6 +69,11 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     days = np.array([(date.fromisoformat(d) - date.fromisoformat(baseline["entry_date"])).days for d in future_dates])
     if not len(days) or np.any(days <= 0):
         raise ValueError("Future exits must follow entry")
+    security_days = np.array([[
+        (date.fromisoformat(d) - date.fromisoformat(lot["entry_date"])).days
+        for lot in lots] for d in future_dates])
+    if np.any(security_days <= 0):
+        raise ValueError("Future exits must follow every security entry")
     # NPV at the target rate >= 0 is equivalent to crossing target XIRR
     # for conventional cash flows. Include entry charges and dated net dividends.
     outlays = q * cost + np.array([r["entry_charges"]["total"] for r in lots])
@@ -77,7 +82,7 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             (date.fromisoformat(x["date"]) - date.fromisoformat(r["entry_date"])).days / 365)
         for x in (dividends or []) if x["ticker"] == r["ticker"]) for r in lots])
     security_target = (outlays - dividend_pv)[None, :] * np.power(
-        1 + policy["target_xirr"], days[:, None] / 365)
+        1 + policy["target_xirr"], security_days / 365)
     security_profit = gross - fees - tax >= security_target[None, :, :]
     security_probability = np.maximum.accumulate(security_profit, axis=1).mean(axis=0)
     security_crossings = []

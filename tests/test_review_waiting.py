@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import pandas as pd
 from streamlit.testing.v1 import AppTest
-from public_review.market import sessions, entry_session, AwaitingMarketEntry
+from public_review.market import sessions, entry_session, security_entry_schedule, AwaitingMarketEntry
 from public_review.service import run
 from review_fixtures import policy
 from test_review_operations import FakeDB
@@ -41,22 +41,22 @@ class WaitingTests(unittest.TestCase):
         self.assertEqual((entry, as_of), ('2026-09-10', '2026-09-10'))
 
     def test_nse_entry_can_freeze_during_market_hours(self):
-        entry, ready = entry_session(datetime(2026, 9, 10, 4, 0, tzinfo=timezone.utc),
+        entry, ready = entry_session(datetime(2026, 9, 10, 4, 45, tzinfo=timezone.utc),
                                      self.publication()['published_at'], policy(),
                                      {'A.NS': 'equity', 'B.NS': 'listed_non_equity_etf'})
         self.assertEqual(entry, '2026-09-10')
-        self.assertEqual(ready, '2026-09-10T04:00:00+00:00')
+        self.assertEqual(ready, '2026-09-10T04:45:00+00:00')
 
     def test_world_entry_waits_until_every_required_market_opens(self):
         kinds = {'A.NS': 'equity', 'AXTI': 'foreign_us_listing'}
         published = '2026-09-10T12:52:29+00:00'
         with self.assertRaises(AwaitingMarketEntry):
-            entry_session(datetime(2026, 9, 11, 13, 44, tzinfo=timezone.utc),
+            entry_session(datetime(2026, 9, 11, 14, 29, tzinfo=timezone.utc),
                           published, policy(), kinds)
-        entry, ready = entry_session(datetime(2026, 9, 11, 13, 45, tzinfo=timezone.utc),
+        entry, ready = entry_session(datetime(2026, 9, 11, 14, 30, tzinfo=timezone.utc),
                                      published, policy(), kinds)
         self.assertEqual(entry, '2026-09-11')
-        self.assertEqual(ready, '2026-09-11T13:45:00+00:00')
+        self.assertEqual(ready, '2026-09-11T14:30:00+00:00')
 
     def test_world_assessment_waits_until_every_required_market_closes(self):
         kinds = {'A.NS': 'equity', 'AXTI': 'foreign_us_listing'}
@@ -69,28 +69,50 @@ class WaitingTests(unittest.TestCase):
                                    published, policy(), kinds)
         self.assertEqual((entry, as_of), ('2026-09-11', '2026-09-11'))
 
+    def test_each_security_uses_its_own_market_at_publication(self):
+        published = '2026-09-10T14:00:29+00:00'
+        entries = security_entry_schedule(
+            datetime(2026, 9, 11, 5, tzinfo=timezone.utc), published, policy(),
+            {'A.NS': 'equity', 'AXTI': 'foreign_us_listing'})
+        self.assertEqual(entries['AXTI']['requested_entry_at'], published)
+        self.assertEqual(entries['AXTI']['basis'], 'PUBLICATION_DURING_MARKET')
+        self.assertEqual(entries['A.NS']['requested_entry_at'], '2026-09-11T04:45:00+00:00')
+        self.assertEqual(entries['A.NS']['basis'], 'NEXT_OPEN_PLUS_CONFIGURED_WAIT')
+
     def test_baseline_freezes_before_first_assessment(self):
         db = FakeDB()
-        histories = {ticker: pd.DataFrame({'Open': [price], 'Close': [price], 'Volume': [1000.]},
-                                           index=['2026-09-10'])
-                     for ticker, price in [('A.NS', 100.), ('B.NS', 50.)]}
+        schedule = {ticker: {'ticker': ticker, 'kind': kind, 'market': 'NSE',
+                    'requested_entry_at': '2026-09-10T04:45:00+00:00',
+                    'entry_date': '2026-09-10', 'basis': 'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                    'ready': True} for ticker, kind in policy()['instrument_kinds'].items()}
+        prices = {'A.NS': 100., 'B.NS': 50.}
+        quote = lambda ticker, planned, p: {**planned, 'price_inr': prices[ticker],
+                    'native_price': prices[ticker], 'fx_to_inr': 1.,
+                    'quote_at': planned['requested_entry_at'], 'source': 'test'}
         pending = AwaitingMarketEntry('2026-09-10', '2026-09-10T10:30:00+00:00')
         with patch('public_review.service.publications', return_value=[self.publication()]), \
-             patch('public_review.market.entry_session', return_value=('2026-09-10', '2026-09-10T04:00:00+00:00')), \
-             patch('public_review.market.fetch_entry', return_value=histories), \
+             patch('public_review.market.security_entry_schedule', return_value=schedule), \
+             patch('public_review.market.fetch_entry_quote', side_effect=quote), \
              patch('public_review.market.sessions', side_effect=pending):
             result = run(db, 'TEST', policy(), now=datetime(2026, 9, 10, 5, tzinfo=timezone.utc))
         self.assertEqual((result['failed'], result['waiting']), (0, 1))
         self.assertEqual(result['results'][0]['reason'], 'AWAITING_FIRST_ASSESSMENT')
-        self.assertEqual([row['kind'] for row in db.rows], ['BASELINE', 'WAITING'])
+        self.assertEqual([row['kind'] for row in db.rows],
+                         ['SECURITY_ENTRY', 'SECURITY_ENTRY', 'BASELINE', 'WAITING'])
 
     def test_real_error_still_fails_and_sanitizes_details(self):
         db = FakeDB()
+        schedule = {ticker: {'ticker': ticker, 'kind': kind, 'market': 'NSE',
+                    'requested_entry_at': '2026-09-10T04:45:00+00:00',
+                    'entry_date': '2026-09-10', 'basis': 'NEXT_OPEN_PLUS_CONFIGURED_WAIT',
+                    'ready': True} for ticker, kind in policy()['instrument_kinds'].items()}
+        prices = {'A.NS': 100., 'B.NS': 50.}
+        quote = lambda ticker, planned, p: {**planned, 'price_inr': prices[ticker],
+                    'native_price': prices[ticker], 'fx_to_inr': 1.,
+                    'quote_at': planned['requested_entry_at'], 'source': 'test'}
         with patch('public_review.service.publications', return_value=[self.publication()]), \
-             patch('public_review.market.entry_session', return_value=('2026-09-10', '2026-09-10T04:00:00+00:00')), \
-             patch('public_review.market.fetch_entry', return_value={
-                 'A.NS': pd.DataFrame({'Open': [100.], 'Close': [100.], 'Volume': [1000.]}, index=['2026-09-10']),
-                 'B.NS': pd.DataFrame({'Open': [50.], 'Close': [50.], 'Volume': [1000.]}, index=['2026-09-10'])}), \
+             patch('public_review.market.security_entry_schedule', return_value=schedule), \
+             patch('public_review.market.fetch_entry_quote', side_effect=quote), \
              patch('public_review.market.sessions', side_effect=ValueError('SECRET_DATABASE_PASSWORD')), \
              patch('public_review.service.send', return_value=False):
             result = run(db, 'TEST', policy(), now=datetime(2026, 9, 9, 18, tzinfo=timezone.utc))
@@ -125,7 +147,7 @@ class WaitingTests(unittest.TestCase):
         self.assertFalse(at.warning)
         self.assertEqual(len(at.metric), 0)
         self.assertTrue(any('Awaiting market entry' in x.value for x in at.info))
-        self.assertTrue(any('Earliest entry check: 10 Sep 2026 16:00 IST' in x.value for x in at.caption))
+        self.assertTrue(any('Next pending entry check: 10 Sep 2026 16:00 IST' in x.value for x in at.caption))
 
     def test_empty_calendar_is_not_treated_as_waiting(self):
         import pandas as pd

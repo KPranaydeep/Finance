@@ -4,13 +4,17 @@ from public_review.core import freeze
 def policy():
     """Fresh, deterministic test data; never read the owner's production policy."""
     return {
-        "policy_version": "test-policy-v1",
+        "policy_version": "test-policy-v2",
         "policy_approved": True,
         "tax_profile": "resident_individual_regular_delivery",
         "tariff_verified_on": "2026-09-09",
         "tariff_max_age_days": 90,
         "calendar_verified_through": "2026-12-31",
         "capital_inr": None,
+        "entry_wait_after_open_minutes": 60,
+        "entry_quote_interval": "1m",
+        "entry_quote_tolerance_minutes": 5,
+        "assessment_wait_after_close_minutes": 30,
         "slab_rate": .30,
         "surcharge_rate": 0.,
         "slippage_bps": 10.,
