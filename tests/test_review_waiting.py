@@ -1,7 +1,7 @@
 import json
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 from public_review.market import (sessions, entry_session, security_entry_schedule,
@@ -138,6 +138,18 @@ class WaitingTests(unittest.TestCase):
         with patch('public_review.market.yf.Ticker', side_effect=RuntimeError('provider body')):
             with self.assertRaisesRegex(ValueError, 'ENTRY_INTRADAY_HISTORY_UNAVAILABLE'):
                 _intraday_frame('A.NS', pd.Timestamp('2026-09-11T04:45:00Z'))
+
+    def test_intraday_falls_back_to_verified_five_minute_bar(self):
+        from public_review.market import _intraday_frame
+        five_minute = pd.DataFrame(
+            {'Open':[39.9], 'Volume':[100]},
+            index=pd.to_datetime(['2026-09-10T14:30:00Z']))
+        instrument = Mock()
+        instrument.history.side_effect = [pd.DataFrame(), pd.DataFrame(), five_minute]
+        with patch('public_review.market.yf.Ticker', return_value=instrument):
+            frame = _intraday_frame('ASX', pd.Timestamp('2026-09-10T14:30:00Z'))
+        self.assertEqual(frame.attrs['source_interval'], '5m')
+        self.assertEqual(float(frame.iloc[0]['Open']), 39.9)
 
     def test_provider_failure_becomes_retriable_wait(self):
         planned = {'ticker':'A.NS', 'kind':'equity', 'market':'NSE',

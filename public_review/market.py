@@ -204,21 +204,27 @@ def _intraday_frame(ticker, requested):
     end = str((requested + pd.Timedelta(days=1)).date())
     try:
         instrument = yf.Ticker(ticker)
-        frame = instrument.history(start=start, end=end, interval="1m",
-                                   auto_adjust=False, actions=False,
-                                   repair=False, timeout=15)
-        if not frame.empty:
-            return frame
-        # Yahoo occasionally returns an empty start/end response for a valid
-        # recent intraday date. Retry through its rolling intraday endpoint,
-        # then retain only the requested UTC date.
-        frame = instrument.history(period="5d", interval="1m", auto_adjust=False,
-                                   actions=False, repair=False, timeout=15)
-        if frame.empty:
-            return frame
-        utc_index = pd.to_datetime(frame.index, utc=True)
-        wanted = pd.Timestamp(requested).date()
-        return frame[utc_index.date == wanted]
+        # Keep one minute as the preferred evidence. GitHub-hosted Yahoo calls
+        # occasionally return an empty 1m response while coarser intraday bars
+        # remain available. A fallback still selects only a bar beginning at or
+        # after eligibility, and records its actual interval for auditability.
+        for interval, rolling_period in (("1m", "5d"), ("5m", "1mo"),
+                                         ("15m", "1mo")):
+            frame = instrument.history(start=start, end=end, interval=interval,
+                                       auto_adjust=False, actions=False,
+                                       repair=False, timeout=15)
+            if frame.empty:
+                frame = instrument.history(period=rolling_period, interval=interval,
+                                           auto_adjust=False, actions=False,
+                                           repair=False, timeout=15)
+                if not frame.empty:
+                    utc_index = pd.to_datetime(frame.index, utc=True)
+                    wanted = pd.Timestamp(requested).date()
+                    frame = frame[utc_index.date == wanted]
+            if not frame.empty:
+                frame.attrs["source_interval"] = interval
+                return frame
+        return pd.DataFrame()
     except Exception:
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE") from None
 
@@ -300,6 +306,8 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
         raise ValueError("ENTRY_INTRADAY_HISTORY_UNAVAILABLE")
     fx_rate = 1.0
     fx_at = None
+    security_interval = bars.attrs.get("source_interval", "1m")
+    fx_interval = None
     if not ticker.endswith(".NS"):
         try:
             fx = _intraday_frame("INR=X", quote_at)
@@ -312,6 +320,7 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
         try:
             fx_rate, fx_at = _fx_rate_at_or_before(
                 fx, quote_at, policy["fx_quote_max_age_minutes"])
+            fx_interval = fx.attrs.get("source_interval", "1m")
         except ValueError as exc:
             if str(exc) == "FX_ENTRY_QUOTE_UNAVAILABLE":
                 raise _data_retry(candidate, now, ticker, "FX_DATA_RETRY")
@@ -319,8 +328,10 @@ def fetch_entry_quote(ticker, entry, policy, now=None):
     return {**candidate, "ready": True, "price_inr": price * fx_rate,
             "native_price": price, "fx_to_inr": fx_rate,
             "fx_quote_at": pd.Timestamp(fx_at).isoformat() if fx_at is not None else None,
+            "security_quote_interval": security_interval,
+            "fx_quote_interval": fx_interval,
             "quote_at": pd.Timestamp(quote_at).isoformat(),
-            "source": "Yahoo Finance one-minute security Open and latest policy-fresh FX Open observable at trade time"}
+            "source": "Yahoo Finance intraday security Open and latest policy-fresh FX Open observable at trade time; actual intervals recorded"}
 
 
 def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):
