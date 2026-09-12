@@ -95,6 +95,32 @@ def frozen_instrument_kinds(events):
     return result
 
 
+def review_scope_tickers(publications, events):
+    """Tickers required by the investments the workflow actually monitors.
+
+    The newest publication is always in scope. Older publications are included
+    only when an immutable baseline exists for them. This mirrors the service
+    selection rule and prevents retired historical constituents from forcing
+    fresh metadata lookups on every workflow run.
+    """
+    if not publications:
+        return set()
+    active_ids = {row["publication_id"] for row in publications}
+    monitored_publication_ids = {publications[0]["publication_id"]}
+    for row in events or []:
+        if row.get("kind") != "BASELINE":
+            continue
+        publication_id = row.get("payload", {}).get("publication_id")
+        if publication_id in active_ids:
+            monitored_publication_ids.add(publication_id)
+    return {
+        ticker
+        for publication in publications
+        if publication["publication_id"] in monitored_publication_ids
+        for ticker in publication["weights"]
+    }
+
+
 def complete_policy(policy, tickers, registry=None, frozen_kinds=None):
     """Return an ephemeral policy with every requested ticker classified.
 

@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch
 from public_review.instruments import (parse_registry, complete_policy,
-                                       frozen_instrument_kinds, sync_policy_file)
+                                       frozen_instrument_kinds,
+                                       review_scope_tickers, sync_policy_file)
 from review_fixtures import policy
 
 EQUITY = "SYMBOL,NAME OF COMPANY, SERIES,ISIN NUMBER\nA,Example Limited,EQ,INE000A01012\nF,Fund Limited,EQ,INE000A01013\n"
@@ -46,6 +47,21 @@ class InstrumentTests(unittest.TestCase):
         self.assertEqual(frozen_instrument_kinds(events), {
             'A.NS': 'equity', 'AXTI': 'foreign_us_listing',
             'F.NS': 'listed_non_equity_etf'})
+
+    def test_review_scope_excludes_unmonitored_historical_constituents(self):
+        publications = [
+            {'publication_id': 'P3', 'weights': {'LATEST.NS': .5, 'AXTI': .5}},
+            {'publication_id': 'P2', 'weights': {'MONITORED.NS': 1.}},
+            {'publication_id': 'P1', 'weights': {'RETIRED.NS': 1.}},
+        ]
+        events = [{'kind': 'BASELINE', 'payload': {
+            'publication_id': 'P2', 'lots': [
+                {'ticker': 'MONITORED.NS', 'kind': 'equity'}]}}]
+        self.assertEqual(review_scope_tickers(publications, events),
+                         {'LATEST.NS', 'AXTI', 'MONITORED.NS'})
+
+    def test_review_scope_is_empty_without_publications(self):
+        self.assertEqual(review_scope_tickers([], []), set())
 
     def test_explicit_metadata_categories(self):
         r = parse_registry(EQUITY, ETF)
