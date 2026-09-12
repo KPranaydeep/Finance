@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
-from public_review.instruments import parse_registry, complete_policy, sync_policy_file
+from public_review.instruments import (parse_registry, complete_policy,
+                                       frozen_instrument_kinds, sync_policy_file)
 from review_fixtures import policy
 
 EQUITY = "SYMBOL,NAME OF COMPANY, SERIES,ISIN NUMBER\nA,Example Limited,EQ,INE000A01012\nF,Fund Limited,EQ,INE000A01013\n"
@@ -14,6 +15,37 @@ class InstrumentTests(unittest.TestCase):
             result = complete_policy(policy(), ['AXTI'])
         self.assertEqual(result['instrument_kinds']['AXTI'], 'foreign_us_listing')
         self.assertTrue(require_supported_review(['AXTI']))
+
+    def test_plain_us_symbol_needs_no_metadata_network(self):
+        p = policy()
+        p.pop('instrument_kinds')
+        with patch('public_review.instruments._registry') as domestic:
+            result = complete_policy(p, ['AXTI'])
+        self.assertEqual(result['instrument_kinds'],
+                         {'AXTI': 'foreign_us_listing'})
+        domestic.assert_not_called()
+
+    def test_frozen_ledger_kinds_avoid_metadata_network(self):
+        p = policy()
+        p.pop('instrument_kinds')
+        frozen = {'A.NS': 'equity', 'F.NS': 'listed_non_equity_etf',
+                  'AXTI': 'foreign_us_listing'}
+        with patch('public_review.instruments._registry') as domestic:
+            result = complete_policy(p, frozen, frozen_kinds=frozen)
+        self.assertEqual(result['instrument_kinds'], frozen)
+        domestic.assert_not_called()
+
+    def test_recovers_and_validates_frozen_event_kinds(self):
+        events = [
+            {'kind': 'BASELINE', 'payload': {'lots': [
+                {'ticker': 'A.NS', 'kind': 'equity'},
+                {'ticker': 'AXTI', 'kind': 'foreign_us_listing'}]}},
+            {'kind': 'SECURITY_ENTRY', 'payload': {
+                'ticker': 'F.NS', 'kind': 'listed_non_equity_etf'}},
+        ]
+        self.assertEqual(frozen_instrument_kinds(events), {
+            'A.NS': 'equity', 'AXTI': 'foreign_us_listing',
+            'F.NS': 'listed_non_equity_etf'})
 
     def test_explicit_metadata_categories(self):
         r = parse_registry(EQUITY, ETF)

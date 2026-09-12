@@ -88,8 +88,11 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
 
 
 def historical_preview(publication, policy, events, now=None):
-    from .instruments import complete_policy, require_supported_review
-    policy = complete_policy(policy, publication["weights"])
+    from .instruments import (complete_policy, frozen_instrument_kinds,
+                              require_supported_review)
+    policy = complete_policy(
+        policy, publication["weights"],
+        frozen_kinds=frozen_instrument_kinds(events))
     require_supported_review(publication["weights"])
     now = now or datetime.now(timezone.utc)
     ack_epoch = max((r.get("seq", 0) for r in events if r["kind"] == "ACKNOWLEDGED"), default=0)

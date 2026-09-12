@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 import yfinance as yf
 from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
 from public_withdrawal_allocator import allocate_withdrawal
@@ -135,7 +134,7 @@ def share_prompt_button(prompt: str, version: str) -> None:
     """Render a native Web Share button with a copy fallback."""
     prompt_json = json.dumps(prompt)
     title_json = json.dumps(f"PUBLIC-01 {version} private execution-plan prompt")
-    components.html(
+    st.iframe(
         f"""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>
         * {{box-sizing:border-box}} body {{margin:0;background:transparent;font-family:system-ui,-apple-system,sans-serif}}
@@ -171,13 +170,14 @@ def share_prompt_button(prompt: str, version: str) -> None:
         }}
         </script></body></html>""",
         height=72,
+        width="stretch",
     )
 
 
 def copy_prompt_button(prompt: str) -> None:
     """Render an explicit clipboard control independent of Streamlit's code toolbar."""
     prompt_json = json.dumps(prompt)
-    components.html(
+    st.iframe(
         f"""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>
         * {{box-sizing:border-box}} body {{margin:0;background:transparent;font-family:system-ui,-apple-system,sans-serif}}
@@ -202,6 +202,7 @@ def copy_prompt_button(prompt: str) -> None:
         }});
         </script></body></html>""",
         height=72,
+        width="stretch",
     )
 
 
@@ -568,7 +569,7 @@ if execution_scenario == "Start fresh with cash":
                 "planning_price":"Price","estimated_value":"Approx. value"})
             st.dataframe(
                 plan_frame[["Action","Ticker","Shares","Price","Approx. value"]],
-                use_container_width=True,hide_index=True,
+                width="stretch",hide_index=True,
                 column_config={
                     "Price":st.column_config.NumberColumn(format="₹%.2f"),
                     "Approx. value":st.column_config.NumberColumn(format="₹%.2f"),
@@ -578,7 +579,7 @@ if execution_scenario == "Start fresh with cash":
                 "Download calculated buy plan CSV",
                 plan_frame[["Action","Ticker","Shares","Price","Approx. value"]].to_csv(index=False).encode("utf-8"),
                 file_name=f"{DEFAULT_BASKET_ID.lower()}-fresh-cash-buy-plan.csv",
-                mime="text/csv",use_container_width=True,
+                mime="text/csv",width="stretch",
             )
         if calculated_plan["missing_prices"]:
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
@@ -630,7 +631,7 @@ if execution_scenario == "Raise cash from existing holdings":
                 w3.metric("Cash left in model",f"₹{sale_plan['residual_cash']:,.2f}")
                 if sale_plan["orders"]:
                     sale_frame=pd.DataFrame(sale_plan["orders"])
-                    st.dataframe(sale_frame,hide_index=True,use_container_width=True,
+                    st.dataframe(sale_frame,hide_index=True,width="stretch",
                                  column_config={"Price":st.column_config.NumberColumn(format="₹%.2f"),
                                                 "Approx. value":st.column_config.NumberColumn(format="₹%.2f")})
                     st.download_button("Download model withdrawal CSV",sale_frame.to_csv(index=False).encode("utf-8"),
@@ -664,14 +665,14 @@ if execution_scenario != "Raise cash from existing holdings":
         data=execution_prompt.encode("utf-8"),
         file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-execution-prompt.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
     action_4.download_button(
         "Download public target JSON",
         data=json.dumps(public_target, sort_keys=True, indent=2, default=str).encode("utf-8"),
         file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-target.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
     with st.expander("Copy execution-plan prompt"):
         st.caption("Use the copy icon in the top-right of the prompt, then paste it beside your broker report.")
@@ -787,14 +788,14 @@ if calibration["sufficient"]:
 
 st.subheader("History")
 tabs=st.tabs(["Portfolio versions","Allocation changes","Net NAV history"])
-with tabs[0]: st.dataframe(pd.DataFrame(record["publications"]),use_container_width=True,hide_index=True)
+with tabs[0]: st.dataframe(pd.DataFrame(record["publications"]),width="stretch",hide_index=True)
 with tabs[1]:
     allocation_changes=build_allocation_change_rows(record["publications"],record["publication_positions"])
     if allocation_changes:
         change_frame=pd.DataFrame(allocation_changes)
         change_frame["Target turnover"]=change_frame["Target turnover"].astype(float)*100
         st.dataframe(
-            change_frame,use_container_width=True,hide_index=True,
+            change_frame,width="stretch",hide_index=True,
             column_config={"Target turnover":st.column_config.NumberColumn(format="%.1f%%")},
         )
         st.caption("Target turnover is half the sum of absolute weight changes. It describes published allocation changes, not executed trades.")
@@ -804,7 +805,7 @@ with tabs[2]:
     if nav:
         nav_frame=pd.DataFrame(nav)
         visible=[column for column in ["nav_date","publication_id","gross_nav","net_nav","turnover","estimated_drag"] if column in nav_frame]
-        st.dataframe(nav_frame[visible],use_container_width=True,hide_index=True)
+        st.dataframe(nav_frame[visible],width="stretch",hide_index=True)
     else:
         st.info("Net model NAV history will appear after the daily update runs.")
 
@@ -827,7 +828,7 @@ export_label="Download simulation evidence" if is_simulation else "Download evid
 export_suffix="simulation-evidence" if is_simulation else "evidence"
 if is_simulation:
     st.caption("This download includes simulated history and is labelled as research evidence.")
-st.download_button(export_label,evidence,f"{DEFAULT_BASKET_ID.lower()}-{export_suffix}.json","application/json",use_container_width=True)
+st.download_button(export_label,evidence,f"{DEFAULT_BASKET_ID.lower()}-{export_suffix}.json","application/json",width="stretch")
 st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
 st.info("Model performance and statistical scenarios are not investment advice and do not guarantee future results.")
 

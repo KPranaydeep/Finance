@@ -15,13 +15,17 @@ def main():
         policy = load_policy(datetime.now(timezone.utc).date())
         from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
         from public_review.service import run, publications
-        from public_review.instruments import complete_policy
+        from public_review.instruments import complete_policy, frozen_instrument_kinds
+        from public_review import store
         url = get_public_basket_database_url()
         if not url:
             raise ValueError("DATABASE_CONFIGURATION_REQUIRED")
         with connect_public_basket_db(url) as conn:
             pubs = publications(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"))
-            policy = complete_policy(policy, {t for p in pubs for t in p["weights"]})
+            history = store.read(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"))
+            policy = complete_policy(
+                policy, {t for p in pubs for t in p["weights"]},
+                frozen_kinds=frozen_instrument_kinds(history))
             result = run(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"), policy,
                          acknowledge=os.getenv("PUBLIC_REVIEW_ACK_BASELINE") or None)
         print(json.dumps(result))
