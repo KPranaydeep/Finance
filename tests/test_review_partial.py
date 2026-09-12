@@ -9,8 +9,9 @@ from streamlit.testing.v1 import AppTest
 from public_review.market import calendar
 from public_review.partial import estimate_captured_security, METHOD
 from public_review.service import run
-from review_fixtures import policy
+from review_fixtures import baseline, policy
 from test_review_operations import FakeDB
+from public_review import market, store
 
 
 class PartialSecurityReviewTests(unittest.TestCase):
@@ -129,6 +130,79 @@ class PartialSecurityReviewTests(unittest.TestCase):
         self.assertFalse(at.exception)
         self.assertTrue(any('Provisional security review estimates' in item.value
                             for item in at.markdown))
+
+    def test_missing_completed_close_uses_verified_entry_mark(self):
+        from public_review.preview import _immediate_baseline_preview
+        publication = self.publication()
+        b = {'baseline_id':'BASE-PARTIAL', 'publication_id':'PUB-PARTIAL',
+             'basket_id':'TEST', 'portfolio_version':7, 'entry_date':'2026-09-11',
+             'capital':1000., 'weights':{'A.NS':.5, 'B.NS':.5},
+             'lots':[
+                 {'ticker':'A.NS', 'kind':'equity', 'entry_date':'2026-09-11',
+                  'price':101., 'entry_quote_at':'2026-09-11T04:45:00+00:00'},
+                 {'ticker':'B.NS', 'kind':'listed_non_equity_etf',
+                  'entry_date':'2026-09-11', 'price':50.,
+                  'entry_quote_at':'2026-09-11T04:45:00+00:00'}]}
+        histories = {
+            'A.NS':pd.DataFrame({'Close':[100., np.nan]},
+                                index=['2026-09-10','2026-09-11']),
+            'B.NS':pd.DataFrame({'Close':[50., 55.]},
+                                index=['2026-09-10','2026-09-11'])}
+        schedule = pd.DataFrame({
+            'market_open':pd.to_datetime(['2026-09-10T03:45:00Z','2026-09-11T03:45:00Z']),
+            'market_close':pd.to_datetime(['2026-09-10T10:00:00Z','2026-09-11T10:00:00Z'])},
+            index=pd.to_datetime(['2026-09-10','2026-09-11']))
+        future = pd.DataFrame({
+            'market_open':pd.date_range('2026-09-15T03:45:00Z', periods=20, freq='D'),
+            'market_close':pd.date_range('2026-09-15T10:00:00Z', periods=20, freq='D')},
+            index=pd.date_range('2026-09-15', periods=20, freq='D'))
+        returns = pd.DataFrame(np.zeros((126,2)), columns=['A.NS','B.NS'])
+        forecast = {'next_review':None, 'research_candidate':'2026-09-15'}
+        with patch('public_review.market.fetch', return_value=histories), \
+             patch('public_review.market.calendar', return_value=schedule), \
+             patch('public_review.market.joint_calendar', return_value=future), \
+             patch('public_review.history.common_history',
+                   return_value=(None, returns, {'start':'x','end':'2026-09-10',
+                                 'usable_daily_returns':126,'missing_sessions':[]})) as common, \
+             patch('public_review.preview.validate', return_value={'passed':False}), \
+             patch('public_review.preview.estimate', return_value=forecast):
+            preview = _immediate_baseline_preview(
+                publication, b, policy(), [],
+                datetime(2026,9,12,3,tzinfo=timezone.utc), 0)
+        timing = {row['ticker']:row for row in preview['valuation_timing']['rows']}
+        self.assertEqual(timing['A.NS']['price_source'],
+                         'FROZEN_ENTRY_PRICE_PENDING_FIRST_CLOSE')
+        self.assertEqual(timing['B.NS']['price_source'],
+                         'LATEST_COMPLETED_POST_ENTRY_CLOSE')
+        self.assertEqual(common.call_args.args[1], '2026-09-10')
+
+    def test_stale_synchronized_history_becomes_provisional_success(self):
+        db = FakeDB()
+        b = baseline()
+        b['entry_model_version'] = market.ENTRY_MODEL_VERSION
+        store.append(db, 'TEST', 'baseline-test', 'BASELINE', b['baseline_id'], b)
+        publication = {'publication_id':'PUB-TEST', 'basket_id':'TEST',
+                       'portfolio_version':1, 'published_at':'2026-05-01T10:00:00+00:00',
+                       'weights':{'A.NS':.5,'B.NS':.5}}
+        provisional = {'provisional':True, 'publication_id':'PUB-TEST',
+                       'as_of':'mixed chronology-safe marks',
+                       'checked_at':'2026-09-12T03:00:00+00:00',
+                       'assumption':'test', 'valuation_timing':{'rows':[]},
+                       'forecast':{'research_candidate':'2026-09-15'},
+                       'decision':{'next_review':'2026-09-15','reasons':[]}}
+        with patch('public_review.service.publications', return_value=[publication]), \
+             patch('public_review.market.sessions',
+                   return_value=('2026-05-04','2026-09-11',['2026-09-15'])), \
+             patch('public_review.market.fetch', return_value={}), \
+             patch('public_review.market.synchronized_dates',
+                   side_effect=ValueError('STALE_OR_INCOMPLETE_MARKET_HISTORY')), \
+             patch('public_review.preview._immediate_baseline_preview',
+                   return_value=provisional):
+            result = run(db, 'TEST', policy(),
+                         now=datetime(2026,9,12,3,tzinfo=timezone.utc))
+        self.assertEqual(result['failed'], 0)
+        self.assertEqual(result['results'][0]['status'], 'PROVISIONAL_ASSESSED')
+        self.assertEqual(db.rows[-1]['kind'], 'PREVIEW')
 
 
 if __name__ == '__main__':

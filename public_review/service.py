@@ -239,6 +239,28 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             # Persist only allowlisted safe codes; never DB URLs, provider bodies
             # or exception traces (may contain credentials).
             code = str(exc) if isinstance(exc, ValueError) and str(exc) in SAFE_ERRORS else "MONITOR_CHECK_FAILED"
+            if (code == "STALE_OR_INCOMPLETE_MARKET_HISTORY" and
+                    baseline is not None and stage in {"market_history", "assessment"}):
+                try:
+                    from .preview import _immediate_baseline_preview
+                    ack_epoch = max((row.get("seq", 0) for row in history
+                                     if row["kind"] == "ACKNOWLEDGED"), default=0)
+                    provisional = _immediate_baseline_preview(
+                        publication, baseline, policy, history, now, ack_epoch)
+                    provisional_key = "preview:" + baseline_id + ":" + digest({
+                        "policy": policy,
+                        "valuation_timing": provisional.get("valuation_timing"),
+                        "forecast": provisional.get("forecast"),
+                    })
+                    store.append(conn, basket, provisional_key, "PREVIEW",
+                                 baseline_id, provisional)
+                    conn.commit()
+                    results.append({"publication_id": publication["publication_id"],
+                                    "status": "PROVISIONAL_ASSESSED",
+                                    "reason": "MIXED_TIME_CHRONOLOGY_SAFE_MARKS"})
+                    continue
+                except Exception:
+                    conn.rollback()
             if code == "AWAITING_MARKET_ENTRY":
                 waiting += 1
                 reason = "AWAITING_FIRST_ASSESSMENT" if baseline is not None else code

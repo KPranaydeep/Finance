@@ -30,9 +30,16 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
         completed = schedule[schedule.market_close + buffer <= pd.Timestamp(now)]
         if not completed.empty:
             completed_cutoffs.append(str(completed.index[-1].date()))
-        post_entry = [str(day.date()) for day in completed.index
-                      if str(day.date()) >= lot["entry_date"] and
-                      str(day.date()) in histories[ticker].index]
+        post_entry = []
+        for day in completed.index:
+            price_date = str(day.date())
+            if price_date < lot["entry_date"] or price_date not in histories[ticker].index:
+                continue
+            value = pd.to_numeric(
+                pd.Series([histories[ticker].loc[price_date, "Close"]]),
+                errors="coerce").iloc[0]
+            if math.isfinite(float(value)) and float(value) > 0:
+                post_entry.append(price_date)
         if post_entry:
             price_date = post_entry[-1]
             price = float(histories[ticker].loc[price_date, "Close"])
@@ -50,7 +57,17 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
                        "chronology_valid": True})
     if not completed_cutoffs:
         raise market.AwaitingMarketEntry(baseline["entry_date"], None)
-    history_as_of = min(completed_cutoffs)
+    completed_cutoff = min(completed_cutoffs)
+    common_valid = None
+    for history in histories.values():
+        close = pd.to_numeric(history["Close"], errors="coerce")
+        valid = {str(day) for day, value in close.items()
+                 if str(day) <= completed_cutoff and
+                 math.isfinite(float(value)) and float(value) > 0}
+        common_valid = valid if common_valid is None else common_valid & valid
+    if not common_valid:
+        raise ValueError("INSUFFICIENT_COMMON_HISTORY")
+    history_as_of = max(common_valid)
     _, returns, coverage = common_history(histories, history_as_of, policy)
     returns = returns[tickers]
     if len(returns) < 126:

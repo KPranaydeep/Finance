@@ -140,7 +140,7 @@ def render_partial_security_reviews(events, publication_id):
 
 
 def render_events(events, active_ids=None, now=None, latest_publication_id=None,
-                  suppress_latest_failure=False):
+                  suppress_latest_failure=False, suppress_durable_preview=False):
     now = now or datetime.now(timezone.utc)
     baseline_by_publication = {}
     for row in events:
@@ -177,6 +177,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     baseline = baselines[selected]
     bid = baseline["baseline_id"]
     last = store.latest(events, "ASSESSMENT", bid)
+    provisional = store.latest(events, "PREVIEW", bid)
     failure = store.latest(events, "FAILURE", bid)
     waiting = store.latest(events, "WAITING", bid)
     heartbeat = store.latest(events, "HEARTBEAT", bid)
@@ -191,7 +192,11 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         } for lot in baseline["lots"]]))
     successful_seq = max((last or {}).get("seq", 0), (heartbeat or {}).get("seq", 0))
     if not last or (failure and failure["seq"] > successful_seq):
-        if waiting and waiting["payload"].get("entry_frozen"):
+        if provisional and not suppress_durable_preview:
+            render_fresh_preview(provisional["payload"])
+        if provisional or suppress_durable_preview:
+            st.info("Entry is verified. The review date above uses chronology-safe provisional marks; synchronized observed performance will replace it when every required close is available.")
+        elif waiting and waiting["payload"].get("entry_frozen"):
             message = "Entry established from verified opening prices; awaiting the first completed global assessment session."
             ready_at = waiting["payload"].get("ready_at")
             if ready_at:
@@ -264,11 +269,13 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
 def render_review_panel(basket_id, active_publications):
     st.subheader("Your next portfolio review")
     fresh_waiting = False
+    fresh_preview_shown = False
     if active_publications:
         try:
             with st.spinner("Assessing security targets from available history..."):
                 preview = load_fresh_preview(basket_id, active_publications[0]["publication_id"])
             render_fresh_preview(preview)
+            fresh_preview_shown = True
         except Exception as exc:
             from .service import SAFE_ERRORS
             allowed = SAFE_ERRORS | {"POLICY_APPROVAL_REQUIRED", "TARIFF_REVIEW_REQUIRED",
@@ -302,6 +309,7 @@ def render_review_panel(basket_id, active_publications):
         events = load_events(basket_id)
         render_events(events, {p["publication_id"] for p in active_publications},
                       latest_publication_id=active_publications[0]["publication_id"] if active_publications else None,
-                      suppress_latest_failure=fresh_waiting)
+                      suppress_latest_failure=fresh_waiting,
+                      suppress_durable_preview=fresh_preview_shown)
     except Exception:
         st.warning("Model review inspection is unavailable. No reliable review date can be shown.")
