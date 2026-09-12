@@ -131,7 +131,7 @@ class PartialSecurityReviewTests(unittest.TestCase):
         self.assertTrue(any('Provisional security review estimates' in item.value
                             for item in at.markdown))
 
-    def test_missing_completed_close_uses_verified_entry_mark(self):
+    def test_planning_preview_uses_only_prepublication_history_and_entry_marks(self):
         from public_review.preview import _immediate_baseline_preview
         publication = self.publication()
         b = {'baseline_id':'BASE-PARTIAL', 'publication_id':'PUB-PARTIAL',
@@ -171,11 +171,13 @@ class PartialSecurityReviewTests(unittest.TestCase):
                 datetime(2026,9,15,11,tzinfo=timezone.utc), 0)
         timing = {row['ticker']:row for row in preview['valuation_timing']['rows']}
         self.assertEqual(timing['A.NS']['price_source'],
-                         'FROZEN_ENTRY_PRICE_PENDING_FIRST_CLOSE')
+                         'FROZEN_ENTRY_PRICE')
         self.assertEqual(timing['B.NS']['price_source'],
-                         'LATEST_COMPLETED_POST_ENTRY_CLOSE')
+                         'FROZEN_ENTRY_PRICE')
         self.assertFalse(preview['valuation_timing']['all_prices_synchronized'])
         self.assertEqual(common.call_args.args[1], '2026-09-10')
+        self.assertTrue(preview['planning_estimate'])
+        self.assertEqual(preview['as_of'], '2026-09-10')
 
     def test_stale_synchronized_history_becomes_provisional_success(self):
         db = FakeDB()

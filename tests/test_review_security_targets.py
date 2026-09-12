@@ -122,7 +122,7 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(result['decision']['next_review'], '2026-09-11')
         self.assertIsNone(result['forecast']['next_review'])
 
-    def test_existing_baseline_preview_obeys_post_entry_observation_gate(self):
+    def test_existing_baseline_shows_planning_estimate_during_observation_wait(self):
         from datetime import datetime, timezone
         from public_review.market import AwaitingMarketEntry
         b, p = baseline(), policy()
@@ -135,8 +135,16 @@ class SecurityTargetTests(unittest.TestCase):
         }
         events = [{'kind': 'BASELINE', 'baseline_id': b['baseline_id'],
                    'payload': b}]
-        with self.assertRaises(AwaitingMarketEntry) as caught:
-            historical_preview(publication, p, events,
-                               datetime(2026, 5, 4, 12, tzinfo=timezone.utc))
-        self.assertEqual(caught.exception.wait_reason,
-                         'FORECAST_OBSERVATION_WAIT')
+        pending = AwaitingMarketEntry('2026-05-04',
+                                      '2026-05-05T10:30:00+00:00')
+        pending.wait_reason = 'FORECAST_OBSERVATION_WAIT'
+        planning = {'planning_estimate': True, 'publication_id': b['publication_id']}
+        with patch('public_review.market.require_forecast_observation_sessions',
+                   side_effect=pending), \
+             patch('public_review.preview._immediate_baseline_preview',
+                   return_value=planning) as immediate:
+            result = historical_preview(
+                publication, p, events,
+                datetime(2026, 5, 4, 12, tzinfo=timezone.utc))
+        self.assertEqual(result, planning)
+        immediate.assert_called_once()

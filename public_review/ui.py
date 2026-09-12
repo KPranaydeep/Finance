@@ -103,9 +103,18 @@ def render_fresh_preview(p):
     st.session_state[key] = date
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     due = bool(d.get("reasons")) or bool(date and date <= today)
-    st.metric("Latest suggested review", "Review now" if due else (date or "Next session risk check"))
+    metric_label = ("Probability-weighted planning review" if p.get("planning_estimate")
+                    else "Latest suggested review")
+    st.metric(metric_label, "Review now" if due else (date or "Next session risk check"))
     if p["provisional"]:
         st.caption("Provisional: " + p["assumption"])
+    if p.get("planning_estimate") and p.get("observation_ready_at"):
+        ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
+            ZoneInfo("Asia/Kolkata"))
+        st.info(
+            "Available immediately for planning; it is not an observed return or sell instruction. "
+            f"Observed monitoring can supersede it after {ready:%d %b %Y %H:%M IST}."
+        )
     if d.get("target_crossed_securities"):
         st.warning("Net target already crossed: " + ", ".join(d["target_crossed_securities"]) + ". Review costs and risk before selling.")
     if f.get("next_review") is None:

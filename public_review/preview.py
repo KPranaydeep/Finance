@@ -8,62 +8,46 @@ from .forecast import estimate, validate
 
 
 def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_epoch):
-    """Forecast immediately from chronology-safe marks before global close.
+    """Create a publication-time planning forecast without post-entry returns.
 
-    Entry evidence remains immutable. Each holding uses its latest completed
-    post-entry close when available, otherwise its frozen entry price. A later
-    synchronized assessment supersedes this read-only preview.
+    Historical returns end at the latest date that was observable for every
+    represented market when the portfolio was published. Frozen entry prices
+    are used only to measure the future net-XIRR hurdle. A later observed
+    assessment supersedes this read-only planning estimate.
     """
     from .history import common_history
-    market.require_forecast_observation_sessions(baseline, policy, now)
     tickers = [lot["ticker"] for lot in baseline["lots"]]
-    local_day = pd.Timestamp(now).tz_convert("Asia/Kolkata").date()
-    histories = market.fetch(tickers, baseline["entry_date"], str(local_day),
+    published = pd.Timestamp(publication["published_at"])
+    if published.tzinfo is None:
+        raise ValueError("AWARE_PUBLICATION_TIME_REQUIRED")
+    completed_at_publication = []
+    for lot in baseline["lots"]:
+        schedule = market.calendar(
+            published.date() - timedelta(days=14), published.date(), policy,
+            market.KIND_CALENDARS[lot["kind"]])
+        completed = schedule[schedule.market_close <= published]
+        if completed.empty:
+            raise ValueError("INSUFFICIENT_COMMON_HISTORY")
+        completed_at_publication.append(str(completed.index[-1].date()))
+    publication_cutoff = min(completed_at_publication)
+    histories = market.fetch(tickers, baseline["entry_date"], publication_cutoff,
                              policy, allow_incomplete_end=True)
-    buffer = pd.Timedelta(minutes=policy["assessment_wait_after_close_minutes"])
-    marks, timing, completed_cutoffs = {}, [], []
+    marks, timing = {}, []
     for lot in baseline["lots"]:
         ticker = lot["ticker"]
-        market_name = market.KIND_CALENDARS[lot["kind"]]
-        schedule = market.calendar(
-            pd.Timestamp(lot["entry_date"]) - pd.Timedelta(days=10),
-            local_day + timedelta(days=1), policy, market_name)
-        completed = schedule[schedule.market_close + buffer <= pd.Timestamp(now)]
-        if not completed.empty:
-            completed_cutoffs.append(str(completed.index[-1].date()))
-        post_entry = []
-        for day in completed.index:
-            price_date = str(day.date())
-            if price_date < lot["entry_date"] or price_date not in histories[ticker].index:
-                continue
-            value = pd.to_numeric(
-                pd.Series([histories[ticker].loc[price_date, "Close"]]),
-                errors="coerce").iloc[0]
-            if math.isfinite(float(value)) and float(value) > 0:
-                post_entry.append(price_date)
-        if post_entry:
-            price_date = post_entry[-1]
-            price = float(histories[ticker].loc[price_date, "Close"])
-            mode = "LATEST_COMPLETED_POST_ENTRY_CLOSE"
-            observed_at = price_date
-        else:
-            price = float(lot["price"])
-            mode = "FROZEN_ENTRY_PRICE_PENDING_FIRST_CLOSE"
-            observed_at = lot.get("entry_quote_at") or lot.get("entry_at") or lot["entry_date"]
+        price = float(lot["price"])
+        observed_at = lot.get("entry_quote_at") or lot.get("entry_at") or lot["entry_date"]
         if not math.isfinite(price) or price <= 0:
             raise ValueError("INVALID_OR_NONTRADING_PRICE")
         marks[ticker] = price
-        timing.append({"ticker": ticker, "price_source": mode,
+        timing.append({"ticker": ticker, "price_source": "FROZEN_ENTRY_PRICE",
                        "price_observed_at": str(observed_at),
                        "chronology_valid": True})
-    if not completed_cutoffs:
-        raise market.AwaitingMarketEntry(baseline["entry_date"], None)
-    completed_cutoff = min(completed_cutoffs)
     common_valid = None
     for history in histories.values():
         close = pd.to_numeric(history["Close"], errors="coerce")
         valid = {str(day) for day, value in close.items()
-                 if str(day) <= completed_cutoff and
+                 if str(day) <= publication_cutoff and
                  math.isfinite(float(value)) and float(value) > 0}
         common_valid = valid if common_valid is None else common_valid & valid
     if not common_valid:
@@ -74,29 +58,28 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
     if len(returns) < 126:
         raise ValueError("INSUFFICIENT_COMMON_HISTORY")
     kinds = {lot["ticker"]: lot["kind"] for lot in baseline["lots"]}
-    schedule = market.joint_calendar(local_day, policy["calendar_verified_through"],
+    observation_ready_at, observation_rows = market.forecast_observation_ready_at(
+        baseline, policy)
+    schedule = market.joint_calendar(observation_ready_at.date(),
+                                     policy["calendar_verified_through"],
                                      policy, kinds)
     future = [str(day.date()) for day, session in schedule.iterrows()
-              if session.market_open > pd.Timestamp(now)][:policy["max_review_sessions"]]
+              if session.market_open > observation_ready_at][:policy["max_review_sessions"]]
     if len(future) < policy["max_review_sessions"]:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     validation = validate(returns, baseline, marks, list(returns.index), policy)
     forecast = estimate(baseline, marks, returns, future, policy,
                         baseline["capital"], validation)
     candidate = forecast.get("next_review") or forecast.get("research_candidate") or future[0]
-    prior = [r["payload"].get("decision", {}).get("next_review") for r in events
-             if r["kind"] == "PREVIEW" and r["baseline_id"] == baseline["baseline_id"]]
-    candidate = min([candidate] + [day for day in prior if day])
-    price_dates = {row["price_observed_at"][:10] for row in timing}
-    all_completed_closes = all(
-        row["price_source"] == "LATEST_COMPLETED_POST_ENTRY_CLOSE" for row in timing
-    )
     return {"provisional": True, "publication_id": publication["publication_id"],
+            "planning_estimate": True,
             "history_coverage": coverage, "ack_epoch": ack_epoch,
-            "as_of": "mixed chronology-safe marks", "checked_at": pd.Timestamp(now).isoformat(),
-            "assumption": "Immediate entry-time forecast. Frozen entry prices are used until each market supplies a completed post-entry close; entry evidence is never revised.",
-            "valuation_timing": {"mode": "ASYNCHRONOUS_CHRONOLOGY_SAFE",
-                                  "all_prices_synchronized": all_completed_closes and len(price_dates) == 1,
+            "as_of": history_as_of, "checked_at": pd.Timestamp(now).isoformat(),
+            "observation_ready_at": observation_ready_at.isoformat(),
+            "observation_rows": observation_rows,
+            "assumption": "Historical planning estimate using only returns observable before publication. Frozen entry prices model the fully loaded target hurdle; no post-entry return is used.",
+            "valuation_timing": {"mode": "PUBLICATION_TIME_PLANNING",
+                                  "all_prices_synchronized": False,
                                   "rows": timing},
             "forecast": forecast,
             "decision": {"next_review": candidate, "reasons": [],
@@ -119,10 +102,13 @@ def historical_preview(publication, policy, events, now=None):
         b = row["payload"]
         if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in b["lots"]):
             raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
-        # The read-only page must obey the same post-entry observation gate as
-        # the durable workflow. Otherwise it can manufacture an earlier
-        # preview while the workflow is correctly recording a waiting state.
-        market.require_forecast_observation_sessions(b, policy, now)
+        try:
+            market.require_forecast_observation_sessions(b, policy, now)
+        except market.AwaitingMarketEntry:
+            # Show a non-actionable, publication-time planning estimate while
+            # the durable observed-monitoring clock remains correctly gated.
+            return _immediate_baseline_preview(
+                publication, b, policy, events, now, ack_epoch)
         try:
             _, as_of, days = market.sessions(
                 now, publication["published_at"], policy, kinds)
