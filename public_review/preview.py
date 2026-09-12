@@ -87,12 +87,15 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
              if r["kind"] == "PREVIEW" and r["baseline_id"] == baseline["baseline_id"]]
     candidate = min([candidate] + [day for day in prior if day])
     price_dates = {row["price_observed_at"][:10] for row in timing}
+    all_completed_closes = all(
+        row["price_source"] == "LATEST_COMPLETED_POST_ENTRY_CLOSE" for row in timing
+    )
     return {"provisional": True, "publication_id": publication["publication_id"],
             "history_coverage": coverage, "ack_epoch": ack_epoch,
             "as_of": "mixed chronology-safe marks", "checked_at": pd.Timestamp(now).isoformat(),
             "assumption": "Immediate entry-time forecast. Frozen entry prices are used until each market supplies a completed post-entry close; entry evidence is never revised.",
             "valuation_timing": {"mode": "ASYNCHRONOUS_CHRONOLOGY_SAFE",
-                                  "all_prices_synchronized": len(price_dates) == 1,
+                                  "all_prices_synchronized": all_completed_closes and len(price_dates) == 1,
                                   "rows": timing},
             "forecast": forecast,
             "decision": {"next_review": candidate, "reasons": [],

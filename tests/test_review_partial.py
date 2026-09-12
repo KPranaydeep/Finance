@@ -174,6 +174,7 @@ class PartialSecurityReviewTests(unittest.TestCase):
                          'FROZEN_ENTRY_PRICE_PENDING_FIRST_CLOSE')
         self.assertEqual(timing['B.NS']['price_source'],
                          'LATEST_COMPLETED_POST_ENTRY_CLOSE')
+        self.assertFalse(preview['valuation_timing']['all_prices_synchronized'])
         self.assertEqual(common.call_args.args[1], '2026-09-10')
 
     def test_stale_synchronized_history_becomes_provisional_success(self):

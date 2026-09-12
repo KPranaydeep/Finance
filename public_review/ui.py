@@ -20,6 +20,20 @@ def percent(value):
     return "N/A" if value is None else f"{value:.2%}"
 
 
+def has_durable_preview(events, publication_id):
+    """Whether the latest publication already has a usable stored preview."""
+    baseline_ids = {
+        row["payload"].get("baseline_id", row.get("baseline_id"))
+        for row in (events or [])
+        if row["kind"] == "BASELINE"
+        and row["payload"].get("publication_id") == publication_id
+    }
+    return any(
+        row["kind"] == "PREVIEW" and row.get("baseline_id") in baseline_ids
+        for row in (events or [])
+    )
+
+
 @st.cache_data(ttl=300, max_entries=16, show_spinner=False)
 def load_fresh_preview(basket_id, publication_id):
     from .preview import historical_preview
@@ -69,7 +83,16 @@ def render_fresh_preview(p):
     st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
     if p.get("valuation_timing"):
         timing = p["valuation_timing"]
-        label = "Synchronized" if timing.get("all_prices_synchronized") else "Mixed-time provisional"
+        timing_rows = timing.get("rows", [])
+        all_completed_closes = bool(timing_rows) and all(
+            row.get("price_source") == "LATEST_COMPLETED_POST_ENTRY_CLOSE"
+            for row in timing_rows
+        )
+        label = (
+            "Synchronized"
+            if timing.get("all_prices_synchronized") and all_completed_closes
+            else "Mixed-time provisional"
+        )
         with st.expander("Valuation timing · " + label):
             st.caption("Audit detail: every price was observable by the assessment time. Frozen entry prices are never overwritten.")
             st.table(pd.DataFrame([{
@@ -205,7 +228,8 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
             st.info(message)
         else:
             st.warning("Cannot assess: " + (failure["payload"]["reason"].replace("_", " ").lower() if failure else "awaiting first assessment"))
-        render_partial_security_reviews(events, baseline["publication_id"])
+        if not provisional and not suppress_durable_preview:
+            render_partial_security_reviews(events, baseline["publication_id"])
         return
     p = last["payload"]
     checked_at = heartbeat["payload"]["at"] if heartbeat else p["checked_at"]
@@ -270,6 +294,10 @@ def render_review_panel(basket_id, active_publications):
     st.subheader("Your next portfolio review")
     fresh_waiting = False
     fresh_preview_shown = False
+    try:
+        events = load_events(basket_id)
+    except Exception:
+        events = None
     if active_publications:
         try:
             with st.spinner("Assessing security targets from available history..."):
@@ -300,13 +328,16 @@ def render_review_panel(basket_id, active_publications):
                                str(getattr(exc, "pending_ticker", "a pending overseas security")) +
                                ". No FX rate was invented; the workflow will retry.")
             else:
-                st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
+                latest_publication_id = active_publications[0]["publication_id"]
+                if not has_durable_preview(events, latest_publication_id):
+                    st.warning("Fresh historical review unavailable: " + code + ". No reliable fresh date is implied.")
             if code == "FOREIGN_REVIEW_COST_MODEL_REQUIRED":
                 st.caption("This publication contains direct overseas listings. INR pricing is separate from tax classification. The review engine supports NSE delivery only; overseas brokerage, remittance charges and instrument-specific tax treatment must be integrated before net-XIRR review dates can be shown.")
             if code == "INSTRUMENT_CLASSIFICATION_REQUIRED":
                 st.caption("Automatic classification could not safely identify one or more published instruments. The owner policy does not require a ticker list; retry after the NSE/Yahoo metadata source is available or add support for the unrecognized instrument category in code.")
     try:
-        events = load_events(basket_id)
+        if events is None:
+            events = load_events(basket_id)
         render_events(events, {p["publication_id"] for p in active_publications},
                       latest_publication_id=active_publications[0]["publication_id"] if active_publications else None,
                       suppress_latest_failure=fresh_waiting,

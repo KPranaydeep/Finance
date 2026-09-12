@@ -4,6 +4,16 @@ from streamlit.testing.v1 import AppTest
 
 
 class UiTests(unittest.TestCase):
+    def test_durable_preview_suppresses_transient_fresh_error(self):
+        from public_review.ui import has_durable_preview
+        events = [
+            {"kind": "BASELINE", "baseline_id": "B1",
+             "payload": {"baseline_id": "B1", "publication_id": "P1"}},
+            {"kind": "PREVIEW", "baseline_id": "B1", "payload": {}},
+        ]
+        self.assertTrue(has_durable_preview(events, "P1"))
+        self.assertFalse(has_durable_preview(events, "P2"))
+
     def app(self,mode):
         app=AppTest.from_file(str(Path(__file__).with_name('review_ui_fixture.py')),default_timeout=20)
         app.session_state['fixture_mode']=mode
