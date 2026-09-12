@@ -121,3 +121,22 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(result['assumed_entry_date'], '2026-09-10')
         self.assertEqual(result['decision']['next_review'], '2026-09-11')
         self.assertIsNone(result['forecast']['next_review'])
+
+    def test_existing_baseline_preview_obeys_post_entry_observation_gate(self):
+        from datetime import datetime, timezone
+        from public_review.market import AwaitingMarketEntry
+        b, p = baseline(), policy()
+        publication = {
+            'publication_id': b['publication_id'],
+            'basket_id': 'TEST',
+            'portfolio_version': b['portfolio_version'],
+            'published_at': '2026-05-01T10:00:00+00:00',
+            'weights': b['weights'],
+        }
+        events = [{'kind': 'BASELINE', 'baseline_id': b['baseline_id'],
+                   'payload': b}]
+        with self.assertRaises(AwaitingMarketEntry) as caught:
+            historical_preview(publication, p, events,
+                               datetime(2026, 5, 4, 12, tzinfo=timezone.utc))
+        self.assertEqual(caught.exception.wait_reason,
+                         'FORECAST_OBSERVATION_WAIT')

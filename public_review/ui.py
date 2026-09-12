@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import streamlit as st
 from . import store
+from .forecast import TIMING_MODEL
 from .market import ENTRY_MODEL_VERSION
 
 
@@ -20,6 +21,14 @@ def percent(value):
     return "N/A" if value is None else f"{value:.2%}"
 
 
+def is_current_preview(row):
+    """Reject durable previews produced by an older timing methodology."""
+    if not row:
+        return False
+    forecast = row.get("payload", {}).get("forecast", {})
+    return forecast.get("timing_model") == TIMING_MODEL
+
+
 def has_durable_preview(events, publication_id):
     """Whether the latest publication already has a usable stored preview."""
     baseline_ids = {
@@ -30,6 +39,7 @@ def has_durable_preview(events, publication_id):
     }
     return any(
         row["kind"] == "PREVIEW" and row.get("baseline_id") in baseline_ids
+        and is_current_preview(row)
         for row in (events or [])
     )
 
@@ -228,6 +238,8 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     bid = baseline["baseline_id"]
     last = store.latest(events, "ASSESSMENT", bid)
     provisional = store.latest(events, "PREVIEW", bid)
+    if not is_current_preview(provisional):
+        provisional = None
     failure = store.latest(events, "FAILURE", bid)
     waiting = store.latest(events, "WAITING", bid)
     heartbeat = store.latest(events, "HEARTBEAT", bid)

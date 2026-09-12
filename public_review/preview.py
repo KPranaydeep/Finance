@@ -119,6 +119,10 @@ def historical_preview(publication, policy, events, now=None):
         b = row["payload"]
         if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in b["lots"]):
             raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
+        # The read-only page must obey the same post-entry observation gate as
+        # the durable workflow. Otherwise it can manufacture an earlier
+        # preview while the workflow is correctly recording a waiting state.
+        market.require_forecast_observation_sessions(b, policy, now)
         try:
             _, as_of, days = market.sessions(
                 now, publication["published_at"], policy, kinds)

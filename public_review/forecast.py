@@ -4,6 +4,7 @@ from .costs import tax_rate
 from .core import digest
 
 METHOD = "per-security-entry-first-passage-gap-safe-v4"
+TIMING_MODEL = "joint-first-passage-post-entry-observation-v1"
 
 
 def paths(returns, days, count, block, seed):
@@ -137,6 +138,7 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "earliest_security_crossing": earliest_security,
             "expected_security_crossing": expected_security_crossing,
             "any_security_crossing_probability": any_security_crossing_probability,
+            "timing_model": TIMING_MODEL,
             "expected_security_crossing_basis": "JOINT_PATH_FIRST_PASSAGE_CONDITIONAL_ON_CROSSING_WITHIN_HORIZON",
             "trigger_securities": [r["ticker"] for r in security_crossings if earliest_security and r["crossing_date"] == earliest_security],
             "security_crossings": security_crossings, "target_xirr": policy["target_xirr"],
