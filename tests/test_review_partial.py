@@ -144,20 +144,20 @@ class PartialSecurityReviewTests(unittest.TestCase):
                   'entry_date':'2026-09-11', 'price':50.,
                   'entry_quote_at':'2026-09-11T04:45:00+00:00'}]}
         histories = {
-            'A.NS':pd.DataFrame({'Close':[100., np.nan]},
-                                index=['2026-09-10','2026-09-11']),
-            'B.NS':pd.DataFrame({'Close':[50., 55.]},
-                                index=['2026-09-10','2026-09-11'])}
+            'A.NS':pd.DataFrame({'Close':[100., np.nan, np.nan]},
+                                index=['2026-09-10','2026-09-11','2026-09-15']),
+            'B.NS':pd.DataFrame({'Close':[50., 54., 55.]},
+                                index=['2026-09-10','2026-09-11','2026-09-15'])}
         schedule = pd.DataFrame({
-            'market_open':pd.to_datetime(['2026-09-10T03:45:00Z','2026-09-11T03:45:00Z']),
-            'market_close':pd.to_datetime(['2026-09-10T10:00:00Z','2026-09-11T10:00:00Z'])},
-            index=pd.to_datetime(['2026-09-10','2026-09-11']))
+            'market_open':pd.to_datetime(['2026-09-10T03:45:00Z','2026-09-11T03:45:00Z','2026-09-15T03:45:00Z']),
+            'market_close':pd.to_datetime(['2026-09-10T10:00:00Z','2026-09-11T10:00:00Z','2026-09-15T10:00:00Z'])},
+            index=pd.to_datetime(['2026-09-10','2026-09-11','2026-09-15']))
         future = pd.DataFrame({
-            'market_open':pd.date_range('2026-09-15T03:45:00Z', periods=20, freq='D'),
-            'market_close':pd.date_range('2026-09-15T10:00:00Z', periods=20, freq='D')},
-            index=pd.date_range('2026-09-15', periods=20, freq='D'))
+            'market_open':pd.date_range('2026-09-16T03:45:00Z', periods=20, freq='D'),
+            'market_close':pd.date_range('2026-09-16T10:00:00Z', periods=20, freq='D')},
+            index=pd.date_range('2026-09-16', periods=20, freq='D'))
         returns = pd.DataFrame(np.zeros((126,2)), columns=['A.NS','B.NS'])
-        forecast = {'next_review':None, 'research_candidate':'2026-09-15'}
+        forecast = {'next_review':None, 'research_candidate':'2026-09-16'}
         with patch('public_review.market.fetch', return_value=histories), \
              patch('public_review.market.calendar', return_value=schedule), \
              patch('public_review.market.joint_calendar', return_value=future), \
@@ -168,7 +168,7 @@ class PartialSecurityReviewTests(unittest.TestCase):
              patch('public_review.preview.estimate', return_value=forecast):
             preview = _immediate_baseline_preview(
                 publication, b, policy(), [],
-                datetime(2026,9,12,3,tzinfo=timezone.utc), 0)
+                datetime(2026,9,15,11,tzinfo=timezone.utc), 0)
         timing = {row['ticker']:row for row in preview['valuation_timing']['rows']}
         self.assertEqual(timing['A.NS']['price_source'],
                          'FROZEN_ENTRY_PRICE_PENDING_FIRST_CLOSE')

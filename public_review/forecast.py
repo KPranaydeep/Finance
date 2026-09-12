@@ -29,9 +29,8 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     if not future_dates:
         raise ValueError("Future exits must follow entry")
     minimum_session = int(policy.get("minimum_forecast_review_sessions", 1))
-    if minimum_session < 1 or minimum_session > len(future_dates):
+    if minimum_session < 1:
         raise ValueError("INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS")
-    eligible_start = minimum_session - 1
     lots = baseline["lots"]
     tickers = [r["ticker"] for r in lots]
     matrix = returns[tickers].to_numpy(dtype=float)
@@ -89,12 +88,20 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
         1 + policy["target_xirr"], security_days / 365)
     security_profit = gross - fees - tax >= security_target[None, :, :]
     security_probability = np.maximum.accumulate(security_profit, axis=1).mean(axis=0)
+    any_security_hit = security_profit.any(axis=2)
+    paths_with_security_hit = any_security_hit.any(axis=1)
+    any_security_crossing_probability = float(paths_with_security_hit.mean())
+    expected_security_crossing = None
+    if paths_with_security_hit.any():
+        first_hit_indices = np.argmax(
+            any_security_hit[paths_with_security_hit], axis=1
+        )
+        expected_hit_index = int(np.rint(first_hit_indices.mean()))
+        expected_security_crossing = future_dates[expected_hit_index]
     security_crossings = []
     for j, ticker in enumerate(tickers):
-        hits = np.flatnonzero(
-            security_probability[eligible_start:, j] >= policy["crossing_probability"]
-        )
-        index = eligible_start + int(hits[0]) if len(hits) else None
+        hits = np.flatnonzero(security_probability[:, j] >= policy["crossing_probability"])
+        index = int(hits[0]) if len(hits) else None
         security_crossings.append({
             "ticker": ticker, "crossing_date": future_dates[index] if index is not None else None,
             "probability": float(security_probability[index, j]) if index is not None else None,
@@ -109,21 +116,18 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     drift = np.max(np.abs(weights - target_weights), axis=2) >= policy["drift_limit"]
     crossing = np.maximum.accumulate(profit | security_profit.any(axis=2) | risk | drift, axis=1)
     probability = crossing.mean(axis=0)
-    # Select an individually qualifying security, not a union of weak chances
-    # across many securities. Risk/basket triggers may require earlier review.
-    other_probability = np.maximum.accumulate(profit | risk | drift, axis=1).mean(axis=0)
-    hit = np.flatnonzero(
-        other_probability[eligible_start:] >= policy["crossing_probability"]
-    )
+    # The profit-review date is the joint-path expected first security crossing,
+    # not the earliest marginal ticker date. Downside/concentration/drift may
+    # still require an earlier risk review. Actual portfolio-profit gates remain
+    # evaluated on every workflow run and are not delayed by this forecast date.
+    other_probability = np.maximum.accumulate(risk | drift, axis=1).mean(axis=0)
+    hit = np.flatnonzero(other_probability >= policy["crossing_probability"])
     # Review one session before the first probability-limit breach, never before
     # tomorrow. No crossing -> bounded monitoring horizon, not "never".
-    offset = (
-        max(eligible_start, eligible_start + int(hit[0]) - 1)
-        if len(hit) else len(future_dates) - 1
-    )
+    offset = max(0, int(hit[0]) - 1) if len(hit) else len(future_dates) - 1
     candidate = future_dates[offset]
-    if earliest_security:
-        candidate = min(candidate, earliest_security)
+    if expected_security_crossing:
+        candidate = min(candidate, expected_security_crossing)
     approved = bool(validation and validation.get("passed") and
                     validation.get("policy_hash") == digest(policy) and
                     validation.get("tickers") == tickers and validation.get("method") == METHOD)
@@ -131,6 +135,9 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "status": "WALK_FORWARD_CHECKS_PASSED_EXPERIMENTAL" if approved else "RESEARCH_ONLY",
             "next_review": candidate if approved else None, "research_candidate": candidate,
             "earliest_security_crossing": earliest_security,
+            "expected_security_crossing": expected_security_crossing,
+            "any_security_crossing_probability": any_security_crossing_probability,
+            "expected_security_crossing_basis": "JOINT_PATH_FIRST_PASSAGE_CONDITIONAL_ON_CROSSING_WITHIN_HORIZON",
             "trigger_securities": [r["ticker"] for r in security_crossings if earliest_security and r["crossing_date"] == earliest_security],
             "security_crossings": security_crossings, "target_xirr": policy["target_xirr"],
             "crossing_probability_threshold": policy["crossing_probability"],

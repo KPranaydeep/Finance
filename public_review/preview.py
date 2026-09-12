@@ -15,6 +15,7 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
     synchronized assessment supersedes this read-only preview.
     """
     from .history import common_history
+    market.require_forecast_observation_sessions(baseline, policy, now)
     tickers = [lot["ticker"] for lot in baseline["lots"]]
     local_day = pd.Timestamp(now).tz_convert("Asia/Kolkata").date()
     histories = market.fetch(tickers, baseline["entry_date"], str(local_day),

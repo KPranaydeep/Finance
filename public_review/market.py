@@ -119,6 +119,53 @@ def sessions(now, published_at, policy, instrument_kinds=None):
     return str(eligible.index[0].date()), str(completed.index[-1].date()), [str(d.date()) for d in future.index]
 
 
+def forecast_observation_ready_at(baseline, policy):
+    """Return when every funded security completes its observation sessions.
+
+    Entry sessions are excluded. Markets count independently, and the basket is
+    ready at the latest required close plus the assessment buffer.
+    """
+    required = int(policy.get("minimum_forecast_review_sessions", 1))
+    if required < 1:
+        raise ValueError("INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS")
+    buffer = pd.Timedelta(minutes=policy["assessment_wait_after_close_minutes"])
+    ready_rows = []
+    for lot in baseline["lots"]:
+        entry_day = pd.Timestamp(lot["entry_date"]).date()
+        end = min(
+            entry_day + timedelta(days=max(30, required * 4)),
+            pd.Timestamp(policy["calendar_verified_through"]).date(),
+        )
+        schedule = calendar(entry_day, end, policy, KIND_CALENDARS[lot["kind"]])
+        post_entry = schedule[pd.Index(schedule.index.date) > entry_day]
+        if len(post_entry) < required:
+            raise ValueError("INCOMPLETE_SESSION_CALENDAR")
+        session = post_entry.iloc[required - 1]
+        ready_rows.append({
+            "ticker": lot["ticker"],
+            "observation_session": str(post_entry.index[required - 1].date()),
+            "ready_at": (session.market_close + buffer).isoformat(),
+        })
+    if not ready_rows:
+        raise ValueError("INVALID_CAPITAL")
+    return max(pd.Timestamp(row["ready_at"]) for row in ready_rows), ready_rows
+
+
+def require_forecast_observation_sessions(baseline, policy, now):
+    """Raise a normal waiting state until the post-entry window completes."""
+    now = pd.Timestamp(now)
+    ready_at, rows = forecast_observation_ready_at(baseline, policy)
+    if now < ready_at:
+        pending = AwaitingMarketEntry(baseline["entry_date"], ready_at.isoformat())
+        pending.wait_reason = "FORECAST_OBSERVATION_WAIT"
+        pending.observation_sessions = int(
+            policy.get("minimum_forecast_review_sessions", 1)
+        )
+        pending.observation_rows = rows
+        raise pending
+    return rows
+
+
 def fetch_entry(tickers, entry_day, policy, ready_at=None):
     """Fetch a verifiable opening price without requiring the session close."""
     histories = fetch(tickers, entry_day, entry_day, policy, allow_incomplete_end=True)

@@ -6,7 +6,9 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 from public_review.market import (sessions, entry_session, security_entry_schedule,
                                   AwaitingMarketEntry, _first_traded_intraday_bar,
-                                  _fx_rate_at_or_before, fetch_entry_quote)
+                                  _fx_rate_at_or_before, fetch_entry_quote,
+                                  forecast_observation_ready_at,
+                                  require_forecast_observation_sessions)
 from public_review.service import run
 from review_fixtures import policy
 from test_review_operations import FakeDB
@@ -70,6 +72,37 @@ class WaitingTests(unittest.TestCase):
         entry, as_of, _ = sessions(datetime(2026, 9, 11, 20, 30, tzinfo=timezone.utc),
                                    published, policy(), kinds)
         self.assertEqual((entry, as_of), ('2026-09-11', '2026-09-11'))
+
+    def test_first_post_entry_session_is_observed_not_forecast(self):
+        p = policy()
+        p['minimum_forecast_review_sessions'] = 1
+        b = {'entry_date': '2026-09-11', 'lots': [
+            {'ticker': 'A.NS', 'kind': 'equity', 'entry_date': '2026-09-11'},
+        ]}
+        ready_at, rows = forecast_observation_ready_at(b, p)
+        self.assertEqual(ready_at, pd.Timestamp('2026-09-15T10:30:00+00:00'))
+        self.assertEqual(rows[0]['observation_session'], '2026-09-15')
+        with self.assertRaises(AwaitingMarketEntry) as caught:
+            require_forecast_observation_sessions(
+                b, p, datetime(2026, 9, 15, 10, 29, tzinfo=timezone.utc))
+        self.assertEqual(caught.exception.wait_reason, 'FORECAST_OBSERVATION_WAIT')
+        _, _, future = sessions(
+            datetime(2026, 9, 15, 10, 30, tzinfo=timezone.utc),
+            '2026-09-10T12:52:29+00:00', p,
+            {'A.NS': 'equity'})
+        self.assertEqual(future[0], '2026-09-16')
+
+    def test_world_observation_waits_for_each_exchange_independently(self):
+        p = policy()
+        b = {'entry_date': '2026-09-11', 'lots': [
+            {'ticker': 'A.NS', 'kind': 'equity', 'entry_date': '2026-09-11'},
+            {'ticker': 'AXTI', 'kind': 'foreign_us_listing', 'entry_date': '2026-09-11'},
+        ]}
+        ready_at, rows = forecast_observation_ready_at(b, p)
+        by_ticker = {row['ticker']: row for row in rows}
+        self.assertEqual(by_ticker['A.NS']['observation_session'], '2026-09-15')
+        self.assertEqual(by_ticker['AXTI']['observation_session'], '2026-09-14')
+        self.assertEqual(ready_at, pd.Timestamp('2026-09-15T10:30:00+00:00'))
 
     def test_each_security_uses_its_own_market_at_publication(self):
         published = '2026-09-10T14:00:29+00:00'
@@ -241,6 +274,7 @@ class WaitingTests(unittest.TestCase):
         with patch('public_review.service.publications', return_value=[self.publication()]), \
              patch('public_review.market.security_entry_schedule', return_value=schedule), \
              patch('public_review.market.fetch_entry_quote', side_effect=quote), \
+             patch('public_review.market.require_forecast_observation_sessions'), \
              patch('public_review.market.sessions', side_effect=ValueError('SECRET_DATABASE_PASSWORD')), \
              patch('public_review.service.send', return_value=False):
             result = run(db, 'TEST', policy(), now=datetime(2026, 9, 9, 18, tzinfo=timezone.utc))

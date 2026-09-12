@@ -51,16 +51,34 @@ def load_fresh_preview(basket_id, publication_id):
 
 def render_crossings(forecast):
     rows = forecast.get("security_crossings", [])
-    if not rows:
+    reached = [row for row in rows if row.get("crossing_date")]
+    if not reached:
+        st.caption("No security reaches the configured probability threshold within the forecast horizon.")
         return
-    minimum_session = int(forecast.get("minimum_forecast_review_sessions", 1))
+    observation_sessions = int(forecast.get("minimum_forecast_review_sessions", 1))
     st.caption(f"Profit gate: fully loaded round-trip break-even and net annualized target of {percent(forecast['target_xirr'])} · "
                f"Crossing probability threshold: {percent(forecast['crossing_probability_threshold'])}. "
-               f"Forecast search begins at eligible market session {minimum_session}. "
+               f"Forecasting begins only after {observation_sessions} complete post-entry observation session"
+               f"{'s' if observation_sessions != 1 else ''}; entry sessions are excluded. "
                "This does not delay daily monitoring or authorize a trade. A probability threshold is not statistical confidence or a guaranteed exit date.")
+    expected = forecast.get("expected_security_crossing")
+    horizon_probability = forecast.get("any_security_crossing_probability")
+    st.info(
+        "Probability-weighted expected review session: "
+        + (expected or "not reached within the forecast horizon")
+        + " · Probability that at least one security crosses within the horizon: "
+        + percent(horizon_probability)
+    )
+    st.caption(
+        "Calculated from each joint simulation path's first security crossing, conditional on a crossing within the horizon. "
+        "This preserves cross-security dependence and avoids double-counting overlapping ticker probabilities."
+    )
     st.table(pd.DataFrame([{"Security": r["ticker"],
                            "Estimated crossing": r["crossing_date"] or "Not reached in horizon",
-                           "Probability by date": percent(r["probability"])} for r in rows]))
+                           "Probability by date": percent(r["probability"])} for r in reached]))
+    omitted = len(rows) - len(reached)
+    if omitted:
+        st.caption(f"{omitted} securities without a threshold crossing in the configured horizon are omitted.")
     st.caption("Research estimates unless validation passes. A crossing requests a review, not an automatic sale. Short-term XIRR can look large despite a small rupee gain.")
 
 
@@ -107,7 +125,7 @@ def render_fresh_preview(p):
     if p.get("history_coverage"):
         h = p["history_coverage"]
         st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
-    with st.expander("Earliest security target crossings", expanded=True):
+    with st.expander("Security target-crossing estimates", expanded=True):
         render_crossings(f)
 
 
@@ -118,7 +136,14 @@ def render_pending(row, now):
     p = row["payload"]
     if p.get("reason") == "AWAITING_MARKET_ENTRY":
         captured, total = p.get("captured_entries"), p.get("total_entries")
-        if captured is not None and total:
+        if p.get("wait_reason") == "FORECAST_OBSERVATION_WAIT":
+            sessions = int(p.get("observation_sessions") or 1)
+            st.info(
+                f"Entry is verified. Waiting for every represented exchange to complete "
+                f"{sessions} post-entry observation session{'s' if sessions != 1 else ''}; "
+                "entry sessions do not count."
+            )
+        elif captured is not None and total:
             st.info(f"Security entries captured: {captured} of {total}. Each security enters independently according to its own exchange session.")
         else:
             st.info("Awaiting market entry—not a failure. Each security enters at publication when its exchange is trading, or after its own next open plus the configured wait.")
@@ -217,6 +242,8 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         } for lot in baseline["lots"]]))
     successful_seq = max((last or {}).get("seq", 0), (heartbeat or {}).get("seq", 0))
     if not last or (failure and failure["seq"] > successful_seq):
+        if suppress_durable_preview:
+            return
         if provisional and not suppress_durable_preview:
             render_fresh_preview(provisional["payload"])
         if provisional or suppress_durable_preview:
@@ -321,7 +348,15 @@ def render_review_panel(basket_id, active_publications):
             }.get(type(exc), "PREVIEW_CHECK_FAILED")
             if code == "AWAITING_MARKET_ENTRY":
                 fresh_waiting = True
-                st.info("Opening-price entry is waiting for every represented market to open, or has been established while the first completed-session assessment is still pending.")
+                if getattr(exc, "wait_reason", None) == "FORECAST_OBSERVATION_WAIT":
+                    sessions = int(getattr(exc, "observation_sessions", 1))
+                    st.info(
+                        f"Entry is verified. Waiting for every represented exchange to complete "
+                        f"{sessions} post-entry observation session{'s' if sessions != 1 else ''}; "
+                        "entry sessions do not count."
+                    )
+                else:
+                    st.info("Opening-price entry is waiting for every represented market to open, or has been established while the first completed-session assessment is still pending.")
                 if getattr(exc, "wait_reason", None) == "ENTRY_DATA_RETRY":
                     st.caption("Intraday data is temporarily unavailable for " +
                                str(getattr(exc, "pending_ticker", "a pending security")) +
@@ -344,6 +379,6 @@ def render_review_panel(basket_id, active_publications):
         render_events(events, {p["publication_id"] for p in active_publications},
                       latest_publication_id=active_publications[0]["publication_id"] if active_publications else None,
                       suppress_latest_failure=fresh_waiting,
-                      suppress_durable_preview=fresh_preview_shown)
+                      suppress_durable_preview=fresh_preview_shown or fresh_waiting)
     except Exception:
         st.warning("Model review inspection is unavailable. No reliable review date can be shown.")

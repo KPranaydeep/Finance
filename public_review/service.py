@@ -208,6 +208,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 baseline = next(r["payload"] for r in history if r["event_key"] == baseline_key)
                 baseline_id = baseline["baseline_id"]
                 tickers = [row["ticker"] for row in baseline["lots"]]
+            stage = "forecast_observation_window"
+            market.require_forecast_observation_sessions(baseline, policy, now)
             stage = "session_calendar"
             entry, as_of, future = market.sessions(
                 now, publication["published_at"], policy, kinds)
@@ -277,6 +279,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                            "pending_tickers": getattr(exc, "pending_tickers", None),
                            "pending_ticker": getattr(exc, "pending_ticker", None),
                            "wait_reason": getattr(exc, "wait_reason", None),
+                           "observation_sessions": getattr(exc, "observation_sessions", None),
+                           "observation_rows": getattr(exc, "observation_rows", None),
                            "entry_date": getattr(exc, "entry_date", None),
                            "ready_at": getattr(exc, "ready_at", None)}
                 store.append(conn, basket, "waiting:" + baseline_id + ":" + now.isoformat(),
