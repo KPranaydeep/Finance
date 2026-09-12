@@ -35,6 +35,16 @@ class ForecastTests(unittest.TestCase):
         v['policy_hash']='wrong'
         self.assertIsNone(estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000,v)['next_review'])
 
+    def test_minimum_forecast_session_does_not_delay_actual_monitoring(self):
+        b=baseline(); p=policy()
+        p['minimum_forecast_review_sessions']=3
+        p['concentration_limit']=.1
+        r=pd.DataFrame(np.zeros((252,2)),columns=['A.NS','B.NS'])
+        days=[str(d.date()) for d in pd.bdate_range('2026-09-10',periods=20)]
+        f=estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000)
+        self.assertEqual(f['research_candidate'],days[2])
+        self.assertEqual(f['minimum_forecast_review_sessions'],3)
+
     def test_walkforward_nonoverlap_and_no_invented_pass(self):
         p=policy(); b=baseline()
         r=pd.DataFrame(np.zeros((292,2)),columns=['A.NS','B.NS'])

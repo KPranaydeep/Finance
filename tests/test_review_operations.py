@@ -76,6 +76,15 @@ class OperationTests(unittest.TestCase):
         with patch('public_review.config.Path.read_text',return_value=json.dumps(fixture)):
             self.assertEqual(load_policy(today=date(2026,9,9)),fixture)
 
+    def test_minimum_forecast_session_must_fit_both_horizons(self):
+        from public_review.config import load_policy
+        fixture=policy()
+        fixture['minimum_forecast_review_sessions']=fixture['max_review_sessions'] + 1
+        with patch('public_review.config.Path.read_text',return_value=json.dumps(fixture)):
+            with self.assertRaisesRegex(
+                    ValueError,'INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS'):
+                load_policy(today=date(2026,9,9))
+
     def test_approved_but_stale_tariff_blocks(self):
         from public_review.config import load_policy
         with patch('public_review.config.Path.read_text',return_value=json.dumps(policy())):

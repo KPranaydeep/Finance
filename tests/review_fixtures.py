@@ -26,6 +26,7 @@ def policy():
         "drift_limit": .05,
         "min_annual_improvement": .06,
         "crossing_probability": .20,
+        "minimum_forecast_review_sessions": 1,
         "max_review_sessions": 20,
         "simulation_paths": 1000,
         "block_length": 5,

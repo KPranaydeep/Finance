@@ -23,7 +23,8 @@ def load_policy(today=None):
     ranges = {"slab_rate": (0, .30), "surcharge_rate": (0, .37), "slippage_bps": (0, 500),
               "target_xirr": (.01, 10), "drawdown_limit": (.01, .9), "concentration_limit": (.01, 1),
               "drift_limit": (.001, 1), "min_annual_improvement": (.06, 1),
-              "crossing_probability": (.01, .5), "max_review_sessions": (1, 60),
+              "crossing_probability": (.01, .5),
+              "minimum_forecast_review_sessions": (1, 60), "max_review_sessions": (1, 60),
               "simulation_paths": (100, 5000), "block_length": (1, 30),
               "validation_train": (126, 756), "validation_horizon": (5, 60),
               "validation_min_folds": (20, 100), "validation_max_brier": (.01, .25),
@@ -36,13 +37,16 @@ def load_policy(today=None):
         value = policy[key]
         if isinstance(value, bool) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError("INVALID_POLICY_" + key.upper())
-    for key in ("max_review_sessions", "simulation_paths", "block_length", "seed", "validation_train",
+    for key in ("minimum_forecast_review_sessions", "max_review_sessions", "simulation_paths", "block_length", "seed", "validation_train",
                 "validation_horizon", "validation_min_folds", "history_years", "tariff_max_age_days",
                 "entry_wait_after_open_minutes", "entry_max_quote_delay_minutes",
                 "fx_quote_max_age_minutes",
                 "assessment_wait_after_close_minutes"):
         if not isinstance(policy[key], int):
             raise ValueError("INTEGER_POLICY_REQUIRED")
+    if policy["minimum_forecast_review_sessions"] > min(
+            policy["max_review_sessions"], policy["validation_horizon"]):
+        raise ValueError("INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS")
     if policy.get("entry_quote_interval") != "1m":
         raise ValueError("INVALID_POLICY_ENTRY_QUOTE_INTERVAL")
     if policy.get("profit_review_rule") != "ROUND_TRIP_BREAK_EVEN_AND_TARGET_XIRR":

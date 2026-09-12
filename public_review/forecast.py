@@ -28,6 +28,10 @@ def paths(returns, days, count, block, seed):
 def estimate(baseline, prices, returns, future_dates, policy, peak, validation=None, count=None, dividends=None):
     if not future_dates:
         raise ValueError("Future exits must follow entry")
+    minimum_session = int(policy.get("minimum_forecast_review_sessions", 1))
+    if minimum_session < 1 or minimum_session > len(future_dates):
+        raise ValueError("INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS")
+    eligible_start = minimum_session - 1
     lots = baseline["lots"]
     tickers = [r["ticker"] for r in lots]
     matrix = returns[tickers].to_numpy(dtype=float)
@@ -87,8 +91,10 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     security_probability = np.maximum.accumulate(security_profit, axis=1).mean(axis=0)
     security_crossings = []
     for j, ticker in enumerate(tickers):
-        hits = np.flatnonzero(security_probability[:, j] >= policy["crossing_probability"])
-        index = int(hits[0]) if len(hits) else None
+        hits = np.flatnonzero(
+            security_probability[eligible_start:, j] >= policy["crossing_probability"]
+        )
+        index = eligible_start + int(hits[0]) if len(hits) else None
         security_crossings.append({
             "ticker": ticker, "crossing_date": future_dates[index] if index is not None else None,
             "probability": float(security_probability[index, j]) if index is not None else None,
@@ -106,10 +112,15 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     # Select an individually qualifying security, not a union of weak chances
     # across many securities. Risk/basket triggers may require earlier review.
     other_probability = np.maximum.accumulate(profit | risk | drift, axis=1).mean(axis=0)
-    hit = np.flatnonzero(other_probability >= policy["crossing_probability"])
+    hit = np.flatnonzero(
+        other_probability[eligible_start:] >= policy["crossing_probability"]
+    )
     # Review one session before the first probability-limit breach, never before
     # tomorrow. No crossing -> bounded monitoring horizon, not "never".
-    offset = max(0, int(hit[0]) - 1) if len(hit) else len(future_dates) - 1
+    offset = (
+        max(eligible_start, eligible_start + int(hit[0]) - 1)
+        if len(hit) else len(future_dates) - 1
+    )
     candidate = future_dates[offset]
     if earliest_security:
         candidate = min(candidate, earliest_security)
@@ -123,6 +134,7 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "trigger_securities": [r["ticker"] for r in security_crossings if earliest_security and r["crossing_date"] == earliest_security],
             "security_crossings": security_crossings, "target_xirr": policy["target_xirr"],
             "crossing_probability_threshold": policy["crossing_probability"],
+            "minimum_forecast_review_sessions": minimum_session,
             "never_crossed_fraction": float(1 - probability[-1]),
             "paths": count, "common_returns": len(matrix), "seed": policy["seed"],
             "curve": [{"date": d, "any_review_probability": float(probability[i]),
