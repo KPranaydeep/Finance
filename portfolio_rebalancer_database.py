@@ -12,6 +12,7 @@ import uuid
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, time as clock_time, timedelta, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote
 
@@ -958,6 +959,10 @@ BROKER_HOLDINGS_COLUMN_ALIASES = {
     "average price": "Average Buy Price",
     "avg. cost": "Average Buy Price",
     "avg cost": "Average Buy Price",
+    "avg buy price ($)": "Average Buy Price",
+    "average buy price ($)": "Average Buy Price",
+    "ticker": "Ticker",
+    "stock symbol": "Ticker",
     "buy value": "Buy Value",
     "closing price": "Closing Price",
     "previous closing price": "Closing Price",
@@ -965,6 +970,116 @@ BROKER_HOLDINGS_COLUMN_ALIASES = {
     "unrealised p&l": "Unrealised P&L",
     "unrealized p&l": "Unrealised P&L",
 }
+
+
+def _normalise_company_name(value):
+    """Return a comparison key that ignores punctuation and legal suffix noise."""
+    words = re.findall(r"[a-z0-9]+", str(value or "").lower())
+    suffixes = {
+        "co", "company", "corp", "corporation", "inc", "incorporated",
+        "ltd", "limited", "plc", "group", "holdings", "holding",
+    }
+    return " ".join(word for word in words if word not in suffixes)
+
+
+@st.cache_data(show_spinner=False, ttl=86400)
+def resolve_us_instrument_by_name(stock_name):
+    """Resolve a US company name through Yahoo without silently guessing.
+
+    Tickertape's US CSV omits exchange tickers and ISINs.  A candidate is accepted
+    only when Yahoo identifies it as a USD-listed equity/ETF and its normalized
+    name closely matches the report.  Ambiguous or weak matches remain unresolved.
+    """
+    import yfinance as yf
+
+    query = str(stock_name or "").strip()
+    wanted = _normalise_company_name(query)
+    if not wanted:
+        return None
+
+    quotes = []
+    for search_query in dict.fromkeys([query, wanted]):
+        try:
+            quotes.extend(yf.Search(search_query, max_results=10, news_count=0).quotes or [])
+        except Exception:
+            continue
+
+    candidates = []
+    allowed_types = {"EQUITY", "ETF"}
+    us_exchanges = {"ASE", "BTS", "NCM", "NGM", "NMS", "NYQ", "NYS", "PCX"}
+    seen_symbols = set()
+    for quote_row in quotes:
+        symbol = str(quote_row.get("symbol") or "").strip().upper()
+        quote_type = str(quote_row.get("quoteType") or "").strip().upper()
+        exchange = str(quote_row.get("exchange") or "").strip().upper()
+        candidate_name = quote_row.get("longname") or quote_row.get("shortname") or ""
+        candidate_key = _normalise_company_name(candidate_name)
+        if (
+            not symbol or symbol in seen_symbols or quote_type not in allowed_types
+            or exchange not in us_exchanges or not candidate_key
+        ):
+            continue
+        seen_symbols.add(symbol)
+        similarity = SequenceMatcher(None, wanted, candidate_key).ratio()
+        wanted_tokens = set(wanted.split())
+        candidate_tokens = set(candidate_key.split())
+        token_score = (
+            len(wanted_tokens & candidate_tokens) / len(wanted_tokens | candidate_tokens)
+            if wanted_tokens and candidate_tokens else 0.0
+        )
+        candidates.append((max(similarity, token_score), symbol))
+
+    candidates.sort(reverse=True)
+    if not candidates or candidates[0][0] < 0.78:
+        return None
+    if len(candidates) > 1 and candidates[1][0] >= candidates[0][0] - 0.04:
+        return None
+
+    return resolve_yahoo_instrument(candidates[0][1], {})
+
+
+def _read_tickertape_us_holdings_csv(uploaded_file):
+    """Parse a Tickertape US holdings CSV into the broker-import schema."""
+    if uploaded_file is None:
+        raise ValueError("Choose a Tickertape US holdings CSV first.")
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("The selected broker holdings file is empty.")
+
+    try:
+        df = pd.read_csv(io.BytesIO(raw))
+    except Exception as exc:
+        raise ValueError(f"Could not read the CSV file: {exc}") from exc
+
+    df.columns = [str(col).strip() for col in df.columns]
+    renamed = {
+        col: BROKER_HOLDINGS_COLUMN_ALIASES[col.lower()]
+        for col in df.columns
+        if col.lower() in BROKER_HOLDINGS_COLUMN_ALIASES
+    }
+    df = df.rename(columns=renamed)
+    required = ["Stock Name", "Quantity", "Average Buy Price"]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(
+            "The Tickertape US CSV is missing required columns: " + ", ".join(missing)
+        )
+
+    if "Ticker" not in df.columns:
+        df["Ticker"] = ""
+    df["Stock Name"] = df["Stock Name"].fillna("").astype(str).str.strip()
+    df["Ticker"] = df["Ticker"].fillna("").astype(str).str.strip().str.upper()
+    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
+    df["Average Buy Price"] = pd.to_numeric(df["Average Buy Price"], errors="coerce")
+    df = df[
+        df["Stock Name"].ne("")
+        & df["Quantity"].notna() & (df["Quantity"] > 0)
+        & df["Average Buy Price"].notna() & (df["Average Buy Price"] > 0)
+    ].copy()
+    if df.empty:
+        raise ValueError("No valid positive-quantity holdings were found in the Tickertape US CSV.")
+    df["Currency"] = "USD"
+    return df[["Ticker", "Stock Name", "Quantity", "Average Buy Price", "Currency"]]
 
 
 def _detect_broker_holdings_header_row(raw_df, max_scan_rows=25):
@@ -1063,46 +1178,64 @@ def _read_broker_holdings_excel(uploaded_file):
 
 
 def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
-    """Resolve broker holdings by ISIN and upsert them into master_holdings.
+    """Resolve Indian Excel or Tickertape US CSV holdings and upsert them.
 
     Returns (imported_row_count, unresolved_isins).
     """
-    cleaned = _read_broker_holdings_excel(uploaded_file)
+    file_name = str(getattr(uploaded_file, "name", "") or "").strip().lower()
+    is_tickertape_csv = file_name.endswith(".csv")
+    cleaned = (
+        _read_tickertape_us_holdings_csv(uploaded_file)
+        if is_tickertape_csv else _read_broker_holdings_excel(uploaded_file)
+    )
     normalized_mode = str(mode or "merge").strip().lower()
     if normalized_mode not in {"replace", "merge"}:
         raise ValueError("Import mode must be either 'replace' or 'merge'.")
 
-    equity_map = load_equity_mapping().copy()
-    equity_map["ISIN"] = equity_map["ISIN"].astype(str).str.strip().str.upper()
-    isin_to_symbol = dict(
-        zip(equity_map["ISIN"], equity_map["Symbol"].astype(str).str.strip().str.upper())
-    )
+    isin_to_symbol = {}
+    if not is_tickertape_csv:
+        equity_map = load_equity_mapping().copy()
+        equity_map["ISIN"] = equity_map["ISIN"].astype(str).str.strip().str.upper()
+        isin_to_symbol = dict(
+            zip(equity_map["ISIN"], equity_map["Symbol"].astype(str).str.strip().str.upper())
+        )
     nse_lookup = get_nse_company_lookup()
 
     resolved_rows = []
     unresolved_isins = []
 
     for _, row in cleaned.iterrows():
-        isin = row["ISIN"]
-        symbol_guess = isin_to_symbol.get(isin)
-        instrument = resolve_yahoo_instrument(symbol_guess, nse_lookup) if symbol_guess else None
+        if is_tickertape_csv:
+            supplied_ticker = str(row.get("Ticker") or "").strip().upper()
+            instrument = (
+                resolve_yahoo_instrument(supplied_ticker, {})
+                if supplied_ticker else resolve_us_instrument_by_name(row["Stock Name"])
+            )
+            unresolved_label = str(row["Stock Name"])
+        else:
+            isin = row["ISIN"]
+            symbol_guess = isin_to_symbol.get(isin)
+            instrument = resolve_yahoo_instrument(symbol_guess, nse_lookup) if symbol_guess else None
+            unresolved_label = f"{isin} ({row['Stock Name']})"
         if instrument is None:
-            unresolved_isins.append(f"{isin} ({row['Stock Name']})")
+            unresolved_isins.append(unresolved_label)
             continue
 
         resolved_rows.append({
             "Symbol": instrument["symbol"],
-            "Stock Name": instrument["stock_name"],
+            "Stock Name": row["Stock Name"] or instrument["stock_name"],
             "Yahoo Ticker": instrument["yahoo_ticker"],
             "Exchange": instrument["exchange"],
-            "Currency": _normalize_currency_code(instrument["currency"]),
+            "Currency": _normalize_currency_code(
+                row.get("Currency", instrument["currency"])
+            ),
             "Quantity": float(row["Quantity"]),
             "Average Price": float(row["Average Buy Price"]),
         })
 
     if not resolved_rows:
         raise ValueError(
-            "None of the ISINs in the broker holdings file could be resolved. Unresolved: "
+            "None of the holdings in the broker file could be resolved. Unresolved: "
             + ", ".join(unresolved_isins[:10])
         )
 
@@ -3986,13 +4119,14 @@ with step_col1:
     with st.container(border=True):
         st.markdown("**1️⃣ Upload your broker holdings**")
         broker_holdings_upload = st.file_uploader(
-            "Upload broker holdings .xlsx",
-            type=["xlsx", "xls"],
+            "Upload broker holdings (.xlsx, .xls, or Tickertape US .csv)",
+            type=["xlsx", "xls", "csv"],
             key="broker_holdings_upload",
             help=(
-                "Statement with Stock Name, ISIN, Quantity, Average Buy Price, Buy Value, "
-                "Closing Price, Closing Value, Unrealised P&L. Header row is auto-detected "
-                "(row 11 by default). Stocks are matched to symbols by ISIN."
+                "Groww/Indian Excel statements are matched by ISIN. Tickertape US CSV "
+                "reports are detected from Stock Name, Quantity, and Avg Buy Price ($). "
+                "Because Tickertape omits symbols, US names are matched to Yahoo only "
+                "when the result is unambiguous; unresolved names are reported."
             ),
         )
         broker_holdings_mode = st.radio(
