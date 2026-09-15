@@ -26,6 +26,45 @@ SAFE_ERRORS = {
 }
 
 
+def price_history_evidence(histories):
+    """Canonical, gap-preserving close history for the audit fingerprint.
+
+    Mixed exchange and FX calendars legitimately leave missing observations in
+    an individual raw history.  Strict audit JSON must never contain NaN, and a
+    gap must never be forward-filled or silently removed.  Represent it as JSON
+    ``null`` so the exact date/ticker gap remains part of the fingerprint.
+    """
+    evidence = {}
+    for ticker, history in sorted(histories.items()):
+        closes = {}
+        for day, value in history["Close"].items():
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                number = math.nan
+            closes[str(day)] = number if math.isfinite(number) else None
+        evidence[str(ticker)] = closes
+    return evidence
+
+
+def safe_diagnostic_code(stage, exc):
+    """Return an owner-actionable category without exception text or secrets."""
+    categories = {
+        ValueError: "VALUE_ERROR",
+        TypeError: "TYPE_ERROR",
+        KeyError: "KEY_ERROR",
+        ArithmeticError: "ARITHMETIC_ERROR",
+        MemoryError: "MEMORY_ERROR",
+        RuntimeError: "RUNTIME_ERROR",
+    }
+    category = next(
+        (label for exception_type, label in categories.items()
+         if isinstance(exc, exception_type)),
+        "UNEXPECTED_EXCEPTION",
+    )
+    return f"{stage.upper()}_{category}"
+
+
 def publications(conn, basket):
     # Read existing ledger only, without calling schema-mutating trust loaders.
     rows = conn.execute("""SELECT v.* FROM public_portfolio_versions v
@@ -88,7 +127,8 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
             "comparisons": compare_exits(baseline, prices, as_of, policy, metrics) if comparisons else [],
-            "mmi": mood, "price_hash": digest({t: {d: float(v) for d, v in h.Close.items()} for t, h in histories.items()}),
+            "mmi": mood,
+            "price_hash": digest(price_history_evidence(histories)),
             "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
             "model_only": True}
 
@@ -291,14 +331,17 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                                 "entry_date": payload["entry_date"], "ready_at": payload["ready_at"]})
                 continue
             failures += 1
+            diagnostic_code = safe_diagnostic_code(stage, exc)
             payload = {"status": "CANNOT_ASSESS", "reason": code, "checked_at": now.isoformat(),
-                       "model_only": True, "publication_id": publication["publication_id"], "stage": stage}
+                       "model_only": True, "publication_id": publication["publication_id"],
+                       "stage": stage, "diagnostic_code": diagnostic_code}
             store.append(conn, basket, "failure:" + baseline_id + ":" + now.isoformat() + ":" + code,
                          "FAILURE", baseline_id, payload)
             conn.commit()
             notify_safely(conn, basket, baseline_id, payload, now)
             results.append({"publication_id": publication["publication_id"],
-                            "status": "CANNOT_ASSESS", "reason": code, "stage": stage})
+                            "status": "CANNOT_ASSESS", "reason": code,
+                            "stage": stage, "diagnostic_code": diagnostic_code})
     return {"checked": len(selected), "failed": failures, "waiting": waiting, "results": results}
 
 
