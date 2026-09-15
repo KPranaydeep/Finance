@@ -282,6 +282,8 @@ class WaitingTests(unittest.TestCase):
         self.assertEqual(result['waiting'], 0)
         self.assertEqual(result['results'][0]['reason'], 'MONITOR_CHECK_FAILED')
         self.assertEqual(result['results'][0]['stage'], 'session_calendar')
+        self.assertEqual(result['results'][0]['diagnostic_code'],
+                         'SESSION_CALENDAR_VALUE_ERROR')
         self.assertNotIn('SECRET_DATABASE_PASSWORD', json.dumps(result) + json.dumps(db.rows))
 
     def test_missing_classifications_remain_a_real_failure(self):

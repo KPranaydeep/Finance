@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 import pandas as pd
-from public_review.service import run, build_assessment
+from public_review.service import run, build_assessment, price_history_evidence
 from public_review.market import calendar
 from review_fixtures import baseline, policy
 from test_review_operations import FakeDB
@@ -58,3 +58,14 @@ class ServiceTests(unittest.TestCase):
         result = build_assessment(b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],datetime(2026,9,9,13,tzinfo=timezone.utc))
         self.assertIn('2026-09-08', result['history_coverage']['missing_sessions'])
         self.assertEqual(result['history_coverage']['method'], 'complete-adjacent-session-pairs-no-fill')
+
+    def test_audit_fingerprint_preserves_mixed_market_nan_as_null(self):
+        p=policy(); b=baseline(); h=self.histories(p)
+        h['A.NS'].loc['2026-09-08','Close']=float('nan')
+        evidence=price_history_evidence(h)
+        self.assertIsNone(evidence['A.NS']['2026-09-08'])
+        result=build_assessment(
+            b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],
+            datetime(2026,9,9,13,tzinfo=timezone.utc))
+        self.assertEqual(len(result['price_hash']),64)
+        self.assertIn('2026-09-08',result['history_coverage']['missing_sessions'])
