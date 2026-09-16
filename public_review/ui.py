@@ -106,6 +106,12 @@ def render_fresh_preview(p):
     metric_label = ("Probability-weighted planning review" if p.get("planning_estimate")
                     else "Latest suggested review")
     st.metric(metric_label, "Review now" if due else (date or "Next session risk check"))
+    followup = f.get("next_common_review_session")
+    if date and followup:
+        st.caption(
+            f"Review window: {date}, then {followup} if follow-up is needed. "
+            "The second date is the literal next calendar day, and both are verified common trading sessions for every market represented in this basket."
+        )
     if p["provisional"]:
         st.caption("Provisional: " + p["assumption"])
     if p.get("planning_estimate") and p.get("observation_ready_at"):
@@ -298,6 +304,12 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.metric("Estimated net XIRR", percent(m["xirr"]))
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
+    followup = p.get("forecast", {}).get("next_common_review_session")
+    if d.get("next_review") and followup:
+        st.caption(
+            f"Review window: {d['next_review']}, then {followup} if follow-up is needed. "
+            "The second date is the literal next calendar day, and both are common trading sessions across the basket's represented markets."
+        )
     checked = datetime.fromisoformat(checked_at).astimezone(ZoneInfo("Asia/Kolkata"))
     st.caption(f"{m['days_held']} days held · Absolute net return {percent(m['net_total_return'])} · Prices through {p['as_of']} · Checked {checked:%d %b %Y %H:%M IST}")
     st.caption("100% annualized XIRR does not mean your investment has doubled. A review date is not an optimal selling date.")

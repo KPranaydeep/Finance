@@ -63,9 +63,10 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
     schedule = market.joint_calendar(observation_ready_at.date(),
                                      policy["calendar_verified_through"],
                                      policy, kinds)
+    required_future = policy["max_review_sessions"] + 5
     future = [str(day.date()) for day, session in schedule.iterrows()
-              if session.market_open > observation_ready_at][:policy["max_review_sessions"]]
-    if len(future) < policy["max_review_sessions"]:
+              if session.market_open > observation_ready_at][:required_future]
+    if len(future) < required_future:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     validation = validate(returns, baseline, marks, list(returns.index), policy)
     forecast = estimate(baseline, marks, returns, future, policy,

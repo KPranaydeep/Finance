@@ -3,8 +3,28 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
-METHOD = "per-security-entry-first-passage-gap-safe-v4"
-TIMING_MODEL = "joint-first-passage-post-entry-observation-v1"
+METHOD = "per-security-entry-first-passage-gap-safe-v5"
+TIMING_MODEL = "joint-first-passage-consecutive-review-window-v2"
+
+
+def paired_review_window(candidate, verified_sessions):
+    """Return review and literal next-day sessions, both exchange-verified.
+
+    Prefer a pair ending no later than the model candidate so an operational
+    review is never delayed solely by a weekend or holiday. If the candidate
+    is the first available session, use the first valid pair after it.
+    """
+    from datetime import date, timedelta
+    sessions = sorted(set(verified_sessions))
+    available = set(sessions)
+    pairs = [(day, (date.fromisoformat(day) + timedelta(days=1)).isoformat())
+             for day in sessions
+             if (date.fromisoformat(day) + timedelta(days=1)).isoformat() in available]
+    earlier = [pair for pair in pairs if pair[0] <= candidate]
+    if earlier:
+        return earlier[-1]
+    later = [pair for pair in pairs if pair[0] > candidate]
+    return later[0] if later else (candidate, None)
 
 
 def paths(returns, days, count, block, seed):
@@ -27,6 +47,13 @@ def paths(returns, days, count, block, seed):
 
 
 def estimate(baseline, prices, returns, future_dates, policy, peak, validation=None, count=None, dividends=None):
+    # The caller may provide one extra verified exchange session.  It is not
+    # simulated and therefore does not enlarge ``max_review_sessions``; it is
+    # retained only as the next tradable follow-up session after the selected
+    # review date.
+    all_future_dates = list(future_dates)
+    horizon = int(policy.get("max_review_sessions", len(all_future_dates)))
+    future_dates = all_future_dates[:horizon]
     if not future_dates:
         raise ValueError("Future exits must follow entry")
     minimum_session = int(policy.get("minimum_forecast_review_sessions", 1))
@@ -129,12 +156,18 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     candidate = future_dates[offset]
     if expected_security_crossing:
         candidate = min(candidate, expected_security_crossing)
+    model_candidate = candidate
+    candidate, followup_session = paired_review_window(
+        model_candidate, all_future_dates)
     approved = bool(validation and validation.get("passed") and
                     validation.get("policy_hash") == digest(policy) and
                     validation.get("tickers") == tickers and validation.get("method") == METHOD)
     return {"method": METHOD,
             "status": "WALK_FORWARD_CHECKS_PASSED_EXPERIMENTAL" if approved else "RESEARCH_ONLY",
             "next_review": candidate if approved else None, "research_candidate": candidate,
+            "unadjusted_research_candidate": model_candidate,
+            "review_session": candidate,
+            "next_common_review_session": followup_session,
             "earliest_security_crossing": earliest_security,
             "expected_security_crossing": expected_security_crossing,
             "any_security_crossing_probability": any_security_crossing_probability,

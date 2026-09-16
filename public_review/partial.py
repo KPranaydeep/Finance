@@ -48,9 +48,10 @@ def _security_dates(now, entry_date, market_name, policy):
     if completed.empty:
         raise market.AwaitingMarketEntry(entry_date, schedule.iloc[0].market_close.isoformat())
     as_of = str(completed.index[-1].date())
+    required_future = policy["max_review_sessions"] + 5
     future = [str(day.date()) for day in schedule.index
-              if str(day.date()) > max(as_of, entry_date)][:policy["max_review_sessions"]]
-    if not future:
+              if str(day.date()) > max(as_of, entry_date)][:required_future]
+    if len(future) < required_future:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     return as_of, future
 

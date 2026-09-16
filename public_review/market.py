@@ -113,8 +113,13 @@ def sessions(now, published_at, policy, instrument_kinds=None):
     if ready_at > now:
         raise AwaitingMarketEntry(str(eligible.index[0].date()), ready_at.isoformat())
     completed = schedule[schedule.market_close + assessment_buffer <= now]
-    future = schedule[schedule.market_open > now].iloc[:policy["max_review_sessions"]]
-    if completed.empty or len(future) < policy["max_review_sessions"]:
+    # Keep a small verified-session tail outside the modeling horizon.  It lets
+    # the forecast select two *consecutive calendar dates* which are both
+    # common trading sessions. ``forecast.estimate`` excludes the tail from
+    # the configured simulation horizon.
+    required_future = policy["max_review_sessions"] + 5
+    future = schedule[schedule.market_open > now].iloc[:required_future]
+    if completed.empty or len(future) < required_future:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     return str(eligible.index[0].date()), str(completed.index[-1].date()), [str(d.date()) for d in future.index]
 
