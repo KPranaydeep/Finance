@@ -24,7 +24,9 @@ class ForecastTests(unittest.TestCase):
         f=estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000)
         self.assertEqual(f['never_crossed_fraction'],1.)
         self.assertIsNone(f['next_review'])
-        self.assertEqual(f['research_candidate'],days[-1])
+        self.assertEqual(f['unadjusted_research_candidate'],days[-1])
+        self.assertEqual(f['research_candidate'],days[-2])
+        self.assertEqual(f['next_common_review_session'],days[-1])
         self.assertIsNone(f['expected_security_crossing'])
         self.assertEqual(f['any_security_crossing_probability'],0.)
 
@@ -55,6 +57,20 @@ class ForecastTests(unittest.TestCase):
         f=estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000)
         self.assertEqual(f['research_candidate'],days[0])
         self.assertEqual(f['minimum_forecast_review_sessions'],3)
+
+    def test_review_window_uses_next_market_session_not_next_calendar_day(self):
+        b=baseline(); p=policy()
+        p['max_review_sessions']=1
+        p['concentration_limit']=.1
+        r=pd.DataFrame(np.zeros((252,2)),columns=['A.NS','B.NS'])
+        # Friday is modeled, but Saturday is closed. The operational window
+        # therefore uses the next verified consecutive pair, Monday-Tuesday.
+        days=['2026-09-18','2026-09-21','2026-09-22']
+        f=estimate(b,{'A.NS':100,'B.NS':50},r,days,p,10000)
+        self.assertEqual(f['unadjusted_research_candidate'],'2026-09-18')
+        self.assertEqual(f['review_session'],'2026-09-21')
+        self.assertEqual(f['next_common_review_session'],'2026-09-22')
+        self.assertEqual(len(f['curve']),1)
 
     def test_walkforward_nonoverlap_and_no_invented_pass(self):
         p=policy(); b=baseline()

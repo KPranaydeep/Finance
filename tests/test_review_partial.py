@@ -153,9 +153,9 @@ class PartialSecurityReviewTests(unittest.TestCase):
             'market_close':pd.to_datetime(['2026-09-10T10:00:00Z','2026-09-11T10:00:00Z','2026-09-15T10:00:00Z'])},
             index=pd.to_datetime(['2026-09-10','2026-09-11','2026-09-15']))
         future = pd.DataFrame({
-            'market_open':pd.date_range('2026-09-16T03:45:00Z', periods=20, freq='D'),
-            'market_close':pd.date_range('2026-09-16T10:00:00Z', periods=20, freq='D')},
-            index=pd.date_range('2026-09-16', periods=20, freq='D'))
+            'market_open':pd.date_range('2026-09-16T03:45:00Z', periods=25, freq='D'),
+            'market_close':pd.date_range('2026-09-16T10:00:00Z', periods=25, freq='D')},
+            index=pd.date_range('2026-09-16', periods=25, freq='D'))
         returns = pd.DataFrame(np.zeros((126,2)), columns=['A.NS','B.NS'])
         forecast = {'next_review':None, 'research_candidate':'2026-09-16'}
         with patch('public_review.market.fetch', return_value=histories), \
