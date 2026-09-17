@@ -21,6 +21,47 @@ def percent(value):
     return "N/A" if value is None else f"{value:.2%}"
 
 
+REVIEW_SORT_OPTIONS = (
+    "Probability by date (high to low)",
+    "Review date (earliest first)",
+    "Target weight (high to low)",
+    "Security (A to Z)",
+)
+
+
+def sort_security_estimates(rows, sort_by):
+    """Return review estimates in a predictable, numerically correct order."""
+    def probability(row):
+        value = row.get("probability", row.get("crossing_probability"))
+        return float(value) if value is not None else -1.0
+
+    def target_weight(row):
+        value = row.get("target_weight")
+        return float(value) if value is not None else -1.0
+
+    def review_date(row):
+        return (row.get("review_date") or row.get("crossing_date")
+                or row.get("estimated_crossing_date") or "9999-12-31")
+
+    def ticker(row):
+        return str(row.get("ticker") or "")
+
+    if sort_by == "Review date (earliest first)":
+        key = lambda row: (review_date(row), -probability(row),
+                           -target_weight(row), ticker(row))
+    elif sort_by == "Target weight (high to low)":
+        key = lambda row: (-target_weight(row), -probability(row),
+                           review_date(row), ticker(row))
+    elif sort_by == "Security (A to Z)":
+        key = lambda row: (ticker(row),)
+    else:
+        # The default is the most useful planning view: credible candidates
+        # first, with the earlier date and larger allocation breaking ties.
+        key = lambda row: (-probability(row), review_date(row),
+                           -target_weight(row), ticker(row))
+    return sorted(rows, key=key)
+
+
 def is_current_preview(row):
     """Reject durable previews produced by an older timing methodology."""
     if not row:
@@ -59,7 +100,7 @@ def load_fresh_preview(basket_id, publication_id):
     return historical_preview(publication, policy, events)
 
 
-def render_crossings(forecast):
+def render_crossings(forecast, sort_key="security_crossings_sort"):
     rows = forecast.get("security_crossings", [])
     reached = [row for row in rows if row.get("crossing_date")]
     if not reached:
@@ -84,6 +125,14 @@ def render_crossings(forecast):
             "÷ Σ(probability by date × published target weight), using only non-zero dated crossings. "
             "The result is mapped to the nearest valid consecutive two-day market window."
         )
+    sort_by = st.selectbox(
+        "Sort security estimates",
+        REVIEW_SORT_OPTIONS,
+        key=sort_key,
+        help=("Probability is sorted numerically, not as formatted text. "
+              "Missing probabilities and undated estimates remain last."),
+    )
+    reached = sort_security_estimates(reached, sort_by)
     st.table(pd.DataFrame([{"Security": r["ticker"],
                            "Target weight": percent(r.get("target_weight")),
                            "Estimated crossing": r["crossing_date"] or "Not reached in horizon",
@@ -155,7 +204,7 @@ def render_fresh_preview(p):
         h = p["history_coverage"]
         st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
     with st.expander("Security target-crossing estimates", expanded=True):
-        render_crossings(f)
+        render_crossings(f, "fresh_security_crossings_sort")
 
 
 def render_pending(row, now):
@@ -208,6 +257,14 @@ def render_partial_security_reviews(events, publication_id):
         return
     st.markdown("#### Provisional security review estimates")
     st.caption("Available from captured entries until the first complete basket assessment. One-share, fully costed security-only estimates; complete basket results will supersede them.")
+    sort_by = st.selectbox(
+        "Sort provisional security estimates",
+        REVIEW_SORT_OPTIONS,
+        key=f"partial_security_crossings_sort_{publication_id}",
+        help=("Probability is sorted numerically, not as formatted text. "
+              "Missing probabilities and undated estimates remain last."),
+    )
+    estimates = sort_security_estimates(list(latest.values()), sort_by)
     st.table(pd.DataFrame([{
         "Security": payload["ticker"],
         "Entry price": f"₹{payload['entry_price_inr']:,.2f}",
@@ -216,8 +273,8 @@ def render_partial_security_reviews(events, publication_id):
         "Estimated target crossing": payload.get("estimated_crossing_date") or "Not reached in horizon",
         "Review date": payload.get("review_date") or "N/A",
         "Review + 1": payload.get("review_followup_date") or "N/A",
-        "Probability": percent(payload.get("crossing_probability")),
-    } for payload in sorted(latest.values(), key=lambda item: item["ticker"])]))
+        "Probability by date": percent(payload.get("crossing_probability")),
+    } for payload in estimates]))
     st.caption("Research estimates—not sell dates or recommendations. Fixed costs are conservative at one share; results may change when final basket quantities are known.")
 
 
@@ -340,7 +397,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
                            file_name=f"model-exit-comparison-P{baseline['portfolio_version']:03d}.json", mime="application/json")
     with st.expander("Review-date evidence and assumptions"):
         forecast = p["forecast"]
-        render_crossings(forecast)
+        render_crossings(forecast, f"assessment_security_crossings_sort_{bid}")
         st.write("Forecast status: " + forecast["status"].replace("_", " ").lower())
         if forecast.get("curve"):
             curve = pd.DataFrame(forecast["curve"])
