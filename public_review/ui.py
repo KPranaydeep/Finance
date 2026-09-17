@@ -71,19 +71,21 @@ def render_crossings(forecast):
                f"Forecasting begins only after {observation_sessions} complete post-entry observation session"
                f"{'s' if observation_sessions != 1 else ''}; entry sessions are excluded. "
                "This does not delay daily monitoring or authorize a trade. A probability threshold is not statistical confidence or a guaranteed exit date.")
-    expected = forecast.get("expected_security_crossing")
-    horizon_probability = forecast.get("any_security_crossing_probability")
-    st.info(
-        "Probability-weighted expected review session: "
-        + (expected or "not reached within the forecast horizon")
-        + " · Probability that at least one security crosses within the horizon: "
-        + percent(horizon_probability)
-    )
-    st.caption(
-        "Calculated from each joint simulation path's first security crossing, conditional on a crossing within the horizon. "
-        "This preserves cross-security dependence and avoids double-counting overlapping ticker probabilities."
-    )
+    weighted = forecast.get("allocation_weighted_review")
+    if weighted:
+        st.info(
+            "Allocation-weighted planning review: " + weighted["review_date"]
+            + " · Follow-up: " + (weighted.get("review_followup_date") or "N/A")
+            + " · Contributing target weight: "
+            + percent(weighted.get("contributing_target_weight"))
+        )
+        st.caption(
+            "Calculated once as Σ(security review date × probability by date × published target weight) "
+            "÷ Σ(probability by date × published target weight), using only non-zero dated crossings. "
+            "The result is mapped to the nearest valid consecutive two-day market window."
+        )
     st.table(pd.DataFrame([{"Security": r["ticker"],
+                           "Target weight": percent(r.get("target_weight")),
                            "Estimated crossing": r["crossing_date"] or "Not reached in horizon",
                            "Review date": r.get("review_date") or "N/A",
                            "Review + 1": r.get("review_followup_date") or "N/A",
@@ -105,7 +107,7 @@ def render_fresh_preview(p):
     st.session_state[key] = date
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     due = bool(d.get("reasons")) or bool(date and date <= today)
-    metric_label = ("Probability-weighted planning review" if p.get("planning_estimate")
+    metric_label = ("Allocation-weighted planning review" if p.get("planning_estimate")
                     else "Latest suggested review")
     st.metric(metric_label, "Review now" if due else (date or "Next session risk check"))
     followup = f.get("next_common_review_session")
@@ -209,6 +211,7 @@ def render_partial_security_reviews(events, publication_id):
     st.table(pd.DataFrame([{
         "Security": payload["ticker"],
         "Entry price": f"₹{payload['entry_price_inr']:,.2f}",
+        "Target weight": percent(payload.get("target_weight")),
         "Data through": payload["as_of"],
         "Estimated target crossing": payload.get("estimated_crossing_date") or "Not reached in horizon",
         "Review date": payload.get("review_date") or "N/A",

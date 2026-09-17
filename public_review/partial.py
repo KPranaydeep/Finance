@@ -93,6 +93,7 @@ def estimate_captured_security(publication, entry, policy, now):
                "estimated_crossing_date": crossing["crossing_date"],
                "review_date": crossing.get("review_date"),
                "review_followup_date": crossing.get("review_followup_date"),
+               "target_weight": float(publication["weights"].get(ticker, 0.)),
                "crossing_probability": crossing["probability"],
                "horizon_probability": crossing["horizon_probability"],
                "target_xirr": policy["target_xirr"],

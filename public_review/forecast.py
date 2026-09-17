@@ -3,16 +3,15 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
-METHOD = "per-security-entry-first-passage-gap-safe-v5"
-TIMING_MODEL = "joint-first-passage-consecutive-review-window-v2"
+METHOD = "allocation-probability-weighted-review-gap-safe-v6"
+TIMING_MODEL = "allocation-weighted-consecutive-review-window-v3"
 
 
 def paired_review_window(candidate, verified_sessions):
     """Return review and literal next-day sessions, both exchange-verified.
 
-    Prefer a pair ending no later than the model candidate so an operational
-    review is never delayed solely by a weekend or holiday. If the candidate
-    is the first available session, use the first valid pair after it.
+    Select the nearest valid pair; ties prefer the earlier review so an
+    operational check is not delayed solely by a weekend or holiday.
     """
     from datetime import date, timedelta
     sessions = sorted(set(verified_sessions))
@@ -20,11 +19,53 @@ def paired_review_window(candidate, verified_sessions):
     pairs = [(day, (date.fromisoformat(day) + timedelta(days=1)).isoformat())
              for day in sessions
              if (date.fromisoformat(day) + timedelta(days=1)).isoformat() in available]
-    earlier = [pair for pair in pairs if pair[0] <= candidate]
-    if earlier:
-        return earlier[-1]
-    later = [pair for pair in pairs if pair[0] > candidate]
-    return later[0] if later else (candidate, None)
+    if not pairs:
+        return candidate, None
+    origin = date.fromisoformat(candidate).toordinal()
+    return min(pairs, key=lambda pair: (
+        abs(date.fromisoformat(pair[0]).toordinal() - origin),
+        pair[0] > candidate,
+    ))
+
+
+def allocation_weighted_review(security_crossings, target_weights,
+                               verified_sessions):
+    """Target-weight and probability weighted portfolio planning date."""
+    from datetime import date
+    contributors = []
+    for row in security_crossings:
+        crossing_date = row.get("crossing_date")
+        review_date = row.get("review_date") or crossing_date
+        probability = row.get("probability")
+        target_weight = float(target_weights.get(row["ticker"], 0.))
+        if not review_date or probability is None or probability <= 0 or target_weight <= 0:
+            continue
+        mass = float(probability) * target_weight
+        contributors.append({
+            "ticker": row["ticker"], "crossing_date": crossing_date,
+            "security_review_date": review_date,
+            "probability": float(probability), "target_weight": target_weight,
+            "probability_weighted_target_weight": mass,
+        })
+    denominator = sum(row["probability_weighted_target_weight"]
+                      for row in contributors)
+    if denominator <= 0:
+        return None
+    weighted_ordinal = round(sum(
+        date.fromisoformat(row["security_review_date"]).toordinal()
+        * row["probability_weighted_target_weight"]
+        for row in contributors) / denominator)
+    raw_date = date.fromordinal(weighted_ordinal).isoformat()
+    review_date, followup = paired_review_window(raw_date, verified_sessions)
+    return {
+        "raw_weighted_date": raw_date,
+        "review_date": review_date,
+        "review_followup_date": followup,
+        "contributing_target_weight": sum(row["target_weight"]
+                                          for row in contributors),
+        "probability_weighted_mass": denominator,
+        "contributors": contributors,
+    }
 
 
 def paths(returns, days, count, block, seed):
@@ -126,6 +167,8 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
         )
         expected_hit_index = int(np.rint(first_hit_indices.mean()))
         expected_security_crossing = future_dates[expected_hit_index]
+    target_weight_map = {ticker: float(baseline["weights"].get(ticker, 0.))
+                         for ticker in tickers}
     security_crossings = []
     for j, ticker in enumerate(tickers):
         hits = np.flatnonzero(security_probability[:, j] >= policy["crossing_probability"])
@@ -139,6 +182,7 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "ticker": ticker, "crossing_date": crossing_date,
             "review_date": review_date,
             "review_followup_date": review_followup,
+            "target_weight": target_weight_map[ticker],
             "probability": float(security_probability[index, j]) if index is not None else None,
             "horizon_probability": float(security_probability[-1, j])})
     earliest_security = min((r["crossing_date"] for r in security_crossings if r["crossing_date"]), default=None)
@@ -160,12 +204,19 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     # Review one session before the first probability-limit breach, never before
     # tomorrow. No crossing -> bounded monitoring horizon, not "never".
     offset = max(0, int(hit[0]) - 1) if len(hit) else len(future_dates) - 1
-    candidate = future_dates[offset]
-    if expected_security_crossing:
-        candidate = min(candidate, expected_security_crossing)
-    model_candidate = candidate
-    candidate, followup_session = paired_review_window(
-        model_candidate, all_future_dates)
+    risk_fallback = future_dates[offset]
+    weighted_review = allocation_weighted_review(
+        security_crossings, target_weight_map, all_future_dates)
+    model_candidate = (weighted_review["raw_weighted_date"]
+                       if weighted_review else risk_fallback)
+    if weighted_review:
+        candidate = weighted_review["review_date"]
+        followup_session = weighted_review["review_followup_date"]
+        planning_basis = "ALLOCATION_WEIGHT_X_CROSSING_PROBABILITY"
+    else:
+        candidate, followup_session = paired_review_window(
+            risk_fallback, all_future_dates)
+        planning_basis = "RISK_REVIEW_FALLBACK_NO_TARGET_CROSSINGS"
     approved = bool(validation and validation.get("passed") and
                     validation.get("policy_hash") == digest(policy) and
                     validation.get("tickers") == tickers and validation.get("method") == METHOD)
@@ -175,6 +226,8 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "unadjusted_research_candidate": model_candidate,
             "review_session": candidate,
             "next_common_review_session": followup_session,
+            "planning_date_basis": planning_basis,
+            "allocation_weighted_review": weighted_review,
             "earliest_security_crossing": earliest_security,
             "expected_security_crossing": expected_security_crossing,
             "any_security_crossing_probability": any_security_crossing_probability,
