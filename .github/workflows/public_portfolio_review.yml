@@ -2,11 +2,17 @@ name: Public portfolio model review
 
 on:
   schedule:
+    # Pre-market planning checks: 08:45 IST for NSE, then 30 minutes before
+    # the US regular open in daylight/standard time (18:30/19:30 IST).
+    - cron: "15 3 * * 1-5"
+    - cron: "0 13,14 * * 1-5"
     # Entry checks: NSE open + 60m, then NYSE open + 60m in daylight/standard time.
     - cron: "45 4 * * 1-5"
     - cron: "30 14,15 * * 1-5"
-    # Completed-session checks: exchange close + the configured 30m data buffer.
-    - cron: "30 10,20,21 * * 1-5"
+    # NSE close + the configured 30m data buffer (16:00 IST). The completed
+    # US session is processed by the next 08:45 IST pre-market check, avoiding
+    # all scheduled work during the owner's 22:00-04:00 IST sleep window.
+    - cron: "30 10 * * 1-5"
     # Preserve a daily heartbeat on weekends and holidays.
     - cron: "45 12 * * *"
   workflow_dispatch:
