@@ -3147,7 +3147,21 @@ def run_portfolio_analysis_multi(
     buffer_days=0,
     redundancy_corr_threshold=0.80,
 ):
-    ...
+    ticker_currency_pairs = tuple(
+        sorted(
+            (str(row["Yahoo Ticker"]), _normalize_currency_code(row["Currency"]))
+            for _, row in current_alloc.iterrows()
+            if str(row.get("Yahoo Ticker", "")).strip()
+        )
+    )
+    log_returns, meta = get_daily_log_returns(
+        tuple(symbols),
+        drop_bottom_pct=drop_bottom_pct,
+        buffer_days=buffer_days,
+        ticker_currency_pairs=ticker_currency_pairs,
+        redundancy_corr_threshold=redundancy_corr_threshold,
+    )
+
     if target_volatility is not None:
         optimal_weights = optimize_portfolio_target_volatility(
             log_returns, target_volatility=target_volatility
@@ -3164,7 +3178,7 @@ def run_portfolio_analysis_multi(
     if optimal_weights is None:
         return None, log_returns, None, None, meta
 
-    # >>> ADD THIS LINE <<<
+    # Enforce minimum 1% weight on any non-zero position, then renormalize
     optimal_weights = enforce_min_weight_postprocess(optimal_weights, min_weight=0.01)
 
     current_stats, optimal_stats = portfolio_stats_comparison(
