@@ -65,3 +65,38 @@ class UiTests(unittest.TestCase):
         app.selectbox[0].set_value(1).run()
         self.assertFalse(app.exception)
         self.assertEqual(len(app.metric),4)
+
+    def test_security_estimates_default_to_numeric_probability_order(self):
+        from public_review.ui import sort_security_estimates
+        rows = [
+            {"ticker": "LOW.NS", "probability": .09,
+             "review_date": "2026-09-16", "target_weight": .40},
+            {"ticker": "HIGH-LATE.NS", "probability": .24,
+             "review_date": "2026-09-18", "target_weight": .10},
+            {"ticker": "HIGH-EARLY.NS", "probability": .24,
+             "review_date": "2026-09-17", "target_weight": .05},
+            {"ticker": "UNKNOWN.NS", "probability": None,
+             "review_date": None, "target_weight": .45},
+        ]
+        ordered = sort_security_estimates(
+            rows, "Probability by date (high to low)")
+        self.assertEqual(
+            [row["ticker"] for row in ordered],
+            ["HIGH-EARLY.NS", "HIGH-LATE.NS", "LOW.NS", "UNKNOWN.NS"],
+        )
+
+    def test_security_estimates_can_sort_by_review_date(self):
+        from public_review.ui import sort_security_estimates
+        rows = [
+            {"ticker": "LATE.NS", "crossing_probability": .80,
+             "review_date": "2026-09-18"},
+            {"ticker": "EARLY.NS", "crossing_probability": .20,
+             "review_date": "2026-09-16"},
+            {"ticker": "UNDATED.NS", "crossing_probability": None},
+        ]
+        ordered = sort_security_estimates(
+            rows, "Review date (earliest first)")
+        self.assertEqual(
+            [row["ticker"] for row in ordered],
+            ["EARLY.NS", "LATE.NS", "UNDATED.NS"],
+        )
