@@ -3936,7 +3936,7 @@ with st.sidebar:
 
     st.divider()
     st.header("Analysis inputs")
-    days_to_flip = st.number_input("Expected days to flip", min_value=1, value=13, step=1)
+    days_to_flip = st.number_input("Expected days to flip", min_value=1, value=1, step=1)
     max_dd_pct = st.number_input(
         "Max drawdown input (%)",
         min_value=0.00,
