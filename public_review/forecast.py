@@ -130,8 +130,15 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     for j, ticker in enumerate(tickers):
         hits = np.flatnonzero(security_probability[:, j] >= policy["crossing_probability"])
         index = int(hits[0]) if len(hits) else None
+        crossing_date = future_dates[index] if index is not None else None
+        review_date, review_followup = (
+            paired_review_window(crossing_date, all_future_dates)
+            if crossing_date else (None, None)
+        )
         security_crossings.append({
-            "ticker": ticker, "crossing_date": future_dates[index] if index is not None else None,
+            "ticker": ticker, "crossing_date": crossing_date,
+            "review_date": review_date,
+            "review_followup_date": review_followup,
             "probability": float(security_probability[index, j]) if index is not None else None,
             "horizon_probability": float(security_probability[-1, j])})
     earliest_security = min((r["crossing_date"] for r in security_crossings if r["crossing_date"]), default=None)

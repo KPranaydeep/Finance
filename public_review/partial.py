@@ -10,7 +10,7 @@ from .costs import charges
 from .forecast import estimate
 
 
-METHOD = "captured-security-one-share-net-xirr-v1"
+METHOD = "captured-security-one-share-net-xirr-v2"
 
 
 def _one_share_baseline(publication, entry, policy):
@@ -91,6 +91,8 @@ def estimate_captured_security(publication, entry, policy, now):
                "entry_at": entry.get("requested_entry_at"), "entry_quote_at": entry.get("quote_at"),
                "entry_price_inr": float(entry["price_inr"]), "as_of": as_of,
                "estimated_crossing_date": crossing["crossing_date"],
+               "review_date": crossing.get("review_date"),
+               "review_followup_date": crossing.get("review_followup_date"),
                "crossing_probability": crossing["probability"],
                "horizon_probability": crossing["horizon_probability"],
                "target_xirr": policy["target_xirr"],

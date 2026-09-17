@@ -85,6 +85,8 @@ def render_crossings(forecast):
     )
     st.table(pd.DataFrame([{"Security": r["ticker"],
                            "Estimated crossing": r["crossing_date"] or "Not reached in horizon",
+                           "Review date": r.get("review_date") or "N/A",
+                           "Review + 1": r.get("review_followup_date") or "N/A",
                            "Probability by date": percent(r["probability"])} for r in reached]))
     omitted = len(rows) - len(reached)
     if omitted:
@@ -209,6 +211,8 @@ def render_partial_security_reviews(events, publication_id):
         "Entry price": f"₹{payload['entry_price_inr']:,.2f}",
         "Data through": payload["as_of"],
         "Estimated target crossing": payload.get("estimated_crossing_date") or "Not reached in horizon",
+        "Review date": payload.get("review_date") or "N/A",
+        "Review + 1": payload.get("review_followup_date") or "N/A",
         "Probability": percent(payload.get("crossing_probability")),
     } for payload in sorted(latest.values(), key=lambda item: item["ticker"])]))
     st.caption("Research estimates—not sell dates or recommendations. Fixed costs are conservative at one share; results may change when final basket quantities are known.")
