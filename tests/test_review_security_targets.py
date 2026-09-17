@@ -28,6 +28,8 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(f['earliest_security_crossing'], '2026-05-05')
         self.assertEqual(f['trigger_securities'], ['A.NS'])
         self.assertEqual(f['next_review'], '2026-05-05')
+        self.assertEqual(f['security_crossings'][0]['review_date'], '2026-05-05')
+        self.assertEqual(f['security_crossings'][0]['review_followup_date'], '2026-05-06')
         self.assertEqual(f['curve'][0]['profit_crossing_probability'], 0)
 
     def test_not_one_lucky_path_or_union_of_weak_security_chances(self):

@@ -42,6 +42,9 @@ class PartialSecurityReviewTests(unittest.TestCase):
         self.assertEqual(result['notional_basis'],
                          'ONE_SHARE_WITH_MODELED_ENTRY_EXIT_COSTS_AND_TAX')
         self.assertEqual(result['ticker'], 'A.NS')
+        if result['estimated_crossing_date']:
+            self.assertIsNotNone(result['review_date'])
+            self.assertIsNotNone(result['review_followup_date'])
         self.assertIn('evidence_hash', result)
 
     def test_workflow_records_partial_forecast_without_freezing_basket(self):
@@ -58,9 +61,10 @@ class PartialSecurityReviewTests(unittest.TestCase):
         quote = {**schedule['A.NS'], 'price_inr':100., 'native_price':100.,
                  'fx_to_inr':1., 'quote_at':'2026-09-11T04:52:00+00:00', 'source':'test'}
         partial = {'status':'PROVISIONAL_RESEARCH', 'method':METHOD,
-                   'publication_id':'PUB-PARTIAL', 'ticker':'A.NS', 'as_of':'2026-09-11',
-                   'entry_price_inr':100., 'estimated_crossing_date':'2026-09-21',
-                   'crossing_probability':.2, 'horizon_probability':.3, 'target_xirr':1.,
+                    'publication_id':'PUB-PARTIAL', 'ticker':'A.NS', 'as_of':'2026-09-11',
+                    'entry_price_inr':100., 'estimated_crossing_date':'2026-09-21',
+                    'review_date':'2026-09-21', 'review_followup_date':'2026-09-22',
+                    'crossing_probability':.2, 'horizon_probability':.3, 'target_xirr':1.,
                    'notional_basis':'ONE_SHARE_WITH_MODELED_ENTRY_EXIT_COSTS_AND_TAX',
                    'checked_at':'2026-09-11T12:00:00+00:00', 'evidence_hash':'x'}
         with patch('public_review.service.publications', return_value=[publication]), \
@@ -79,6 +83,7 @@ class PartialSecurityReviewTests(unittest.TestCase):
             render_partial_security_reviews([{'kind':'SECURITY_REVIEW_PREVIEW','payload':{
                 'publication_id':'PUB-PARTIAL','ticker':'A.NS','entry_price_inr':100.,
                 'as_of':'2026-09-11','estimated_crossing_date':'2026-09-21',
+                'review_date':'2026-09-21','review_followup_date':'2026-09-22',
                 'crossing_probability':.2}}], 'PUB-PARTIAL')
         at = AppTest.from_function(app, default_timeout=20).run()
         self.assertFalse(at.exception)
