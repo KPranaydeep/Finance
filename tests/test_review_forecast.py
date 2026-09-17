@@ -1,12 +1,34 @@
 import unittest
 import numpy as np
 import pandas as pd
-from public_review.forecast import paths, estimate, validate, METHOD
+from public_review.forecast import (paths, estimate, validate, METHOD,
+                                    allocation_weighted_review)
 from public_review.core import digest
 from review_fixtures import policy, baseline
 
 
 class ForecastTests(unittest.TestCase):
+    def test_allocation_probability_weighted_review_formula(self):
+        crossings=[
+            {'ticker':'A.NS','crossing_date':'2026-09-18','review_date':'2026-09-18','probability':.20},
+            {'ticker':'B.NS','crossing_date':'2026-09-22','review_date':'2026-09-22','probability':.40},
+            {'ticker':'C.NS','crossing_date':None,'probability':None},
+        ]
+        result=allocation_weighted_review(
+            crossings, {'A.NS':.75,'B.NS':.25,'C.NS':.10},
+            ['2026-09-18','2026-09-21','2026-09-22','2026-09-23'])
+        self.assertEqual(result['raw_weighted_date'],'2026-09-20')
+        self.assertEqual(result['review_date'],'2026-09-21')
+        self.assertEqual(result['review_followup_date'],'2026-09-22')
+        self.assertAlmostEqual(result['probability_weighted_mass'],.25)
+        self.assertAlmostEqual(result['contributing_target_weight'],1.)
+
+    def test_allocation_weighted_review_ignores_zero_and_missing_values(self):
+        self.assertIsNone(allocation_weighted_review(
+            [{'ticker':'A.NS','crossing_date':None,'probability':None},
+             {'ticker':'B.NS','crossing_date':'2026-09-22','probability':0.}],
+            {'A.NS':.5,'B.NS':.5}, ['2026-09-22','2026-09-23']))
+
     def test_joint_sampling_preserves_relationship(self):
         a=np.linspace(-.05,.05,252); matrix=np.column_stack([a,2*a])
         simulated=paths(matrix,20,100,5,123)
