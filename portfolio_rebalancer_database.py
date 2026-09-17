@@ -2993,6 +2993,26 @@ def weight_bounds(num_assets):
     cap = max(MAX_WEIGHT_PER_ASSET, 1.0 / num_assets) if num_assets else 1.0
     return tuple((0.0, min(cap, 1.0)) for _ in range(num_assets))
 
+def enforce_min_weight_postprocess(weights, min_weight=0.01):
+    """Set tiny weights to zero and renormalize the rest.
+
+    This does NOT change the optimization problem itself; it only cleans up
+    the final solution for reporting and execution.
+    """
+    w = np.asarray(weights, dtype=float).copy()
+
+    # Zero out micro-weights
+    w[np.abs(w) < min_weight] = 0.0
+
+    total = w.sum()
+    if total <= 0:
+        # If everything got zeroed, just return the original weights unchanged
+        # (or you could fall back to the raw optimizer solution).
+        return weights
+
+    # Renormalize
+    w /= total
+    return w
 
 def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1):
     from scipy.optimize import minimize
@@ -3127,21 +3147,7 @@ def run_portfolio_analysis_multi(
     buffer_days=0,
     redundancy_corr_threshold=0.80,
 ):
-    ticker_currency_pairs = tuple(
-        sorted(
-            (str(row["Yahoo Ticker"]), _normalize_currency_code(row["Currency"]))
-            for _, row in current_alloc.iterrows()
-            if str(row.get("Yahoo Ticker", "")).strip()
-        )
-    )
-    log_returns, meta = get_daily_log_returns(
-        tuple(symbols),
-        drop_bottom_pct=drop_bottom_pct,
-        buffer_days=buffer_days,
-        ticker_currency_pairs=ticker_currency_pairs,
-        redundancy_corr_threshold=redundancy_corr_threshold,
-    )
-
+    ...
     if target_volatility is not None:
         optimal_weights = optimize_portfolio_target_volatility(
             log_returns, target_volatility=target_volatility
@@ -3157,6 +3163,9 @@ def run_portfolio_analysis_multi(
         optimal_weights = optimize_max_sharpe_ratio(log_returns)
     if optimal_weights is None:
         return None, log_returns, None, None, meta
+
+    # >>> ADD THIS LINE <<<
+    optimal_weights = enforce_min_weight_postprocess(optimal_weights, min_weight=0.01)
 
     current_stats, optimal_stats = portfolio_stats_comparison(
         current_alloc, log_returns, optimal_weights
