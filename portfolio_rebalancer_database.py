@@ -3222,14 +3222,19 @@ def lumpsum_allocation_plan(current_alloc, optimal_weights, log_returns, prices,
     invested_amounts=quantities*price_inr
 
     plan = pd.DataFrame({
-        "Symbol": alloc_df.loc[common_tickers, "Symbol"].values,
-        "Yahoo Ticker": common_tickers,
-        "Optimal Weight": aligned_weights,
-        "Target Amount INR": target_amounts,
-        "Latest Price INR": price_inr,
-        "Suggested Quantity": quantities,
-        "Estimated Investment INR": invested_amounts,
-    }).sort_values("Optimal Weight", ascending=False).reset_index(drop=True)
+    "Symbol": alloc_df.loc[common_tickers, "Symbol"].values,
+    "Yahoo Ticker": common_tickers,
+    "Optimal Weight": aligned_weights,
+    "Target Amount INR": target_amounts,
+    "Latest Price INR": price_inr,
+    "Suggested Quantity": quantities,
+    "Estimated Investment INR": invested_amounts,
+    })
+    
+    # Keep only rows with non-zero optimal weight
+    plan = plan[plan["Optimal Weight"] > 0].sort_values(
+        "Optimal Weight", ascending=False
+    ).reset_index(drop=True)
 
     unallocated_cash = float(allocation_result["residual_cash_inr"])
     return plan, unallocated_cash, missing_prices, missing_alloc
