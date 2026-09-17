@@ -4642,6 +4642,29 @@ if run_btn:
         if optimal_weights is None:
             st.error("Portfolio optimization did not return a usable allocation.")
             st.stop()
+        # Show optimal portfolio weights table
+        st.subheader("Optimal Portfolio (Weights)")
+        optimal_portfolio_df = pd.DataFrame({
+            "Ticker": log_returns.columns,
+            "Optimal Weight": optimal_weights,
+        })
+        optimal_portfolio_df = optimal_portfolio_df[optimal_portfolio_df["Optimal Weight"] > 0].sort_values(
+            "Optimal Weight", ascending=False
+        ).reset_index(drop=True)
+        
+        st.dataframe(
+            optimal_portfolio_df.style.format({"Optimal Weight": "{:.2%}"}),
+            width="stretch",
+            hide_index=True,
+        )
+        
+        st.download_button(
+            "Download optimal portfolio CSV",
+            data=optimal_portfolio_df.to_csv(index=False).encode("utf-8"),
+            file_name="optimal_portfolio_weights.csv",
+            mime="text/csv",
+            width="stretch",
+        )
 
         if not meta["dropped_df"].empty:
             st.subheader("Dropped Tickers")
