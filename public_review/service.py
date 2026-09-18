@@ -26,7 +26,7 @@ SAFE_ERRORS = {
 }
 
 
-def price_history_evidence(histories, as_of):
+def price_history_evidence(histories, as_of=None):
     """Return a compact, serialisable evidence summary for test/UI consumers."""
     return {ticker: {"as_of": as_of, "rows": int(len(frame)),
                      "has_close": "Close" in frame.columns}
@@ -255,7 +255,14 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             conn.rollback()
             # Persist only allowlisted safe codes; never DB URLs, provider bodies
             # or exception traces (may contain credentials).
-            code = str(exc) if isinstance(exc, ValueError) and str(exc) in SAFE_ERRORS else "MONITOR_CHECK_FAILED"
+            if isinstance(exc, ValueError) and str(exc) in SAFE_ERRORS:
+                code = str(exc)
+            elif isinstance(exc, ValueError):
+                # Keep failures sanitised but retain the pipeline stage so
+                # retries/debugging can distinguish calendar vs assessment.
+                code = f"{str(stage).upper()}_VALUE_ERROR"
+            else:
+                code = "MONITOR_CHECK_FAILED"
             if (code == "STALE_OR_INCOMPLETE_MARKET_HISTORY" and
                     baseline is not None and stage in {"market_history", "assessment"}):
                 try:
