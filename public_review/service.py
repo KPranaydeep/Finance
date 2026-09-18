@@ -26,6 +26,13 @@ SAFE_ERRORS = {
 }
 
 
+def price_history_evidence(histories, as_of):
+    """Return a compact, serialisable evidence summary for test/UI consumers."""
+    return {ticker: {"as_of": as_of, "rows": int(len(frame)),
+                     "has_close": "Close" in frame.columns}
+            for ticker, frame in histories.items()}
+
+
 def publications(conn, basket):
     # Read existing ledger only, without calling schema-mutating trust loaders.
     rows = conn.execute("""SELECT v.* FROM public_portfolio_versions v
@@ -305,7 +312,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             conn.commit()
             notify_safely(conn, basket, baseline_id, payload, now)
             results.append({"publication_id": publication["publication_id"],
-                            "status": "CANNOT_ASSESS", "reason": code, "stage": stage})
+                            "status": "CANNOT_ASSESS", "reason": code, "stage": stage,
+                            "diagnostic_code": code})
     return {"checked": len(selected), "failed": failures, "waiting": waiting, "results": results}
 
 
