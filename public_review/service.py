@@ -27,10 +27,15 @@ SAFE_ERRORS = {
 
 
 def price_history_evidence(histories, as_of=None):
-    """Return a compact, serialisable evidence summary for test/UI consumers."""
-    return {ticker: {"as_of": as_of, "rows": int(len(frame)),
-                     "has_close": "Close" in frame.columns}
-            for ticker, frame in histories.items()}
+    """Return date-keyed closes with NaN normalised to JSON null."""
+    result = {}
+    for ticker, frame in histories.items():
+        close = frame["Close"] if "Close" in frame.columns else pd.Series(dtype=float)
+        result[ticker] = {
+            str(index)[:10]: (None if pd.isna(value) else float(value))
+            for index, value in close.items()
+        }
+    return result
 
 
 def publications(conn, basket):
@@ -318,9 +323,10 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                          "FAILURE", baseline_id, payload)
             conn.commit()
             notify_safely(conn, basket, baseline_id, payload, now)
+            diagnostic = code if code != "MONITOR_CHECK_FAILED" else f"{str(stage).upper()}_VALUE_ERROR"
             results.append({"publication_id": publication["publication_id"],
-                            "status": "CANNOT_ASSESS", "reason": code, "stage": stage,
-                            "diagnostic_code": code})
+                            "status": "CANNOT_ASSESS", "reason": "MONITOR_CHECK_FAILED",
+                            "stage": stage, "diagnostic_code": diagnostic})
     return {"checked": len(selected), "failed": failures, "waiting": waiting, "results": results}
 
 
