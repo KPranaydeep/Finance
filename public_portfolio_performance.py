@@ -323,7 +323,10 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
             "publication_date": entry_date,
             "entry_date": entry_date,
             "last_allocation_date": last_date,
-            "exit_date": None if ticker in current_tickers else last_date,
+            # A removed name's exit is the publication that first reports it
+            # absent (the current publication), not its last stored position
+            # row; position tables may omit zero-weight/removal snapshots.
+            "exit_date": None if ticker in current_tickers else publication_date,
             "status": "active" if ticker in current_tickers else "removed",
             "publication_id": current["publication_id"] if ticker in current_tickers else None,
             "portfolio_version": f"P{int(current['portfolio_version']):03d}" if ticker in current_tickers else None,
