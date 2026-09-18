@@ -263,6 +263,7 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
     """Return the latest available unadjusted closes without blocking the page on failures."""
     if not tickers:
         return {}
+
     try:
         from public_price_currency import download_inr
         close, currencies = download_inr(list(tickers), period="7d", auto_adjust=False)
@@ -282,6 +283,39 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
     except Exception:
         LOGGER.exception("Latest public allocation prices could not be loaded")
         return {}
+
+
+def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """Build a versioned, page-consumable feed for recommendation cards."""
+    published_at = current.get("published_at")
+    publication_date = (
+        published_at.astimezone(IST).date().isoformat()
+        if hasattr(published_at, "astimezone")
+        else str(published_at)[:10]
+    )
+    securities = [
+        {
+            "ticker": str(row["ticker"]),
+            "target_weight": float(row["target_weight"]),
+            "publication_date": publication_date,
+            "publication_id": current["publication_id"],
+            "portfolio_version": f"P{int(current['portfolio_version']):03d}",
+        }
+        for row in record.get("constituents", [])
+        if str(row.get("ticker", "")).strip()
+    ]
+    return {
+        "schema": "public-portfolio-card-feed",
+        "schema_version": 1,
+        "generated_at": datetime.now(IST).isoformat(),
+        "source": "public_portfolio_performance.py",
+        "basket_id": current["basket_id"],
+        "publication_id": current["publication_id"],
+        "portfolio_version": f"P{int(current['portfolio_version']):03d}",
+        "publication_date": publication_date,
+        "data_as_of": current.get("as_of"),
+        "securities": securities,
+    }
 
 
 def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str,
@@ -823,6 +857,16 @@ if security_findings:
     st.error("Evidence export is unavailable because the public-data inspection did not pass.")
     st.stop()
 evidence=json.dumps(evidence_state,sort_keys=True,indent=2,default=str).encode()
+card_feed=build_card_feed(record,current)
+card_feed_bytes=json.dumps(card_feed,sort_keys=True,indent=2,default=str).encode()
+st.download_button(
+    "Download card-generation feed",
+    card_feed_bytes,
+    f"{DEFAULT_BASKET_ID.lower()}-card-feed.json",
+    "application/json",
+    width="stretch",
+    help="Stable versioned feed for generating one recommendation card per security.",
+)
 is_simulation=evidence_state["evidence_metadata"]["contains_backfilled_nav"]
 export_label="Download simulation evidence" if is_simulation else "Download evidence bundle"
 export_suffix="simulation-evidence" if is_simulation else "evidence"
