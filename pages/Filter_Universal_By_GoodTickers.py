@@ -1,6 +1,5 @@
 # pages/Filter_Universal_By_GoodTickers.py
 import io
-from pathlib import Path
 from typing import List
 
 import pandas as pd
@@ -29,13 +28,6 @@ def normalize_ticker(s: str) -> str:
     t = t.replace("\ufeff", "").replace("\u200b", "")
     return t.upper()
 
-@st.cache_data(show_spinner=False)
-def read_repo_universal(path: str = "universal_portfolio_backup.csv") -> pd.DataFrame:
-    p = Path(path)
-    if not p.exists():
-        return pd.DataFrame()
-    return pd.read_csv(p, dtype=str)
-
 def read_uploaded_csv(uploaded) -> pd.DataFrame:
     try:
         return pd.read_csv(uploaded, dtype=str)
@@ -48,25 +40,25 @@ def read_uploaded_csv(uploaded) -> pd.DataFrame:
 
 # UI: load universal CSV
 st.header("Step 1 — Source universal_portfolio_backup CSV")
-repo_df = read_repo_universal()
-use_repo = False
-uploaded_uni = None
-if not repo_df.empty:
-    st.success("Found universal_portfolio_backup.csv in the repo.")
-    st.write(f"Rows in repo universal file: {len(repo_df):,}")
-    use_repo = st.checkbox("Use the repository universal_portfolio_backup.csv", value=True)
-if not use_repo:
-    uploaded_uni = st.file_uploader("Or upload your universal_portfolio_backup CSV", type=["csv"], key="upload_uni")
-    if uploaded_uni:
-        repo_df = read_uploaded_csv(uploaded_uni)
-        st.write(f"Rows in uploaded universal file: {len(repo_df):,}")
+st.caption(
+    "Upload the private holdings file for this browser session only. "
+    "Do not commit holdings, quantities, average prices, or account exports to the public repository."
+)
+uploaded_uni = st.file_uploader(
+    "Upload your universal_portfolio_backup CSV",
+    type=["csv"],
+    key="upload_uni",
+)
+repo_df = read_uploaded_csv(uploaded_uni) if uploaded_uni else pd.DataFrame()
+if uploaded_uni:
+    st.write(f"Rows in uploaded universal file: {len(repo_df):,}")
 
 if repo_df.empty:
-    st.info("No universal portfolio CSV found yet. Upload or add universal_portfolio_backup.csv to the repo.")
+    st.info("Upload your private universal portfolio CSV to continue.")
     st.stop()
 
 st.markdown("Preview (first 20 rows):")
-st.dataframe(repo_df.head(20), use_container_width=True)
+st.dataframe(repo_df.head(20), width="stretch")
 
 # UI: load good tickers
 st.header("Step 2 — Provide good_tickers (from Probe)")
@@ -130,7 +122,7 @@ if filtered.empty:
     st.stop()
 
 st.markdown("Preview filtered rows (first 50):")
-st.dataframe(filtered.head(50), use_container_width=True)
+st.dataframe(filtered.head(50), width="stretch")
 
 # Allow download
 buf = io.StringIO()

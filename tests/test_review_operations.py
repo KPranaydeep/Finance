@@ -85,6 +85,18 @@ class OperationTests(unittest.TestCase):
                     ValueError,'INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS'):
                 load_policy(today=date(2026,9,9))
 
+    def test_minimum_net_return_is_validated(self):
+        from public_review.config import load_policy
+        for value in (-.001, 1.01, float('nan'), True):
+            with self.subTest(value=value):
+                fixture=policy()
+                fixture['minimum_net_return']=value
+                with patch('public_review.config.Path.read_text',
+                           return_value=json.dumps(fixture)):
+                    with self.assertRaisesRegex(
+                            ValueError,'INVALID_POLICY_MINIMUM_NET_RETURN'):
+                        load_policy(today=date(2026,9,9))
+
     def test_approved_but_stale_tariff_blocks(self):
         from public_review.config import load_policy
         with patch('public_review.config.Path.read_text',return_value=json.dumps(policy())):

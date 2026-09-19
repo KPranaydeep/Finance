@@ -1,7 +1,8 @@
 import unittest
 import math
 from copy import deepcopy
-from public_review.core import xirr, freeze, evaluate, decision, compare_exits, digest
+from public_review.core import (xirr, freeze, evaluate, decision, compare_exits,
+                                digest, clears_profit_review_gate)
 from public_review.costs import charges, tax_rate, sell_value
 from review_fixtures import policy, baseline
 
@@ -117,11 +118,39 @@ class ReviewCoreTests(unittest.TestCase):
         # Deliberately inconsistent input proves the explicit break-even guard
         # cannot be bypassed by an XIRR value alone.
         m["net_profit"]=-.01
+        m["net_total_return"]=-.000001
         for row in m["rows"]:
             row["net_profit"]=-.01
         d=decision(m,b,b["weights"],policy(),10000)
         self.assertNotIn("PROFIT_TAKING_REVIEW",d["reasons"])
         self.assertNotIn("SECURITY_TARGET_REVIEW",d["reasons"])
+
+    def test_profit_gate_requires_minimum_net_return_and_target_xirr(self):
+        p=policy()
+        self.assertFalse(clears_profit_review_gate(.0124, 2., p))
+        self.assertFalse(clears_profit_review_gate(.02, .99, p))
+        self.assertTrue(clears_profit_review_gate(.0125, 1., p))
+
+    def test_decision_applies_minimum_return_to_portfolio_and_securities(self):
+        b, p=baseline(), policy()
+        m=evaluate(b,{"A.NS":500,"B.NS":250},"2026-09-09",p)
+        m["net_profit"]=100.
+        m["net_total_return"]=.01
+        m["xirr"]=2.
+        for row in m["rows"]:
+            row["net_profit"]=round(row["outlay"] * .01, 2)
+            row["xirr"]=2.
+        d=decision(m,b,b["weights"],p,10000)
+        self.assertNotIn("PROFIT_TAKING_REVIEW",d["reasons"])
+        self.assertNotIn("SECURITY_TARGET_REVIEW",d["reasons"])
+
+        m["net_profit"]=125.
+        m["net_total_return"]=.0125
+        for row in m["rows"]:
+            row["net_profit"]=round(row["outlay"] * .0125, 2)
+        d=decision(m,b,b["weights"],p,10000)
+        self.assertIn("PROFIT_TAKING_REVIEW",d["reasons"])
+        self.assertIn("SECURITY_TARGET_REVIEW",d["reasons"])
 
     def test_no_rebalance_without_benefit_evidence(self):
         b=baseline(); m=evaluate(b,{"A.NS":100,"B.NS":50},"2026-09-09",policy())

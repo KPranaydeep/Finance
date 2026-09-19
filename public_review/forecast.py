@@ -3,8 +3,8 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
-METHOD = "allocation-probability-weighted-review-gap-safe-v6"
-TIMING_MODEL = "allocation-weighted-consecutive-review-window-v3"
+METHOD = "allocation-probability-weighted-review-net-floor-v7"
+TIMING_MODEL = "allocation-weighted-consecutive-review-net-floor-v4"
 
 
 def paired_review_window(candidate, verified_sessions):
@@ -153,8 +153,15 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
         x["net"] / (1 + policy["target_xirr"]) ** (
             (date.fromisoformat(x["date"]) - date.fromisoformat(r["entry_date"])).days / 365)
         for x in (dividends or []) if x["ticker"] == r["ticker"]) for r in lots])
-    security_target = (outlays - dividend_pv)[None, :] * np.power(
+    dividend_net = np.array([sum(
+        x["net"] for x in (dividends or []) if x["ticker"] == r["ticker"])
+        for r in lots])
+    security_xirr_target = (outlays - dividend_pv)[None, :] * np.power(
         1 + policy["target_xirr"], security_days / 365)
+    security_minimum_return_target = (
+        outlays * (1 + policy["minimum_net_return"]) - dividend_net)[None, :]
+    security_target = np.maximum(
+        security_xirr_target, security_minimum_return_target)
     security_profit = gross - fees - tax >= security_target[None, :, :]
     security_probability = np.maximum.accumulate(security_profit, axis=1).mean(axis=0)
     any_security_hit = security_profit.any(axis=2)
@@ -186,7 +193,11 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "probability": float(security_probability[index, j]) if index is not None else None,
             "horizon_probability": float(security_probability[-1, j])})
     earliest_security = min((r["crossing_date"] for r in security_crossings if r["crossing_date"]), default=None)
-    target = baseline["capital"] * np.power(1 + policy["target_xirr"], days / 365)
+    xirr_target = baseline["capital"] * np.power(
+        1 + policy["target_xirr"], days / 365)
+    minimum_return_target = baseline["capital"] * (
+        1 + policy["minimum_net_return"])
+    target = np.maximum(xirr_target, minimum_return_target)
     profit = net >= target
     running_peak = np.maximum.accumulate(np.maximum(net, peak), axis=1)
     risk = ((net / running_peak - 1 <= -policy["drawdown_limit"]) |
@@ -235,6 +246,8 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
             "expected_security_crossing_basis": "JOINT_PATH_FIRST_PASSAGE_CONDITIONAL_ON_CROSSING_WITHIN_HORIZON",
             "trigger_securities": [r["ticker"] for r in security_crossings if earliest_security and r["crossing_date"] == earliest_security],
             "security_crossings": security_crossings, "target_xirr": policy["target_xirr"],
+            "minimum_net_return": policy["minimum_net_return"],
+            "profit_review_rule": policy["profit_review_rule"],
             "crossing_probability_threshold": policy["crossing_probability"],
             "minimum_forecast_review_sessions": minimum_session,
             "never_crossed_fraction": float(1 - probability[-1]),
@@ -255,7 +268,7 @@ def validate(returns, baseline, prices, dates, policy):
     """
     from copy import deepcopy
     from datetime import date, timedelta
-    from .core import evaluate
+    from .core import evaluate, clears_profit_review_gate
     horizon, train = policy["validation_horizon"], policy["validation_train"]
     values = returns[[r["ticker"] for r in baseline["lots"]]]
     folds = []
@@ -286,8 +299,12 @@ def validate(returns, baseline, prices, dates, policy):
             m = evaluate(b, actual_prices, future_dates[i], policy)
             peak = max(peak, m["net_proceeds"])
             w = {r["ticker"]: r["gross"] / m["gross_value"] for r in m["rows"]}
-            if ((m["xirr"] is not None and m["xirr"] >= policy["target_xirr"]) or
-                any(r["xirr"] is not None and r["xirr"] >= policy["target_xirr"] for r in m["rows"]) or
+            portfolio_profit = clears_profit_review_gate(
+                m["net_total_return"], m["xirr"], policy)
+            security_profit = any(clears_profit_review_gate(
+                r["net_profit"] / r["outlay"], r["xirr"], policy)
+                for r in m["rows"])
+            if (portfolio_profit or security_profit or
                 m["net_proceeds"] / peak - 1 <= -policy["drawdown_limit"] or
                 max(w.values()) > policy["concentration_limit"] or
                 max(abs(w.get(t, 0) - b["weights"].get(t, 0)) for t in w) >= policy["drift_limit"]):

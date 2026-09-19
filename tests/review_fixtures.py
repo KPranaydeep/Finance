@@ -4,7 +4,7 @@ from public_review.core import freeze
 def policy():
     """Fresh, deterministic test data; never read the owner's production policy."""
     return {
-        "policy_version": "test-policy-v2",
+        "policy_version": "test-policy-v3",
         "policy_approved": True,
         "tax_profile": "resident_individual_regular_delivery",
         "tariff_verified_on": "2026-09-09",
@@ -20,7 +20,8 @@ def policy():
         "surcharge_rate": 0.,
         "slippage_bps": 10.,
         "target_xirr": 1.,
-        "profit_review_rule": "ROUND_TRIP_BREAK_EVEN_AND_TARGET_XIRR",
+        "minimum_net_return": .0125,
+        "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
         "drawdown_limit": .15,
         "concentration_limit": .50,
         "drift_limit": .05,

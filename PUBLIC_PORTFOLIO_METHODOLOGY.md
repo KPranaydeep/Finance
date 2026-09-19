@@ -22,6 +22,10 @@ These ranges describe statistical uncertainty conditional on the available histo
 
 Every new forecast records its publication, sample dates, method, horizon unit, target calendar date and reference NAV. Once NAV data reaches or passes expiry, evaluation uses the last available close on or before expiry and the original frozen reference NAV. An expiry on a market holiday can therefore be evaluated after the next NAV arrives. Legacy forecasts keep their original trading-observation evaluation rules and are excluded from the new outlook display. Calibration is restricted to the current publication's 28-day method after 20 completed forecasts. Daily forecast horizons overlap, so completed forecasts are not independent trials. Future publications are unknown at issuance; realizations follow the actual basket changes.
 
+## Profit-review gate
+
+A profit review is raised only when two independent conditions are satisfied after modeled entry charges, liquidation charges, slippage, taxes and applicable FX costs. First, total net proceeds plus credited net distributions must exceed the modeled outlay by at least the configured absolute minimum net return, currently 1.25%. Second, net annualized XIRR must meet the configured annualized target. The same dual gate applies to the whole model basket and to individual securities. This prevents a tiny rupee gain over a short holding period from qualifying solely because its annualized XIRR appears large. Crossing the gate requests a review; it does not submit or recommend an automatic sale.
+
 ## Time and data conventions
 
 Public display time is Asia/Kolkata. Database timestamps remain timezone-aware. `as_of` identifies the information cutoff used for a publication; `published_at` identifies when it became public. Market-day calculations use available ordered NAV observations, not assumed calendar days.

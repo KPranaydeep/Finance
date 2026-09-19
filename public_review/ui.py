@@ -107,7 +107,11 @@ def render_crossings(forecast, sort_key="security_crossings_sort"):
         st.caption("No security reaches the configured probability threshold within the forecast horizon.")
         return
     observation_sessions = int(forecast.get("minimum_forecast_review_sessions", 1))
-    st.caption(f"Profit gate: fully loaded round-trip break-even and net annualized target of {percent(forecast['target_xirr'])} · "
+    minimum_return = forecast.get("minimum_net_return")
+    return_floor = (percent(minimum_return) if minimum_return is not None
+                    else "legacy break-even only")
+    st.caption(f"Profit gate: minimum net return of {return_floor} after modeled round-trip friction · "
+               f"Net annualized target: {percent(forecast['target_xirr'])} · "
                f"Crossing probability threshold: {percent(forecast['crossing_probability_threshold'])}. "
                f"Forecasting begins only after {observation_sessions} complete post-entry observation session"
                f"{'s' if observation_sessions != 1 else ''}; entry sessions are excluded. "

@@ -97,6 +97,8 @@ def estimate_captured_security(publication, entry, policy, now):
                "crossing_probability": crossing["probability"],
                "horizon_probability": crossing["horizon_probability"],
                "target_xirr": policy["target_xirr"],
+               "minimum_net_return": policy["minimum_net_return"],
+               "profit_review_rule": policy["profit_review_rule"],
                "notional_basis": "ONE_SHARE_WITH_MODELED_ENTRY_EXIT_COSTS_AND_TAX",
                "checked_at": pd.Timestamp(now).isoformat(),
                "limitations": "Provisional security-only estimate. It excludes basket interactions and is superseded by the completed basket baseline."}
