@@ -26,6 +26,20 @@ SAFE_ERRORS = {
     "ASSESSMENT_PRICE_VALUE_ERROR", "ASSESSMENT_VALUATION_VALUE_ERROR",
     "ASSESSMENT_PEAK_VALUE_ERROR", "ASSESSMENT_VALIDATION_VALUE_ERROR",
     "ASSESSMENT_FORECAST_VALUE_ERROR", "ASSESSMENT_DECISION_VALUE_ERROR",
+    "ASSESSMENT_DISTRIBUTION_VALUE_ERROR", "ASSESSMENT_PRICE_INPUT_VALUE_ERROR",
+    "ASSESSMENT_COST_INPUT_VALUE_ERROR", "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
+    "ASSESSMENT_TAX_REGIME_VALUE_ERROR", "ASSESSMENT_CASH_FLOW_VALUE_ERROR",
+}
+
+
+VALUATION_ERROR_CODES = {
+    "Invalid dated model distribution": "ASSESSMENT_DISTRIBUTION_VALUE_ERROR",
+    "Invalid current price": "ASSESSMENT_PRICE_INPUT_VALUE_ERROR",
+    "Invalid non-negative amount": "ASSESSMENT_COST_INPUT_VALUE_ERROR",
+    "Unsupported side/instrument classification": "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
+    "Unclassified instrument": "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
+    "Unsupported tax date/regime": "ASSESSMENT_TAX_REGIME_VALUE_ERROR",
+    "Nonfinite cash flow": "ASSESSMENT_CASH_FLOW_VALUE_ERROR",
 }
 
 
@@ -77,8 +91,9 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
                                   "net": round(dividend * lot["quantity"] * (1 - policy["slab_rate"] * (1 + policy["surcharge_rate"]) * 1.04), 2)})
     try:
         metrics = evaluate(baseline, prices, as_of, policy, dividends)
-    except ValueError:
-        raise ValueError("ASSESSMENT_VALUATION_VALUE_ERROR") from None
+    except ValueError as exc:
+        raise ValueError(VALUATION_ERROR_CODES.get(
+            str(exc), "ASSESSMENT_VALUATION_VALUE_ERROR")) from None
     from .history import common_history
     closes, returns, coverage = common_history(histories, as_of, policy)
     # Reconstruct peak from the same frozen model, never from unrelated NAV/backfill.
@@ -88,8 +103,9 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
             m = evaluate(
                 baseline, row.to_dict(), d, policy,
                 [x for x in dividends if x["date"] <= d])
-        except ValueError:
-            raise ValueError("ASSESSMENT_PEAK_VALUE_ERROR") from None
+        except ValueError as exc:
+            raise ValueError(VALUATION_ERROR_CODES.get(
+                str(exc), "ASSESSMENT_PEAK_VALUE_ERROR")) from None
         peak = max(peak, m["net_proceeds"])
     validation = {"passed": False, "reason": "INSUFFICIENT_COMMON_HISTORY"}
     forecast = {"status": "INSUFFICIENT_COMMON_HISTORY", "next_review": None}
