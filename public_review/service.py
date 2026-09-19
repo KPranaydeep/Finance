@@ -79,10 +79,12 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
         h = histories[lot["ticker"]]
         # Yahoo historical closes are split-normalized. A subsequent split makes
         # frozen units incomparable; do not silently use the wrong quantities.
-        after_capture = h.loc[h.index > lot["entry_date"]]
-        if "Stock Splits" in after_capture and (after_capture["Stock Splits"] != 0).any():
+        assessment_window = h.loc[
+            (h.index > lot["entry_date"]) & (h.index <= as_of)]
+        if ("Stock Splits" in assessment_window and
+                (assessment_window["Stock Splits"] != 0).any()):
             raise ValueError("CORPORATE_ACTION_REVIEW_REQUIRED")
-        for day, row in h.loc[h.index > lot["entry_date"]].iterrows():
+        for day, row in assessment_window.iterrows():
             dividend = float(row.get("Dividends", 0.))
             if not math.isfinite(dividend) or dividend < 0:
                 raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")

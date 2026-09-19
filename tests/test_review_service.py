@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import pandas as pd
 from public_review.service import run, build_assessment, price_history_evidence
+from public_review.core import evaluate
 from public_review.market import calendar
 from review_fixtures import baseline, policy
 from test_review_operations import FakeDB
@@ -77,3 +78,15 @@ class ServiceTests(unittest.TestCase):
             build_assessment(
                 b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],
                 datetime(2026,9,9,13,tzinfo=timezone.utc))
+
+    def test_actions_after_synchronized_as_of_are_not_assessed_early(self):
+        p=policy(); b=baseline(); h=self.histories(p)
+        h['A.NS'].loc['2026-09-09','Dividends']=2.
+        h['A.NS'].loc['2026-09-09','Stock Splits']=2.
+        result=build_assessment(
+            b,h,'2026-09-08',['2026-09-10'],p,[],b['weights'],
+            datetime(2026,9,9,13,tzinfo=timezone.utc))
+        self.assertEqual(result['as_of'],'2026-09-08')
+        self.assertEqual(result['metrics']['date'],'2026-09-08')
+        self.assertEqual(result['metrics']['net_proceeds'],
+                         evaluate(b,{'A.NS':100.,'B.NS':50.},'2026-09-08',p)['net_proceeds'])
