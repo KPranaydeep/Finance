@@ -64,7 +64,9 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
             raise ValueError("CORPORATE_ACTION_REVIEW_REQUIRED")
         for day, row in h.loc[h.index > lot["entry_date"]].iterrows():
             dividend = float(row.get("Dividends", 0.))
-            if dividend:
+            if not math.isfinite(dividend) or dividend < 0:
+                raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
+            if dividend > 0:
                 dividends.append({"ticker": lot["ticker"], "date": day,
                                   "net": round(dividend * lot["quantity"] * (1 - policy["slab_rate"] * (1 + policy["surcharge_rate"]) * 1.04), 2)})
     metrics = evaluate(baseline, prices, as_of, policy, dividends)

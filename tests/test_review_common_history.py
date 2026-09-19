@@ -67,6 +67,28 @@ class CommonHistoryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'INVALID_OR_NONTRADING_PRICE'):
                 fetch(['A.NS'],'2026-09-09','2026-09-09',policy())
 
+    def test_foreign_zero_dividend_survives_missing_same_day_fx(self):
+        dates = pd.to_datetime(['2026-09-08', '2026-09-09'])
+        fx = pd.DataFrame(
+            {'Open': [80.], 'High': [80.], 'Low': [80.], 'Close': [80.]},
+            index=dates[:1])
+        security = pd.DataFrame({
+            'Open': [10., 11.], 'High': [10., 11.], 'Low': [10., 11.],
+            'Close': [10., 11.], 'Volume': [100., 100.],
+            'Dividends': [0., 0.], 'Stock Splits': [0., 0.],
+        }, index=dates)
+        with patch('public_review.market.yf.Ticker') as ticker:
+            ticker.side_effect = lambda symbol: type(
+                'TickerResult', (), {
+                    'history': lambda self, **kwargs: (
+                        fx.copy() if symbol == 'INR=X' else security.copy())
+                })()
+            result = fetch(
+                ['AXTI'], '2026-09-08', '2026-09-09', policy(),
+                allow_incomplete_end=True)
+        self.assertEqual(result['AXTI'].loc['2026-09-09', 'Dividends'], 0.)
+        self.assertTrue(pd.isna(result['AXTI'].loc['2026-09-09', 'Close']))
+
     def test_fx_is_included_once_in_world_benchmark(self):
         dates=['2026-09-08','2026-09-09']
         nav=[{'nav_date':d,'nav':100.} for d in dates]

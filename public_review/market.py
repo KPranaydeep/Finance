@@ -418,7 +418,16 @@ def fetch(tickers, entry_day, as_of, policy, *, allow_incomplete_end=False):
                     rate_column = column if column in aligned else "Close"
                     history[column] = pd.to_numeric(history[column], errors="coerce") * pd.to_numeric(aligned[rate_column], errors="coerce")
             if "Dividends" in history:
-                history["Dividends"] = pd.to_numeric(history["Dividends"], errors="coerce") * pd.to_numeric(aligned["Close"], errors="coerce")
+                native_dividends = pd.to_numeric(
+                    history["Dividends"], errors="coerce")
+                fx_closes = pd.to_numeric(aligned["Close"], errors="coerce")
+                converted_dividends = native_dividends * fx_closes
+                # A zero distribution is an event absence, so it remains zero
+                # even when that security session has no same-date bank-FX row.
+                # A real distribution without FX deliberately remains NaN and
+                # is rejected by the assessment instead of being invented.
+                history["Dividends"] = converted_dividends.where(
+                    native_dividends.ne(0), 0.0)
             history.attrs["quote_currency"] = "USD"
             history.attrs["valuation_currency"] = "INR"
         if not allow_incomplete_end:
