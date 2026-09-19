@@ -69,3 +69,11 @@ class ServiceTests(unittest.TestCase):
             datetime(2026,9,9,13,tzinfo=timezone.utc))
         self.assertEqual(len(result['price_hash']),64)
         self.assertIn('2026-09-08',result['history_coverage']['missing_sessions'])
+
+    def test_real_dividend_without_usable_fx_fails_closed(self):
+        p=policy(); b=baseline(); h=self.histories(p)
+        h['A.NS'].loc['2026-09-08','Dividends']=float('nan')
+        with self.assertRaisesRegex(ValueError,'STALE_OR_INCOMPLETE_MARKET_HISTORY'):
+            build_assessment(
+                b,h,'2026-09-09',['2026-09-10'],p,[],b['weights'],
+                datetime(2026,9,9,13,tzinfo=timezone.utc))
