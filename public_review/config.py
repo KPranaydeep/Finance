@@ -21,7 +21,8 @@ def load_policy(today=None):
     if today > date.fromisoformat(policy["calendar_verified_through"]):
         raise ValueError("CALENDAR_REVIEW_REQUIRED")
     ranges = {"slab_rate": (0, .30), "surcharge_rate": (0, .37), "slippage_bps": (0, 500),
-              "target_xirr": (.01, 10), "drawdown_limit": (.01, .9), "concentration_limit": (.01, 1),
+              "target_xirr": (.01, 10), "minimum_net_return": (0, 1),
+              "drawdown_limit": (.01, .9), "concentration_limit": (.01, 1),
               "drift_limit": (.001, 1), "min_annual_improvement": (.06, 1),
               "crossing_probability": (.01, .5),
               "minimum_forecast_review_sessions": (1, 60), "max_review_sessions": (1, 60),
@@ -49,7 +50,7 @@ def load_policy(today=None):
         raise ValueError("INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS")
     if policy.get("entry_quote_interval") != "1m":
         raise ValueError("INVALID_POLICY_ENTRY_QUOTE_INTERVAL")
-    if policy.get("profit_review_rule") != "ROUND_TRIP_BREAK_EVEN_AND_TARGET_XIRR":
+    if policy.get("profit_review_rule") != "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR":
         raise ValueError("INVALID_POLICY_PROFIT_REVIEW_RULE")
     # ``instrument_kinds`` is a resolved runtime field, not owner policy.
     # Accept it temporarily for backward-compatible tests/old deployments, but

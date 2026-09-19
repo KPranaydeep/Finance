@@ -52,6 +52,21 @@ class SecurityTargetTests(unittest.TestCase):
         # Gross 0.3% daily growth exceeds 100% annualized; net need not.
         self.assertIsNone(f['earliest_security_crossing'])
 
+    def test_forecast_requires_net_return_floor_after_all_friction(self):
+        b, p, r, _ = self.setup_case()
+        shocks = np.full((100, 1, 2), .02)
+        without_floor = deepcopy(p)
+        without_floor['minimum_net_return'] = 0.
+        with patch('public_review.forecast.paths', return_value=shocks):
+            legacy = estimate(b, {'A.NS':100, 'B.NS':50}, r,
+                              ['2026-05-05'], without_floor, b['capital'])
+        with patch('public_review.forecast.paths', return_value=shocks):
+            protected = estimate(b, {'A.NS':100, 'B.NS':50}, r,
+                                 ['2026-05-05'], p, b['capital'])
+        self.assertEqual(legacy['earliest_security_crossing'], '2026-05-05')
+        self.assertIsNone(protected['earliest_security_crossing'])
+        self.assertEqual(protected['minimum_net_return'], .0125)
+
     def test_old_validation_cannot_approve_new_method(self):
         b, p, r, v = self.setup_case()
         v.pop('method')
@@ -77,6 +92,27 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertFalse(at.exception)
         self.assertEqual(at.metric[0].value, '2099-01-01')
         self.assertTrue(any('Provisional:' in c.value for c in at.caption))
+
+    def test_ui_discloses_minimum_return_separately_from_xirr(self):
+        from streamlit.testing.v1 import AppTest
+        def app():
+            from public_review.ui import render_crossings
+            render_crossings({
+                'target_xirr': 1., 'minimum_net_return': .0125,
+                'crossing_probability_threshold': .2,
+                'security_crossings': [{
+                    'ticker':'A.NS', 'target_weight':1.,
+                    'crossing_date':'2026-09-21',
+                    'review_date':'2026-09-21',
+                    'review_followup_date':'2026-09-22',
+                    'probability':.25,
+                }],
+            })
+        at = AppTest.from_function(app).run()
+        self.assertFalse(at.exception)
+        disclosure = ' '.join(c.value for c in at.caption)
+        self.assertIn('minimum net return of 1.25%', disclosure)
+        self.assertIn('Net annualized target: 100.00%', disclosure)
 
     def test_crossed_security_requests_review_without_auto_rebalance(self):
         b, p, _, _ = self.setup_case()

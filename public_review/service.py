@@ -107,7 +107,7 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
             "comparisons": exit_comparisons,
-            "mmi": mood, "price_hash": digest({t: {d: float(v) for d, v in h.Close.items()} for t, h in histories.items()}),
+            "mmi": mood, "price_hash": digest(price_history_evidence(histories, as_of)),
             "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
             "model_only": True}
 
@@ -323,9 +323,10 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                          "FAILURE", baseline_id, payload)
             conn.commit()
             notify_safely(conn, basket, baseline_id, payload, now)
+            public_reason = code if code in SAFE_ERRORS else "MONITOR_CHECK_FAILED"
             diagnostic = code if code != "MONITOR_CHECK_FAILED" else f"{str(stage).upper()}_VALUE_ERROR"
             results.append({"publication_id": publication["publication_id"],
-                            "status": "CANNOT_ASSESS", "reason": "MONITOR_CHECK_FAILED",
+                            "status": "CANNOT_ASSESS", "reason": public_reason,
                             "stage": stage, "diagnostic_code": diagnostic})
     return {"checked": len(selected), "failed": failures, "waiting": waiting, "results": results}
 
