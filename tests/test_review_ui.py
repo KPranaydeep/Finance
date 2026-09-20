@@ -39,6 +39,15 @@ class UiTests(unittest.TestCase):
         self.assertEqual(app.metric[0].value,'Not validated')
         self.assertTrue(any('Alert delivery' in w.value for w in app.warning))
 
+    def test_fresh_result_suppresses_older_durable_panel(self):
+        def app():
+            from public_review.ui import render_events
+            render_events([], suppress_durable_preview=True)
+        at = AppTest.from_function(app).run()
+        self.assertFalse(at.exception)
+        self.assertEqual(len(at.metric), 0)
+        self.assertEqual(len(at.selectbox), 0)
+
     def test_stale_hides_actionable_values(self):
         app=self.app('stale')
         self.assertEqual(len(app.metric),0)
