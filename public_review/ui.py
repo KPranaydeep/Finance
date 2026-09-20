@@ -178,42 +178,59 @@ def render_fresh_preview(p):
     due = (not planning_only) and (
         bool(d.get("reasons")) or bool(date and date <= today)
     )
-    metric_label = ("Planning review estimate" if planning_only
-                    else "Latest suggested review")
-    st.metric(metric_label, "Review now" if due else (date or "Next session risk check"))
+    metrics = p.get("metrics") or {}
+    with st.container(border=True):
+        with st.container(horizontal=True):
+            st.metric("Current state", "Review now" if due else "No action now")
+            st.metric(
+                "Planning review" if planning_only else "Next review",
+                date or "Next session risk check",
+            )
+            if metrics:
+                st.metric("Net return", percent(metrics.get("net_total_return")))
+        if planning_only and p.get("observation_ready_at"):
+            ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
+                ZoneInfo("Asia/Kolkata"))
+            st.caption(
+                f"Observed monitoring begins after {ready:%d %b %Y, %H:%M IST}. "
+                "This planning date is not a sell instruction."
+            )
+        elif d.get("reasons"):
+            st.caption(
+                "A configured review trigger is active. Review risk, taxes and "
+                "trading costs before taking any action."
+            )
+        else:
+            st.caption("No configured review trigger is active.")
+
     followup = f.get("next_common_review_session")
-    if date and followup:
-        st.caption(
-            f"Review window: {date}, then {followup} if follow-up is needed. "
-            "The second date is the next verified common trading session for every market represented in this basket."
-        )
-    if p["provisional"]:
-        st.caption("Provisional: " + p["assumption"])
-    if p.get("planning_estimate") and p.get("observation_ready_at"):
-        ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
-            ZoneInfo("Asia/Kolkata"))
-        st.info(
-            "Available immediately for planning; it is not an observed return or sell instruction. "
-            f"Observed monitoring can supersede it after {ready:%d %b %Y %H:%M IST}."
-        )
     if d.get("target_crossed_securities"):
         st.warning("Net target already crossed: " + ", ".join(d["target_crossed_securities"]) + ". Review costs and risk before selling.")
-    if f.get("next_review") is None:
-        st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
-    st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
-    if p.get("valuation_timing"):
-        timing = p["valuation_timing"]
-        timing_rows = timing.get("rows", [])
-        all_completed_closes = bool(timing_rows) and all(
-            row.get("price_source") == "LATEST_COMPLETED_POST_ENTRY_CLOSE"
-            for row in timing_rows
-        )
-        label = (
-            "Synchronized"
-            if timing.get("all_prices_synchronized") and all_completed_closes
-            else "Mixed-time provisional"
-        )
-        with st.expander("Valuation timing · " + label):
+
+    with st.expander("Research and audit details", expanded=False):
+        if date and followup:
+            st.caption(
+                f"Review window: {date}, then {followup} if follow-up is needed. "
+                "The second date is the next verified common trading session for every market represented in this basket."
+            )
+        if p["provisional"]:
+            st.caption("Provisional: " + p["assumption"])
+        if f.get("next_review") is None:
+            st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
+        st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
+        if p.get("valuation_timing"):
+            timing = p["valuation_timing"]
+            timing_rows = timing.get("rows", [])
+            all_completed_closes = bool(timing_rows) and all(
+                row.get("price_source") == "LATEST_COMPLETED_POST_ENTRY_CLOSE"
+                for row in timing_rows
+            )
+            label = (
+                "Synchronized"
+                if timing.get("all_prices_synchronized") and all_completed_closes
+                else "Mixed-time provisional"
+            )
+            st.markdown("**Valuation timing · " + label + "**")
             st.caption("Audit detail: every price was observable by the assessment time. Frozen entry prices are never overwritten.")
             st.table(pd.DataFrame([{
                 "Security": row["ticker"],
@@ -221,12 +238,27 @@ def render_fresh_preview(p):
                 "Observed at": row["price_observed_at"],
                 "Chronology valid": "Yes" if row["chronology_valid"] else "No",
             } for row in timing.get("rows", [])]))
-    st.caption("Currency: NSE-listed holdings are priced in INR, including overseas ETFs. Their INR prices already reflect FX exposure; no second USD/INR conversion is applied.")
-    if p.get("history_coverage"):
-        h = p["history_coverage"]
-        st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
-    with st.expander("Security target-crossing estimates", expanded=True):
+        st.caption("Currency: NSE-listed holdings are priced in INR, including overseas ETFs. Their INR prices already reflect FX exposure; no second USD/INR conversion is applied.")
+        if p.get("history_coverage"):
+            h = p["history_coverage"]
+            st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
+        st.markdown("**Security target-crossing estimates**")
         render_crossings(f, "fresh_security_crossings_sort")
+        if p.get("metrics", {}).get("rows"):
+            st.markdown("**Observed security returns**")
+            st.table(pd.DataFrame([{
+                "Security": row["ticker"],
+                "Shares": row["shares"],
+                "Price": f"₹{row['price']:,.2f}",
+                "Net profit": f"₹{row['net_profit']:,.2f}",
+                "Net XIRR": percent(row.get("xirr")),
+            } for row in p["metrics"]["rows"]]))
+        st.download_button(
+            "Download current review evidence",
+            json.dumps(p, indent=2, default=str),
+            file_name="public-model-review-evidence.json",
+            mime="application/json",
+        )
 
 
 def render_pending(row, now):
@@ -303,6 +335,11 @@ def render_partial_security_reviews(events, publication_id):
 def render_events(events, active_ids=None, now=None, latest_publication_id=None,
                   suppress_latest_failure=False, suppress_durable_preview=False):
     now = now or datetime.now(timezone.utc)
+    # A fresh current-policy preview is the authoritative page result. Older
+    # durable assessments remain in the append-only evidence ledger but must
+    # not create a second, contradictory public review panel.
+    if suppress_durable_preview:
+        return
     baseline_by_publication = {}
     for row in events:
         if (row["kind"] == "BASELINE" and

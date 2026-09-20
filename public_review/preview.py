@@ -132,11 +132,11 @@ def historical_preview(publication, policy, events, now=None):
             raise ValueError("INCOMPLETE_SESSION_CALENDAR")
         p = build_assessment(b, histories, as_of, days, policy, events, publication["weights"],
                              now, comparisons=False)
-        return {"provisional": False, "as_of": as_of, "checked_at": now.isoformat(),
-                "ack_epoch": ack_epoch,
+        return {**p, "provisional": False, "as_of": as_of,
+                "checked_at": now.isoformat(), "ack_epoch": ack_epoch,
                 "policy_version": policy.get("policy_version"),
                 "policy_digest": digest(policy),
-                "forecast": p["forecast"], "decision": p["decision"], "publication_id": publication["publication_id"]}
+                "publication_id": publication["publication_id"]}
     weights = publication["weights"]
     if set(weights) - set(policy["instrument_kinds"]):
         raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")

@@ -90,7 +90,8 @@ class SecurityTargetTests(unittest.TestCase):
                 'decision':{'next_review':'2099-01-01', 'reasons':[]}})
         at = AppTest.from_function(app).run()
         self.assertFalse(at.exception)
-        self.assertEqual(at.metric[0].value, '2099-01-01')
+        self.assertEqual(at.metric[0].value, 'No action now')
+        self.assertEqual(at.metric[1].value, '2099-01-01')
         self.assertTrue(any('Provisional:' in c.value for c in at.caption))
 
     def test_planning_estimate_never_claims_review_now(self):
@@ -105,8 +106,10 @@ class SecurityTargetTests(unittest.TestCase):
                 'decision':{'next_review':'2020-01-02', 'reasons':[]}})
         at = AppTest.from_function(app).run()
         self.assertFalse(at.exception)
-        self.assertEqual(at.metric[0].label, 'Planning review estimate')
-        self.assertEqual(at.metric[0].value, '2020-01-02')
+        self.assertEqual(at.metric[0].label, 'Current state')
+        self.assertEqual(at.metric[0].value, 'No action now')
+        self.assertEqual(at.metric[1].label, 'Planning review')
+        self.assertEqual(at.metric[1].value, '2020-01-02')
 
     def test_remembered_review_date_is_scoped_to_policy(self):
         from public_review.ui import review_promise_key
