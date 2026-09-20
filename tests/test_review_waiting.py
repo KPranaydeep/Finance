@@ -92,6 +92,24 @@ class WaitingTests(unittest.TestCase):
             {'A.NS': 'equity'})
         self.assertEqual(future[0], '2026-09-16')
 
+    def test_fourth_post_entry_session_is_inclusively_eligible(self):
+        p = policy()
+        p['minimum_forecast_review_sessions'] = 4
+        b = {'entry_date': '2026-09-11', 'lots': [
+            {'ticker': 'A.NS', 'kind': 'equity', 'entry_date': '2026-09-11'},
+        ]}
+        ready_at, rows = forecast_observation_ready_at(b, p)
+        self.assertEqual(rows[0]['observation_session'], '2026-09-18')
+        self.assertEqual(ready_at, pd.Timestamp('2026-09-18T10:30:00+00:00'))
+        with self.assertRaises(AwaitingMarketEntry):
+            require_forecast_observation_sessions(
+                b, p, datetime(2026, 9, 18, 10, 29, tzinfo=timezone.utc))
+        self.assertEqual(
+            require_forecast_observation_sessions(
+                b, p, datetime(2026, 9, 18, 10, 30, tzinfo=timezone.utc)),
+            rows,
+        )
+
     def test_world_observation_waits_for_each_exchange_independently(self):
         p = policy()
         b = {'entry_date': '2026-09-11', 'lots': [
