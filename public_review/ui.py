@@ -149,25 +149,43 @@ def render_crossings(forecast, sort_key="security_crossings_sort"):
     st.caption("Research estimates unless validation passes. A crossing requests a review, not an automatic sale. Short-term XIRR can look large despite a small rupee gain.")
 
 
+def review_promise_key(p):
+    """Scope remembered dates to the policy that produced them."""
+    policy_identity = (
+        p.get("policy_digest")
+        or p.get("policy", {}).get("policy_version")
+        or p.get("policy_version")
+        or p.get("forecast", {}).get("policy_hash")
+        or "legacy"
+    )
+    return (
+        "review_promise_" + p["publication_id"] + "_"
+        + str(p.get("ack_epoch", 0)) + "_" + str(policy_identity)
+    )
+
+
 def render_fresh_preview(p):
     d, f = p["decision"], p["forecast"]
     # Retain earlier page-view dates in this session; durable workflow dates
     # are also honored by the assessment engine.
-    key = "review_promise_" + p["publication_id"] + "_" + str(p.get("ack_epoch", 0))
+    key = review_promise_key(p)
     candidate = d.get("next_review")
     prior = st.session_state.get(key)
     date = min(x for x in (candidate, prior) if x) if candidate or prior else None
     st.session_state[key] = date
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-    due = bool(d.get("reasons")) or bool(date and date <= today)
-    metric_label = ("Allocation-weighted planning review" if p.get("planning_estimate")
+    planning_only = bool(p.get("planning_estimate"))
+    due = (not planning_only) and (
+        bool(d.get("reasons")) or bool(date and date <= today)
+    )
+    metric_label = ("Planning review estimate" if planning_only
                     else "Latest suggested review")
     st.metric(metric_label, "Review now" if due else (date or "Next session risk check"))
     followup = f.get("next_common_review_session")
     if date and followup:
         st.caption(
             f"Review window: {date}, then {followup} if follow-up is needed. "
-            "The second date is the literal next calendar day, and both are verified common trading sessions for every market represented in this basket."
+            "The second date is the next verified common trading session for every market represented in this basket."
         )
     if p["provisional"]:
         st.caption("Provisional: " + p["assumption"])
@@ -376,7 +394,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     if d.get("next_review") and followup:
         st.caption(
             f"Review window: {d['next_review']}, then {followup} if follow-up is needed. "
-            "The second date is the literal next calendar day, and both are common trading sessions across the basket's represented markets."
+            "The second date is the next verified common trading session across the basket's represented markets."
         )
     checked = datetime.fromisoformat(checked_at).astimezone(ZoneInfo("Asia/Kolkata"))
     st.caption(f"{m['days_held']} days held · Absolute net return {percent(m['net_total_return'])} · Prices through {p['as_of']} · Checked {checked:%d %b %Y %H:%M IST}")
