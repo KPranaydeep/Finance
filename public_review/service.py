@@ -23,6 +23,23 @@ SAFE_ERRORS = {
     "ENTRY_INTRADAY_HISTORY_UNAVAILABLE", "INVALID_POLICY_ENTRY_QUOTE_INTERVAL",
     "INVALID_POLICY_PROFIT_REVIEW_RULE",
     "INVALID_POLICY_MINIMUM_FORECAST_REVIEW_SESSIONS",
+    "ASSESSMENT_PRICE_VALUE_ERROR", "ASSESSMENT_VALUATION_VALUE_ERROR",
+    "ASSESSMENT_PEAK_VALUE_ERROR", "ASSESSMENT_VALIDATION_VALUE_ERROR",
+    "ASSESSMENT_FORECAST_VALUE_ERROR", "ASSESSMENT_DECISION_VALUE_ERROR",
+    "ASSESSMENT_DISTRIBUTION_VALUE_ERROR", "ASSESSMENT_PRICE_INPUT_VALUE_ERROR",
+    "ASSESSMENT_COST_INPUT_VALUE_ERROR", "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
+    "ASSESSMENT_TAX_REGIME_VALUE_ERROR", "ASSESSMENT_CASH_FLOW_VALUE_ERROR",
+}
+
+
+VALUATION_ERROR_CODES = {
+    "Invalid dated model distribution": "ASSESSMENT_DISTRIBUTION_VALUE_ERROR",
+    "Invalid current price": "ASSESSMENT_PRICE_INPUT_VALUE_ERROR",
+    "Invalid non-negative amount": "ASSESSMENT_COST_INPUT_VALUE_ERROR",
+    "Unsupported side/instrument classification": "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
+    "Unclassified instrument": "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
+    "Unsupported tax date/regime": "ASSESSMENT_TAX_REGIME_VALUE_ERROR",
+    "Nonfinite cash flow": "ASSESSMENT_CASH_FLOW_VALUE_ERROR",
 }
 
 
@@ -53,37 +70,61 @@ def publications(conn, basket):
 
 
 def build_assessment(baseline, histories, as_of, future, policy, prior, latest_weights, now, comparisons=True):
-    prices = {t: float(h.loc[as_of, "Close"]) for t, h in histories.items()}
+    try:
+        prices = {t: float(h.loc[as_of, "Close"]) for t, h in histories.items()}
+    except ValueError:
+        raise ValueError("ASSESSMENT_PRICE_VALUE_ERROR") from None
     dividends = []
     for lot in baseline["lots"]:
         h = histories[lot["ticker"]]
         # Yahoo historical closes are split-normalized. A subsequent split makes
         # frozen units incomparable; do not silently use the wrong quantities.
-        after_capture = h.loc[h.index > lot["entry_date"]]
-        if "Stock Splits" in after_capture and (after_capture["Stock Splits"] != 0).any():
+        assessment_window = h.loc[
+            (h.index > lot["entry_date"]) & (h.index <= as_of)]
+        if ("Stock Splits" in assessment_window and
+                (assessment_window["Stock Splits"] != 0).any()):
             raise ValueError("CORPORATE_ACTION_REVIEW_REQUIRED")
-        for day, row in h.loc[h.index > lot["entry_date"]].iterrows():
+        for day, row in assessment_window.iterrows():
             dividend = float(row.get("Dividends", 0.))
             if not math.isfinite(dividend) or dividend < 0:
                 raise ValueError("STALE_OR_INCOMPLETE_MARKET_HISTORY")
             if dividend > 0:
                 dividends.append({"ticker": lot["ticker"], "date": day,
                                   "net": round(dividend * lot["quantity"] * (1 - policy["slab_rate"] * (1 + policy["surcharge_rate"]) * 1.04), 2)})
-    metrics = evaluate(baseline, prices, as_of, policy, dividends)
+    try:
+        metrics = evaluate(baseline, prices, as_of, policy, dividends)
+    except ValueError as exc:
+        raise ValueError(VALUATION_ERROR_CODES.get(
+            str(exc), "ASSESSMENT_VALUATION_VALUE_ERROR")) from None
     from .history import common_history
     closes, returns, coverage = common_history(histories, as_of, policy)
     # Reconstruct peak from the same frozen model, never from unrelated NAV/backfill.
     peak = baseline["capital"]
     for d, row in closes.loc[closes.index >= baseline.get("fully_invested_date", baseline["entry_date"])].iterrows():
-        m = evaluate(baseline, row.to_dict(), d, policy, [x for x in dividends if x["date"] <= d])
+        try:
+            m = evaluate(
+                baseline, row.to_dict(), d, policy,
+                [x for x in dividends if x["date"] <= d])
+        except ValueError as exc:
+            raise ValueError(VALUATION_ERROR_CODES.get(
+                str(exc), "ASSESSMENT_PEAK_VALUE_ERROR")) from None
         peak = max(peak, m["net_proceeds"])
     validation = {"passed": False, "reason": "INSUFFICIENT_COMMON_HISTORY"}
     forecast = {"status": "INSUFFICIENT_COMMON_HISTORY", "next_review": None}
     if len(returns) >= 126:
-        validation = validate(returns, baseline, prices, list(returns.index), policy)
+        try:
+            validation = validate(
+                returns, baseline, prices, list(returns.index), policy)
+        except ValueError:
+            raise ValueError("ASSESSMENT_VALIDATION_VALUE_ERROR") from None
         future_baseline = deepcopy(baseline)
         future_baseline["cash"] += sum(x["net"] for x in dividends)
-        forecast = estimate(future_baseline, prices, returns, future, policy, peak, validation, dividends=dividends)
+        try:
+            forecast = estimate(
+                future_baseline, prices, returns, future, policy, peak,
+                validation, dividends=dividends)
+        except ValueError:
+            raise ValueError("ASSESSMENT_FORECAST_VALUE_ERROR") from None
     ack = store.latest(prior, "ACKNOWLEDGED", baseline["baseline_id"])
     last = store.latest(prior, "ASSESSMENT", baseline["baseline_id"])
     promised = (last["payload"].get("decision", {}).get("next_review") if last and
@@ -91,7 +132,11 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
     # Keep an operational risk-check date even when statistical timing fails
     # validation; do not label that fallback as a target-crossing forecast.
     timing = {"next_review": forecast.get("next_review") or (future[0] if future else None)}
-    assessed = decision(metrics, baseline, latest_weights, policy, peak, timing, promised)
+    try:
+        assessed = decision(
+            metrics, baseline, latest_weights, policy, peak, timing, promised)
+    except ValueError:
+        raise ValueError("ASSESSMENT_DECISION_VALUE_ERROR") from None
     assessed["date_basis"] = "VALIDATED_FORECAST" if forecast.get("next_review") else "NEXT_SESSION_RISK_CHECK"
     try:
         from public_market_mood import fetch_mmi
