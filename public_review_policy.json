@@ -1,5 +1,5 @@
 {
-  "policy_version": "owner-review-policy-v6",
+  "policy_version": "owner-review-policy-v7",
   "policy_approved": true,
   "tax_profile": "resident_individual_regular_delivery",
   "tariff_verified_on": "2026-09-09",
@@ -22,7 +22,7 @@
   "drift_limit": 0.05,
   "min_annual_improvement": 0.06,
   "crossing_probability": 0.2,
-  "minimum_forecast_review_sessions": 1,
+  "minimum_forecast_review_sessions": 4,
   "max_review_sessions": 40,
   "simulation_paths": 3000,
   "block_length": 5,
