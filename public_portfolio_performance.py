@@ -293,8 +293,16 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
         if hasattr(published_at, "astimezone")
         else str(published_at)[:10]
     )
+    active_publications = record.get("active_publications") or [
+        publication for publication in record.get("publications", [])
+        if publication.get("effective_status", "ACTIVE") == "ACTIVE"
+    ]
+    ordered_publications = sorted(
+        active_publications,
+        key=lambda publication: int(publication.get("portfolio_version") or 0),
+    )
     publication_dates = {}
-    for publication in record.get("publications", []):
+    for publication in ordered_publications:
         publication_id = publication.get("publication_id")
         published = publication.get("published_at") or publication.get("as_of")
         if publication_id and published:
@@ -302,8 +310,11 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
                 publication_dates[publication_id] = published.astimezone(IST).date().isoformat()
             else:
                 publication_dates[publication_id] = str(published)[:10]
+    active_publication_ids = set(publication_dates)
     lifecycle = {}
     for position in record.get("publication_positions", []):
+        if position.get("publication_id") not in active_publication_ids:
+            continue
         ticker = str(position.get("ticker", "")).strip()
         date_value = publication_dates.get(position.get("publication_id"))
         if not ticker or not date_value:
@@ -312,21 +323,48 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
         row["dates"].append(date_value)
         row["weights"].append(float(position.get("target_weight") or 0))
     current_tickers = {str(row["ticker"]).strip() for row in record.get("constituents", [])}
+    publication_sequence = [
+        publication.get("publication_id")
+        for publication in ordered_publications
+        if publication.get("publication_id") in publication_dates
+    ]
     securities = []
     for ticker, history in sorted(lifecycle.items()):
         entry_date = min(history["dates"])
         last_date = max(history["dates"])
         current_row = next((row for row in record.get("constituents", []) if str(row["ticker"]).strip() == ticker), None)
+        held_publications = {
+            position.get("publication_id")
+            for position in record.get("publication_positions", [])
+            if str(position.get("ticker", "")).strip() == ticker
+            and position.get("publication_id") in active_publication_ids
+        }
+        exit_date = None
+        if ticker not in current_tickers and held_publications:
+            last_held_index = max(
+                index
+                for index, publication_id in enumerate(publication_sequence)
+                if publication_id in held_publications
+            )
+            first_absent_publication = next(
+                (
+                    publication_id
+                    for publication_id in publication_sequence[last_held_index + 1:]
+                    if publication_id not in held_publications
+                ),
+                None,
+            )
+            exit_date = publication_dates.get(first_absent_publication)
         securities.append({
             "ticker": ticker,
             "target_weight": float(current_row["target_weight"]) if current_row else 0.0,
             "publication_date": entry_date,
             "entry_date": entry_date,
             "last_allocation_date": last_date,
-            # A removed name's exit is the publication that first reports it
-            # absent (the current publication), not its last stored position
-            # row; position tables may omit zero-weight/removal snapshots.
-            "exit_date": None if ticker in current_tickers else publication_date,
+            # A removed name exits on the first active publication after its
+            # last held version. This remains correct across later versions and
+            # ignores voided publications.
+            "exit_date": exit_date,
             "status": "active" if ticker in current_tickers else "removed",
             "publication_id": current["publication_id"] if ticker in current_tickers else None,
             "portfolio_version": f"P{int(current['portfolio_version']):03d}" if ticker in current_tickers else None,
