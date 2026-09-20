@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 import math
 import pandas as pd
 from . import market
-from .core import freeze
+from .core import digest, freeze
 from .forecast import estimate, validate
 
 
@@ -74,6 +74,8 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
     candidate = forecast.get("next_review") or forecast.get("research_candidate") or future[0]
     return {"provisional": True, "publication_id": publication["publication_id"],
             "planning_estimate": True,
+            "policy_version": policy.get("policy_version"),
+            "policy_digest": digest(policy),
             "history_coverage": coverage, "ack_epoch": ack_epoch,
             "as_of": history_as_of, "checked_at": pd.Timestamp(now).isoformat(),
             "observation_ready_at": observation_ready_at.isoformat(),
@@ -132,6 +134,8 @@ def historical_preview(publication, policy, events, now=None):
                              now, comparisons=False)
         return {"provisional": False, "as_of": as_of, "checked_at": now.isoformat(),
                 "ack_epoch": ack_epoch,
+                "policy_version": policy.get("policy_version"),
+                "policy_digest": digest(policy),
                 "forecast": p["forecast"], "decision": p["decision"], "publication_id": publication["publication_id"]}
     weights = publication["weights"]
     if set(weights) - set(policy["instrument_kinds"]):
@@ -180,6 +184,8 @@ def historical_preview(publication, policy, events, now=None):
              if r["kind"] == "PREVIEW" and r["baseline_id"] == publication["publication_id"]]
     candidate = min([candidate] + [d for d in prior if d])
     return {"provisional": True, "publication_id": publication["publication_id"],
+            "policy_version": policy.get("policy_version"),
+            "policy_digest": digest(policy),
             "history_coverage": coverage,
             "ack_epoch": ack_epoch,
             "as_of": as_of, "checked_at": now.isoformat(), "assumed_entry_date": entry,

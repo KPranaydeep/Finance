@@ -93,6 +93,29 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(at.metric[0].value, '2099-01-01')
         self.assertTrue(any('Provisional:' in c.value for c in at.caption))
 
+    def test_planning_estimate_never_claims_review_now(self):
+        from streamlit.testing.v1 import AppTest
+        def app():
+            from public_review.ui import render_fresh_preview
+            render_fresh_preview({'publication_id':'TEST', 'provisional':True,
+                'planning_estimate':True, 'policy_digest':'v7-digest',
+                'assumption':'Publication-time research estimate.',
+                'as_of':'2020-01-01', 'checked_at':'2020-01-01T18:00:00+00:00',
+                'forecast':{'next_review':None},
+                'decision':{'next_review':'2020-01-02', 'reasons':[]}})
+        at = AppTest.from_function(app).run()
+        self.assertFalse(at.exception)
+        self.assertEqual(at.metric[0].label, 'Planning review estimate')
+        self.assertEqual(at.metric[0].value, '2020-01-02')
+
+    def test_remembered_review_date_is_scoped_to_policy(self):
+        from public_review.ui import review_promise_key
+        base = {'publication_id':'TEST', 'ack_epoch':0}
+        self.assertNotEqual(
+            review_promise_key({**base, 'policy_digest':'v6'}),
+            review_promise_key({**base, 'policy_digest':'v7'}),
+        )
+
     def test_ui_discloses_minimum_return_separately_from_xirr(self):
         from streamlit.testing.v1 import AppTest
         def app():
