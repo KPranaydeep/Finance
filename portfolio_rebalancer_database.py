@@ -189,8 +189,11 @@ def trigger_download(data, file_name, mime_type):
 
 @st.cache_data(show_spinner=False)
 def load_equity_mapping():
+    local_path = Path(__file__).resolve().with_name("EQUITY_L.csv")
     url = "https://raw.githubusercontent.com/KPranaydeep/Finance/refs/heads/main/EQUITY_L.csv"
-    df = pd.read_csv(url)
+    # The deployed repository snapshot is deterministic and travels with the app.
+    # Keep the remote file only as a fallback for unusual single-file executions.
+    df = pd.read_csv(local_path if local_path.exists() else url)
     df.columns = df.columns.str.strip()
     return df[["ISIN NUMBER", "SYMBOL", "NAME OF COMPANY"]].rename(columns={
         "ISIN NUMBER": "ISIN",
@@ -1279,6 +1282,23 @@ def _indian_report_ticker_candidates(symbol, exchange_hint, nse_company_lookup):
     return [f"{base_symbol}.NS", f"{base_symbol}.BO"]
 
 
+def _instrument_from_official_nse_symbol(symbol, company_name=""):
+    """Build identity from the bundled official NSE mapping without a price probe."""
+    base_symbol = normalize_portfolio_symbol(symbol)
+    if not base_symbol:
+        return None
+
+    ticker = f"{base_symbol}.NS"
+    metadata = get_yahoo_metadata(ticker)
+    return {
+        "symbol": base_symbol,
+        "yahoo_ticker": ticker,
+        "stock_name": str(company_name or metadata["stock_name"] or base_symbol).strip(),
+        "exchange": str(metadata["exchange"] or "NSE").strip(),
+        "currency": _normalize_currency_code(metadata["currency"] or "INR"),
+    }
+
+
 def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
     """Resolve schema-detected Indian or Tickertape US holdings and upsert them.
 
@@ -1316,7 +1336,8 @@ def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
             unresolved_label = str(row["Stock Name"])
         else:
             isin = row["ISIN"]
-            symbol_guess = str(isin_to_symbol.get(isin) or row.get("Ticker") or "").strip().upper()
+            mapped_nse_symbol = str(isin_to_symbol.get(isin) or "").strip().upper()
+            symbol_guess = str(mapped_nse_symbol or row.get("Ticker") or "").strip().upper()
             exchange_hint = str(row.get("Exchange") or "").strip().upper()
             # An ISIN-bearing report is Indian even when its exchange column is
             # absent. Probe Indian venues only; never let a same-name US ticker win.
@@ -1329,6 +1350,12 @@ def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
                 instrument = resolve_yahoo_instrument(candidate, nse_lookup)
                 if instrument is not None:
                     break
+            if instrument is None and mapped_nse_symbol:
+                # Price-provider availability must not erase an identity already
+                # established by the official NSE symbol/ISIN mapping.
+                instrument = _instrument_from_official_nse_symbol(
+                    mapped_nse_symbol, nse_lookup.get(mapped_nse_symbol, row["Stock Name"])
+                )
             unresolved_label = f"{isin} ({row['Stock Name']})"
         if instrument is None:
             unresolved_isins.append(unresolved_label)
