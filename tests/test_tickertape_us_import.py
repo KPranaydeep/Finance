@@ -34,7 +34,9 @@ class TickertapeUsImportTests(unittest.TestCase):
             "_detect_holdings_report_type",
             "_read_indian_broker_holdings",
             "_indian_report_ticker_candidates",
+            "_instrument_from_official_nse_symbol",
             "normalize_portfolio_symbol",
+            "load_equity_mapping",
         }
         nodes = []
         aliases = None
@@ -53,7 +55,16 @@ class TickertapeUsImportTests(unittest.TestCase):
             "pd": pd,
             "re": __import__("re"),
             "SequenceMatcher": SequenceMatcher,
+            "Path": Path,
+            "__file__": str(source),
             "resolve_yahoo_instrument": lambda symbol, _lookup: cls.resolved.append(symbol) or {"symbol": symbol},
+            "get_yahoo_metadata": lambda ticker: {
+                "yahoo_ticker": ticker,
+                "stock_name": ticker,
+                "exchange": "NSE",
+                "currency": "INR",
+            },
+            "_normalize_currency_code": lambda value: str(value).upper(),
         }
         exec(compile(ast.Module(body=[aliases, *nodes], type_ignores=[]), str(source), "exec"), cls.env)
 
@@ -108,6 +119,19 @@ class TickertapeUsImportTests(unittest.TestCase):
             "500325", "BSE", {}
         )
         self.assertEqual(candidates, ["500325.BO"])
+
+    def test_official_nse_identity_does_not_require_live_price_probe(self):
+        instrument = self.env["_instrument_from_official_nse_symbol"](
+            "SBC", "SBC Exports Limited"
+        )
+        self.assertEqual(instrument["symbol"], "SBC")
+        self.assertEqual(instrument["yahoo_ticker"], "SBC.NS")
+        self.assertEqual(instrument["currency"], "INR")
+
+    def test_bundled_nse_mapping_contains_sbc_isin(self):
+        mapping = self.env["load_equity_mapping"]()
+        row = mapping.loc[mapping["ISIN"].eq("INE04AK01028")].iloc[0]
+        self.assertEqual(row["Symbol"], "SBC")
 
     def test_name_resolution_accepts_us_listing_not_foreign_replica(self):
         quotes = [
