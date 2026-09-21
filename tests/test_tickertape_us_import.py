@@ -12,10 +12,9 @@ import pandas as pd
 
 
 class Uploaded:
-    name = "us_portfolio_report.csv"
-
-    def __init__(self, payload):
+    def __init__(self, payload, name="us_portfolio_report.csv"):
         self.payload = payload
+        self.name = name
 
     def getvalue(self):
         return self.payload
@@ -30,6 +29,12 @@ class TickertapeUsImportTests(unittest.TestCase):
             "_normalise_company_name",
             "resolve_us_instrument_by_name",
             "_read_tickertape_us_holdings_csv",
+            "_detect_broker_holdings_header_row",
+            "_read_holdings_preview",
+            "_detect_holdings_report_type",
+            "_read_indian_broker_holdings",
+            "_indian_report_ticker_candidates",
+            "normalize_portfolio_symbol",
         }
         nodes = []
         aliases = None
@@ -62,6 +67,47 @@ class TickertapeUsImportTests(unittest.TestCase):
         self.assertEqual(result.loc[0, "Quantity"], 1)
         self.assertEqual(result.loc[0, "Average Buy Price"], 28.10)
         self.assertEqual(result.loc[0, "Currency"], "USD")
+
+    def test_schema_detection_keeps_groww_csv_in_india(self):
+        payload = (
+            b"Stock Name,ISIN,Quantity,Average Buy Price\n"
+            b"SBC Exports Ltd,INE04AK01028,10,45.76\n"
+        )
+        upload = Uploaded(payload, "groww_holdings.csv")
+        self.assertEqual(self.env["_detect_holdings_report_type"](upload), "INDIAN")
+        result = self.env["_read_indian_broker_holdings"](upload)
+        self.assertEqual(result.loc[0, "ISIN"], "INE04AK01028")
+        self.assertEqual(result.loc[0, "Average Buy Price"], 45.76)
+
+    def test_schema_detection_identifies_explicit_us_report(self):
+        payload = (
+            b"Stock Name,Quantity,Avg Buy Price ($),Current Value ($)\n"
+            b"SBC Medical Group Holdings,2,4.50,9.00\n"
+        )
+        upload = Uploaded(payload)
+        self.assertEqual(
+            self.env["_detect_holdings_report_type"](upload), "TICKERTAPE_US"
+        )
+
+    def test_ambiguous_csv_fails_closed_instead_of_guessing_us(self):
+        payload = b"Stock Name,Quantity,Average Price\nSBC,2,45.76\n"
+        with self.assertRaisesRegex(ValueError, "cannot be identified safely"):
+            self.env["_detect_holdings_report_type"](
+                Uploaded(payload, "holdings.csv")
+            )
+
+    def test_indian_sbc_candidates_never_include_unsuffixed_us_symbol(self):
+        candidates = self.env["_indian_report_ticker_candidates"](
+            "SBC", "", {"SBC": "SBC Exports Limited"}
+        )
+        self.assertEqual(candidates, ["SBC.NS"])
+        self.assertNotIn("SBC", candidates)
+
+    def test_bse_hint_is_respected(self):
+        candidates = self.env["_indian_report_ticker_candidates"](
+            "500325", "BSE", {}
+        )
+        self.assertEqual(candidates, ["500325.BO"])
 
     def test_name_resolution_accepts_us_listing_not_foreign_replica(self):
         quotes = [

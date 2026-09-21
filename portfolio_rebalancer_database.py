@@ -951,18 +951,25 @@ BROKER_HOLDINGS_COLUMN_ALIASES = {
     "stock name": "Stock Name",
     "instrument": "Stock Name",
     "symbol": "Stock Name",
+    "trading symbol": "Ticker",
+    "trading_symbol": "Ticker",
     "isin": "ISIN",
+    "symbol isin": "ISIN",
+    "symbol_isin": "ISIN",
     "quantity": "Quantity",
     "quantity available": "Quantity",
     "qty": "Quantity",
     "average buy price": "Average Buy Price",
     "average price": "Average Buy Price",
+    "average_price": "Average Buy Price",
+    "avg. price": "Average Buy Price",
     "avg. cost": "Average Buy Price",
     "avg cost": "Average Buy Price",
     "avg buy price ($)": "Average Buy Price",
     "average buy price ($)": "Average Buy Price",
     "ticker": "Ticker",
     "stock symbol": "Ticker",
+    "exchange": "Exchange",
     "buy value": "Buy Value",
     "closing price": "Closing Price",
     "previous closing price": "Closing Price",
@@ -1083,53 +1090,118 @@ def _read_tickertape_us_holdings_csv(uploaded_file):
 
 
 def _detect_broker_holdings_header_row(raw_df, max_scan_rows=25):
-    """Locate the header row by scanning for ISIN + Quantity column labels.
+    """Locate an Indian broker header by scanning for ISIN + Quantity aliases.
 
     This tolerates broker exports that don't always place headers on row 11.
     """
-    required_tokens = {"isin", "quantity"}
     for row_idx in range(min(max_scan_rows, len(raw_df))):
-        row_values = {
-            str(v).strip().lower() for v in raw_df.iloc[row_idx].tolist() if pd.notna(v)
+        canonical_columns = {
+            BROKER_HOLDINGS_COLUMN_ALIASES.get(str(value).strip().lower())
+            for value in raw_df.iloc[row_idx].tolist()
+            if pd.notna(value)
         }
-        if required_tokens.issubset(row_values):
+        if {"ISIN", "Quantity"}.issubset(canonical_columns):
             return row_idx
     return None
 
 
-def _read_broker_holdings_excel(uploaded_file):
-    """Parse a broker holdings statement (.xlsx) with Stock Name/ISIN/Quantity/
-    Average Buy Price/Buy Value/Closing Price/Closing Value/Unrealised P&L columns.
-
-    The header row is auto-detected; it defaults to row 11 (index 10) when it
-    cannot be located, matching the layout described by the user.
-    """
-    if uploaded_file is None:
-        raise ValueError("Choose a broker holdings Excel file first.")
-
-    raw = uploaded_file.getvalue()
-    if not raw:
-        raise ValueError("The selected broker holdings file is empty.")
+def _read_holdings_preview(raw, file_name):
+    """Read the first report rows without assigning a header."""
+    if str(file_name or "").lower().endswith(".csv"):
+        try:
+            return pd.read_csv(io.BytesIO(raw), header=None, nrows=25)
+        except Exception as exc:
+            raise ValueError(f"Could not read the CSV file: {exc}") from exc
 
     try:
-        preview_df = pd.read_excel(io.BytesIO(raw), header=None, nrows=25)
+        return pd.read_excel(io.BytesIO(raw), header=None, nrows=25)
     except ImportError as exc:
         raise ValueError(
-            "Reading .xlsx files requires the 'openpyxl' package. Install it with "
+            "Reading Excel files requires the 'openpyxl' package. Install it with "
             "`pip install openpyxl` and retry."
         ) from exc
     except Exception as exc:
         raise ValueError(f"Could not read the Excel file: {exc}") from exc
 
+
+def _detect_holdings_report_type(uploaded_file):
+    """Classify a holdings report from its schema, never from its extension alone."""
+    if uploaded_file is None:
+        raise ValueError("Choose a broker holdings file first.")
+
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("The selected broker holdings file is empty.")
+
+    file_name = str(getattr(uploaded_file, "name", "") or "").strip().lower()
+    preview_df = _read_holdings_preview(raw, file_name)
+    ambiguous_header_found = False
+
+    for row_idx in range(min(25, len(preview_df))):
+        raw_columns = {
+            str(value).strip().lower()
+            for value in preview_df.iloc[row_idx].tolist()
+            if pd.notna(value) and str(value).strip()
+        }
+        canonical_columns = {
+            BROKER_HOLDINGS_COLUMN_ALIASES.get(column)
+            for column in raw_columns
+        }
+
+        if {"ISIN", "Quantity", "Average Buy Price"}.issubset(canonical_columns):
+            return "INDIAN"
+
+        us_required = {"Stock Name", "Quantity", "Average Buy Price"}
+        if us_required.issubset(canonical_columns):
+            has_us_currency_marker = any(
+                "$" in column or "usd" in column for column in raw_columns
+            )
+            if has_us_currency_marker:
+                return "TICKERTAPE_US"
+            ambiguous_header_found = True
+
+    if ambiguous_header_found:
+        raise ValueError(
+            "The CSV has generic holdings columns but no ISIN or explicit USD fields, "
+            "so its market cannot be identified safely. Export the Groww holdings "
+            "report with ISIN, or the Tickertape US report with USD-labelled columns."
+        )
+    raise ValueError(
+        "The holdings report format was not recognized. Groww/Indian reports must "
+        "include ISIN, Quantity, and Average Price; Tickertape US reports must include "
+        "Stock Name, Quantity, and a USD-labelled average buy price."
+    )
+
+
+def _read_indian_broker_holdings(uploaded_file):
+    """Parse an Indian broker CSV/Excel with Stock Name/ISIN/Quantity/
+    Average Buy Price/Buy Value/Closing Price/Closing Value/Unrealised P&L columns.
+
+    The header row is auto-detected so Groww exports work as either CSV or Excel.
+    """
+    if uploaded_file is None:
+        raise ValueError("Choose an Indian broker holdings file first.")
+
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("The selected broker holdings file is empty.")
+
+    file_name = str(getattr(uploaded_file, "name", "") or "").strip().lower()
+    preview_df = _read_holdings_preview(raw, file_name)
     header_row = _detect_broker_holdings_header_row(preview_df)
     if header_row is None:
-        header_row = 10
+        raise ValueError(
+            "Could not locate an Indian holdings header containing ISIN and Quantity."
+        )
 
     try:
-        df = pd.read_excel(io.BytesIO(raw), header=header_row)
+        if file_name.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(raw), header=header_row)
+        else:
+            df = pd.read_excel(io.BytesIO(raw), header=header_row)
     except Exception as exc:
         raise ValueError(
-            f"Could not read the Excel file with header row {header_row + 1}: {exc}"
+            f"Could not read the holdings file with header row {header_row + 1}: {exc}"
         ) from exc
 
     df.columns = [str(c).strip() for c in df.columns]
@@ -1149,9 +1221,15 @@ def _read_broker_holdings_excel(uploaded_file):
 
     if "Stock Name" not in df.columns:
         df["Stock Name"] = df["ISIN"]
+    if "Ticker" not in df.columns:
+        df["Ticker"] = ""
+    if "Exchange" not in df.columns:
+        df["Exchange"] = ""
 
     df["ISIN"] = df["ISIN"].astype(str).str.strip().str.upper()
     df["Stock Name"] = df["Stock Name"].fillna("").astype(str).str.strip()
+    df["Ticker"] = df["Ticker"].fillna("").astype(str).str.strip().str.upper()
+    df["Exchange"] = df["Exchange"].fillna("").astype(str).str.strip().str.upper()
     df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
     df["Average Buy Price"] = pd.to_numeric(df["Average Buy Price"], errors="coerce")
 
@@ -1164,36 +1242,60 @@ def _read_broker_holdings_excel(uploaded_file):
             "No valid holdings rows (with ISIN, Quantity, Average Buy Price) were found."
         )
 
-    def _combine(group):
-        total_qty = group["Quantity"].sum()
-        weighted_price = (group["Quantity"] * group["Average Buy Price"]).sum() / total_qty
-        return pd.Series({
-            "Stock Name": group["Stock Name"].iloc[0],
-            "Quantity": total_qty,
-            "Average Buy Price": weighted_price,
-        })
+    def _first_nonempty(values):
+        return next((value for value in values if value), "")
 
-    df = df.groupby("ISIN", as_index=False).apply(_combine).reset_index(drop=True)
-    return df[["ISIN", "Stock Name", "Quantity", "Average Buy Price"]]
+    df["Total Buy Cost"] = df["Quantity"] * df["Average Buy Price"]
+    df = df.groupby("ISIN", as_index=False).agg(**{
+        "Stock Name": ("Stock Name", "first"),
+        "Ticker": ("Ticker", _first_nonempty),
+        "Exchange": ("Exchange", _first_nonempty),
+        "Quantity": ("Quantity", "sum"),
+        "Total Buy Cost": ("Total Buy Cost", "sum"),
+    })
+    df["Average Buy Price"] = df["Total Buy Cost"] / df["Quantity"]
+    return df[
+        ["ISIN", "Ticker", "Exchange", "Stock Name", "Quantity", "Average Buy Price"]
+    ]
+
+
+def _read_broker_holdings_excel(uploaded_file):
+    """Backward-compatible wrapper for Indian broker report parsing."""
+    return _read_indian_broker_holdings(uploaded_file)
+
+
+def _indian_report_ticker_candidates(symbol, exchange_hint, nse_company_lookup):
+    """Return Indian-only Yahoo candidates for a symbol from an ISIN report."""
+    raw_symbol = str(symbol or "").strip().upper()
+    if not raw_symbol:
+        return []
+
+    base_symbol = normalize_portfolio_symbol(raw_symbol)
+    exchange = str(exchange_hint or "").strip().upper()
+    if exchange in {"BSE", "BOM", "BO"}:
+        return [f"{base_symbol}.BO"]
+    if exchange in {"NSE", "NS"} or base_symbol in (nse_company_lookup or {}):
+        return [f"{base_symbol}.NS"]
+    return [f"{base_symbol}.NS", f"{base_symbol}.BO"]
 
 
 def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
-    """Resolve Indian Excel or Tickertape US CSV holdings and upsert them.
+    """Resolve schema-detected Indian or Tickertape US holdings and upsert them.
 
     Returns (imported_row_count, unresolved_isins).
     """
-    file_name = str(getattr(uploaded_file, "name", "") or "").strip().lower()
-    is_tickertape_csv = file_name.endswith(".csv")
+    report_type = _detect_holdings_report_type(uploaded_file)
+    is_tickertape_us = report_type == "TICKERTAPE_US"
     cleaned = (
         _read_tickertape_us_holdings_csv(uploaded_file)
-        if is_tickertape_csv else _read_broker_holdings_excel(uploaded_file)
+        if is_tickertape_us else _read_indian_broker_holdings(uploaded_file)
     )
     normalized_mode = str(mode or "merge").strip().lower()
     if normalized_mode not in {"replace", "merge"}:
         raise ValueError("Import mode must be either 'replace' or 'merge'.")
 
     isin_to_symbol = {}
-    if not is_tickertape_csv:
+    if not is_tickertape_us:
         equity_map = load_equity_mapping().copy()
         equity_map["ISIN"] = equity_map["ISIN"].astype(str).str.strip().str.upper()
         isin_to_symbol = dict(
@@ -1205,7 +1307,7 @@ def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
     unresolved_isins = []
 
     for _, row in cleaned.iterrows():
-        if is_tickertape_csv:
+        if is_tickertape_us:
             supplied_ticker = str(row.get("Ticker") or "").strip().upper()
             instrument = (
                 resolve_yahoo_instrument(supplied_ticker, {})
@@ -1214,8 +1316,19 @@ def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
             unresolved_label = str(row["Stock Name"])
         else:
             isin = row["ISIN"]
-            symbol_guess = isin_to_symbol.get(isin)
-            instrument = resolve_yahoo_instrument(symbol_guess, nse_lookup) if symbol_guess else None
+            symbol_guess = str(isin_to_symbol.get(isin) or row.get("Ticker") or "").strip().upper()
+            exchange_hint = str(row.get("Exchange") or "").strip().upper()
+            # An ISIN-bearing report is Indian even when its exchange column is
+            # absent. Probe Indian venues only; never let a same-name US ticker win.
+            candidates = _indian_report_ticker_candidates(
+                symbol_guess, exchange_hint, nse_lookup
+            )
+
+            instrument = None
+            for candidate in candidates:
+                instrument = resolve_yahoo_instrument(candidate, nse_lookup)
+                if instrument is not None:
+                    break
             unresolved_label = f"{isin} ({row['Stock Name']})"
         if instrument is None:
             unresolved_isins.append(unresolved_label)
@@ -4147,12 +4260,12 @@ with step_col1:
     with st.container(border=True):
         st.markdown("**1️⃣ Upload your broker holdings**")
         broker_holdings_upload = st.file_uploader(
-            "Upload broker holdings (.xlsx, .xls, or Tickertape US .csv)",
+            "Upload Groww/Indian or Tickertape US holdings",
             type=["xlsx", "xls", "csv"],
             key="broker_holdings_upload",
             help=(
-                "Groww/Indian Excel statements are matched by ISIN. Tickertape US CSV "
-                "reports are detected from Stock Name, Quantity, and Avg Buy Price ($). "
+                "Groww/Indian CSV or Excel statements are detected and matched by ISIN. "
+                "Tickertape US reports are detected from explicit USD-labelled columns. "
                 "Because Tickertape omits symbols, US names are matched to Yahoo only "
                 "when the result is unambiguous; unresolved names are reported."
             ),
