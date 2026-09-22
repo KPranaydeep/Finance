@@ -23,6 +23,7 @@ from public_track_record import (
     load_security_evidence,
     percent,
     percentage_points,
+    portfolio_cover_card,
     share_text,
     whatsapp_card,
 )
@@ -78,10 +79,10 @@ with st.container(horizontal=True):
     st.metric("Recorded exits", len(exited))
     st.metric("Published", str(feed["publication_date"]))
 
-st.subheader("Verified security history")
+st.subheader("Evidence deck")
 st.write(
-    "Choose a security to see what ₹100 at its first active publication became, "
-    "compared with Nifty 50 and VT world in INR."
+    "Start with the portfolio summary, then move through one publication-linked "
+    "security card at a time."
 )
 
 if not active:
@@ -97,138 +98,173 @@ if exited:
         selection_mode="single",
     )
 selection_rows = active if scope == "Current holdings" else exited
-selected_ticker = st.selectbox(
-    "Security",
-    [item["ticker"] for item in selection_rows],
-    format_func=lambda ticker: next(
-        (
-            f"{row['ticker']} · {float(row['target_weight']):.0%} target"
-            if scope == "Current holdings"
-            else f"{row['ticker']} · exited {row.get('exit_date') or 'date unavailable'}"
-        )
-        for row in selection_rows
-        if row["ticker"] == ticker
-    ),
-)
-selected = next(item for item in selection_rows if item["ticker"] == selected_ticker)
-now = datetime.now(IST)
-refresh_bucket = now.replace(second=0, microsecond=0)
-refresh_bucket = refresh_bucket.replace(minute=refresh_bucket.minute // 5 * 5)
-
-try:
-    with st.skeleton(height=240):
-        metrics, chart = load_security_evidence(
-            selected_ticker,
-            str(selected["entry_date"]),
-            exit_date=(str(selected["exit_date"]) if selected.get("exit_date") else None),
-            refresh_bucket=refresh_bucket.isoformat(),
-        )
-except Exception:
-    LOGGER.exception("Selected security evidence could not be built")
-    st.warning(
-        "Market data for this security is temporarily unavailable. "
-        "The immutable publication record remains unchanged."
-    )
-    st.stop()
-
-symbol = metrics.get("price_symbol", "₹")
-with st.container(horizontal=True):
-    st.metric("₹100 became", f"₹{100 * (1 + metrics['ticker_return']):,.2f}")
-    st.metric("Return in INR", percent(metrics["ticker_return"]))
-    st.metric("Versus Nifty 50", percentage_points(metrics["excess_return"]))
-    st.metric("Versus VT world", percentage_points(metrics["excess_world_return"]))
-
-st.caption(
-    f"First publication: {selected['entry_date']} · Evidence through: {metrics['as_of']} · "
-    f"{metrics['calendar_days']} calendar days / {metrics['ticker_sessions']} market sessions"
-)
-
-display_chart = chart.rename(columns={"Ticker": selected_ticker})
-st.line_chart(
-    display_chart,
-    y_label="Growth of ₹100",
-    color=["#9f4339", "#315f78", "#b27a18"],
-    height=460,
-)
-
-price_left, price_right = st.columns(2)
-price_left.metric("Entry close", f"{symbol}{metrics['entry_close']:,.2f}")
-price_right.metric(
-    str(metrics.get("endpoint_label", "Latest price")),
-    f"{symbol}{metrics['endpoint_price']:,.2f}",
-)
-st.caption(
-    f"Latest price observed: {metrics['endpoint_as_of']} · Overseas security returns are "
-    "translated to INR using same-date USD/INR observations."
-)
-
-st.subheader("Current published holdings")
-holdings_frame = pd.DataFrame(
-    [
-        {
-            "Security": item["ticker"],
-            "Target weight": float(item["target_weight"]),
-            "Tracked since": item["entry_date"],
-        }
-        for item in active
-    ]
-)
-holdings_frame["Tracked since"] = pd.to_datetime(
-    holdings_frame["Tracked since"], errors="coerce"
-).dt.date
-st.dataframe(
-    holdings_frame,
-    hide_index=True,
+slide_number = st.pagination(
+    len(selection_rows) + 1,
+    default=1,
+    max_visible_pages=5,
     width="stretch",
-    column_config={
-        "Target weight": st.column_config.NumberColumn(format="percent"),
-        "Tracked since": st.column_config.DateColumn(format="DD MMM YYYY"),
-    },
+    key=f"track_record_slides_{scope}",
+)
+st.caption(
+    f"Slide {slide_number} of {len(selection_rows) + 1} · "
+    + ("Portfolio summary" if slide_number == 1 else selection_rows[slide_number - 2]["ticker"])
 )
 
-share_section = st.expander(
-    "Shareable evidence for the selected security",
-    expanded=False,
-    icon=":material/share:",
-    on_change="rerun",
-)
-if share_section.open:
-    with share_section:
+if slide_number == 1:
+    cover = portfolio_cover_card(feed, selection_rows, scope_label=scope)
+    st.image(cover, width="stretch")
+    st.caption(
+        "The cover is built directly from the immutable publication record and "
+        "requires no market-data request."
+    )
+else:
+    selected = selection_rows[slide_number - 2]
+    selected_ticker = selected["ticker"]
+    now = datetime.now(IST)
+    refresh_bucket = now.replace(second=0, microsecond=0)
+    refresh_bucket = refresh_bucket.replace(minute=refresh_bucket.minute // 5 * 5)
+    try:
+        with st.skeleton(height=360):
+            metrics, chart = load_security_evidence(
+                selected_ticker,
+                str(selected["entry_date"]),
+                exit_date=(
+                    str(selected["exit_date"]) if selected.get("exit_date") else None
+                ),
+                refresh_bucket=refresh_bucket.isoformat(),
+            )
         share_card = whatsapp_card(selected_ticker, metrics, chart)
         st.image(share_card, width="stretch")
-        with st.container(horizontal=True):
-            st.download_button(
-                "Download image",
-                share_card,
-                file_name=f"{selected_ticker.replace('^', '')}-track-record-{metrics['as_of']}.png",
-                mime="image/png",
-                type="primary",
-                on_click="ignore",
-            )
-            st.download_button(
-                "Download evidence",
-                evidence_csv(selected_ticker, metrics, chart),
-                file_name=f"{selected_ticker.replace('^', '')}-track-record-{metrics['as_of']}.csv",
-                mime="text/csv",
-                on_click="ignore",
-            )
-            st.download_button(
-                "Download caption",
-                share_text(selected_ticker, metrics, chart),
-                file_name=f"{selected_ticker.replace('^', '')}-share-caption.txt",
-                mime="text/plain",
-                on_click="ignore",
-            )
+        st.caption(
+            f"{selected_ticker} · first publication {selected['entry_date']} · "
+            f"evidence through {metrics['as_of']}"
+        )
 
-exit_section = st.expander(
-    "Exited securities",
+        detail_section = st.expander(
+            "Interactive evidence",
+            expanded=False,
+            icon=":material/analytics:",
+            on_change="rerun",
+        )
+        if detail_section.open:
+            with detail_section:
+                symbol = metrics.get("price_symbol", "₹")
+                with st.container(horizontal=True):
+                    st.metric(
+                        "₹100 became",
+                        f"₹{100 * (1 + metrics['ticker_return']):,.2f}",
+                    )
+                    st.metric("Return in INR", percent(metrics["ticker_return"]))
+                    st.metric(
+                        "Versus Nifty 50",
+                        percentage_points(metrics["excess_return"]),
+                    )
+                    st.metric(
+                        "Versus VT world",
+                        percentage_points(metrics["excess_world_return"]),
+                    )
+                st.caption(
+                    f"{metrics['calendar_days']} calendar days / "
+                    f"{metrics['ticker_sessions']} market sessions"
+                )
+                display_chart = chart.rename(columns={"Ticker": selected_ticker})
+                st.line_chart(
+                    display_chart,
+                    y_label="Growth of ₹100",
+                    color=["#9f4339", "#315f78", "#b27a18"],
+                    height=460,
+                )
+                price_left, price_right = st.columns(2)
+                price_left.metric(
+                    "Entry close", f"{symbol}{metrics['entry_close']:,.2f}"
+                )
+                price_right.metric(
+                    str(metrics.get("endpoint_label", "Latest price")),
+                    f"{symbol}{metrics['endpoint_price']:,.2f}",
+                )
+                st.caption(
+                    f"Latest price observed: {metrics['endpoint_as_of']} · "
+                    "Overseas returns are translated to INR using same-date USD/INR."
+                )
+
+        share_section = st.expander(
+            "Download and share this slide",
+            expanded=False,
+            icon=":material/share:",
+            on_change="rerun",
+        )
+        if share_section.open:
+            with share_section:
+                with st.container(horizontal=True):
+                    st.download_button(
+                        "Download image",
+                        share_card,
+                        file_name=(
+                            f"{selected_ticker.replace('^', '')}-track-record-"
+                            f"{metrics['as_of']}.png"
+                        ),
+                        mime="image/png",
+                        type="primary",
+                        on_click="ignore",
+                    )
+                    st.download_button(
+                        "Download evidence",
+                        evidence_csv(selected_ticker, metrics, chart),
+                        file_name=(
+                            f"{selected_ticker.replace('^', '')}-track-record-"
+                            f"{metrics['as_of']}.csv"
+                        ),
+                        mime="text/csv",
+                        on_click="ignore",
+                    )
+                    st.download_button(
+                        "Download caption",
+                        share_text(selected_ticker, metrics, chart),
+                        file_name=(
+                            f"{selected_ticker.replace('^', '')}-share-caption.txt"
+                        ),
+                        mime="text/plain",
+                        on_click="ignore",
+                    )
+    except Exception:
+        LOGGER.exception("Selected security evidence could not be built")
+        st.warning(
+            "Market data for this slide is temporarily unavailable. Move to another "
+            "slide or retry later; the immutable publication record is unchanged."
+        )
+
+composition_section = st.expander(
+    "Portfolio composition",
     expanded=False,
-    icon=":material/history:",
+    icon=":material/list:",
     on_change="rerun",
 )
-if exit_section.open:
-    with exit_section:
+if composition_section.open:
+    with composition_section:
+        holdings_frame = pd.DataFrame(
+            [
+                {
+                    "Security": item["ticker"],
+                    "Target weight": float(item["target_weight"]),
+                    "Tracked since": item["entry_date"],
+                }
+                for item in active
+            ]
+        )
+        holdings_frame["Tracked since"] = pd.to_datetime(
+            holdings_frame["Tracked since"], errors="coerce"
+        ).dt.date
+        st.dataframe(
+            holdings_frame,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Target weight": st.column_config.NumberColumn(format="percent"),
+                "Tracked since": st.column_config.DateColumn(format="DD MMM YYYY"),
+            },
+        )
         if exited:
+            st.markdown("**Exited securities**")
             st.dataframe(
                 pd.DataFrame(
                     [
@@ -244,11 +280,9 @@ if exit_section.open:
                 width="stretch",
             )
             st.caption(
-                "An exit means the security disappeared from a later active publication. "
-                "It is historical evidence, not a current sell instruction."
+                "An exit is historical evidence, not a current sell instruction."
             )
-        else:
-            st.caption("No dated exits have been recorded yet.")
+
 
 owner_section = st.expander(
     "Owner exports and maintenance",

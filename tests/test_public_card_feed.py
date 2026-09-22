@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from public_card_feed import build_card_feed
-from public_track_record import analyze
+from public_track_record import analyze, portfolio_cover_card
 
 
 def test_card_feed_tracks_active_and_exited_lifecycles():
@@ -123,3 +123,22 @@ def test_indian_security_return_stays_in_inr():
 
     assert metrics["ticker_return"] == pytest.approx(0.1)
     assert metrics["price_symbol"] == "₹"
+
+
+def test_portfolio_cover_slide_requires_no_market_history():
+    feed = {
+        "portfolio_version": "P004",
+        "publication_date": "2026-09-20",
+        "publication_id": "PUB-EXAMPLE",
+    }
+    securities = [
+        {"ticker": "AAA.NS", "target_weight": 0.6},
+        {"ticker": "BBB.NS", "target_weight": 0.4},
+    ]
+
+    image = portfolio_cover_card(
+        feed, securities, scope_label="Current holdings"
+    )
+
+    assert image.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(image) > 10_000

@@ -611,6 +611,126 @@ def batch_summary_card(feed: dict, summaries: list[dict]) -> bytes:
     return buf.getvalue()
 
 
+@st.cache_data(ttl=300, max_entries=16, show_spinner=False)
+def portfolio_cover_card(
+    feed: dict,
+    securities: list[dict],
+    *,
+    scope_label: str,
+) -> bytes:
+    """Render a zero-network cover slide for the public evidence deck."""
+    paper, ink, muted, accent, faint = (
+        "#f5f0e6",
+        "#29251f",
+        "#625d55",
+        "#913f36",
+        "#d8cfbf",
+    )
+    serif, sans, mono = "DejaVu Serif", "DejaVu Sans", "DejaVu Sans Mono"
+    current_scope = scope_label.lower().startswith("current")
+    title = "CURRENT HOLDINGS" if current_scope else "EXITED SECURITIES"
+    ordered = (
+        sorted(
+            securities,
+            key=lambda item: (-float(item.get("target_weight") or 0), item["ticker"]),
+        )
+        if current_scope
+        else sorted(
+            securities,
+            key=lambda item: (str(item.get("exit_date") or ""), item["ticker"]),
+            reverse=True,
+        )
+    )
+    shown = ordered[:5]
+
+    figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
+    figure.patches.extend(
+        [
+            plt.Rectangle(
+                (0.035, 0.028),
+                0.930,
+                0.944,
+                transform=figure.transFigure,
+                facecolor="none",
+                edgecolor=ink,
+                linewidth=1.3,
+            ),
+            plt.Rectangle(
+                (0.044, 0.037),
+                0.912,
+                0.926,
+                transform=figure.transFigure,
+                facecolor="none",
+                edgecolor=faint,
+                linewidth=0.8,
+            ),
+        ]
+    )
+    figure.text(0.075, 0.930, "PUBLIC PORTFOLIO", color=accent, fontsize=18,
+                fontweight="bold", family=sans)
+    figure.text(0.075, 0.790, "Track-record\nevidence deck", color=ink,
+                fontsize=43, fontweight="bold", family=serif, linespacing=1.12)
+    figure.text(
+        0.075,
+        0.715,
+        f"{feed.get('portfolio_version', '')}  ·  published {feed.get('publication_date', '')}",
+        color=muted,
+        fontsize=17,
+        family=sans,
+    )
+    figure.lines.append(
+        plt.Line2D([0.075, 0.925], [0.680, 0.680], transform=figure.transFigure,
+                   color=ink, linewidth=1.0)
+    )
+    figure.text(0.075, 0.635, title, color=muted, fontsize=14,
+                fontweight="bold", family=sans)
+    figure.text(0.075, 0.560, str(len(securities)), color=accent, fontsize=50,
+                fontweight="bold", family=serif)
+    figure.text(0.215, 0.570, "securities in this deck", color=ink, fontsize=20,
+                fontweight="bold", family=sans)
+
+    y = 0.495
+    for item in shown:
+        ticker = str(item.get("ticker", ""))
+        if current_scope:
+            detail = f"{float(item.get('target_weight') or 0):.0%} target"
+        else:
+            detail = f"exited {str(item.get('exit_date') or 'date unavailable')}"
+        figure.text(0.095, y, ticker, color=ink, fontsize=18,
+                    fontweight="bold", family=mono)
+        figure.text(0.905, y, detail, color=muted, fontsize=15,
+                    ha="right", family=sans)
+        figure.lines.append(
+            plt.Line2D([0.095, 0.905], [y - 0.018, y - 0.018],
+                       transform=figure.transFigure, color=faint, linewidth=0.7)
+        )
+        y -= 0.055
+    remaining = len(ordered) - len(shown)
+    if remaining > 0:
+        figure.text(0.095, y, f"+ {remaining} more", color=muted, fontsize=15,
+                    family=sans, style="italic")
+
+    figure.text(0.075, 0.125, "TURN THE PAGE", color=accent, fontsize=13,
+                fontweight="bold", family=sans)
+    figure.text(
+        0.075,
+        0.072,
+        "One immutable entry date. One security per slide.\n"
+        "Nifty 50 and VT world shown in INR for context.",
+        color=ink,
+        fontsize=15,
+        family=serif,
+        linespacing=1.45,
+    )
+    figure.text(0.925, 0.048, str(feed.get("publication_id", ""))[-16:],
+                color=muted, fontsize=9, ha="right", family=mono)
+    buffer = BytesIO()
+    figure.savefig(buffer, format="png", dpi=100, facecolor=paper,
+                   bbox_inches=None, pad_inches=0)
+    plt.close(figure)
+    return buffer.getvalue()
+
+
 def whatsapp_card(ticker: str, metrics: dict, chart: pd.DataFrame) -> bytes:
     """Render a glance-readable 1080×1350 humanistic share card."""
     paper = "#f5f0e6"
@@ -808,6 +928,3 @@ def whatsapp_card(ticker: str, metrics: dict, chart: pd.DataFrame) -> bytes:
                    bbox_inches=None, pad_inches=0)
     plt.close(figure)
     return buffer.getvalue()
-
-
-
