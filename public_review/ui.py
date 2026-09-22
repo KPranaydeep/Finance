@@ -179,6 +179,13 @@ def review_display_state(p, today=None):
             "date_value": candidate or "Not yet estimated",
             "due": False,
         }
+    if decision.get("review_acknowledged"):
+        return {
+            "state": "Review completed",
+            "date_label": "Next review" if candidate else "Monitoring",
+            "date_value": candidate or "Continues automatically",
+            "due": False,
+        }
     if reasons:
         triggered_as_of = p.get("as_of") or str(p.get("checked_at") or "")[:10]
         return {
@@ -220,6 +227,18 @@ def render_fresh_preview(p):
                 f"Observed monitoring begins after {ready:%d %b %Y, %H:%M IST}. "
                 "This planning date is not a sell instruction."
             )
+        elif d.get("review_acknowledged"):
+            acknowledged_at = d.get("acknowledged_at")
+            acknowledged_label = ""
+            if acknowledged_at:
+                acknowledged = datetime.fromisoformat(acknowledged_at).astimezone(
+                    ZoneInfo("Asia/Kolkata")
+                )
+                acknowledged_label = f" on {acknowledged:%d %b %Y, %H:%M IST}"
+            st.caption(
+                "Owner review completed" + acknowledged_label
+                + ". No trade or portfolio change was recorded; monitoring continues."
+            )
         elif d.get("reasons"):
             st.caption(
                 "A configured review trigger is active. Review risk, taxes and "
@@ -230,7 +249,15 @@ def render_fresh_preview(p):
 
     followup = f.get("next_common_review_session")
     if d.get("target_crossed_securities"):
-        st.warning("Net target already crossed: " + ", ".join(d["target_crossed_securities"]) + ". Review costs and risk before selling.")
+        message = (
+            "Net target already crossed: "
+            + ", ".join(d["target_crossed_securities"])
+            + "."
+        )
+        if d.get("review_acknowledged"):
+            st.info(message + " This unchanged trigger was acknowledged; no sale was recorded.")
+        else:
+            st.warning(message + " Review costs and risk before selling.")
 
     with st.expander("Research and audit details", expanded=False):
         forecast_date = f.get("next_review")
@@ -446,18 +473,30 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         return
     m, d = p["metrics"], p["decision"]
     status = d["status"].replace("_", " ").capitalize()
-    if d["reasons"]:
+    review_required = d.get(
+        "review_required",
+        bool(d["reasons"]) and not d.get("review_acknowledged"),
+    )
+    if review_required:
         st.warning(status + " — review the estimates before acting. No trades have been submitted.")
+    elif d.get("review_acknowledged"):
+        st.info("Owner review completed. No trade or portfolio change was recorded; monitoring continues.")
     else:
         st.info("No configured trigger detected. This is not a guarantee against losses.")
     with st.container(horizontal=True):
-        st.metric("Next suggested review", "Now" if d["reasons"] else (d["next_review"] or "Not validated"))
+        review_value = (
+            "Now" if review_required
+            else d.get("next_review") or (
+                "Review completed" if d.get("review_acknowledged") else "Not validated"
+            )
+        )
+        st.metric("Next suggested review", review_value)
         st.metric("Estimated net XIRR", percent(m["xirr"]))
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
     forecast_review = p.get("forecast", {}).get("next_review")
     followup = p.get("forecast", {}).get("next_common_review_session")
-    if not d["reasons"] and forecast_review and followup:
+    if not review_required and forecast_review and followup:
         st.caption(
             f"Review window: {forecast_review}, then {followup} if follow-up is needed. "
             "The second date is the next verified common trading session across the basket's represented markets."

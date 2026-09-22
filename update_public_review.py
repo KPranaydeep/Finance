@@ -28,8 +28,19 @@ def main():
             policy = complete_policy(
                 policy, review_scope_tickers(pubs, history),
                 frozen_kinds=frozen_instrument_kinds(history))
+            acknowledge_latest = os.getenv(
+                "PUBLIC_REVIEW_ACK_LATEST", "false"
+            ).strip().lower() == "true"
+            acknowledge_baseline = os.getenv(
+                "PUBLIC_REVIEW_ACK_BASELINE", ""
+            ).strip()
+            if acknowledge_latest and acknowledge_baseline:
+                raise ValueError("INVALID_REVIEW_ACKNOWLEDGEMENT")
+            acknowledgement = (
+                "LATEST" if acknowledge_latest else acknowledge_baseline or None
+            )
             result = run(conn, os.getenv("PUBLIC_BASKET_ID", "PUBLIC-01"), policy,
-                         acknowledge=os.getenv("PUBLIC_REVIEW_ACK_BASELINE") or None)
+                         acknowledge=acknowledgement)
         print(json.dumps(result))
         return 1 if result["failed"] else 0
     except Exception as exc:
@@ -44,7 +55,8 @@ def main():
                       "NO_ACTIVE_PUBLICATION", "UNKNOWN_BASELINE", "INSTRUMENT_CLASSIFICATION_REQUIRED",
                       "INSTRUMENT_METADATA_UNAVAILABLE", "POLICY_UPDATE_BUSY", "POLICY_CHANGED_RETRY",
                       "FOREIGN_REVIEW_COST_MODEL_REQUIRED", "INVALID_POLICY_ENTRY_QUOTE_INTERVAL",
-                      "ENTRY_INTRADAY_HISTORY_UNAVAILABLE"}
+                      "ENTRY_INTRADAY_HISTORY_UNAVAILABLE",
+                      "NO_REVIEW_TO_ACKNOWLEDGE", "INVALID_REVIEW_ACKNOWLEDGEMENT"}
         code = str(exc) if isinstance(exc, ValueError) and str(exc) in safe_codes else "REVIEW_SETUP_OR_STORAGE_FAILED"
         print(json.dumps({"status": "CANNOT_ASSESS", "reason": code,
                           "note": "No trade was submitted. Raw exceptions and credentials are not logged."}))

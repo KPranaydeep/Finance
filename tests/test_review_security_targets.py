@@ -132,6 +132,19 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(display['state'], 'Review now')
         self.assertEqual(display['date_label'], 'Review due since')
 
+    def test_acknowledged_trigger_becomes_completed_monitoring_state(self):
+        from public_review.ui import review_display_state
+        display = review_display_state({
+            'decision': {
+                'next_review': None,
+                'reasons': ['SECURITY_TARGET_REVIEW'],
+                'review_acknowledged': True,
+            },
+        }, today='2026-09-22')
+        self.assertEqual(display['state'], 'Review completed')
+        self.assertEqual(display['date_label'], 'Monitoring')
+        self.assertEqual(display['date_value'], 'Continues automatically')
+
     def test_remembered_review_date_is_scoped_to_policy(self):
         from public_review.ui import review_promise_key
         base = {'publication_id':'TEST', 'ack_epoch':0}

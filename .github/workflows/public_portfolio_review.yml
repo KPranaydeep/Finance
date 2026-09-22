@@ -17,8 +17,13 @@ on:
     - cron: "45 12 * * *"
   workflow_dispatch:
     inputs:
+      acknowledge_latest_review:
+        description: "I completed the latest active model review (records no trade)"
+        required: false
+        default: false
+        type: boolean
       acknowledge_baseline:
-        description: "Optional frozen baseline ID: acknowledge review only; does not record a trade"
+        description: "Advanced: acknowledge a specific frozen baseline ID instead of latest"
         required: false
         type: string
 
@@ -49,6 +54,7 @@ jobs:
           PUBLIC_REVIEW_ENABLED: ${{ vars.PUBLIC_REVIEW_ENABLED || 'false' }}
           PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
           PUBLIC_BASKET_ID: PUBLIC-01
+          PUBLIC_REVIEW_ACK_LATEST: ${{ inputs.acknowledge_latest_review || 'false' }}
           PUBLIC_REVIEW_ACK_BASELINE: ${{ inputs.acknowledge_baseline }}
           PUBLIC_REVIEW_ALERT_CHANNEL: ${{ vars.PUBLIC_REVIEW_ALERT_CHANNEL || 'none' }}
           PUBLIC_REVIEW_TELEGRAM_TOKEN: ${{ secrets.PUBLIC_REVIEW_TELEGRAM_TOKEN }}
