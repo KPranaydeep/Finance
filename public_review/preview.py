@@ -177,13 +177,12 @@ def historical_preview(publication, policy, events, now=None):
     returns = all_returns[held]
     v = validate(returns, b, {t: prices[t] for t in held}, list(returns.index), policy)
     f = estimate(b, prices, returns, days, policy, capital, v)
-    # A research forecast must not become a validated trading recommendation.
-    # Until validation passes, review next session rather than invent a crossing.
-    candidate = f["next_review"] or days[0]
-    prior = [r["payload"].get("decision", {}).get("next_review") for r in events
-             if r["kind"] == "PREVIEW" and r["baseline_id"] == publication["publication_id"]]
-    candidate = min([candidate] + [d for d in prior if d])
+    # Before a durable baseline exists this is planning research, not an
+    # operational review promise. Never relabel the next routine check as a
+    # forecast date.
+    candidate = f.get("next_review") or f.get("research_candidate")
     return {"provisional": True, "publication_id": publication["publication_id"],
+            "planning_estimate": True,
             "policy_version": policy.get("policy_version"),
             "policy_digest": digest(policy),
             "history_coverage": coverage,
@@ -191,4 +190,5 @@ def historical_preview(publication, policy, events, now=None):
             "as_of": as_of, "checked_at": now.isoformat(), "assumed_entry_date": entry,
             "assumption": "Hypothetical entry at the first eligible shared market session after publication, using verified opening prices and modeled entry charges; not an actual trade.",
             "forecast": f, "decision": {"next_review": candidate, "reasons": [],
-            "target_crossed_securities": [], "basis": "VALIDATED_FORECAST" if f["next_review"] else "NEXT_SESSION_RISK_CHECK"}}
+            "target_crossed_securities": [],
+            "basis": "VALIDATED_FORECAST" if f["next_review"] else "RESEARCH_PLANNING_DATE"}}

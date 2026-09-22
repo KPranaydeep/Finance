@@ -16,6 +16,34 @@ class ServiceTests(unittest.TestCase):
         return {t:pd.DataFrame({'Open':price,'Close':price,'Volume':1000,'Dividends':0.,'Stock Splits':0.},index=dates)
                 for t,price in [('A.NS',100.),('B.NS',50.)]}
 
+    def test_only_same_policy_validated_forecast_is_carried_forward(self):
+        from copy import deepcopy
+        from public_review.service import validated_promised_review
+        p = policy()
+        last = {'seq': 4, 'payload': {
+            'policy': deepcopy(p),
+            'forecast': {'next_review': '2026-09-30'},
+            'decision': {'next_review': '2026-09-16',
+                         'date_basis': 'CONTINUOUS_MONITORING'},
+        }}
+        self.assertEqual(
+            validated_promised_review(last, None, p), '2026-09-30')
+        changed = deepcopy(p)
+        changed['minimum_forecast_review_sessions'] = 4
+        self.assertIsNone(validated_promised_review(last, None, changed))
+        self.assertIsNone(validated_promised_review(last, {'seq': 5}, p))
+
+    def test_routine_monitoring_date_is_never_carried_forward(self):
+        from public_review.service import validated_promised_review
+        p = policy()
+        last = {'seq': 4, 'payload': {
+            'policy': p,
+            'forecast': {'next_review': None},
+            'decision': {'next_review': '2026-09-16',
+                         'date_basis': 'NEXT_SESSION_RISK_CHECK'},
+        }}
+        self.assertIsNone(validated_promised_review(last, None, p))
+
     def test_end_to_end_idempotent_model_only_run(self):
         p=policy(); p['capital_inr']=10000
         b=baseline(); db=FakeDB(); histories=self.histories(p)
@@ -42,8 +70,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(sum(r['kind']=='BASELINE' for r in db.rows),1)
         self.assertEqual(sum(r['kind']=='ASSESSMENT' for r in db.rows),1)
         assessment=next(r['payload'] for r in db.rows if r['kind']=='ASSESSMENT')
-        self.assertEqual(assessment['decision']['next_review'], '2026-09-10')
-        self.assertEqual(assessment['decision']['date_basis'], 'NEXT_SESSION_RISK_CHECK')
+        self.assertIsNone(assessment['decision']['next_review'])
+        self.assertEqual(assessment['decision']['date_basis'], 'CONTINUOUS_MONITORING')
         self.assertIsNone(assessment['forecast']['next_review'])
         self.assertEqual(assessment['metrics']['date'],'2026-09-09')
 
