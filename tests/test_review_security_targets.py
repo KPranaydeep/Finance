@@ -107,9 +107,30 @@ class SecurityTargetTests(unittest.TestCase):
         at = AppTest.from_function(app).run()
         self.assertFalse(at.exception)
         self.assertEqual(at.metric[0].label, 'Current state')
-        self.assertEqual(at.metric[0].value, 'No action now')
+        self.assertEqual(at.metric[0].value, 'Planning estimate')
         self.assertEqual(at.metric[1].label, 'Planning review')
         self.assertEqual(at.metric[1].value, '2020-01-02')
+
+    def test_active_trigger_replaces_past_next_review_date(self):
+        from public_review.ui import review_display_state
+        display = review_display_state({
+            'as_of': '2026-09-22',
+            'decision': {
+                'next_review': '2026-09-16',
+                'reasons': ['SECURITY_TARGET_REVIEW'],
+            },
+        }, today='2026-09-22')
+        self.assertEqual(display['state'], 'Review now')
+        self.assertEqual(display['date_label'], 'Triggered as of')
+        self.assertEqual(display['date_value'], '2026-09-22')
+
+    def test_elapsed_forecast_date_is_labelled_due_not_next(self):
+        from public_review.ui import review_display_state
+        display = review_display_state({
+            'decision': {'next_review': '2026-09-16', 'reasons': []},
+        }, today='2026-09-22')
+        self.assertEqual(display['state'], 'Review now')
+        self.assertEqual(display['date_label'], 'Review due since')
 
     def test_remembered_review_date_is_scoped_to_policy(self):
         from public_review.ui import review_promise_key
@@ -183,7 +204,13 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(events, before)
         self.assertEqual(result['as_of'], '2026-09-10')
         self.assertEqual(result['assumed_entry_date'], '2026-09-10')
-        self.assertEqual(result['decision']['next_review'], '2026-09-11')
+        self.assertTrue(result['planning_estimate'])
+        self.assertEqual(
+            result['decision']['next_review'],
+            result['forecast']['research_candidate'],
+        )
+        self.assertEqual(
+            result['decision']['basis'], 'RESEARCH_PLANNING_DATE')
         self.assertIsNone(result['forecast']['next_review'])
 
     def test_existing_baseline_shows_planning_estimate_during_observation_wait(self):

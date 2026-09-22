@@ -164,28 +164,53 @@ def review_promise_key(p):
     )
 
 
+def review_display_state(p, today=None):
+    """Return one mutually exclusive public review state."""
+    decision = p.get("decision", {})
+    candidate = decision.get("next_review")
+    reasons = decision.get("reasons") or []
+    planning_only = bool(p.get("planning_estimate"))
+    today = today or datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+
+    if planning_only:
+        return {
+            "state": "Planning estimate",
+            "date_label": "Planning review",
+            "date_value": candidate or "Not yet estimated",
+            "due": False,
+        }
+    if reasons:
+        triggered_as_of = p.get("as_of") or str(p.get("checked_at") or "")[:10]
+        return {
+            "state": "Review now",
+            "date_label": "Triggered as of",
+            "date_value": triggered_as_of or "Latest assessment",
+            "due": True,
+        }
+    if candidate and candidate <= today:
+        return {
+            "state": "Review now",
+            "date_label": "Review due since",
+            "date_value": candidate,
+            "due": True,
+        }
+    return {
+        "state": "No action now",
+        "date_label": "Next review",
+        "date_value": candidate or "Not yet validated",
+        "due": False,
+    }
+
+
 def render_fresh_preview(p):
     d, f = p["decision"], p["forecast"]
-    # Retain earlier page-view dates in this session; durable workflow dates
-    # are also honored by the assessment engine.
-    key = review_promise_key(p)
-    candidate = d.get("next_review")
-    prior = st.session_state.get(key)
-    date = min(x for x in (candidate, prior) if x) if candidate or prior else None
-    st.session_state[key] = date
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     planning_only = bool(p.get("planning_estimate"))
-    due = (not planning_only) and (
-        bool(d.get("reasons")) or bool(date and date <= today)
-    )
+    display = review_display_state(p)
     metrics = p.get("metrics") or {}
     with st.container(border=True):
         with st.container(horizontal=True):
-            st.metric("Current state", "Review now" if due else "No action now")
-            st.metric(
-                "Planning review" if planning_only else "Next review",
-                date or "Next session risk check",
-            )
+            st.metric("Current state", display["state"])
+            st.metric(display["date_label"], display["date_value"])
             if metrics:
                 st.metric("Net return", percent(metrics.get("net_total_return")))
         if planning_only and p.get("observation_ready_at"):
@@ -208,12 +233,15 @@ def render_fresh_preview(p):
         st.warning("Net target already crossed: " + ", ".join(d["target_crossed_securities"]) + ". Review costs and risk before selling.")
 
     with st.expander("Research and audit details", expanded=False):
-        if date and followup:
+        forecast_date = f.get("next_review")
+        if planning_only and not forecast_date:
+            forecast_date = d.get("next_review")
+        if not display["due"] and forecast_date and followup:
             st.caption(
-                f"Review window: {date}, then {followup} if follow-up is needed. "
+                f"Review window: {forecast_date}, then {followup} if follow-up is needed. "
                 "The second date is the next verified common trading session for every market represented in this basket."
             )
-        if p["provisional"]:
+        if p.get("provisional"):
             st.caption("Provisional: " + p["assumption"])
         if f.get("next_review") is None:
             st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
@@ -427,10 +455,11 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.metric("Estimated net XIRR", percent(m["xirr"]))
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
+    forecast_review = p.get("forecast", {}).get("next_review")
     followup = p.get("forecast", {}).get("next_common_review_session")
-    if d.get("next_review") and followup:
+    if not d["reasons"] and forecast_review and followup:
         st.caption(
-            f"Review window: {d['next_review']}, then {followup} if follow-up is needed. "
+            f"Review window: {forecast_review}, then {followup} if follow-up is needed. "
             "The second date is the next verified common trading session across the basket's represented markets."
         )
     checked = datetime.fromisoformat(checked_at).astimezone(ZoneInfo("Asia/Kolkata"))

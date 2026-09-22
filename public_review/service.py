@@ -32,6 +32,21 @@ SAFE_ERRORS = {
 }
 
 
+def validated_promised_review(last, acknowledgement, policy):
+    """Return only an unacknowledged review promised by the same validated policy.
+
+    Routine next-session monitoring dates and dates inherited from an older
+    policy are deliberately excluded. Scheduled workflows monitor continuously;
+    they do not need to manufacture a public review promise.
+    """
+    if not last or (acknowledgement and acknowledgement["seq"] >= last["seq"]):
+        return None
+    payload = last.get("payload", {})
+    if digest(payload.get("policy", {})) != digest(policy):
+        return None
+    return payload.get("forecast", {}).get("next_review")
+
+
 VALUATION_ERROR_CODES = {
     "Invalid dated model distribution": "ASSESSMENT_DISTRIBUTION_VALUE_ERROR",
     "Invalid current price": "ASSESSMENT_PRICE_INPUT_VALUE_ERROR",
@@ -127,17 +142,19 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
             raise ValueError("ASSESSMENT_FORECAST_VALUE_ERROR") from None
     ack = store.latest(prior, "ACKNOWLEDGED", baseline["baseline_id"])
     last = store.latest(prior, "ASSESSMENT", baseline["baseline_id"])
-    promised = (last["payload"].get("decision", {}).get("next_review") if last and
-                (not ack or ack["seq"] < last["seq"]) else None)
-    # Keep an operational risk-check date even when statistical timing fails
-    # validation; do not label that fallback as a target-crossing forecast.
-    timing = {"next_review": forecast.get("next_review") or (future[0] if future else None)}
+    promised = validated_promised_review(last, ack, policy)
+    # Workflows still inspect the model on every scheduled run. Only a validated
+    # statistical forecast may become a public future-review date.
+    timing = {"next_review": forecast.get("next_review")}
     try:
         assessed = decision(
             metrics, baseline, latest_weights, policy, peak, timing, promised)
     except ValueError:
         raise ValueError("ASSESSMENT_DECISION_VALUE_ERROR") from None
-    assessed["date_basis"] = "VALIDATED_FORECAST" if forecast.get("next_review") else "NEXT_SESSION_RISK_CHECK"
+    assessed["date_basis"] = (
+        "VALIDATED_FORECAST" if forecast.get("next_review")
+        else "CONTINUOUS_MONITORING"
+    )
     try:
         from public_market_mood import fetch_mmi
         mood = fetch_mmi()
