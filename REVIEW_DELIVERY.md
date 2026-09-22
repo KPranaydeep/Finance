@@ -137,9 +137,14 @@ or one-sided test outcomes may leave the date unavailable. Do not lower the gate
 just to display a date. Today's deterministic threshold checks still run.
 
 Once an actionable date has been stored, it cannot silently move later. To confirm
-you reviewed the model, rerun the workflow with `acknowledge_baseline` set to the
-baseline ID from the evidence download. Acknowledgement records **no trade** and
-resets only the scheduling promise; it does not reset holdings or XIRR.
+you completed the latest active review, manually run **Public portfolio model
+review** in GitHub Actions and tick **I completed the latest active model review**.
+GitHub authentication is the owner-access boundary; the public Streamlit page stays
+read-only. The acknowledgement is append-only and bound to the exact assessment,
+policy and trigger set. It records **no trade**, does not reset holdings or XIRR,
+and suppresses only the unchanged reviewed trigger. A new reason/security, or a
+trigger that clears and later recurs, opens a new review cycle. The advanced
+`acknowledge_baseline` input remains available for an older frozen model investment.
 
 MMI is timestamped context only. No untested claim that fear/greed predicts returns
 or reduces slippage has been added.

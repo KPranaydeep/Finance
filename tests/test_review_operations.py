@@ -30,6 +30,64 @@ class FakeDB:
 
 
 class OperationTests(unittest.TestCase):
+    def test_latest_review_acknowledgement_binds_exact_active_assessment(self):
+        from public_review.service import resolve_acknowledgement
+        p = policy()
+        history = [
+            {'kind':'BASELINE','baseline_id':'BASE-1','seq':1,
+             'payload':{'publication_id':'PUB-1'}},
+            {'kind':'ASSESSMENT','baseline_id':'BASE-1','seq':2,
+             'event_hash':'assessment-hash','payload':{
+                 'as_of':'2026-09-22',
+                 'decision':{'reasons':['SECURITY_TARGET_REVIEW'],
+                             'target_crossed_securities':['A.NS']}}},
+        ]
+        baseline_id, assessment, acknowledgement = resolve_acknowledgement(
+            history, [{'publication_id':'PUB-1'}], 'LATEST', p)
+        self.assertEqual(baseline_id, 'BASE-1')
+        self.assertEqual(assessment['seq'], 2)
+        self.assertEqual(acknowledgement['assessment_event_hash'], 'assessment-hash')
+        self.assertEqual(
+            acknowledgement['trigger_state']['target_crossed_securities'],
+            ['A.NS'])
+
+    def test_acknowledgement_requires_an_active_review(self):
+        from public_review.service import resolve_acknowledgement
+        history = [
+            {'kind':'BASELINE','baseline_id':'BASE-1','seq':1,
+             'payload':{'publication_id':'PUB-1'}},
+            {'kind':'ASSESSMENT','baseline_id':'BASE-1','seq':2,
+             'payload':{'decision':{'reasons':[]}}},
+        ]
+        with self.assertRaisesRegex(ValueError, 'NO_REVIEW_TO_ACKNOWLEDGE'):
+            resolve_acknowledgement(
+                history, [{'publication_id':'PUB-1'}], 'LATEST', policy())
+
+    def test_acknowledged_trigger_suppresses_only_unchanged_state(self):
+        from public_review.service import (matching_review_acknowledgement,
+                                           review_trigger_state)
+        p = policy()
+        acknowledged_decision = {
+            'reasons':['SECURITY_TARGET_REVIEW'],
+            'target_crossed_securities':['A.NS'],
+        }
+        state = review_trigger_state(acknowledged_decision)
+        history = [{'kind':'ACKNOWLEDGED','baseline_id':'BASE-1','seq':3,
+                    'payload':{'at':'2026-09-22T12:00:00+00:00',
+                               'policy_digest':digest(p),
+                               'trigger_state':state,
+                               'trigger_signature':digest(state)}}]
+        self.assertIsNotNone(matching_review_acknowledgement(
+            history, 'BASE-1', acknowledged_decision, p))
+        changed = {'reasons':['SECURITY_TARGET_REVIEW'],
+                   'target_crossed_securities':['A.NS','B.NS']}
+        self.assertIsNone(matching_review_acknowledgement(
+            history, 'BASE-1', changed, p))
+        history.append({'kind':'ASSESSMENT','baseline_id':'BASE-1','seq':4,
+                        'payload':{'decision':{'reasons':[]}}})
+        self.assertIsNone(matching_review_acknowledgement(
+            history, 'BASE-1', acknowledged_decision, p))
+
     def test_audit_idempotency_and_tampering(self):
         db=FakeDB()
         self.assertTrue(store.append(db,'B','event1','BASELINE','ID',{'cash':100}))
@@ -128,6 +186,15 @@ class OperationTests(unittest.TestCase):
             maybe_notify(db,'B','ID',{'status':'CANNOT_ASSESS'},now)
             maybe_notify(db,'B','ID',{'status':'CANNOT_ASSESS'},now)
             self.assertEqual(sender.call_count,1)
+
+    def test_acknowledged_review_does_not_send_duplicate_alert(self):
+        from public_review.service import maybe_notify
+        db=FakeDB(); now=datetime(2026,9,9,13,tzinfo=timezone.utc)
+        payload={'decision':{'review_acknowledged':True,
+                            'reasons':['SECURITY_TARGET_REVIEW']}}
+        with patch('public_review.service.send',return_value=True) as sender:
+            maybe_notify(db,'B','ID',payload,now)
+        sender.assert_not_called()
 
     def test_actual_schema_publication_status_column(self):
         from public_review.service import publications

@@ -29,6 +29,7 @@ SAFE_ERRORS = {
     "ASSESSMENT_DISTRIBUTION_VALUE_ERROR", "ASSESSMENT_PRICE_INPUT_VALUE_ERROR",
     "ASSESSMENT_COST_INPUT_VALUE_ERROR", "ASSESSMENT_CLASSIFICATION_VALUE_ERROR",
     "ASSESSMENT_TAX_REGIME_VALUE_ERROR", "ASSESSMENT_CASH_FLOW_VALUE_ERROR",
+    "NO_REVIEW_TO_ACKNOWLEDGE",
 }
 
 
@@ -45,6 +46,80 @@ def validated_promised_review(last, acknowledgement, policy):
     if digest(payload.get("policy", {})) != digest(policy):
         return None
     return payload.get("forecast", {}).get("next_review")
+
+
+def review_trigger_state(decision):
+    """Canonical trigger state used to bind acknowledgements to assessments."""
+    return {
+        "reasons": sorted(set(decision.get("reasons") or [])),
+        "target_crossed_securities": sorted(set(
+            decision.get("target_crossed_securities") or []
+        )),
+    }
+
+
+def resolve_acknowledgement(history, publications_, requested_baseline, policy):
+    """Resolve an owner acknowledgement to one exact active assessment."""
+    baseline_id = requested_baseline
+    if requested_baseline == "LATEST":
+        latest_publication_id = publications_[0]["publication_id"]
+        baseline = next((
+            row for row in reversed(history)
+            if row["kind"] == "BASELINE"
+            and row["payload"].get("publication_id") == latest_publication_id
+        ), None)
+        baseline_id = baseline.get("baseline_id") if baseline else None
+
+    if not baseline_id or not any(
+            row["kind"] == "BASELINE" and row["baseline_id"] == baseline_id
+            for row in history):
+        raise ValueError("UNKNOWN_BASELINE")
+
+    assessment = store.latest(history, "ASSESSMENT", baseline_id)
+    latest_decision = assessment["payload"].get("decision", {}) if assessment else {}
+    if (not assessment or not latest_decision.get("reasons")
+            or latest_decision.get("review_acknowledged")):
+        raise ValueError("NO_REVIEW_TO_ACKNOWLEDGE")
+
+    decision_ = latest_decision
+    trigger_state = review_trigger_state(decision_)
+    return baseline_id, assessment, {
+        "at": None,
+        "assessment_seq": assessment["seq"],
+        "assessment_event_hash": assessment.get("event_hash"),
+        "assessment_as_of": assessment["payload"].get("as_of"),
+        "policy_digest": digest(policy),
+        "trigger_state": trigger_state,
+        "trigger_signature": digest(trigger_state),
+        "note": "Owner completed review; no trade or portfolio change recorded",
+    }
+
+
+def matching_review_acknowledgement(prior, baseline_id, decision_, policy):
+    """Return an acknowledgement while no cleared or materially new trigger exists."""
+    acknowledgement = store.latest(prior, "ACKNOWLEDGED", baseline_id)
+    if not acknowledgement:
+        return None
+    payload = acknowledgement.get("payload", {})
+    if (not payload.get("trigger_signature")
+            or payload.get("policy_digest") != digest(policy)):
+        return None
+
+    # Once a later assessment records a clear state, a future recurrence is a
+    # new review cycle even if the same securities cross again.
+    for row in prior:
+        if (row["kind"] == "ASSESSMENT" and row["baseline_id"] == baseline_id
+                and row["seq"] > acknowledgement["seq"]
+                and not row["payload"].get("decision", {}).get("reasons")):
+            return None
+
+    acknowledged = payload.get("trigger_state", {})
+    current = review_trigger_state(decision_)
+    if (set(current["reasons"]).issubset(acknowledged.get("reasons", []))
+            and set(current["target_crossed_securities"]).issubset(
+                acknowledged.get("target_crossed_securities", []))):
+        return acknowledgement
+    return None
 
 
 VALUATION_ERROR_CODES = {
@@ -155,6 +230,18 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
         "VALIDATED_FORECAST" if forecast.get("next_review")
         else "CONTINUOUS_MONITORING"
     )
+    acknowledged = matching_review_acknowledgement(
+        prior, baseline["baseline_id"], assessed, policy
+    )
+    assessed["review_required"] = bool(assessed.get("reasons")) and not acknowledged
+    assessed["review_acknowledged"] = bool(acknowledged)
+    if acknowledged:
+        assessed["acknowledged_at"] = acknowledged["payload"].get("at")
+        forecast_date = forecast.get("next_review")
+        assessed["next_review"] = (
+            forecast_date if forecast_date and forecast_date > metrics["date"]
+            else None
+        )
     try:
         from public_market_mood import fetch_mmi
         mood = fetch_mmi()
@@ -185,10 +272,15 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
         raise ValueError("NO_ACTIVE_PUBLICATION")
     history = store.read(conn, basket)
     if acknowledge:
-        if not any(r["kind"] == "BASELINE" and r["baseline_id"] == acknowledge for r in history):
-            raise ValueError("UNKNOWN_BASELINE")
-        store.append(conn, basket, "ack:" + acknowledge + ":" + now.date().isoformat(), "ACKNOWLEDGED", acknowledge,
-                     {"at": now.isoformat(), "note": "Review acknowledged; no trade recorded"})
+        baseline_id, assessment, acknowledgement = resolve_acknowledgement(
+            history, pubs, acknowledge, policy
+        )
+        acknowledgement["at"] = now.isoformat()
+        store.append(
+            conn, basket,
+            "ack:" + baseline_id + ":assessment:" + str(assessment["seq"]),
+            "ACKNOWLEDGED", baseline_id, acknowledgement,
+        )
         conn.commit()
         history = store.read(conn, basket)
     # Continue monitoring already-created investments. Latest is added, never
@@ -397,6 +489,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
 
 def maybe_notify(conn, basket, baseline_id, payload, now):
     decision_ = payload.get("decision", {})
+    if decision_.get("review_acknowledged"):
+        return
     status = decision_.get("status", payload.get("status", "CANNOT_ASSESS"))
     review = decision_.get("next_review")
     fingerprint = digest({"baseline": baseline_id, "status": status, "date": review,

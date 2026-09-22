@@ -75,6 +75,33 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(assessment['forecast']['next_review'])
         self.assertEqual(assessment['metrics']['date'],'2026-09-09')
 
+    def test_build_assessment_marks_unchanged_review_as_acknowledged(self):
+        from public_review.service import build_assessment, review_trigger_state
+        from public_review.core import digest
+        p = policy(); b = baseline(); histories = self.histories(p)
+        for frame in histories.values():
+            frame.loc['2026-09-09', ['Open', 'Close']] *= 2.5
+        first = build_assessment(
+            b, histories, '2026-09-09', ['2026-09-10'], p, [],
+            b['weights'], datetime(2026,9,9,13,tzinfo=timezone.utc),
+            comparisons=False)
+        self.assertTrue(first['decision']['reasons'])
+        state = review_trigger_state(first['decision'])
+        prior = [{'kind':'ACKNOWLEDGED','baseline_id':b['baseline_id'],'seq':3,
+                  'payload':{'at':'2026-09-09T12:00:00+00:00',
+                             'policy_digest':digest(p),
+                             'trigger_state':state,
+                             'trigger_signature':digest(state)}}]
+        second = build_assessment(
+            b, histories, '2026-09-09', ['2026-09-10'], p, prior,
+            b['weights'], datetime(2026,9,9,13,tzinfo=timezone.utc),
+            comparisons=False)
+        self.assertTrue(second['decision']['review_acknowledged'])
+        self.assertFalse(second['decision']['review_required'])
+        self.assertEqual(
+            second['decision']['acknowledged_at'],
+            '2026-09-09T12:00:00+00:00')
+
     def test_split_does_not_silently_restate_frozen_units(self):
         p=policy(); b=baseline(); h=self.histories(p)
         h['A.NS'].loc['2026-09-09','Stock Splits']=2
