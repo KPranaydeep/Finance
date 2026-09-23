@@ -30,7 +30,15 @@ def _immediate_baseline_preview(publication, baseline, policy, events, now, ack_
             raise ValueError("INSUFFICIENT_COMMON_HISTORY")
         completed_at_publication.append(str(completed.index[-1].date()))
     publication_cutoff = min(completed_at_publication)
-    histories = market.fetch(tickers, baseline["entry_date"], publication_cutoff,
+    # This is a publication-time *historical* forecast.  Its sample must end
+    # before publication, but it must not start at the newly frozen entry date:
+    # for a fresh publication that would create an empty or inverted range and
+    # hide the planning review date until live observations arrive.
+    history_start = (
+        pd.Timestamp(publication_cutoff)
+        - pd.DateOffset(years=int(policy["history_years"]))
+    ).date().isoformat()
+    histories = market.fetch(tickers, history_start, publication_cutoff,
                              policy, allow_incomplete_end=True)
     marks, timing = {}, []
     for lot in baseline["lots"]:

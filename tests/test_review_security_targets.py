@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from public_review.forecast import estimate, METHOD
 from public_review.core import decision, evaluate, digest
-from public_review.preview import historical_preview
+from public_review.preview import historical_preview, _immediate_baseline_preview
 from review_fixtures import baseline, policy
 
 
@@ -252,3 +252,23 @@ class SecurityTargetTests(unittest.TestCase):
                 datetime(2026, 5, 4, 12, tzinfo=timezone.utc))
         self.assertEqual(result, planning)
         immediate.assert_called_once()
+
+    def test_publication_planning_uses_historical_lookback_not_entry_date(self):
+        from datetime import datetime, timezone
+        b, p = baseline(), policy()
+        publication = {
+            'publication_id': b['publication_id'],
+            'published_at': '2026-05-01T10:00:00+00:00',
+        }
+        with patch('public_review.market.fetch', side_effect=RuntimeError('stop')) as fetch:
+            with self.assertRaisesRegex(RuntimeError, 'stop'):
+                _immediate_baseline_preview(
+                    publication, b, p, [],
+                    datetime(2026, 5, 4, 12, tzinfo=timezone.utc), 0)
+        start, end = fetch.call_args.args[1:3]
+        self.assertLess(pd.Timestamp(start), pd.Timestamp(end))
+        self.assertNotEqual(start, b['entry_date'])
+        self.assertEqual(
+            pd.Timestamp(start),
+            pd.Timestamp(end) - pd.DateOffset(years=p['history_years']),
+        )
