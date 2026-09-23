@@ -15,11 +15,13 @@ from public_card_feed import build_card_feed, load_public_record
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
+    batch_summary_card,
     build_card_batch,
     evidence_csv,
     exited_symbol_rows,
     exited_symbols_csv,
     exited_symbols_text,
+    load_portfolio_summaries,
     load_security_evidence,
     percent,
     percentage_points,
@@ -111,12 +113,50 @@ st.caption(
 )
 
 if slide_number == 1:
-    cover = portfolio_cover_card(feed, selection_rows, scope_label=scope)
-    st.image(cover, width="stretch")
-    st.caption(
-        "The cover is built directly from the immutable publication record and "
-        "requires no market-data request."
+    now = datetime.now(IST)
+    refresh_bucket = now.replace(second=0, microsecond=0)
+    refresh_bucket = refresh_bucket.replace(
+        minute=refresh_bucket.minute // 15 * 15
     )
+    summary_inputs = tuple(
+        (
+            str(item["ticker"]),
+            str(item["entry_date"]),
+            str(item["exit_date"]) if item.get("exit_date") else None,
+            str(item.get("status", "active")).lower(),
+        )
+        for item in feed["securities"]
+    )
+    try:
+        with st.skeleton(height=360):
+            summaries, summary_failures = load_portfolio_summaries(
+                str(feed["publication_id"]),
+                summary_inputs,
+                refresh_bucket.isoformat(),
+            )
+            if not summaries:
+                raise ValueError("No security outcomes are currently available.")
+            summary_card = batch_summary_card(feed, summaries)
+        st.image(summary_card, width="stretch")
+        st.caption(
+            "Highest gain and loss use publication-linked security returns. "
+            "Realized and active figures are equal-weight means across the "
+            "successfully analysed securities—not the portfolio NAV return."
+        )
+        if summary_failures:
+            st.caption(
+                f"{len(summary_failures)} of {len(summary_inputs)} securities "
+                "were temporarily excluded because complete comparable market "
+                "history was unavailable."
+            )
+    except Exception:
+        LOGGER.exception("Portfolio performance summary could not be built")
+        cover = portfolio_cover_card(feed, selection_rows, scope_label=scope)
+        st.image(cover, width="stretch")
+        st.caption(
+            "Live summary history is temporarily unavailable, so this slide "
+            "shows the immutable publication cover instead."
+        )
 else:
     selected = selection_rows[slide_number - 2]
     selected_ticker = selected["ticker"]
