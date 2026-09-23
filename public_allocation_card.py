@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 from io import BytesIO
 
 import matplotlib.pyplot as plt
@@ -46,7 +45,6 @@ def _change_summary(
     return headline, details
 
 
-@lru_cache(maxsize=32)
 def render_allocation_card(
     portfolio_version: str,
     publication_date: str,
