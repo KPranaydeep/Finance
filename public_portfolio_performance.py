@@ -421,7 +421,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-render_review_panel(basket["basket_id"], record.get("active_publications", []))
+review_card_summary=render_review_panel(
+    basket["basket_id"], record.get("active_publications", [])
+)
 
 # Informational only: this value never enters allocation, forecast or order inputs.
 mood=load_market_mood()
@@ -508,6 +510,26 @@ if share_allocation.open:
             current["as_of"].astimezone(IST).date().isoformat(),
             allocation_card_rows,
             card_changes,
+            tuple(
+                item for item in (
+                    (
+                        "ALLOCATION REVIEW",
+                        pd.Timestamp(review_card_summary["review_date"]).strftime("%d %b").upper(),
+                        review_card_summary["review_state"],
+                    ) if review_card_summary else None,
+                    (
+                        "NET SINCE ENTRY",
+                        f'{review_card_summary["net_return"]:+.2%}',
+                        "After modeled costs",
+                    ) if review_card_summary and review_card_summary.get("net_return") is not None else None,
+                    (
+                        "28-DAY MEDIAN",
+                        f'{float(current_forecast_values["median_return"]):+.2%}',
+                        "Through " + pd.Timestamp(current_forecast_values["target_date"]).strftime("%d %b"),
+                    ) if current_forecast_values.get("median_return") is not None
+                         and current_forecast_values.get("target_date") else None,
+                ) if item is not None
+            ),
         )
         st.image(allocation_card, width="stretch")
         st.download_button(

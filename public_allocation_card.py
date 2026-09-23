@@ -56,6 +56,7 @@ def render_allocation_card(
         tuple[tuple[str, float], ...],
         tuple[tuple[str, float], ...],
     ] | None = None,
+    decision_strip: tuple[tuple[str, str, str], ...] = (),
     *,
     public_url: str = PUBLIC_PORTFOLIO_URL,
 ) -> bytes:
@@ -96,6 +97,27 @@ def render_allocation_card(
 
     table_header_y = 0.785
     first_y, last_y = 0.738, 0.140
+    if decision_strip:
+        count = len(decision_strip)
+        left, right = 0.075, 0.925
+        column_width = (right - left) / count
+        for index, (label, value, note) in enumerate(decision_strip):
+            x = left + index * column_width
+            figure.text(x, 0.800, label, fontsize=9.5, fontweight="bold",
+                        color=muted, family="sans-serif")
+            figure.text(x, 0.770, value, fontsize=15.5, fontweight="bold",
+                        color=accent if index == 0 else ink, family="sans-serif")
+            figure.text(x, 0.746, note, fontsize=9.5,
+                        color=muted, family="sans-serif")
+            if index:
+                divider_x = x - 0.018
+                figure.lines.append(
+                    plt.Line2D((divider_x, divider_x), (0.742, 0.812),
+                               transform=figure.transFigure, color=rule,
+                               linewidth=0.8)
+                )
+        table_header_y = 0.695
+        first_y = 0.655
     if changes is not None:
         previous_version, entries, exits = changes
         entry_headline, entry_details = _change_summary(
@@ -104,23 +126,24 @@ def render_allocation_card(
         exit_headline, exit_details = _change_summary(
             exits, empty_text="No exits"
         )
-        figure.text(0.075, 0.792, f"CHANGES SINCE {previous_version}",
+        change_top = 0.690 if decision_strip else 0.792
+        figure.text(0.075, change_top, f"CHANGES SINCE {previous_version}",
                     fontsize=10.5, fontweight="bold", color=muted,
                     family="sans-serif")
-        figure.text(0.075, 0.758, "ENTRIES", fontsize=11.5,
+        figure.text(0.075, change_top - 0.034, "ENTRIES", fontsize=11.5,
                     fontweight="bold", color=accent, family="sans-serif")
-        figure.text(0.075, 0.730, entry_headline, fontsize=12.5,
+        figure.text(0.075, change_top - 0.062, entry_headline, fontsize=12.5,
                     fontweight="bold", color=ink, family="sans-serif")
-        figure.text(0.075, 0.704, entry_details, fontsize=9.5,
+        figure.text(0.075, change_top - 0.088, entry_details, fontsize=9.5,
                     color=muted, family="sans-serif")
-        figure.text(0.535, 0.758, "EXITS", fontsize=11.5,
+        figure.text(0.535, change_top - 0.034, "EXITS", fontsize=11.5,
                     fontweight="bold", color=ink, family="sans-serif")
-        figure.text(0.535, 0.730, exit_headline, fontsize=12.5,
+        figure.text(0.535, change_top - 0.062, exit_headline, fontsize=12.5,
                     fontweight="bold", color=ink, family="sans-serif")
-        figure.text(0.535, 0.704, exit_details, fontsize=9.5,
+        figure.text(0.535, change_top - 0.088, exit_details, fontsize=9.5,
                     color=muted, family="sans-serif")
-        table_header_y = 0.655
-        first_y, last_y = 0.615, 0.140
+        table_header_y = 0.555 if decision_strip else 0.655
+        first_y, last_y = (0.518 if decision_strip else 0.615), 0.140
 
     columns = (0.075, 0.455, 0.625, 0.790)
     for x, label in zip(columns, ("SECURITY", "TARGET", "INR CLOSE", "LISTING")):
@@ -134,9 +157,10 @@ def render_allocation_card(
     )
 
     step = (first_y - last_y) / max(len(rows) - 1, 1)
-    row_font = 11.5 if changes is not None and len(rows) > 22 else (
+    row_font = 11 if decision_strip and changes is not None and len(rows) > 20 else (
+        11.5 if changes is not None and len(rows) > 22 else (
         12.5 if len(rows) > 22 else 14
-    )
+    ))
     for index, (ticker, weight, price, listing) in enumerate(rows):
         y = first_y - index * step
         figure.text(columns[0], y, ticker, fontsize=row_font, fontweight="bold",
@@ -158,11 +182,14 @@ def render_allocation_card(
     figure.text(0.075, 0.095, f"Total target  {total_weight:.0%}", fontsize=13,
                 fontweight="bold", color=ink, family="sans-serif")
     figure.text(
-        0.075, 0.064,
-        "Entries/exits compare active publications · not executed trades",
-        fontsize=10.5, color=muted, family="sans-serif", style="italic",
+        0.075, 0.068,
+        "Review dates request reassessment—not an automatic trade. 28-day median is a separate statistical horizon.",
+        fontsize=8.8, color=muted, family="sans-serif", style="italic",
     )
-    figure.text(0.925, 0.064, public_url, fontsize=9.5, color=accent,
+    figure.text(0.075, 0.047,
+                "Entries/exits compare active publications—not executed trades",
+                fontsize=8.5, color=muted, family="sans-serif")
+    figure.text(0.925, 0.047, public_url, fontsize=8.5, color=accent,
                 family="sans-serif", ha="right")
 
     output = BytesIO()
