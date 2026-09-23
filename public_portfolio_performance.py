@@ -28,6 +28,7 @@ from public_portfolio_publications import verify_trust_audit
 from public_portfolio_trust import (CALCULATION_VERSION, MODEL_SLIPPAGE_RATE,
     MODEL_TRANSACTION_COST_RATE, forecast_calibration, performance_metrics, select_horizon)
 from public_release_checks import prepare_evidence_export
+from public_allocation_card import listing_descriptor, render_allocation_card
 
 IST = ZoneInfo("Asia/Kolkata")
 LOGGER = logging.getLogger(__name__)
@@ -107,11 +108,12 @@ st.markdown(
       .metric-value {font-size:1.18rem; margin-top:.22rem;}
       .metric-note {font-size:.64rem; margin-top:.18rem;}
       h2 {font-size:1.32rem !important; padding-top:.7rem !important;}
-      .allocation-table {min-width:0; table-layout:fixed;}
+      .allocation-table {min-width:680px; table-layout:fixed;}
       .allocation-table th,.allocation-table td {padding:.65rem .62rem; font-size:.82rem;}
-      .allocation-table th:nth-child(1),.allocation-table td:nth-child(1) {width:38%;}
-      .allocation-table th:nth-child(2),.allocation-table td:nth-child(2) {width:38%;}
-      .allocation-table th:nth-child(3),.allocation-table td:nth-child(3) {width:24%; text-align:right;}
+      .allocation-table th:nth-child(1),.allocation-table td:nth-child(1) {width:29%;}
+      .allocation-table th:nth-child(2),.allocation-table td:nth-child(2) {width:29%;}
+      .allocation-table th:nth-child(3),.allocation-table td:nth-child(3) {width:20%; text-align:right;}
+      .allocation-table th:nth-child(4),.allocation-table td:nth-child(4) {width:22%; white-space:nowrap;}
       .weight-track {width:58px;}
       .weight-line {min-width:0; gap:.4rem;}
       .ticker-cell {overflow:hidden; text-overflow:ellipsis;}
@@ -445,9 +447,14 @@ if float(current["cash_weight"])>0:
     allocation=pd.concat([allocation,pd.DataFrame([{"ticker":"CASH","target_weight":current["cash_weight"]}])],ignore_index=True)
 allocation["Allocation"]=allocation["target_weight"].astype(float)*100
 allocation["Price"]=allocation["ticker"].map(lambda ticker: price_snapshot.get(ticker,{}).get("price"))
+allocation["Listing"]=allocation["ticker"].map(
+    lambda ticker: listing_descriptor(
+        ticker, price_snapshot.get(ticker, {}).get("source_currency")
+    )
+)
 allocation=allocation.rename(columns={"ticker":"Security"})
 allocation_rows=[]
-for item in allocation[["Security","Allocation","Price"]].to_dict("records"):
+for item in allocation[["Security","Allocation","Price","Listing"]].to_dict("records"):
     security=html.escape(str(item["Security"]))
     weight=float(item["Allocation"])
     price="N/A" if pd.isna(item["Price"]) else f"₹{float(item['Price']):,.2f}"
@@ -455,14 +462,56 @@ for item in allocation[["Security","Allocation","Price"]].to_dict("records"):
         f'<tr><td class="ticker-cell" title="{security}">{security}</td>'
         f'<td><div class="weight-line"><span>{weight:.0f}%</span><span class="weight-track">'
         f'<span class="weight-fill" style="display:block;width:{min(max(weight,0),100):.2f}%"></span>'
-        f'</span></div></td><td class="price-cell">{price}</td></tr>'
+        f'</span></div></td><td class="price-cell">{price}</td>'
+        f'<td>{html.escape(str(item["Listing"]))}</td></tr>'
     )
 st.markdown(
     '<div class="allocation-wrap"><table class="allocation-table"><thead><tr>'
-    '<th>Security</th><th>Target weight</th><th>Latest close</th></tr></thead><tbody>'
+    '<th>Security</th><th>Target weight</th><th>Latest close</th><th>Listing</th></tr></thead><tbody>'
     + ''.join(allocation_rows) + '</tbody></table></div>',
     unsafe_allow_html=True,
 )
+allocation_card_rows=tuple(
+    (
+        str(item["Security"]),
+        float(item["Allocation"])/100,
+        None if pd.isna(item["Price"]) else float(item["Price"]),
+        str(item["Listing"]),
+    )
+    for item in allocation[["Security","Allocation","Price","Listing"]].to_dict("records")
+)
+share_allocation=st.popover(
+    "Share allocation",
+    icon=":material/share:",
+    type="primary",
+    on_change="rerun",
+)
+if share_allocation.open:
+    with share_allocation:
+        allocation_card=render_allocation_card(
+            f'P{int(current["portfolio_version"]):03d}',
+            current["as_of"].astimezone(IST).date().isoformat(),
+            allocation_card_rows,
+        )
+        st.image(allocation_card, width="stretch")
+        st.download_button(
+            "Download image",
+            allocation_card,
+            file_name=(
+                f'public-01-P{int(current["portfolio_version"]):03d}-'
+                f'target-allocation-{current["as_of"].astimezone(IST):%Y-%m-%d}.png'
+            ),
+            mime="image/png",
+            icon=":material/download:",
+            type="primary",
+            width="stretch",
+            on_click="ignore",
+        )
+        st.caption(
+            "Send the downloaded PNG directly in WhatsApp for an inline image. "
+            "The listing column shows market and native quote currency; closes "
+            "remain INR-normalized for comparison."
+        )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
     st.caption(f"Prices: latest available unadjusted close in INR · through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR. Direct-US review estimates use the versioned Tickertape Pro and HDFC cost assumptions; displayed closes are not executable quotes.")
