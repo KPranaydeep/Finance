@@ -339,6 +339,94 @@ def load_security_evidence(
     return metrics, chart
 
 
+@st.cache_data(ttl=900, max_entries=16, show_spinner=False)
+def load_portfolio_summaries(
+    publication_id: str,
+    securities: tuple[tuple[str, str, str | None, str], ...],
+    refresh_bucket: str = "",
+) -> tuple[list[dict], list[str]]:
+    """Compute all security outcomes from one cached daily-history download.
+
+    ``publication_id`` and ``refresh_bucket`` deliberately participate in the
+    cache key. The former freezes the constituent lifecycle; the latter lets a
+    newly completed market session enter the evidence without unbounded cache
+    growth.
+    """
+    del publication_id, refresh_bucket
+    if not securities:
+        return [], []
+
+    entry_dates = [date.fromisoformat(row[1][:10]) for row in securities]
+    start = min(entry_dates) - timedelta(days=10)
+    end = datetime.now(IST).date() + timedelta(days=1)
+    symbols = sorted(
+        {row[0] for row in securities}
+        | {BENCHMARK_TICKER, WORLD_TICKER, FX_TICKER}
+    )
+    frame = yf.download(
+        symbols,
+        start=start.isoformat(),
+        end=end.isoformat(),
+        interval="1d",
+        auto_adjust=False,
+        actions=False,
+        progress=False,
+        threads=True,
+        group_by="ticker",
+    )
+    if frame.empty:
+        raise ValueError("PORTFOLIO_CARD_HISTORY_UNAVAILABLE")
+
+    now = datetime.now(IST)
+    benchmark = completed_nse_history(
+        _single_ticker_frame(frame, BENCHMARK_TICKER), now
+    )
+    world = completed_us_history(_single_ticker_frame(frame, WORLD_TICKER), now)
+    fx = completed_us_history(_single_ticker_frame(frame, FX_TICKER), now)
+    summaries: list[dict] = []
+    failures: list[str] = []
+
+    for ticker, entry_value, exit_value, status in securities:
+        try:
+            is_indian = ticker.endswith((".NS", ".BO"))
+            security = _single_ticker_frame(frame, ticker)
+            security = (
+                completed_nse_history(security, now)
+                if is_indian
+                else completed_us_history(security, now)
+            )
+            security_benchmark = benchmark
+            security_world = world
+            security_fx = fx
+            if exit_value:
+                endpoint = date.fromisoformat(exit_value[:10])
+                security = security[security.index.date <= endpoint]
+                security_benchmark = benchmark[benchmark.index.date <= endpoint]
+                security_world = world[world.index.date <= endpoint]
+                security_fx = fx[fx.index.date <= endpoint]
+            metrics, _ = analyze(
+                security,
+                security_benchmark,
+                security_world,
+                security_fx,
+                date.fromisoformat(entry_value[:10]),
+                ticker_currency="INR" if is_indian else "USD",
+            )
+            summaries.append(
+                {
+                    "ticker": ticker,
+                    "entry_date": entry_value[:10],
+                    "exit_date": exit_value[:10] if exit_value else None,
+                    "data_through": metrics["as_of"],
+                    "return": metrics["ticker_return"],
+                    "status": status,
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            failures.append(ticker)
+    return summaries, failures
+
+
 def percent(value: float) -> str:
     return f"{value:+.2%}"
 
@@ -589,8 +677,11 @@ def batch_summary_card(feed: dict, summaries: list[dict]) -> bytes:
     active = [row["return"] for row in summaries if row["status"] != "removed"]
     mean_finished = sum(finished) / len(finished) if finished else None
     mean_active = sum(active) / len(active) if active else None
-    fig = plt.figure(figsize=(8, 12), dpi=135, facecolor=paper)
-    fig.patches.append(plt.Rectangle((.035,.025),.93,.95,transform=fig.transFigure,facecolor="none",edgecolor=ink,linewidth=1.2))
+    fig = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
+    fig.patches.extend([
+        plt.Rectangle((.035,.025),.93,.95,transform=fig.transFigure,facecolor="none",edgecolor=ink,linewidth=1.2),
+        plt.Rectangle((.044,.034),.912,.932,transform=fig.transFigure,facecolor="none",edgecolor="#d8cfbf",linewidth=.8),
+    ])
     fig.text(.09,.91,"PORTFOLIO",fontsize=28,fontweight="bold",family="serif",color=ink)
     fig.text(.09,.865,"CARD SUMMARY",fontsize=28,fontweight="bold",family="serif",color=ink)
     fig.text(.09,.82,f"{feed.get('portfolio_version','')} · {feed.get('publication_date','')}",fontsize=14,family="sans",color=muted)
@@ -600,14 +691,14 @@ def batch_summary_card(feed: dict, summaries: list[dict]) -> bytes:
         fig.text(.09,y-.075,row['ticker'] if row else "No data",fontsize=24,fontweight="bold",color=color)
         fig.text(.09,y-.125,f"{row['return']:+.2%}" if row else "N/A",fontsize=21,fontweight="bold",color=color)
         y-=.22
-    fig.text(.09,.255,"REALIZED RETURN",fontsize=13,fontweight="bold",color=muted)
+    fig.text(.09,.255,"MEAN REALIZED RETURN",fontsize=13,fontweight="bold",color=muted)
     fig.text(.09,.205,f"{mean_finished:+.2%}" if mean_finished is not None else "N/A",fontsize=24,fontweight="bold",color=accent)
     fig.text(.09,.16,f"{len(finished)} exited",fontsize=13,fontweight="bold",color=ink)
-    fig.text(.55,.255,"UNREALIZED RETURN",fontsize=13,fontweight="bold",color=muted)
+    fig.text(.55,.255,"MEAN ACTIVE RETURN",fontsize=13,fontweight="bold",color=muted)
     fig.text(.55,.205,f"{mean_active:+.2%}" if mean_active is not None else "N/A",fontsize=24,fontweight="bold",color=accent)
     fig.text(.55,.16,f"{len(active)} active",fontsize=13,fontweight="bold",color=ink)
-    fig.text(.09,.065,"Empirical realized returns · not a guaranteed forecast",fontsize=11,color=muted,style="italic")
-    buf=BytesIO(); fig.savefig(buf,format="png",facecolor=paper,bbox_inches="tight"); plt.close(fig)
+    fig.text(.09,.065,"Equal-weight security means · empirical history · not a forecast",fontsize=11,color=muted,style="italic")
+    buf=BytesIO(); fig.savefig(buf,format="png",dpi=100,facecolor=paper,bbox_inches=None,pad_inches=0); plt.close(fig)
     return buf.getvalue()
 
 

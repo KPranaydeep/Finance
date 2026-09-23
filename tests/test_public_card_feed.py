@@ -4,7 +4,12 @@ import pandas as pd
 import pytest
 
 from public_card_feed import build_card_feed
-from public_track_record import analyze, portfolio_cover_card
+from public_track_record import (
+    analyze,
+    batch_summary_card,
+    load_portfolio_summaries,
+    portfolio_cover_card,
+)
 
 
 def test_card_feed_tracks_active_and_exited_lifecycles():
@@ -142,3 +147,60 @@ def test_portfolio_cover_slide_requires_no_market_history():
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
     assert len(image) > 10_000
+
+
+def test_portfolio_summary_card_renders_empirical_outcomes():
+    feed = {
+        "portfolio_version": "P008",
+        "publication_date": "2026-09-15",
+    }
+    summaries = [
+        {"ticker": "GAIN.NS", "return": 1.4151, "status": "active"},
+        {"ticker": "LOSS.NS", "return": -0.0951, "status": "removed"},
+    ]
+
+    image = batch_summary_card(feed, summaries)
+
+    assert image.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(image) > 10_000
+
+
+def test_bulk_summary_downloads_history_once_and_converts_us_return(monkeypatch):
+    index = pd.to_datetime(["2026-09-01", "2026-09-02"])
+    values = {
+        "AAA.NS": [100.0, 110.0],
+        "USX": [10.0, 10.0],
+        "^NSEI": [100.0, 100.0],
+        "VT": [50.0, 50.0],
+        "INR=X": [80.0, 160.0],
+    }
+    columns = pd.MultiIndex.from_product(
+        [values, ["Close", "Adj Close"]], names=["Ticker", "Price"]
+    )
+    frame = pd.DataFrame(index=index, columns=columns, dtype=float)
+    for ticker, prices in values.items():
+        frame[(ticker, "Close")] = prices
+        frame[(ticker, "Adj Close")] = prices
+    calls = []
+
+    def fake_download(*args, **kwargs):
+        calls.append((args, kwargs))
+        return frame
+
+    monkeypatch.setattr("public_track_record.yf.download", fake_download)
+    load_portfolio_summaries.clear()
+    summaries, failures = load_portfolio_summaries(
+        "PUB-BULK-TEST",
+        (
+            ("AAA.NS", "2026-09-01", None, "active"),
+            ("USX", "2026-09-01", None, "active"),
+        ),
+        "unique-test-bucket",
+    )
+    load_portfolio_summaries.clear()
+
+    returns = {row["ticker"]: row["return"] for row in summaries}
+    assert failures == []
+    assert returns["AAA.NS"] == pytest.approx(0.1)
+    assert returns["USX"] == pytest.approx(1.0)
+    assert len(calls) == 1
