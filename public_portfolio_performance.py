@@ -23,7 +23,10 @@ from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
-from public_portfolio_history import build_allocation_change_rows
+from public_portfolio_history import (
+    build_allocation_change_rows,
+    latest_entry_exit_changes,
+)
 from public_portfolio_publications import verify_trust_audit
 from public_portfolio_trust import (CALCULATION_VERSION, MODEL_SLIPPAGE_RATE,
     MODEL_TRANSACTION_COST_RATE, forecast_calibration, performance_metrics, select_horizon)
@@ -480,6 +483,9 @@ allocation_card_rows=tuple(
     )
     for item in allocation[["Security","Allocation","Price","Listing"]].to_dict("records")
 )
+latest_changes=latest_entry_exit_changes(
+    record["publications"], record["publication_positions"]
+)
 share_allocation=st.popover(
     "Share allocation",
     icon=":material/share:",
@@ -488,10 +494,20 @@ share_allocation=st.popover(
 )
 if share_allocation.open:
     with share_allocation:
+        card_changes=(
+            (
+                str(latest_changes["previous_version"]),
+                tuple(latest_changes["entries"]),
+                tuple(latest_changes["exits"]),
+            )
+            if latest_changes is not None
+            else None
+        )
         allocation_card=render_allocation_card(
             f'P{int(current["portfolio_version"]):03d}',
             current["as_of"].astimezone(IST).date().isoformat(),
             allocation_card_rows,
+            card_changes,
         )
         st.image(allocation_card, width="stretch")
         st.download_button(
@@ -510,7 +526,8 @@ if share_allocation.open:
         st.caption(
             "Send the downloaded PNG directly in WhatsApp for an inline image. "
             "The listing column shows market and native quote currency; closes "
-            "remain INR-normalized for comparison."
+            "remain INR-normalized for comparison. Entries show their new target "
+            "weights; exits show their last published target weights—not trades."
         )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
