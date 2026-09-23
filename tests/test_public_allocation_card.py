@@ -17,7 +17,16 @@ def test_allocation_card_is_mobile_portrait_png():
         (f"SECURITY{i}.NS", 0.04, 100.0 + i, "India · INR")
         for i in range(25)
     )
-    image = render_allocation_card("P008", "2026-09-15", rows)
+    image = render_allocation_card(
+        "P008",
+        "2026-09-15",
+        rows,
+        (
+            "P007",
+            (("ENTRY.NS", .04), ("USENTRY", .03)),
+            (("EXIT.NS", .05),),
+        ),
+    )
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")

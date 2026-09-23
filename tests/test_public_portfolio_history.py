@@ -1,4 +1,7 @@
-from public_portfolio_history import build_allocation_change_rows
+from public_portfolio_history import (
+    build_allocation_change_rows,
+    latest_entry_exit_changes,
+)
 
 
 def test_allocation_changes_skip_voided_versions_and_compare_active_weights():
@@ -22,3 +25,27 @@ def test_allocation_changes_skip_voided_versions_and_compare_active_weights():
     assert rows[0]["Removed"] == "B"
     assert rows[0]["Decreased"] == 1
     assert rows[0]["Target turnover"] == .5
+
+
+def test_latest_entry_exit_changes_include_previous_and_new_target_sizes():
+    publications = [
+        {"publication_id": "PUB-1", "portfolio_version": 1},
+        {"publication_id": "PUB-X", "portfolio_version": 2,
+         "effective_status": "VOIDED_DUPLICATE"},
+        {"publication_id": "PUB-3", "portfolio_version": 3},
+    ]
+    positions = [
+        {"publication_id": "PUB-1", "ticker": "KEEP.NS", "target_weight": .6},
+        {"publication_id": "PUB-1", "ticker": "EXIT.NS", "target_weight": .4},
+        {"publication_id": "PUB-3", "ticker": "KEEP.NS", "target_weight": .7},
+        {"publication_id": "PUB-3", "ticker": "ENTRY.NS", "target_weight": .3},
+    ]
+
+    changes = latest_entry_exit_changes(publications, positions)
+
+    assert changes == {
+        "previous_version": "P001",
+        "current_version": "P003",
+        "entries": (("ENTRY.NS", .3),),
+        "exits": (("EXIT.NS", .4),),
+    }
