@@ -26,6 +26,11 @@ def test_allocation_card_is_mobile_portrait_png():
             (("ENTRY.NS", .04), ("USENTRY", .03)),
             (("EXIT.NS", .05),),
         ),
+        (
+            ("ALLOCATION REVIEW", "02 OCT", "Planning estimate"),
+            ("NET SINCE ENTRY", "+1.84%", "After modeled costs"),
+            ("28-DAY MEDIAN", "+2.40%", "Through 21 Oct"),
+        ),
     )
     pixels = mpimg.imread(BytesIO(image), format="png")
 

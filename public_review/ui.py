@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import json
+import math
 import pandas as pd
 import streamlit as st
 from . import store
@@ -207,6 +208,71 @@ def review_display_state(p, today=None):
         "date_value": candidate or "Not yet validated",
         "due": False,
     }
+
+
+def review_card_summary(payload):
+    """Normalize a current-publication review payload for share-card use."""
+    if not payload:
+        return None
+    display = review_display_state(payload)
+    date_value = display.get("date_value")
+    if not date_value or date_value in {
+        "Not yet estimated", "Not yet validated", "Continues automatically",
+    }:
+        return None
+    try:
+        review_date = pd.Timestamp(date_value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(review_date):
+        return None
+    metrics = payload.get("metrics") or {}
+    net_return = metrics.get("net_total_return")
+    if net_return is not None:
+        try:
+            net_return = float(net_return)
+            if not math.isfinite(net_return):
+                net_return = None
+        except (TypeError, ValueError):
+            net_return = None
+    return {
+        "review_date": review_date.date().isoformat(),
+        "review_state": (
+            "Planning estimate"
+            if payload.get("planning_estimate")
+            else ("Review now" if display.get("due") else "Observed")
+        ),
+        "net_return": net_return,
+    }
+
+
+def _durable_review_card_summary(events, publication_id, now=None):
+    """Use a recent observed assessment when a fresh preview is unavailable."""
+    if not events or not publication_id:
+        return None
+    now = now or datetime.now(timezone.utc)
+    baselines = [
+        row for row in events
+        if row.get("kind") == "BASELINE"
+        and row.get("payload", {}).get("publication_id") == publication_id
+    ]
+    if not baselines:
+        return None
+    baseline = max(baselines, key=lambda row: row.get("seq", 0))["payload"]
+    assessment = store.latest(events, "ASSESSMENT", baseline["baseline_id"])
+    if not assessment:
+        return None
+    payload = assessment["payload"]
+    checked_at = payload.get("checked_at")
+    if not checked_at:
+        return None
+    checked = datetime.fromisoformat(checked_at)
+    if checked.tzinfo is None:
+        return None
+    age_hours = (now - checked).total_seconds() / 3600
+    if age_hours > 30 or age_hours < -1:
+        return None
+    return review_card_summary(payload)
 
 
 def render_fresh_preview(p):
@@ -547,6 +613,7 @@ def render_review_panel(basket_id, active_publications):
     st.subheader("Your next portfolio review")
     fresh_waiting = False
     fresh_preview_shown = False
+    card_summary = None
     try:
         events = load_events(basket_id)
     except Exception:
@@ -557,6 +624,7 @@ def render_review_panel(basket_id, active_publications):
                 preview = load_fresh_preview(basket_id, active_publications[0]["publication_id"])
             render_fresh_preview(preview)
             fresh_preview_shown = True
+            card_summary = review_card_summary(preview)
         except Exception as exc:
             from .service import SAFE_ERRORS
             allowed = SAFE_ERRORS | {"POLICY_APPROVAL_REQUIRED", "TARIFF_REVIEW_REQUIRED",
@@ -600,9 +668,14 @@ def render_review_panel(basket_id, active_publications):
     try:
         if events is None:
             events = load_events(basket_id)
+        if card_summary is None and active_publications:
+            card_summary = _durable_review_card_summary(
+                events, active_publications[0]["publication_id"]
+            )
         render_events(events, {p["publication_id"] for p in active_publications},
                       latest_publication_id=active_publications[0]["publication_id"] if active_publications else None,
                       suppress_latest_failure=fresh_waiting,
                       suppress_durable_preview=fresh_preview_shown or fresh_waiting)
     except Exception:
         st.warning("Model review inspection is unavailable. No reliable review date can be shown.")
+    return card_summary

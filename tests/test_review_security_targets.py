@@ -6,6 +6,7 @@ import pandas as pd
 from public_review.forecast import estimate, METHOD
 from public_review.core import decision, evaluate, digest
 from public_review.preview import historical_preview, _immediate_baseline_preview
+from public_review.ui import review_card_summary
 from review_fixtures import baseline, policy
 
 
@@ -16,6 +17,27 @@ class SecurityTargetTests(unittest.TestCase):
         r = pd.DataFrame(np.zeros((252, 2)), columns=['A.NS', 'B.NS'])
         v = {'passed': True, 'policy_hash': digest(p), 'tickers': list(r), 'method': METHOD}
         return b, p, r, v
+
+    def test_review_card_summary_separates_planning_and_observed_return(self):
+        planning = review_card_summary({
+            'publication_id': 'PUB-TEST',
+            'planning_estimate': True,
+            'decision': {'next_review': '2026-10-02', 'reasons': []},
+            'forecast': {},
+        })
+        self.assertEqual(planning, {
+            'review_date': '2026-10-02',
+            'review_state': 'Planning estimate',
+            'net_return': None,
+        })
+        observed = review_card_summary({
+            'publication_id': 'PUB-TEST',
+            'decision': {'next_review': '2026-10-03', 'reasons': []},
+            'forecast': {},
+            'metrics': {'net_total_return': .0184},
+        })
+        self.assertEqual(observed['review_state'], 'Observed')
+        self.assertEqual(observed['net_return'], .0184)
 
     def test_security_crosses_even_when_basket_does_not(self):
         b, p, r, v = self.setup_case()
