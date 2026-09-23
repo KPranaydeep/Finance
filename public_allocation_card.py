@@ -85,7 +85,7 @@ def render_allocation_card(
 
     figure.text(0.075, 0.925, "PUBLIC PORTFOLIO", fontsize=18,
                 fontweight="bold", color=accent, family="sans-serif")
-    figure.text(0.075, 0.875, "TARGET ALLOCATION", fontsize=29,
+    figure.text(0.075, 0.875, "TARGET ALLOCATION", fontsize=25,
                 fontweight="bold", color=ink, family="serif")
     figure.text(
         0.075, 0.835,
@@ -124,7 +124,9 @@ def render_allocation_card(
         exit_headline, exit_details = _change_summary(
             exits, empty_text="No exits"
         )
-        change_top = 0.690 if decision_strip else 0.792
+        # Keep the decision strip and publication changes visually connected;
+        # the recovered vertical space belongs to the dense holdings table.
+        change_top = 0.715 if decision_strip else 0.792
         figure.text(0.075, change_top, f"CHANGES SINCE {previous_version}",
                     fontsize=10.5, fontweight="bold", color=muted,
                     family="sans-serif")
@@ -140,8 +142,10 @@ def render_allocation_card(
                     fontweight="bold", color=ink, family="sans-serif")
         figure.text(0.535, change_top - 0.088, exit_details, fontsize=9.5,
                     color=muted, family="sans-serif")
-        table_header_y = 0.555 if decision_strip else 0.655
-        first_y, last_y = (0.518 if decision_strip else 0.615), 0.140
+        table_header_y = 0.590 if decision_strip else 0.655
+        first_y, last_y = (
+            (0.548, 0.128) if decision_strip else (0.615, 0.140)
+        )
 
     columns = (0.075, 0.455, 0.625, 0.790)
     for x, label in zip(columns, ("SECURITY", "TARGET", "INR CLOSE", "LISTING")):
