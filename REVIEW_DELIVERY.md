@@ -1,218 +1,133 @@
-# Public portfolio model review — v46
+# Public portfolio model review
 
-Built against Finance main `9e62848545192eadfa5de244f7e697cb96aebb0a`.
+The model-review service monitors each immutable public portfolio publication. It
+produces evidence and requests reassessment; it never runs the optimizer, places an
+order or declares that a trade is mandatory.
 
-## What this delivers
+## Current behavior
 
-- Separate frozen publication-based model investments, latest active publication
-  selected by default; prior created investments continue to be checked. A new
-  publication does not reset an earlier investment's entry date or cost basis.
-- First eligible NSE opening price after actual `published_at`, only after the
-  session has completed. No pre-publication quote is used as an entry.
-- Whole-share entry allocation, entry fees, residual cash, estimated distributions,
-  security XIRRs and basket cash-flow XIRR, absolute returns and net liquidation value.
-- Conservative standard Groww/Zerodha NSE-delivery charge envelope, explicit
-  instrument tax categories, slippage and tax assumptions. Not a contract note,
-  personal tax calculation, SEBI certification or universal broker tariff.
-- Separate profit-taking, risk and rebalance-benefit review gates. Target net
-  annualized XIRR is 100%; it is not a 100% absolute-return goal.
-- Joint stationary-block path simulation, first-crossing probabilities, retained
-  non-crossing scenarios and a proposed next review date. The date is withheld until
-  the conditional walk-forward checks pass. No promise of market-timing accuracy.
-- Cost-first whole-share comparisons: no trade, full exit, recover initial capital,
-  or withdraw estimated profit. Sell only: no optimizer runs or broker orders.
-- Independent daily workflow, opt-in email/Telegram notifications, deduplication,
-  stale-heartbeat warnings, dated acknowledgements and an append-only hash chain.
-- Read-only responsive Streamlit panel with static security tables, expanded
-  explanations and downloadable model evidence. Simulations never run on page load.
+- Every publication creates a separate frozen model investment. A later
+  publication does not reset an earlier baseline, entry date or cost basis.
+- Each security enters according to its own exchange session. If the security was
+  trading when published, the eligible publication-session evidence is used;
+  otherwise entry waits for that market's next open plus the configured delay.
+- Domestic and direct-US listings are converted to INR using dated FX evidence.
+- Whole-share quantities, residual cash, entry and liquidation costs, estimated
+  distributions, taxes, security XIRRs and basket cash-flow XIRR are included.
+- A planning review date may be available immediately from pre-publication history.
+  Observed monitoring supersedes planning evidence when post-entry sessions become
+  available.
+- Security-level target-crossing estimates remain separate from the allocation-
+  weighted planning date shown to the owner.
 
-## Upload using GitHub — no local Python required
+## Policy source
 
-1. Extract this ZIP. Upload its **contents**, preserving folders, into Finance's
-   repository root. Do not upload the ZIP or a containing `wealth-manager-review`
-   folder. GitHub's upload UI may hide `.github`; verify the workflow file exists at
-   `.github/workflows/public_portfolio_review.yml` after committing.
-2. The only replaced existing files are `public_portfolio_performance.py` and
-   `requirements.txt`. If main changed after the SHA above, merge the two integration
-   changes instead: import `render_review_panel` and call it after the portfolio
-   overview, plus the dependency updates. `CHANGES.patch` is supplied for comparison.
-3. Commit to main. Streamlit Cloud installs the requirements and deploys the page.
-   Keep your existing `[public_basket].database_url` secret unchanged.
-4. Initially the page says monitoring is not ready. This is intentional. The
-   workflow defaults to disabled and creates no records until you enable it.
+`public_review_policy.json` is the single source of current owner-approved policy
+values. Do not duplicate its numeric thresholds in this guide. The loader validates
+ranges, approval, tariff freshness and calendar coverage before assessment.
 
-## Owner decisions required before enabling
+Important distinctions:
 
-Edit `public_review_policy.json` in GitHub. It contains **proposed defaults**, not
-personal recommendations. Do not simply switch approval on without checking them.
+- `target_xirr` is an annualized net XIRR threshold, not an absolute-return target.
+- `minimum_net_return` is an additional break-even margin after modeled round-trip
+  friction.
+- `minimum_forecast_review_sessions` counts completed post-entry sessions and does
+  not include the entry session.
+- `crossing_probability` schedules a review; it does not represent confidence that
+  a security should be sold.
+- `min_annual_improvement` applies only to a comparable, validated net annual
+  rebalance-benefit estimate.
 
-| Setting | Meaning |
-|---|---|
-| `policy_approved` | Set true only after approving every policy assumption below |
-| `tax_profile` | Only resident-individual normal funded NSE delivery is implemented |
-| `slab_rate`, `surcharge_rate` | Explicit illustrative assumptions; currently 30% and 0%. Not every investor's tax rate |
-| `slippage_bps` | Estimated per-side slippage, currently 10 basis points; not a guarantee for illiquid stocks |
-| `capital_inr` | Null derives a full-target reference corpus from **entry** prices plus fee allowance; a number fixes it explicitly |
-| `target_xirr` | 1.0 means 100% annualized, after modeled liquidation deductions |
-| `drawdown_limit` | Proposed 15% net-model peak drawdown review trigger |
-| `concentration_limit` | Proposed 50% maximum single security weight review trigger |
-| `drift_limit` | Proposed five-percentage-point allocation drift inspection boundary |
-| `crossing_probability` | Proposed 20% cumulative probability limit used to schedule a review |
-| `max_review_sessions` | A 20-session uncertainty ceiling; does not force a trade or a calendar-based date |
-| Automatic instrument classification | Every target ticker is resolved from NSE/Yahoo metadata at runtime; unknown categories fail closed |
-| `tariff_verified_on` | Change only after actually rechecking the referenced current tariffs and implemented numbers |
-| `calendar_verified_through` | Verify exchange calendar coverage, including special sessions, before extending |
+## Instruments, costs and taxes
 
-Instrument types:
+Domestic classifications are resolved from current NSE equity and ETF metadata.
+Direct-US Yahoo symbols are classified as foreign US listings. Frozen baseline
+classifications are reused and conflicting classifications fail closed. The owner
+policy file intentionally contains no manually maintained ticker list.
 
-- `equity`: domestic listed equity share eligible for the modeled equity tax regime.
-- `equity_etf`: qualifying domestic equity-oriented listed ETF.
-- `listed_non_equity_etf`: listed gold/international/other non-equity ETF **only if
-  confirmed not a specified debt fund** under the applicable tax rules.
-- `specified_debt_etf`: verified specified debt-fund category, slab-rate treatment.
+The cost model uses a conservative envelope for normal funded delivery:
 
-Examples of classification syntax (not a verified current constituent list):
-`"LAURUSLABS.NS": "equity"`; confirm each ETF's category with its issuer before
-assigning it. Never classify all `.NS` instruments as equity. The mapping is empty
-on purpose: silent tax classification would make the post-tax trigger misleading.
+- domestic Groww/Zerodha brokerage, DP, STT, stamp duty, exchange, SEBI, IPFT, GST
+  and configured slippage;
+- direct-US Tickertape Pro brokerage and regulatory charges, GST, HDFC funding
+  assumptions and dated USD/INR; and
+- the configured resident-individual tax profile without credit for exemptions,
+  loss offsets or marginal relief.
 
-No annual capital-gains exemption, loss offset, marginal relief or capital-gain
-fee deduction is credited in this conservative model. The model does not multiply
-an annual exemption across stocks. Applicable cess and configured surcharge are
-included. Only entries from FY2026-27 onward are supported. Earlier tax regimes,
-non-residents, special accounts/products, foreign-exchange trading, short selling,
-MTF, mandates, call-and-trade, penalties and account-maintenance charges are outside
-scope. Do not claim this covers all investor circumstances or all charges everywhere.
+It is a planning model, not a contract note or personal tax return. Unsupported
+instruments, stale tariffs, unavailable FX, ambiguous classifications and invalid
+calendar coverage stop assessment instead of being guessed.
 
-## Enable GitHub Actions and notifications
+## Review gates
 
-In GitHub → Settings → Environments → **PRODUCTION**:
+The deterministic assessment keeps three decisions separate:
 
-Variables:
+1. **Profit review** — net proceeds clear both round-trip friction plus the minimum
+   net-return requirement and the configured annualized XIRR threshold.
+2. **Risk review** — drawdown, concentration or allocation-drift boundaries require
+   inspection.
+3. **Rebalance benefit** — a return-seeking rebalance requires a validated,
+   comparable net annual improvement estimate. Without approved provenance the
+   result remains `BENEFIT_NOT_ESTABLISHED`.
 
-- `PUBLIC_REVIEW_ENABLED` = `true`
-- `PUBLIC_REVIEW_ALERT_CHANNEL` = `telegram` or `email` (`none` leaves alerts off)
+A trigger is a request to review the portfolio. It is not a buy, sell or hold order.
 
-Secrets:
+## Forecasting and review dates
 
-- Existing `PUBLIC_BASKET_DATABASE_URL`: reuse your PostgreSQL URL here.
-- For Telegram: `PUBLIC_REVIEW_TELEGRAM_TOKEN` and `PUBLIC_REVIEW_TELEGRAM_CHAT_ID`.
-  Create your bot with Telegram BotFather, start a conversation with it, and supply
-  the destination chat ID. Never commit the token or put it in the policy JSON.
-- For email: `PUBLIC_REVIEW_SMTP_HOST`, `PUBLIC_REVIEW_SMTP_USER`,
-  `PUBLIC_REVIEW_SMTP_PASSWORD`, `PUBLIC_REVIEW_EMAIL_FROM`, `PUBLIC_REVIEW_EMAIL_TO`.
-  Uses SMTP over verified TLS on port 465 (an app password may be required).
+The engine uses joint stationary-block simulations over the configured common
+history. It retains paths that do not cross within the horizon and validates timing
+on earlier historical folds. Dates are withheld when data or validation is
+insufficient. “Not reached in horizon” is a valid result and is not converted into
+an invented date.
 
-These notification secrets belong in GitHub Actions, **not in the public page**.
-Use one channel. An actual successfully delivered first message is your acceptance
-test; code cannot confirm a channel without the credentials and destination.
+The allocation-weighted planning date combines only usable security estimates using
+target weight multiplied by probability by date. The displayed date is adjusted to
+an eligible market-review day. The 28-calendar-day public outlook is a separate
+statistical horizon and is never presented as the expected return by the review
+date.
 
-Then Actions → **Public portfolio model review** → Run workflow on main.
+## Workflow schedule
 
-The workflow runs unit/UI tests before the monitor and runs daily at 18:15 IST,
-including weekends, independently of the existing NAV/forecast workflow. GitHub
-scheduled runs can be delayed or disabled; this is not a guaranteed monitoring SLA.
-Enable GitHub's failed-workflow email notifications as a separate backup.
+`.github/workflows/public_portfolio_review.yml` runs:
 
-## Review-date policy
+- NSE and US pre-market planning checks;
+- exchange-specific open-plus-entry-delay checks;
+- an NSE close-plus-data-buffer check;
+- a morning check that can process the completed US session without scheduled work
+  during the owner's 22:00–04:00 IST sleep window; and
+- a daily heartbeat for weekends and holidays.
 
-The engine samples joint consecutive-return blocks from the available common
-history (three years by default). It estimates when the profit, drawdown,
-concentration or drift boundary may first be crossed. It proposes a review one
-session before cumulative crossing probability reaches the configured limit,
-bounded by `max_review_sessions`.
+GitHub cron is best effort and may start late. The workflow is idempotent and a
+delayed run does not invent missing prices.
 
-At least 126 common return rows are needed to simulate. The default walk-forward
-gate needs at least **652 return rows** (252 training + 20 non-overlapping folds of
-20 sessions), five crossing and five non-crossing cases, Brier score <=0.20, and no
-more first-review late cases than weekly review. These are explicit preliminary
-engineering thresholds, not published universal thresholds or proof of accuracy.
+## Owner acknowledgement
 
-The conditional test uses earlier returns to forecast later historical return
-blocks at today's model state and holding age. It tests timing conditional on the
-chosen basket, **not whether choosing this basket historically was possible or
-profitable**. It is not a full strategy backtest with actual rebalance executions.
-It does not prove lifetime tax savings or alpha. Short shared history, recent IPOs
-or one-sided test outcomes may leave the date unavailable. Do not lower the gate
-just to display a date. Today's deterministic threshold checks still run.
+After genuinely reviewing the latest active assessment, manually run **Public
+portfolio model review** and select **I completed the latest active model review**.
+The workflow appends an acknowledgement bound to the exact assessment, policy and
+trigger set. It records no trade, does not reset the model investment, and suppresses
+only the unchanged reviewed trigger. A new or recurring trigger opens a new cycle.
 
-Once an actionable date has been stored, it cannot silently move later. To confirm
-you completed the latest active review, manually run **Public portfolio model
-review** in GitHub Actions and tick **I completed the latest active model review**.
-GitHub authentication is the owner-access boundary; the public Streamlit page stays
-read-only. The acknowledgement is append-only and bound to the exact assessment,
-policy and trigger set. It records **no trade**, does not reset holdings or XIRR,
-and suppresses only the unchanged reviewed trigger. A new reason/security, or a
-trigger that clears and later recurs, opens a new review cycle. The advanced
-`acknowledge_baseline` input remains available for an older frozen model investment.
+## Notifications
 
-MMI is timestamped context only. No untested claim that fear/greed predicts returns
-or reduces slippage has been added.
+Set `PUBLIC_REVIEW_ALERT_CHANNEL` to `telegram`, `email` or `none` in the protected
+`PRODUCTION` environment. Channel credentials belong only in GitHub secrets. A real
+delivered message is required to validate notifications; unit tests cannot prove
+external delivery.
 
-## Rebalance benefit gate
+## Storage and limitations
 
-The deterministic gate is implemented and tested. It requires a validated,
-comparable **net annual** benefit estimate of at least six percentage points for
-return-seeking rebalances. The current repository does not provide such an approved
-estimate with the necessary provenance. Therefore this release deliberately shows
-`BENEFIT_NOT_ESTABLISHED` when relevant instead of manufacturing an estimate from
-the 28-day median. Risk/profit reviews remain independent. No automatic buy/sell
-rebalance instruction is generated by this missing-evidence gate.
+The monitor writes only append-only `public_review_events` and supporting audit
+metadata. It does not modify publications, orders, executions or NAV records. The
+public panel reads with a read-only transaction.
 
-## Model and execution limitations
+Historical prices can be revised for splits or corporate actions. Market-data
+outages, mergers, delistings and unsupported tax regimes require explicit operator
+review. Short-period annualized returns are unstable. No review date, XIRR estimate,
+forecast or withdrawal plan is guaranteed.
 
-- Historical Yahoo OHLC is split-normalized. Model entry reconstruction is explicitly
-  retrospective and uses the provider's current normalized historical price basis.
-  It is not evidence of fills available in the past. Subsequent splits or a revised
-  historical entry quote block assessment for operator review, rather than quietly
-  changing frozen units. Mergers/delistings require manual resolution.
-- Distributions are estimated as retained model cash on the ex-date, after the
-  configured dividend-tax assumption; actual payment dates are not supplied by this
-  feed. These are model XIRRs, not broker XIRRs. Core XIRR supports dated conventional
-  cash flows but this release does not ingest personal deposits/trades/reports.
-- Full withdrawal estimates are exact under the configured cent-rounded model.
-  Partial exit optimization enumerates all quantities up to 500 shares per security;
-  larger holdings use a bounded quantity grid. It proves minimum estimated fee-plus-
-  tax within that grid only. If the solver times out, it explicitly withholds an
-  optimality claim. It does not optimize residual diversification or future taxes.
-- Capital recovery is not the same as safeguarding wealth: remaining shares can
-  lose value, and recovered cash has its own risks. Short holding-period annualized
-  returns are unstable. No guaranteed 100% return, stop-loss fill or optimal date.
-- No market order, broker connection, optimizer run, ledger reset, schema migration
-  or external alert has been executed by delivering these files.
+Run the review tests with:
 
-## Storage and verification
-
-The monitor creates only `public_review_events`, an append-only event table and
-supporting trigger/index/function. Publication, order, execution and NAV tables are
-not modified. Each basket's events have a serialized hash chain and idempotency
-keys. The public panel reads this table with a read-only transaction. It never
-creates schema or writes ledger records.
-
-The chain detects altered entries and broken internal links; it is not an external
-notarization and cannot prevent a database administrator from replacing an entire
-chain. No credentials or personal reports are stored in evidence. Configured model
-assumptions are public; keep personal information and credentials out of them.
-
-Tests cover math, rounding, flow semantics, tax boundaries, audit tampering,
-idempotency, clock/timezone/calendar boundaries, validation gates and Streamlit
-rendering. A live PostgreSQL integration test and successful real email/Telegram
-delivery still require your deployed environment. Do not equate local tests with
-verified production operation.
-
-## Sources and rationale
-
-- Brokerage snapshot: https://groww.in/pricing and https://zerodha.com/charges/
-- Fund tax classification: https://www.amfiindia.com/investor/knowledge-center-info?zoneName=TaxRegimeForMutualFunds
-- Capital gains: https://www.incometaxindia.gov.in/w/capital-gain
-- NSE sessions: https://www.nseindia.com/resources/exchange-communication-holidays
-- Politis and Romano, stationary bootstrap: https://users.ssc.wisc.edu/~behansen/718/Politis%20Romano.pdf
-- Cost-aware threshold rationale (not calibration for this basket): https://corporate.vanguard.com/content/dam/corp/research/pdf/rational_rebalancing_analytical_approach_to_multiasset_portfolio_rebalancing.pdf
-
-## Disable or roll back
-
-Set `PUBLIC_REVIEW_ENABLED=false` to stop monitor writes and alerts. After 30 hours
-the UI marks the last heartbeat stale and hides the previous actionable values.
-Revert the two page integration lines if you want the panel removed. No deletion
-of investment history or production ledger reset is needed.
-
+```powershell
+python -m unittest discover -s tests -p 'test_review_*.py' -v
+```
