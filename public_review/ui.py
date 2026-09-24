@@ -574,7 +574,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     alert_failed = store.latest(events, "ALERT_FAILED", bid)
     if not sent or (alert_failed and alert_failed["seq"] > sent["seq"]) or (heartbeat and not heartbeat["payload"].get("alerts_enabled")):
         st.warning("Alert delivery has not been confirmed for this investment. Do not rely on background notifications yet.")
-    with st.expander("Security returns and exit choices"):
+    with st.expander("Security returns and exit choices", expanded=False):
         # Static formatted tables avoid the mobile virtualized-row issue.
         frame = pd.DataFrame([{"Security": r["ticker"], "Shares": r["shares"],
                                "Price": f"₹{r['price']:,.2f}", "Net profit": f"₹{r['net_profit']:,.2f}",
@@ -588,7 +588,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.caption("Sale choices minimize estimated fees plus immediate tax within the disclosed whole-share candidate grid—not guaranteed lifetime tax or total risk. Proceeds include existing model cash. Capital recovery may leave a concentrated residual portfolio.")
         st.download_button("Download model comparison (.json)", json.dumps(p["comparisons"], indent=2),
                            file_name=f"model-exit-comparison-P{baseline['portfolio_version']:03d}.json", mime="application/json")
-    with st.expander("Review-date evidence and assumptions"):
+    with st.expander("Review-date evidence and assumptions", expanded=False):
         forecast = p["forecast"]
         render_crossings(forecast, f"assessment_security_crossings_sort_{bid}")
         st.write("Forecast status: " + forecast["status"].replace("_", " ").lower())
