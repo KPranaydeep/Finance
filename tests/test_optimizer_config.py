@@ -12,6 +12,19 @@ def valid_config():
         "trading_days_per_year": 250,
         "max_weight_per_asset": 0.5,
         "history_start_date": "2000-01-01",
+        "momentum_filter": {
+            "enabled": True,
+            "method_version": "robust-momentum-v1",
+            "maximum_exclusion_fraction": 0.20,
+            "lookback_sessions": [63, 126, 252],
+            "skip_recent_sessions": 21,
+            "stability_checkpoint_sessions": [0, 21, 42],
+            "trend_lookback_sessions": 200,
+            "minimum_negative_horizons": 2,
+            "annualization_sessions": 250,
+            "volatility_floor_annual": 0.05,
+            "apply_exclusion_to_owned_holdings": False,
+        },
     }
 
 
@@ -26,6 +39,8 @@ def test_loads_and_normalizes_valid_configuration(tmp_path):
     assert result["risk_free_rate_annual"] == 0.112
     assert result["max_weight_per_asset"] == 0.5
     assert result["history_start_date"] == "2000-01-01"
+    assert result["momentum_filter"]["maximum_exclusion_fraction"] == 0.20
+    assert result["momentum_filter"]["method_version"] == "robust-momentum-v1"
 
 
 @pytest.mark.parametrize(
@@ -49,6 +64,20 @@ def test_rejects_unknown_or_missing_keys(tmp_path):
     payload = valid_config()
     payload["silent_new_knob"] = True
     with pytest.raises(ValueError, match="KEYS_INVALID"):
+        load_optimizer_config(write(tmp_path, payload))
+
+
+def test_rejects_momentum_exclusion_above_twenty_percent(tmp_path):
+    payload = valid_config()
+    payload["momentum_filter"]["maximum_exclusion_fraction"] = 0.21
+    with pytest.raises(ValueError, match="MOMENTUM_MAXIMUM_EXCLUSION"):
+        load_optimizer_config(write(tmp_path, payload))
+
+
+def test_requires_owned_holding_protection(tmp_path):
+    payload = valid_config()
+    payload["momentum_filter"]["apply_exclusion_to_owned_holdings"] = True
+    with pytest.raises(ValueError, match="OWNED_PROTECTION_REQUIRED"):
         load_optimizer_config(write(tmp_path, payload))
 
 

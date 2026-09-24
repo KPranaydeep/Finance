@@ -28,11 +28,13 @@ from public_portfolio_publications import publish_approved_portfolio
 from portfolio_optimizer_config import (
     DEFAULT_HISTORY_START_DATE,
     MAX_WEIGHT_PER_ASSET,
+    MOMENTUM_FILTER_CONFIG,
     OPTIMIZER_CONFIG,
     OPTIMIZER_CONFIG_VERSION,
     RISK_FREE_RATE_ANNUAL,
     TRADING_DAYS_PER_YEAR,
 )
+from robust_momentum_filter import apply_robust_momentum_filter
 
 
 def _percent_drop_count(total_tickers, drop_bottom_pct=0.2, min_tickers_to_keep=1):
@@ -3007,6 +3009,7 @@ def get_daily_log_returns(
     drop_bottom_pct=0.2,
     ticker_currency_pairs=(),
     redundancy_corr_threshold=0.80,
+    owned_tickers=(),
 ):
     end_date, _ = _resolve_history_window_end(end_date, buffer_days)
 
@@ -3052,6 +3055,28 @@ def get_daily_log_returns(
     if len(kept) == 0:
         raise ValueError("History filtering removed every ticker.")
 
+    momentum_kept, momentum_report_df = apply_robust_momentum_filter(
+        df[kept.index],
+        owned_tickers=owned_tickers,
+        config=MOMENTUM_FILTER_CONFIG,
+    )
+    momentum_dropped_df = momentum_report_df.loc[
+        momentum_report_df["Excluded"],
+        [
+            "Ticker",
+            "Stable Momentum Score",
+            "3-1 INR Return",
+            "6-1 INR Return",
+            "12-1 INR Return",
+            "Below 200-Session Trend",
+            "Reason",
+        ],
+    ].reset_index(drop=True)
+    if not momentum_kept:
+        raise ValueError("The robust momentum filter removed every ticker.")
+    df = df[momentum_kept]
+    kept = df.count().sort_values(ascending=False, kind="mergesort")
+
     valid_start = df[kept.index].apply(lambda x: x.first_valid_index()).max()
     valid_end = df[kept.index].apply(lambda x: x.last_valid_index()).min()
 
@@ -3093,6 +3118,9 @@ def get_daily_log_returns(
         "min_len_df": min_len_df,
         "missing_history_tickers": missing_history_tickers,
         "redundant_df": redundant_df,
+        "momentum_report_df": momentum_report_df,
+        "momentum_dropped_df": momentum_dropped_df,
+        "momentum_filter_config": dict(MOMENTUM_FILTER_CONFIG),
     }
     return log_returns, meta
 
@@ -3294,12 +3322,22 @@ def run_portfolio_analysis_multi(
             if str(row.get("Yahoo Ticker", "")).strip()
         )
     )
+    owned_tickers = tuple(
+        sorted(
+            str(row["Yahoo Ticker"])
+            for _, row in current_alloc.iterrows()
+            if str(row.get("Yahoo Ticker", "")).strip()
+            and pd.notna(pd.to_numeric(row.get("Quantity", 0), errors="coerce"))
+            and float(pd.to_numeric(row.get("Quantity", 0), errors="coerce")) > 0
+        )
+    )
     log_returns, meta = get_daily_log_returns(
         tuple(symbols),
         drop_bottom_pct=drop_bottom_pct,
         buffer_days=buffer_days,
         ticker_currency_pairs=ticker_currency_pairs,
         redundancy_corr_threshold=redundancy_corr_threshold,
+        owned_tickers=owned_tickers,
     )
 
     if target_volatility is not None:
@@ -4815,6 +4853,24 @@ if run_btn:
             st.subheader("Dropped Tickers")
             st.dataframe(meta["dropped_df"], width="stretch")
 
+        momentum_dropped_df = meta.get("momentum_dropped_df")
+        if momentum_dropped_df is not None and not momentum_dropped_df.empty:
+            st.subheader("Excluded by Robust Momentum Gate")
+            st.caption(
+                "At most 20% of zero-quantity Universal candidates can be excluded. "
+                "Owned holdings are always preserved for the optimizer to reduce or sell correctly."
+            )
+            st.dataframe(
+                momentum_dropped_df.style.format({
+                    "Stable Momentum Score": "{:.1%}",
+                    "3-1 INR Return": "{:.2%}",
+                    "6-1 INR Return": "{:.2%}",
+                    "12-1 INR Return": "{:.2%}",
+                }),
+                width="stretch",
+                hide_index=True,
+            )
+
         redundant_df = meta.get("redundant_df")
         if redundant_df is not None and not redundant_df.empty:
             st.subheader("Merged Near-Duplicate Assets")
@@ -5016,6 +5072,7 @@ if run_btn:
                 "max_drawdown_input_pct": float(max_dd_pct),
                 "internal_max_dd": float(max_dd),
                 "drop_bottom_fraction": float(drop_bottom_pct),
+                "momentum_filter": dict(MOMENTUM_FILTER_CONFIG),
                 "history_buffer_days": int(history_buffer_days),
                 "redundancy_corr_threshold": float(redundancy_corr_threshold),
                 "use_target_volatility": bool(use_target_vol),
@@ -5043,6 +5100,17 @@ if run_btn:
                 "merged_redundant_assets": (
                     redundant_df.to_dict(orient="records")
                     if redundant_df is not None and not redundant_df.empty
+                    else []
+                ),
+                "momentum_exclusions": (
+                    momentum_dropped_df.to_dict(orient="records")
+                    if momentum_dropped_df is not None and not momentum_dropped_df.empty
+                    else []
+                ),
+                "momentum_diagnostics": (
+                    meta["momentum_report_df"].to_dict(orient="records")
+                    if meta.get("momentum_report_df") is not None
+                    and not meta["momentum_report_df"].empty
                     else []
                 ),
             },

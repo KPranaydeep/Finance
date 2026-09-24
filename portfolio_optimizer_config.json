@@ -1,7 +1,20 @@
 {
-  "config_version": "portfolio-optimizer-config-v1",
+  "config_version": "portfolio-optimizer-config-v2",
   "risk_free_rate_annual": 0.112,
   "trading_days_per_year": 250,
   "max_weight_per_asset": 0.5,
-  "history_start_date": "2000-01-01"
+  "history_start_date": "2000-01-01",
+  "momentum_filter": {
+    "enabled": true,
+    "method_version": "robust-momentum-v1",
+    "maximum_exclusion_fraction": 0.20,
+    "lookback_sessions": [63, 126, 252],
+    "skip_recent_sessions": 21,
+    "stability_checkpoint_sessions": [0, 21, 42],
+    "trend_lookback_sessions": 200,
+    "minimum_negative_horizons": 2,
+    "annualization_sessions": 250,
+    "volatility_floor_annual": 0.05,
+    "apply_exclusion_to_owned_holdings": false
+  }
 }
