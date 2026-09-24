@@ -39,6 +39,12 @@ class UiTests(unittest.TestCase):
         self.assertEqual(app.metric[0].value,'Not validated')
         self.assertTrue(any('Alert delivery' in w.value for w in app.warning))
 
+    def test_review_detail_sections_start_collapsed(self):
+        app = self.app('normal')
+        expanders = {item.label: item.proto.expanded for item in app.expander}
+        self.assertFalse(expanders["Security returns and exit choices"])
+        self.assertFalse(expanders["Review-date evidence and assumptions"])
+
     def test_fresh_result_suppresses_older_durable_panel(self):
         def app():
             from public_review.ui import render_events
