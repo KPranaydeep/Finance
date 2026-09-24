@@ -3557,8 +3557,16 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         "Executable Value": exec_val,
     })
 
+    # Turnover-control policy: keep buys and complete exits, but do not generate
+    # partial sell orders for securities that remain in the target portfolio.
+    # Their non-zero optimizer weight is still published and the next analysis
+    # can reassess them without realizing costs merely to trim the position.
+    partial_sell = (
+        rebal_df["Action"].eq("Sell")
+        & rebal_df["Optimal Weight"].gt(1e-12)
+    )
     rebal_df = (
-        rebal_df[rebal_df["Executable Quantity"] != 0]
+        rebal_df[(rebal_df["Executable Quantity"] != 0) & ~partial_sell]
         .sort_values(by="Expected Annual Return Lift (%)", ascending=False)
         .reset_index(drop=True)
     )
@@ -3640,7 +3648,12 @@ def build_holdings_action_summary(
 
         if ticker in analysed:
             action = "Hold"
-            status = "Optimal weight is less than one whole share away"
+            optimal_weight = float(optimal_weight_by_ticker.get(ticker, 0.0))
+            current_weight = float(holding.get("Weight", 0.0))
+            if optimal_weight > 1e-12 and current_weight > optimal_weight + 1e-12:
+                status = "Partial sell suppressed to reduce trading; target weight remains non-zero"
+            else:
+                status = "Optimal weight is less than one whole share away"
         elif ticker in merged_into:
             action = "Not analysed"
             status = f"Near-duplicate of {merged_into[ticker]}, which carries this exposure"
@@ -5034,6 +5047,10 @@ if run_btn:
         if rebal_df.empty:
             st.success("No trades to execute after filtering Executable Quantity = 0")
         else:
+            st.caption(
+                "Buys and zero-target exits are shown. Partial sells are omitted when "
+                "the security remains in the optimal portfolio, reducing avoidable turnover and costs."
+            )
             ordered_rebal_df = _sort_rebalance_df_for_priority(rebal_df)
             st.dataframe(style_rebalance_df(ordered_rebal_df), width="stretch")
 
@@ -5080,6 +5097,7 @@ if run_btn:
                 "internal_max_dd": float(max_dd),
                 "drop_bottom_fraction": float(drop_bottom_pct),
                 "momentum_filter": dict(MOMENTUM_FILTER_CONFIG),
+                "sell_trade_policy": "omit-partial-sells-v1",
                 "history_buffer_days": int(history_buffer_days),
                 "redundancy_corr_threshold": float(redundancy_corr_threshold),
                 "use_target_volatility": bool(use_target_vol),
