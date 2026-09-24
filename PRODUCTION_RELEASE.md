@@ -70,15 +70,11 @@ before the inaugural public release:
 Do not reset merely because a publication is inconvenient. During normal
 operation, corrections are append-only.
 
-## Public navigation cleanup
+## Operator surface verification
 
-Before release, remove or hide these development utilities from public navigation:
-
-- `pages/Filter_Universal_By_GoodTickers.py`
-- `pages/Probe_YF_Tickers.py`
-
-The publisher is an authenticated operator surface. If it remains deployed, verify
-that no publication action is possible without the private token.
+The publisher is the only operator page shipped with the public application. If it
+remains deployed, verify that no publication action is possible without the private
+token.
 
 ## Correcting a mistaken publication
 

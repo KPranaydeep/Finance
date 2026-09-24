@@ -41,9 +41,6 @@ performance calculations are separate operations with separate audit records.
 - `portfolio_rebalancer_database.py` — private optimizer and analysis export.
 - `pages/02_Public_Basket_Publisher.py` — authenticated publication preview and
   append-only publication action; it does not optimize.
-- `pages/Filter_Universal_By_GoodTickers.py` and
-  `pages/Probe_YF_Tickers.py` — development utilities that must not remain in the
-  public navigation at release.
 
 ## Scheduled jobs
 
