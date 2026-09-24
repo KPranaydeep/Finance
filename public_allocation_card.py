@@ -67,6 +67,7 @@ def render_allocation_card(
     muted = "#6b665e"
     accent = "#9f4339"
     rule = "#d8cfbf"
+    alternate_row = "#eee8dc"
     figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
     figure.patches.extend(
         [
@@ -165,6 +166,18 @@ def render_allocation_card(
     ))
     for index, (ticker, weight, price, listing) in enumerate(rows):
         y = first_y - index * step
+        if index % 2:
+            figure.patches.append(
+                Rectangle(
+                    (0.075, y - step * 0.46),
+                    0.85,
+                    step * 0.92,
+                    transform=figure.transFigure,
+                    facecolor=alternate_row,
+                    edgecolor="none",
+                    linewidth=0,
+                )
+            )
         figure.text(columns[0], y, ticker, fontsize=row_font, fontweight="bold",
                     color=ink, family="monospace", va="center")
         figure.text(columns[1], y, f"{weight:.0%}", fontsize=row_font,
@@ -177,7 +190,7 @@ def render_allocation_card(
             line_y = y - step * 0.50
             figure.lines.append(
                 plt.Line2D((0.075, 0.925), (line_y, line_y),
-                           transform=figure.transFigure, color=rule, linewidth=0.55)
+                           transform=figure.transFigure, color=rule, linewidth=0.35)
             )
 
     total_weight = sum(row[1] for row in rows)
