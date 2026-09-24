@@ -91,7 +91,7 @@ def reader_accepts(reader: Callable[..., Any], parameter_name: str) -> bool:
 def show_table(title: str, rows: list[dict[str, Any]], empty_message: str) -> None:
     st.subheader(title)
     if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
     else:
         st.info(empty_message)
 
@@ -236,7 +236,7 @@ summary_3.metric("Checked", now_india.strftime("%d %b %Y, %H:%M %Z"))
 
 st.subheader("Basket metadata")
 if basket_values:
-    st.dataframe([basket_values], use_container_width=True, hide_index=True)
+    st.dataframe([basket_values], width="stretch", hide_index=True)
     if basket_created:
         st.caption("The basket metadata record was initialized during this page load.")
 else:
