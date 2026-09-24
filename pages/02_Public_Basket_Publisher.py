@@ -61,7 +61,7 @@ st.subheader("Read-only publication preview")
 c1,c2=st.columns(2); c1.metric("Constituents",len(constituents)); c2.metric("Fingerprint",digest[:12])
 display_rows=[{"Ticker":row["ticker"],"Weight":f"{row['target_weight']:.0%}"} for row in constituents]
 display_rows.append({"Ticker":"TOTAL","Weight":f"{sum(row['target_weight'] for row in constituents)+cash_weight:.0%}"})
-st.dataframe(display_rows,use_container_width=True,hide_index=True)
+st.dataframe(display_rows, width="stretch", hide_index=True)
 st.caption(f"As of {as_of.astimezone(IST):%d %b %Y %H:%M IST} · Strategy {strategy_version} · Calculation {calculation_version}")
 
 phrase=f"PUBLISH {digest[:12].upper()}"
