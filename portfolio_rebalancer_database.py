@@ -1,5 +1,6 @@
 import base64
 import hmac
+import importlib
 import importlib.util
 import io
 import html
@@ -25,15 +26,21 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
-from portfolio_optimizer_config import (
-    DEFAULT_HISTORY_START_DATE,
-    MAX_WEIGHT_PER_ASSET,
-    MOMENTUM_FILTER_CONFIG,
-    OPTIMIZER_CONFIG,
-    OPTIMIZER_CONFIG_VERSION,
-    RISK_FREE_RATE_ANNUAL,
-    TRADING_DAYS_PER_YEAR,
-)
+import portfolio_optimizer_config as _optimizer_config
+
+# Streamlit may retain an already-imported helper module across a hot deploy.
+# Reload only when the running process still has the pre-momentum configuration;
+# a fresh process takes the normal single-import path.
+if not hasattr(_optimizer_config, "MOMENTUM_FILTER_CONFIG"):
+    _optimizer_config = importlib.reload(_optimizer_config)
+
+DEFAULT_HISTORY_START_DATE = _optimizer_config.DEFAULT_HISTORY_START_DATE
+MAX_WEIGHT_PER_ASSET = _optimizer_config.MAX_WEIGHT_PER_ASSET
+MOMENTUM_FILTER_CONFIG = _optimizer_config.MOMENTUM_FILTER_CONFIG
+OPTIMIZER_CONFIG = _optimizer_config.OPTIMIZER_CONFIG
+OPTIMIZER_CONFIG_VERSION = _optimizer_config.OPTIMIZER_CONFIG_VERSION
+RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
+TRADING_DAYS_PER_YEAR = _optimizer_config.TRADING_DAYS_PER_YEAR
 from robust_momentum_filter import apply_robust_momentum_filter
 
 
