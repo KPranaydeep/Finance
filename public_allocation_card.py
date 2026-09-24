@@ -1,4 +1,4 @@
-"""Mobile-readable share image for the public target allocation."""
+"""Portrait share image for the public target allocation."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _change_summary(
         return empty_text, "—"
     total = sum(weight for _, weight in changes)
     headline = f"{len(changes)} securities · {total:.0%} total"
-    # Three sized names remain legible within one half-width mobile panel.
+    # Keep the publication-change summary consistent with the public page.
     visible = changes[:3]
     details = "  ·  ".join(f"{ticker} {weight:.0%}" for ticker, weight in visible)
     if len(changes) > len(visible):
@@ -58,157 +58,115 @@ def render_allocation_card(
     *,
     public_url: str = PUBLIC_PORTFOLIO_URL,
 ) -> bytes:
-    """Render the complete target allocation as a 1080×1350 PNG."""
+    """Render all holdings in a continuous table as an exact 1080×2378 PNG.
+
+    The taller canvas gives the review strip and publication changes their own
+    space above the holdings, with comfortable row spacing and a fixed footer.
+    """
     if not rows:
         raise ValueError("ALLOCATION_CARD_REQUIRES_ROWS")
 
-    paper = "#f5f0e6"
-    ink = "#29251f"
-    muted = "#6b665e"
-    accent = "#9f4339"
-    rule = "#d8cfbf"
-    alternate_row = "#eee8dc"
-    figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
-    figure.patches.extend(
-        [
-            Rectangle(
-                (0.035, 0.025), 0.93, 0.95,
-                transform=figure.transFigure,
-                facecolor="none", edgecolor=ink, linewidth=1.2,
-            ),
-            Rectangle(
-                (0.044, 0.034), 0.912, 0.932,
-                transform=figure.transFigure,
-                facecolor="none", edgecolor=rule, linewidth=0.8,
-            ),
-        ]
-    )
+    paper, ink, muted = "#f5f0e6", "#29251f", "#6b665e"
+    accent, rule, alternate_row = "#9f4339", "#d8cfbf", "#f0ebe1"
+    figure = plt.figure(figsize=(10.8, 23.78), dpi=100, facecolor=paper)
 
-    figure.text(0.075, 0.925, "PUBLIC PORTFOLIO", fontsize=18,
-                fontweight="bold", color=accent, family="sans-serif")
-    figure.text(0.075, 0.875, "TARGET ALLOCATION", fontsize=25,
-                fontweight="bold", color=ink, family="serif")
-    figure.text(
-        0.075, 0.835,
-        f"{portfolio_version}  ·  {publication_date}  ·  {len(rows)} securities",
-        fontsize=13.5, color=muted, family="sans-serif",
-    )
+    def text(x, y, value, size=14, *, color=ink, bold=False,
+             align="left", family="sans-serif", **kwargs):
+        return figure.text(
+            x, y, value, fontsize=size, color=color,
+            fontweight="bold" if bold else "normal", family=family,
+            ha=align, va="center", **kwargs,
+        )
 
-    table_header_y = 0.785
-    first_y, last_y = 0.738, 0.140
+    def line(left, right, y, *, color=rule, width=0.8):
+        figure.lines.append(plt.Line2D(
+            (left, right), (y, y), transform=figure.transFigure,
+            color=color, linewidth=width,
+        ))
+
+    left, right = 0.06, 0.94
+    text(left, 0.957, "PUBLIC PORTFOLIO", 16, color=accent, bold=True)
+    text(left, 0.926, "TARGET ALLOCATION", 27, bold=True, family="serif")
+    text(left, 0.901,
+         f"{portfolio_version}  ·  {publication_date}  ·  {len(rows)} securities",
+         14, color=muted)
+    line(left, right, 0.880, color=ink, width=1.1)
+
+    band_top = 0.857
     if decision_strip:
-        count = len(decision_strip)
-        left, right = 0.075, 0.925
-        column_width = (right - left) / count
+        column_width = (right - left) / len(decision_strip)
         for index, (label, value, note) in enumerate(decision_strip):
             x = left + index * column_width
-            figure.text(x, 0.800, label, fontsize=9.5, fontweight="bold",
-                        color=muted, family="sans-serif")
-            figure.text(x, 0.770, value, fontsize=15.5, fontweight="bold",
-                        color=accent if index == 0 else ink, family="sans-serif")
-            figure.text(x, 0.746, note, fontsize=9.5,
-                        color=muted, family="sans-serif")
-            if index:
-                divider_x = x - 0.018
-                figure.lines.append(
-                    plt.Line2D((divider_x, divider_x), (0.742, 0.812),
-                               transform=figure.transFigure, color=rule,
-                               linewidth=0.8)
-                )
-        table_header_y = 0.695
-        first_y = 0.655
+            text(x, band_top, label, 11, color=muted, bold=True)
+            text(x, band_top - 0.023, value, 21, bold=True,
+                 color=accent if index == 0 else ink)
+            text(x, band_top - 0.043, note, 11, color=muted)
+        band_top -= 0.075
+
     if changes is not None:
         previous_version, entries, exits = changes
-        entry_headline, entry_details = _change_summary(
-            entries, empty_text="No new entries"
-        )
-        exit_headline, exit_details = _change_summary(
-            exits, empty_text="No exits"
-        )
-        # Keep the decision strip and publication changes visually connected;
-        # the recovered vertical space belongs to the dense holdings table.
-        change_top = 0.715 if decision_strip else 0.792
-        figure.text(0.075, change_top, f"CHANGES SINCE {previous_version}",
-                    fontsize=10.5, fontweight="bold", color=muted,
-                    family="sans-serif")
-        figure.text(0.075, change_top - 0.034, "ENTRIES", fontsize=11.5,
-                    fontweight="bold", color=accent, family="sans-serif")
-        figure.text(0.075, change_top - 0.062, entry_headline, fontsize=12.5,
-                    fontweight="bold", color=ink, family="sans-serif")
-        figure.text(0.075, change_top - 0.088, entry_details, fontsize=9.5,
-                    color=muted, family="sans-serif")
-        figure.text(0.535, change_top - 0.034, "EXITS", fontsize=11.5,
-                    fontweight="bold", color=ink, family="sans-serif")
-        figure.text(0.535, change_top - 0.062, exit_headline, fontsize=12.5,
-                    fontweight="bold", color=ink, family="sans-serif")
-        figure.text(0.535, change_top - 0.088, exit_details, fontsize=9.5,
-                    color=muted, family="sans-serif")
-        table_header_y = 0.590 if decision_strip else 0.655
-        first_y, last_y = (
-            (0.548, 0.128) if decision_strip else (0.615, 0.140)
-        )
+        text(left, band_top, f"CHANGES SINCE {previous_version}", 11,
+             color=muted, bold=True)
+        for x, label, values, empty in (
+            (left, "ENTRIES", entries, "No new entries"),
+            (0.53, "EXITS", exits, "No exits"),
+        ):
+            headline, details = _change_summary(values, empty_text=empty)
+            text(x, band_top - 0.022, label, 12,
+                 color=accent if label == "ENTRIES" else muted, bold=True)
+            text(x, band_top - 0.041, headline, 13, bold=True)
+            # Wrap at separators to preserve every existing summary item.
+            # Half-width columns fit two typical tickers per line.
+            parts = details.split("  ·  ")
+            detail_lines = ["  ·  ".join(parts[i:i + 2])
+                            for i in range(0, len(parts), 2)]
+            text(x, band_top - 0.064, "\n".join(detail_lines), 10.5,
+                 color=muted, linespacing=1.6)
+        band_top -= 0.109
+    else:
+        band_top -= 0.012
 
-    columns = (0.075, 0.455, 0.625, 0.790)
-    for x, label in zip(columns, ("SECURITY", "TARGET", "INR CLOSE", "LISTING")):
-        figure.text(x, table_header_y, label, fontsize=11.5, fontweight="bold",
-                    color=muted, family="sans-serif")
-    figure.lines.append(
-        plt.Line2D(
-            (0.075, 0.925), (table_header_y - 0.019, table_header_y - 0.019),
-            transform=figure.transFigure,
-                   color=ink, linewidth=1.1)
-    )
+    columns = (left + 0.008, 0.475, 0.710, 0.755)
+    for x, label, align in zip(
+        columns, ("SECURITY", "TARGET", "INR CLOSE", "LISTING"),
+        ("left", "right", "right", "left"),
+    ):
+        text(x, band_top, label, 11.5, color=muted, bold=True, align=align)
+    line(left, right, band_top - 0.013, color=ink, width=0.9)
 
-    step = (first_y - last_y) / max(len(rows) - 1, 1)
-    row_font = 11 if decision_strip and changes is not None and len(rows) > 20 else (
-        11.5 if changes is not None and len(rows) > 22 else (
-        12.5 if len(rows) > 22 else 14
-    ))
+    first_y, last_y = band_top - 0.033, 0.145
+    step = min(0.030, (first_y - last_y) / max(len(rows) - 1, 1))
+    row_font = min(17, step * 2378 * 0.60 * 72 / 100)
     for index, (ticker, weight, price, listing) in enumerate(rows):
         y = first_y - index * step
         if index % 2:
-            figure.patches.append(
-                Rectangle(
-                    (0.075, y - step * 0.46),
-                    0.85,
-                    step * 0.92,
-                    transform=figure.transFigure,
-                    facecolor=alternate_row,
-                    edgecolor="none",
-                    linewidth=0,
-                )
-            )
-        figure.text(columns[0], y, ticker, fontsize=row_font, fontweight="bold",
-                    color=ink, family="monospace", va="center")
-        figure.text(columns[1], y, f"{weight:.0%}", fontsize=row_font,
-                    color=accent, family="sans-serif", va="center")
-        figure.text(columns[2], y, _price_text(price), fontsize=row_font,
-                    color=ink, family="sans-serif", va="center")
-        figure.text(columns[3], y, listing, fontsize=row_font - 1,
-                    color=muted, family="sans-serif", va="center")
-        if index < len(rows) - 1:
-            line_y = y - step * 0.50
-            figure.lines.append(
-                plt.Line2D((0.075, 0.925), (line_y, line_y),
-                           transform=figure.transFigure, color=rule, linewidth=0.35)
-            )
+            figure.patches.append(Rectangle(
+                (left, y - step / 2), right - left, step,
+                transform=figure.transFigure, facecolor=alternate_row,
+                edgecolor="none", linewidth=0,
+            ))
+        text(columns[0], y, ticker, row_font, bold=True, family="monospace")
+        text(columns[1], y, f"{weight:.0%}", row_font,
+             color=accent, align="right")
+        text(columns[2], y, _price_text(price), row_font, align="right")
+        text(columns[3], y, listing, row_font - 3, color=muted)
 
+    line(left, right, 0.113)
     total_weight = sum(row[1] for row in rows)
-    figure.text(0.075, 0.095, f"Total target  {total_weight:.0%}", fontsize=13,
-                fontweight="bold", color=ink, family="sans-serif")
-    figure.text(
-        0.075, 0.068,
-        "Review dates request reassessment—not an automatic trade. 28-day median is a separate statistical horizon.",
-        fontsize=8.8, color=muted, family="sans-serif", style="italic",
-    )
-    figure.text(0.075, 0.047,
-                "Entries/exits compare active publications—not executed trades",
-                fontsize=8.5, color=muted, family="sans-serif")
-    figure.text(0.925, 0.047, public_url, fontsize=8.5, color=accent,
-                family="sans-serif", ha="right")
+    text(left, 0.094, f"Total target  {total_weight:.0%}", 14, bold=True)
+    text(left, 0.071,
+         "Review dates request reassessment—not an automatic trade.\n"
+         "28-day median is a separate statistical horizon.",
+         10.5, color=muted, style="italic", linespacing=1.6)
+    text(left, 0.049,
+         "Entries/exits compare active publications—not executed trades",
+         10.5, color=muted)
+    text(left, 0.031, public_url, 10.5, color=accent)
 
     output = BytesIO()
-    figure.savefig(output, format="png", dpi=100, facecolor=paper,
-                   bbox_inches=None, pad_inches=0)
+    # Do not allow an ambient savefig.bbox='tight' to crop the fixed canvas.
+    with plt.rc_context({"savefig.bbox": None}):
+        figure.savefig(output, format="png", dpi=100, facecolor=paper,
+                       bbox_inches=None, pad_inches=0)
     plt.close(figure)
     return output.getvalue()
