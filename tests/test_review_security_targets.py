@@ -116,6 +116,25 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(at.metric[1].value, '2099-01-01')
         self.assertTrue(any('Provisional:' in c.value for c in at.caption))
 
+    def test_preview_detail_sections_are_separate_and_collapsed(self):
+        from streamlit.testing.v1 import AppTest
+        def app():
+            from public_review.ui import render_fresh_preview
+            render_fresh_preview({
+                'publication_id':'TEST', 'provisional':True,
+                'assumption':'Hypothetical entry; not earned returns.',
+                'as_of':'2026-09-09', 'checked_at':'2026-09-09T18:00:00+00:00',
+                'valuation_timing':{'rows':[], 'all_prices_synchronized':False},
+                'forecast':{'next_review':None},
+                'decision':{'next_review':'2099-01-01', 'reasons':[]},
+            })
+        at = AppTest.from_function(app).run()
+        self.assertFalse(at.exception)
+        expanders = {item.label: item.proto.expanded for item in at.expander}
+        self.assertFalse(expanders['Research and audit details'])
+        self.assertFalse(expanders['Valuation timing · Mixed-time provisional'])
+        self.assertFalse(expanders['Security target-crossing estimates'])
+
     def test_planning_estimate_never_claims_review_now(self):
         from streamlit.testing.v1 import AppTest
         def app():
