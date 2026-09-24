@@ -325,6 +325,18 @@ def render_fresh_preview(p):
         else:
             st.warning(message + " Review costs and risk before selling.")
 
+    timing = p.get("valuation_timing")
+    timing_rows = timing.get("rows", []) if timing else []
+    all_completed_closes = bool(timing_rows) and all(
+        row.get("price_source") == "LATEST_COMPLETED_POST_ENTRY_CLOSE"
+        for row in timing_rows
+    )
+    timing_label = (
+        "Synchronized"
+        if timing and timing.get("all_prices_synchronized") and all_completed_closes
+        else "Mixed-time provisional"
+    )
+
     with st.expander("Research and audit details", expanded=False):
         forecast_date = f.get("next_review")
         if planning_only and not forecast_date:
@@ -339,31 +351,28 @@ def render_fresh_preview(p):
         if f.get("next_review") is None:
             st.caption("Target-crossing timing is not validated. Use the risk-review fallback, not the research date as a sell instruction.")
         st.caption(f"Prices through {p['as_of']} · Assessed {p['checked_at']} · Daily data, not live quotes; cache up to five minutes.")
-        if p.get("valuation_timing"):
-            timing = p["valuation_timing"]
-            timing_rows = timing.get("rows", [])
-            all_completed_closes = bool(timing_rows) and all(
-                row.get("price_source") == "LATEST_COMPLETED_POST_ENTRY_CLOSE"
-                for row in timing_rows
-            )
-            label = (
-                "Synchronized"
-                if timing.get("all_prices_synchronized") and all_completed_closes
-                else "Mixed-time provisional"
-            )
-            st.markdown("**Valuation timing · " + label + "**")
+        st.caption("Currency: NSE-listed holdings are priced in INR, including overseas ETFs. Their INR prices already reflect FX exposure; no second USD/INR conversion is applied.")
+        if p.get("history_coverage"):
+            h = p["history_coverage"]
+            st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
+        st.download_button(
+            "Download current review evidence",
+            json.dumps(p, indent=2, default=str),
+            file_name="public-model-review-evidence.json",
+            mime="application/json",
+        )
+
+    if timing:
+        with st.expander("Valuation timing · " + timing_label, expanded=False):
             st.caption("Audit detail: every price was observable by the assessment time. Frozen entry prices are never overwritten.")
             st.table(pd.DataFrame([{
                 "Security": row["ticker"],
                 "Price basis": row["price_source"].replace("_", " ").lower(),
                 "Observed at": row["price_observed_at"],
                 "Chronology valid": "Yes" if row["chronology_valid"] else "No",
-            } for row in timing.get("rows", [])]))
-        st.caption("Currency: NSE-listed holdings are priced in INR, including overseas ETFs. Their INR prices already reflect FX exposure; no second USD/INR conversion is applied.")
-        if p.get("history_coverage"):
-            h = p["history_coverage"]
-            st.caption(f"Shared history: {h['start']} to {h['end']} · {h['usable_daily_returns']} valid daily returns · {len(h['missing_sessions'])} incomplete sessions excluded. No price filling.")
-        st.markdown("**Security target-crossing estimates**")
+            } for row in timing_rows]))
+
+    with st.expander("Security target-crossing estimates", expanded=False):
         render_crossings(f, "fresh_security_crossings_sort")
         if p.get("metrics", {}).get("rows"):
             st.markdown("**Observed security returns**")
@@ -374,12 +383,6 @@ def render_fresh_preview(p):
                 "Net profit": f"₹{row['net_profit']:,.2f}",
                 "Net XIRR": percent(row.get("xirr")),
             } for row in p["metrics"]["rows"]]))
-        st.download_button(
-            "Download current review evidence",
-            json.dumps(p, indent=2, default=str),
-            file_name="public-model-review-evidence.json",
-            mime="application/json",
-        )
 
 
 def render_pending(row, now):
