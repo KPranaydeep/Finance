@@ -115,6 +115,24 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('2026-09-08', result['history_coverage']['missing_sessions'])
         self.assertEqual(result['history_coverage']['method'], 'complete-adjacent-session-pairs-no-fill')
 
+    def test_forecast_wait_does_not_suppress_observed_net_return(self):
+        p=policy(); b=baseline(); h=self.histories(p)
+        result=build_assessment(
+            b,h,'2026-09-09',['2026-09-10','2026-09-11'],p,[],
+            b['weights'],datetime(2026,9,9,13,tzinfo=timezone.utc),
+            comparisons=False,forecast_ready=False,
+            observation_ready_at='2026-09-18T10:30:00+00:00',
+            observation_rows=[{'ticker':'A.NS','observation_session':'2026-09-18'}])
+        self.assertIn('net_total_return',result['metrics'])
+        self.assertTrue(result['forecast_observation_pending'])
+        self.assertEqual(result['observation_ready_at'],
+                         '2026-09-18T10:30:00+00:00')
+        self.assertIsNone(result['forecast']['next_review'])
+        self.assertEqual(result['forecast']['status'],
+                         'AWAITING_MINIMUM_OBSERVATION_SESSIONS')
+        self.assertEqual(result['decision']['date_basis'],
+                         'PROVISIONAL_OBSERVATION_WINDOW')
+
     def test_audit_fingerprint_preserves_mixed_market_nan_as_null(self):
         p=policy(); b=baseline(); h=self.histories(p)
         h['A.NS'].loc['2026-09-08','Close']=float('nan')

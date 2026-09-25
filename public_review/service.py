@@ -159,7 +159,10 @@ def publications(conn, basket):
     return result
 
 
-def build_assessment(baseline, histories, as_of, future, policy, prior, latest_weights, now, comparisons=True):
+def build_assessment(baseline, histories, as_of, future, policy, prior,
+                     latest_weights, now, comparisons=True, *,
+                     forecast_ready=True, observation_ready_at=None,
+                     observation_rows=None):
     try:
         prices = {t: float(h.loc[as_of, "Close"]) for t, h in histories.items()}
     except ValueError:
@@ -215,6 +218,19 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
                 validation, dividends=dividends)
         except ValueError:
             raise ValueError("ASSESSMENT_FORECAST_VALUE_ERROR") from None
+    # The minimum observation window is a forecast-confidence rule, not a
+    # valuation rule.  Preserve the research date for planning, but do not
+    # activate it as an observed review date until the configured post-entry
+    # sessions have completed.  Current fully-costed performance remains
+    # available as soon as one chronology-safe valuation exists.
+    planning_review = None
+    if not forecast_ready:
+        planning_review = (
+            forecast.get("research_candidate")
+            or forecast.get("review_session")
+        )
+        forecast["next_review"] = None
+        forecast["status"] = "AWAITING_MINIMUM_OBSERVATION_SESSIONS"
     ack = store.latest(prior, "ACKNOWLEDGED", baseline["baseline_id"])
     last = store.latest(prior, "ASSESSMENT", baseline["baseline_id"])
     promised = validated_promised_review(last, ack, policy)
@@ -228,8 +244,11 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
         raise ValueError("ASSESSMENT_DECISION_VALUE_ERROR") from None
     assessed["date_basis"] = (
         "VALIDATED_FORECAST" if forecast.get("next_review")
-        else "CONTINUOUS_MONITORING"
+        else ("PROVISIONAL_OBSERVATION_WINDOW" if not forecast_ready
+              else "CONTINUOUS_MONITORING")
     )
+    if planning_review:
+        assessed["planning_review"] = planning_review
     acknowledged = matching_review_acknowledgement(
         prior, baseline["baseline_id"], assessed, policy
     )
@@ -258,6 +277,9 @@ def build_assessment(baseline, histories, as_of, future, policy, prior, latest_w
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
             "comparisons": exit_comparisons,
+            "forecast_observation_pending": not forecast_ready,
+            "observation_ready_at": observation_ready_at,
+            "observation_rows": observation_rows or [],
             "mmi": mood, "price_hash": digest(price_history_evidence(histories, as_of)),
             "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
             "model_only": True}
@@ -384,7 +406,19 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 baseline_id = baseline["baseline_id"]
                 tickers = [row["ticker"] for row in baseline["lots"]]
             stage = "forecast_observation_window"
-            market.require_forecast_observation_sessions(baseline, policy, now)
+            forecast_ready = True
+            observation_ready_at = None
+            observation_rows = []
+            try:
+                observation_rows = market.require_forecast_observation_sessions(
+                    baseline, policy, now)
+            except market.AwaitingMarketEntry as observation_wait:
+                # A forecast may need more evidence, but a completed close can
+                # already support an observed, fully-costed mark-to-market.
+                forecast_ready = False
+                observation_ready_at = observation_wait.ready_at
+                observation_rows = getattr(
+                    observation_wait, "observation_rows", None) or []
             stage = "session_calendar"
             entry, as_of, future = market.sessions(
                 now, publication["published_at"], policy, kinds)
@@ -397,7 +431,13 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
             entry, as_of = market.synchronized_dates(
                 data, entry, as_of, new_baseline=False)
             stage = "assessment"
-            payload = build_assessment(baseline, data, as_of, future, policy, history, pubs[0]["weights"], now)
+            payload = build_assessment(
+                baseline, data, as_of, future, policy, history,
+                pubs[0]["weights"], now,
+                forecast_ready=forecast_ready,
+                observation_ready_at=observation_ready_at,
+                observation_rows=observation_rows,
+            )
             key = "assessment:" + baseline_id + ":" + digest({"method": METHOD, "as_of": as_of, "policy": policy,
                   "prices": payload["price_hash"], "ack": (store.latest(history, "ACKNOWLEDGED", baseline_id) or {}).get("seq")})
             store.append(conn, basket, key, "ASSESSMENT", baseline_id, payload)

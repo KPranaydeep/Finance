@@ -116,13 +116,19 @@ def historical_preview(publication, policy, events, now=None):
         b = row["payload"]
         if any(policy["instrument_kinds"].get(l["ticker"]) != l["kind"] for l in b["lots"]):
             raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
+        forecast_ready = True
+        observation_ready_at = None
+        observation_rows = []
         try:
-            market.require_forecast_observation_sessions(b, policy, now)
-        except market.AwaitingMarketEntry:
-            # Show a non-actionable, publication-time planning estimate while
-            # the durable observed-monitoring clock remains correctly gated.
-            return _immediate_baseline_preview(
-                publication, b, policy, events, now, ack_epoch)
+            observation_rows = market.require_forecast_observation_sessions(
+                b, policy, now)
+        except market.AwaitingMarketEntry as observation_wait:
+            # Do not let the forecast-confidence window suppress performance
+            # that can already be valued from a completed post-entry session.
+            forecast_ready = False
+            observation_ready_at = observation_wait.ready_at
+            observation_rows = getattr(
+                observation_wait, "observation_rows", None) or []
         try:
             _, as_of, days = market.sessions(
                 now, publication["published_at"], policy, kinds)
@@ -138,8 +144,13 @@ def historical_preview(publication, policy, events, now=None):
         days = [day for day in days if day > as_of]
         if not days:
             raise ValueError("INCOMPLETE_SESSION_CALENDAR")
-        p = build_assessment(b, histories, as_of, days, policy, events, publication["weights"],
-                             now, comparisons=False)
+        p = build_assessment(
+            b, histories, as_of, days, policy, events,
+            publication["weights"], now, comparisons=False,
+            forecast_ready=forecast_ready,
+            observation_ready_at=observation_ready_at,
+            observation_rows=observation_rows,
+        )
         return {**p, "provisional": False, "as_of": as_of,
                 "checked_at": now.isoformat(), "ack_epoch": ack_epoch,
                 "policy_version": policy.get("policy_version"),

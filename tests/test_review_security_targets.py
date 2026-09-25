@@ -30,6 +30,20 @@ class SecurityTargetTests(unittest.TestCase):
             'review_state': 'Planning estimate',
             'net_return': None,
         })
+
+        early_observed = review_card_summary({
+            'publication_id': 'PUB-TEST',
+            'forecast_observation_pending': True,
+            'decision': {'next_review': None,
+                         'planning_review': '2026-10-02', 'reasons': []},
+            'forecast': {},
+            'metrics': {'net_total_return': .0184},
+        })
+        self.assertEqual(early_observed, {
+            'review_date': '2026-10-02',
+            'review_state': 'Planning estimate',
+            'net_return': .0184,
+        })
         observed = review_card_summary({
             'publication_id': 'PUB-TEST',
             'decision': {'next_review': '2026-10-03', 'reasons': []},
@@ -267,7 +281,7 @@ class SecurityTargetTests(unittest.TestCase):
             result['decision']['basis'], 'RESEARCH_PLANNING_DATE')
         self.assertIsNone(result['forecast']['next_review'])
 
-    def test_existing_baseline_shows_planning_estimate_during_observation_wait(self):
+    def test_existing_baseline_shows_observed_metrics_during_forecast_wait(self):
         from datetime import datetime, timezone
         from public_review.market import AwaitingMarketEntry
         b, p = baseline(), policy()
@@ -283,16 +297,33 @@ class SecurityTargetTests(unittest.TestCase):
         pending = AwaitingMarketEntry('2026-05-04',
                                       '2026-05-05T10:30:00+00:00')
         pending.wait_reason = 'FORECAST_OBSERVATION_WAIT'
-        planning = {'planning_estimate': True, 'publication_id': b['publication_id']}
+        pending.observation_rows = [{'ticker': 'A.NS'}]
+        observed = {
+            'metrics': {'net_total_return': .01},
+            'decision': {'next_review': None, 'reasons': []},
+            'forecast': {'status': 'AWAITING_MINIMUM_OBSERVATION_SESSIONS'},
+        }
         with patch('public_review.market.require_forecast_observation_sessions',
                    side_effect=pending), \
              patch('public_review.preview._immediate_baseline_preview',
-                   return_value=planning) as immediate:
+                   return_value={'planning_estimate': True}) as immediate, \
+             patch('public_review.market.sessions',
+                   return_value=('2026-05-04', '2026-05-04', ['2026-05-05'])), \
+             patch('public_review.market.fetch', return_value={'A.NS': object()}), \
+             patch('public_review.market.synchronized_dates',
+                   return_value=('2026-05-04', '2026-05-04')), \
+             patch('public_review.service.build_assessment',
+                   return_value=observed) as build:
             result = historical_preview(
                 publication, p, events,
                 datetime(2026, 5, 4, 12, tzinfo=timezone.utc))
-        self.assertEqual(result, planning)
-        immediate.assert_called_once()
+        self.assertEqual(result['metrics']['net_total_return'], .01)
+        self.assertFalse(result['provisional'])
+        immediate.assert_not_called()
+        self.assertFalse(build.call_args.kwargs['forecast_ready'])
+        self.assertEqual(
+            build.call_args.kwargs['observation_ready_at'],
+            '2026-05-05T10:30:00+00:00')
 
     def test_publication_planning_uses_historical_lookback_not_entry_date(self):
         from datetime import datetime, timezone

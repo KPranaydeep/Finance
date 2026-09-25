@@ -171,6 +171,7 @@ def review_display_state(p, today=None):
     candidate = decision.get("next_review")
     reasons = decision.get("reasons") or []
     planning_only = bool(p.get("planning_estimate"))
+    observation_pending = bool(p.get("forecast_observation_pending"))
     today = today or datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
 
     if planning_only:
@@ -178,6 +179,13 @@ def review_display_state(p, today=None):
             "state": "Planning estimate",
             "date_label": "Planning review",
             "date_value": candidate or "Not yet estimated",
+            "due": False,
+        }
+    if observation_pending and not reasons:
+        return {
+            "state": "Observed performance",
+            "date_label": "Planning review",
+            "date_value": decision.get("planning_review") or "Not yet estimated",
             "due": False,
         }
     if decision.get("review_acknowledged"):
@@ -239,7 +247,8 @@ def review_card_summary(payload):
         "review_date": review_date.date().isoformat(),
         "review_state": (
             "Planning estimate"
-            if payload.get("planning_estimate")
+            if (payload.get("planning_estimate")
+                or payload.get("forecast_observation_pending"))
             else ("Review now" if display.get("due") else "Observed")
         ),
         "net_return": net_return,
@@ -286,12 +295,13 @@ def render_fresh_preview(p):
             st.metric(display["date_label"], display["date_value"])
             if metrics:
                 st.metric("Net return", percent(metrics.get("net_total_return")))
-        if planning_only and p.get("observation_ready_at"):
+        if p.get("forecast_observation_pending") and p.get("observation_ready_at"):
             ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
                 ZoneInfo("Asia/Kolkata"))
             st.caption(
-                f"Observed monitoring begins after {ready:%d %b %Y, %H:%M IST}. "
-                "This planning date is not a sell instruction."
+                f"Net performance is observed through {p.get('as_of')}. "
+                f"The forecast date remains provisional until "
+                f"{ready:%d %b %Y, %H:%M IST}."
             )
         elif d.get("review_acknowledged"):
             acknowledged_at = d.get("acknowledged_at")
@@ -555,7 +565,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     with st.container(horizontal=True):
         review_value = (
             "Now" if review_required
-            else d.get("next_review") or (
+            else d.get("next_review") or d.get("planning_review") or (
                 "Review completed" if d.get("review_acknowledged") else "Not validated"
             )
         )
@@ -564,11 +574,21 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
     forecast_review = p.get("forecast", {}).get("next_review")
+    if p.get("forecast_observation_pending"):
+        forecast_review = d.get("planning_review")
     followup = p.get("forecast", {}).get("next_common_review_session")
     if not review_required and forecast_review and followup:
         st.caption(
             f"Review window: {forecast_review}, then {followup} if follow-up is needed. "
             "The second date is the next verified common trading session across the basket's represented markets."
+        )
+    if p.get("forecast_observation_pending") and p.get("observation_ready_at"):
+        ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
+            ZoneInfo("Asia/Kolkata"))
+        st.caption(
+            f"Net performance is observed through {p.get('as_of')}. "
+            f"The planning review remains provisional until "
+            f"{ready:%d %b %Y, %H:%M IST}."
         )
     checked = datetime.fromisoformat(checked_at).astimezone(ZoneInfo("Asia/Kolkata"))
     st.caption(f"{m['days_held']} days held · Absolute net return {percent(m['net_total_return'])} · Prices through {p['as_of']} · Checked {checked:%d %b %Y %H:%M IST}")
