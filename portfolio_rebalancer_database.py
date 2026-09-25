@@ -2235,6 +2235,83 @@ def add_symbols_to_master(symbols, owner):
     return added, duplicates, invalid_symbols, missing_initial_price
 
 
+def add_holding_with_quantity(symbol, quantity, owner, average_price=None):
+    """Add one resolved holding with its bought quantity and cost basis.
+
+    ``average_price`` is expressed in the security's native quoted currency. If
+    omitted, the latest Yahoo price is stored as an explicit placeholder, just
+    like the legacy manual-add flow. Existing holdings are never overwritten;
+    their quantity/cost basis must be changed in the editor below the form.
+    """
+    entered = str(symbol or "").strip()
+    if not entered:
+        raise ValueError("Enter a ticker or Yahoo symbol.")
+
+    try:
+        bought_quantity = float(quantity)
+    except (TypeError, ValueError):
+        raise ValueError("Bought quantity must be a positive number.") from None
+    if not np.isfinite(bought_quantity) or bought_quantity <= 0:
+        raise ValueError("Bought quantity must be a positive number.")
+
+    explicit_price = average_price not in (None, "")
+    if explicit_price:
+        try:
+            saved_price = float(average_price)
+        except (TypeError, ValueError):
+            raise ValueError("Average buy price must be a positive number.") from None
+        if not np.isfinite(saved_price) or saved_price <= 0:
+            raise ValueError("Average buy price must be a positive number.")
+    else:
+        saved_price = None
+
+    instrument = resolve_yahoo_instrument(entered, get_nse_company_lookup())
+    if instrument is None:
+        raise ValueError("Ticker could not be resolved on Yahoo Finance/NSE/BSE.")
+
+    if saved_price is None:
+        latest = get_latest_price_map((instrument["yahoo_ticker"],))
+        saved_price = latest.get(instrument["yahoo_ticker"])
+        if saved_price is None or not np.isfinite(saved_price) or saved_price <= 0:
+            raise ValueError(
+                "A current price was unavailable. Enter your average buy price manually."
+            )
+        saved_price = float(saved_price)
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM master_holdings WHERE owner = ? AND symbol = ?",
+            (owner, instrument["symbol"]),
+        ).fetchone()
+        if existing:
+            raise ValueError(
+                "This holding already exists. Edit its quantity and average price below."
+            )
+        conn.execute(
+            """
+            INSERT INTO master_holdings
+                (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
+                 quantity, average_price, added_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                owner, instrument["symbol"], instrument["stock_name"],
+                instrument["yahoo_ticker"], instrument["exchange"],
+                _normalize_currency_code(instrument["currency"]),
+                bought_quantity, saved_price, now, now,
+            ),
+        )
+        conn.commit()
+
+    return {
+        "symbol": instrument["symbol"],
+        "quantity": bought_quantity,
+        "average_price": saved_price,
+        "price_source": "entered" if explicit_price else "latest Yahoo placeholder",
+    }
+
+
 def add_symbols_to_universal(symbols):
     """Add symbols to the shared universal portfolio (quantity fixed at 0).
 
@@ -4640,40 +4717,90 @@ sidebar_count_placeholder.metric("Current unique holdings", live_unique_count)
 render_saved_analysis(saved_analysis_placeholder, CURRENT_USER)
 
 st.subheader("Master Holdings")
-with st.expander("Add stocks manually", expanded=False):
-    st.caption("Enter symbols or Yahoo tickers, separated by commas or new lines (for example RELIANCE.NS, AXTI, VT). New rows start with quantity 1 and a Yahoo native-currency price as a placeholder—not your actual purchase cost. Edit both below before running optimization. Existing holdings are not overwritten.")
-    with st.form("manual_holdings_add"):
-        manual_symbols = st.text_area("Stocks to add", key="manual_holdings_symbols")
-        manual_add = st.form_submit_button("Add to my holdings")
+master_df = load_master_holdings(CURRENT_USER)
+
+with st.expander("Manage holdings", expanded=True):
+    st.markdown("**Add a holding**")
+    st.caption(
+        "Enter the bought quantity now. Average buy price is in the security's quoted "
+        "currency; leave it at 0 only to use the latest Yahoo price as a temporary placeholder."
+    )
+    with st.form("manual_holding_add"):
+        manual_symbol = st.text_input(
+            "Ticker or Yahoo symbol",
+            key="manual_holding_symbol",
+            placeholder="RELIANCE.NS, AXTI or VT",
+        )
+        manual_quantity = st.number_input(
+            "Bought quantity",
+            min_value=0.000001,
+            value=1.0,
+            step=1.0,
+            format="%.6f",
+            key="manual_holding_quantity",
+        )
+        manual_average_price = st.number_input(
+            "Average buy price (0 = use latest Yahoo price)",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            format="%.2f",
+            key="manual_holding_average_price",
+        )
+        manual_add = st.form_submit_button("Add holding", type="primary")
     if manual_add:
-        symbols = parse_symbol_input(manual_symbols)
-        if not symbols:
-            st.warning("Enter at least one ticker.")
-        elif len(symbols) > 50:
-            st.warning("Add up to 50 symbols at a time.")
-        else:
+        try:
+            get_latest_price_map.clear()
+            _latest_fx_rate_to_inr.clear()
+            added = add_holding_with_quantity(
+                manual_symbol,
+                manual_quantity,
+                CURRENT_USER,
+                average_price=(manual_average_price or None),
+            )
+            st.session_state["holdings_editor_version"] += 1
+            clear_drop_bottom_coverage_preview()
+            st.session_state.pop("drop_bottom_auto_result", None)
+            st.session_state.pop("drop_bottom_auto_error", None)
+            st.session_state["holdings_flash_success"] = (
+                f"Added {added['symbol']} with quantity {added['quantity']:g} and "
+                f"average price {added['average_price']:,.2f} "
+                f"({added['price_source']})."
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not add holding: {exc}")
+
+    if not master_df.empty:
+        st.divider()
+        st.markdown("**Delete holdings**")
+        holdings_to_delete = st.multiselect(
+            "Select holdings to delete",
+            options=master_df["Symbol"].tolist(),
+            key="manual_holdings_to_delete",
+            help="Deletion removes the selected rows from your private holdings only.",
+        )
+        if st.button(
+            "Delete selected holdings",
+            disabled=not holdings_to_delete,
+            key="delete_selected_holdings",
+        ):
             try:
-                get_latest_price_map.clear()
-                _latest_fx_rate_to_inr.clear()
-                added, duplicates, invalid, missing_prices = add_symbols_to_master(symbols, CURRENT_USER)
-                if added:
-                    st.session_state["holdings_editor_version"] += 1
-                    clear_drop_bottom_coverage_preview()
-                    st.session_state.pop("drop_bottom_auto_result", None)
-                    st.session_state.pop("drop_bottom_auto_error", None)
-                    st.session_state["holdings_flash_success"] = "Added with quantity 1: " + ", ".join(added)
-                notices = []
-                if duplicates:
-                    notices.append("Already held (unchanged): " + ", ".join(duplicates))
-                if invalid:
-                    notices.append("Could not resolve: " + ", ".join(invalid))
-                if missing_prices:
-                    notices.append("Price unavailable; enter native Average Price manually: " + ", ".join(missing_prices))
-                if notices:
-                    st.session_state["holdings_flash_warning"] = " · ".join(notices)
+                removed, missing = remove_symbols_from_master(
+                    holdings_to_delete, CURRENT_USER)
+                if not removed:
+                    raise ValueError("No selected holdings were found.")
+                st.session_state["holdings_editor_version"] += 1
+                clear_drop_bottom_coverage_preview()
+                st.session_state.pop("drop_bottom_auto_result", None)
+                st.session_state.pop("drop_bottom_auto_error", None)
+                message = "Deleted: " + ", ".join(removed)
+                if missing:
+                    message += ". Already absent: " + ", ".join(missing)
+                st.session_state["holdings_flash_success"] = message
                 st.rerun()
-            except Exception:
-                st.error("Could not complete the addition. Refresh the holdings list before retrying; check ticker spelling and Yahoo availability.")
+            except Exception as exc:
+                st.error(f"Could not delete holdings: {exc}")
 
 if st.button("Refresh FX to INR", key="refresh_holdings_fx"):
     _latest_fx_rate_to_inr.clear()

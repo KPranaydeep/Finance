@@ -14,7 +14,10 @@ class ManualAddTests(unittest.TestCase):
         self.db.execute('CREATE TABLE master_holdings (owner TEXT, symbol TEXT, stock_name TEXT, yahoo_ticker TEXT, exchange TEXT, currency TEXT, quantity REAL, average_price REAL, added_at TEXT, updated_at TEXT, UNIQUE(owner,symbol))')
         source = Path(__file__).resolve().parents[1] / 'portfolio_rebalancer_database.py'
         tree = ast.parse(source.read_text(encoding='utf-8'))
-        names = {'add_symbols_to_master', '_normalize_currency_code'}
+        names = {
+            'add_symbols_to_master', 'add_holding_with_quantity',
+            '_normalize_currency_code',
+        }
         nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
         self.env = {'np': np, 'datetime': datetime,
                     'get_db_connection': lambda: self.db,
@@ -50,3 +53,35 @@ class ManualAddTests(unittest.TestCase):
         added, _, invalid, missing = self.env['add_symbols_to_master'](['INVALID', 'CWT'], 'alice')
         self.assertEqual((added, invalid, missing), (['CWT'], ['INVALID'], ['CWT']))
         self.assertIsNone(self.db.execute('SELECT average_price FROM master_holdings').fetchone()[0])
+
+    def test_add_holding_uses_bought_quantity_and_entered_price(self):
+        result = self.env['add_holding_with_quantity'](
+            'AXTI', 7.5, 'alice', average_price=9.25)
+        row = self.db.execute(
+            'SELECT owner,symbol,quantity,average_price,currency FROM master_holdings'
+        ).fetchone()
+        self.assertEqual(
+            tuple(row), ('alice', 'AXTI', 7.5, 9.25, 'USD'))
+        self.assertEqual(result['price_source'], 'entered')
+
+    def test_add_holding_can_use_latest_price_placeholder(self):
+        result = self.env['add_holding_with_quantity']('AXTI', 3, 'alice')
+        self.assertEqual(result['average_price'], 12.5)
+        self.assertEqual(result['price_source'], 'latest Yahoo placeholder')
+
+    def test_add_holding_rejects_duplicate_without_overwriting(self):
+        add = self.env['add_holding_with_quantity']
+        add('AXTI', 3, 'alice', average_price=10)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            add('AXTI', 8, 'alice', average_price=20)
+        row = self.db.execute(
+            'SELECT quantity,average_price FROM master_holdings'
+        ).fetchone()
+        self.assertEqual(tuple(row), (3, 10))
+
+    def test_add_holding_validates_quantity_and_price(self):
+        add = self.env['add_holding_with_quantity']
+        with self.assertRaisesRegex(ValueError, 'Bought quantity'):
+            add('AXTI', 0, 'alice', average_price=10)
+        with self.assertRaisesRegex(ValueError, 'Average buy price'):
+            add('AXTI', 1, 'alice', average_price=-1)
