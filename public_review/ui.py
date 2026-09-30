@@ -283,6 +283,47 @@ def load_current_review_summary(basket_id, publication_id):
             return None
 
 
+def capture_current_entry_evidence(basket_id, publication_id):
+    """Idempotently freeze eligible post-publication entry evidence.
+
+    This is intentionally narrower than the scheduled review worker: it only
+    appends immutable SECURITY_ENTRY records and, once complete, one BASELINE.
+    It never assesses, alerts, acknowledges, publishes, or trades.
+    """
+    from .config import load_policy
+    from .instruments import complete_policy, frozen_instrument_kinds
+    from .service import capture_publication_entries, publications
+    from public_basket_postgres import (
+        connect_public_basket_db, get_public_basket_database_url,
+    )
+
+    with connect_public_basket_db(get_public_basket_database_url()) as conn:
+        store.init(conn)
+        conn.commit()
+        pubs = publications(conn, basket_id)
+        publication = next(
+            row for row in pubs if row["publication_id"] == publication_id
+        )
+        events = store.read(conn, basket_id)
+        policy = complete_policy(
+            load_policy(), publication["weights"],
+            frozen_kinds=frozen_instrument_kinds(events),
+        )
+        result = capture_publication_entries(
+            conn, basket_id, publication, policy,
+            now=datetime.now(timezone.utc), history=events,
+            create_previews=False,
+        )
+    # Never leak exception objects or provider details into Streamlit state.
+    return {
+        key: result.get(key)
+        for key in (
+            "status", "captured_entries", "total_entries", "new_entries",
+            "baseline_created", "pending_tickers",
+        )
+    }
+
+
 @st.cache_data(ttl=900, max_entries=16, show_spinner=False)
 def load_indicative_net_return(basket_id, publication_id):
     """Value the current model lots at latest available INR market marks."""
@@ -335,12 +376,25 @@ def load_indicative_net_return(basket_id, publication_id):
 
 @st.fragment(run_every="15m")
 def render_live_review_panel(basket_id, active_publications):
-    """Auto-refresh read-only valuation and review research while viewed."""
+    """Auto-refresh valuation and safely capture immutable entry evidence."""
     publication_id = (
         active_publications[0].get("publication_id")
         if active_publications else None
     )
     if publication_id:
+        capture = None
+        try:
+            capture = capture_current_entry_evidence(basket_id, publication_id)
+            if capture.get("new_entries") or capture.get("baseline_created"):
+                # Make this fragment use the just-committed evidence instead of
+                # waiting for the normal five/fifteen-minute read caches.
+                load_events.clear()
+                load_fresh_preview.clear()
+                load_indicative_net_return.clear()
+        except Exception:
+            # The public page must remain available if an exchange/provider is
+            # temporarily unavailable. The next fragment tick retries safely.
+            capture = None
         try:
             live = load_indicative_net_return(basket_id, publication_id)
         except Exception:
@@ -370,6 +424,15 @@ def render_live_review_panel(basket_id, active_publications):
                     "this page remains open. Indicative only; markets need not "
                     "be simultaneously open."
                 )
+                if (capture and capture.get("status") == "PARTIAL_ENTRY"
+                        and capture.get("captured_entries")):
+                    st.caption(
+                        "Chronologically valid entry prices frozen for "
+                        f"{capture['captured_entries']} of "
+                        f"{capture['total_entries']} securities. Each remaining "
+                        "security freezes independently after its first eligible "
+                        "post-publication trade."
+                    )
     return render_review_panel(basket_id, active_publications)
 
 

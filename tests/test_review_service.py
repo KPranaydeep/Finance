@@ -2,7 +2,9 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 import pandas as pd
-from public_review.service import run, build_assessment, price_history_evidence
+from public_review import market, store
+from public_review.service import (run, build_assessment, price_history_evidence,
+                                   capture_publication_entries)
 from public_review.core import evaluate
 from public_review.market import calendar
 from review_fixtures import baseline, policy
@@ -74,6 +76,64 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(assessment['decision']['date_basis'], 'CONTINUOUS_MONITORING')
         self.assertIsNone(assessment['forecast']['next_review'])
         self.assertEqual(assessment['metrics']['date'],'2026-09-09')
+
+    def test_entry_capture_freezes_each_quote_once_then_one_baseline(self):
+        p=policy(); p['capital_inr']=10000
+        b=baseline(); db=FakeDB()
+        pub={k:b[k] for k in ['publication_id','basket_id','portfolio_version',
+                              'published_at','weights']}
+        now=datetime(2026,9,9,13,tzinfo=timezone.utc)
+        schedule={ticker:{'ticker':ticker,'kind':p['instrument_kinds'][ticker],
+                  'market':'NSE','requested_entry_at':'2026-09-09T04:01:00+00:00',
+                  'session_open_at':'2026-09-09T03:45:00+00:00',
+                  'session_close_at':'2026-09-09T10:00:00+00:00',
+                  'entry_date':'2026-09-09','basis':'PUBLICATION_IN_SESSION',
+                  'ready':True} for ticker in pub['weights']}
+        calls=[]
+
+        def first_quote(ticker, planned, policy_, now=None):
+            calls.append(ticker)
+            if ticker == 'B.NS':
+                pending=market.AwaitingMarketEntry('2026-09-09',
+                                                    '2026-09-09T13:30:00+00:00')
+                pending.planned_entry=planned
+                raise pending
+            return {**planned,'price_inr':100.,'native_price':100.,
+                    'fx_to_inr':1.,'quote_at':'2026-09-09T04:02:00+00:00',
+                    'source':'test'}
+
+        with patch('public_review.market.security_entry_schedule',
+                   return_value=schedule), \
+             patch('public_review.market.fetch_entry_quote',
+                   side_effect=first_quote):
+            partial=capture_publication_entries(
+                db,'TEST',pub,p,now=now,history=[])
+        self.assertEqual(partial['status'],'PARTIAL_ENTRY')
+        self.assertEqual(partial['captured_entries'],1)
+        self.assertEqual(sum(r['kind']=='SECURITY_ENTRY' for r in db.rows),1)
+        self.assertFalse(any(r['kind']=='BASELINE' for r in db.rows))
+
+        def final_quote(ticker, planned, policy_, now=None):
+            calls.append(ticker)
+            return {**planned,'price_inr':50.,'native_price':50.,
+                    'fx_to_inr':1.,'quote_at':'2026-09-09T04:03:00+00:00',
+                    'source':'test'}
+
+        with patch('public_review.market.security_entry_schedule',
+                   return_value=schedule), \
+             patch('public_review.market.fetch_entry_quote',
+                   side_effect=final_quote):
+            frozen=capture_publication_entries(
+                db,'TEST',pub,p,now=now,history=store.read(db,'TEST'))
+            repeated=capture_publication_entries(
+                db,'TEST',pub,p,now=now,history=store.read(db,'TEST'))
+        self.assertEqual(frozen['status'],'BASELINE_FROZEN')
+        self.assertTrue(frozen['baseline_created'])
+        self.assertFalse(repeated['baseline_created'])
+        self.assertEqual(calls.count('A.NS'),1)
+        self.assertEqual(calls.count('B.NS'),2)
+        self.assertEqual(sum(r['kind']=='SECURITY_ENTRY' for r in db.rows),2)
+        self.assertEqual(sum(r['kind']=='BASELINE' for r in db.rows),1)
 
     def test_build_assessment_marks_unchanged_review_as_acknowledged(self):
         from public_review.service import build_assessment, review_trigger_state

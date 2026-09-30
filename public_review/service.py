@@ -285,6 +285,160 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
             "model_only": True}
 
 
+def capture_publication_entries(conn, basket, publication, policy, *, now=None,
+                                history=None, create_previews=False):
+    """Append every chronology-safe security entry available at ``now``.
+
+    This deliberately stops at entry evidence and baseline creation.  It does
+    not assess the portfolio, send notifications, create orders, or submit a
+    trade.  Event keys make repeated page/workflow calls idempotent, while the
+    store's basket advisory lock serialises concurrent visitors and workers.
+    """
+    from .instruments import require_supported_review
+
+    now = now or datetime.now(timezone.utc)
+    history = history if history is not None else store.read(conn, basket)
+    require_supported_review(publication["weights"])
+    weights = publication["weights"]
+    missing_kinds = set(weights) - set(policy.get("instrument_kinds", {}))
+    if missing_kinds:
+        raise ValueError("INSTRUMENT_CLASSIFICATION_REQUIRED")
+    kinds = {ticker: policy["instrument_kinds"][ticker] for ticker in weights}
+
+    baseline_key = (
+        "baseline:" + market.ENTRY_MODEL_VERSION + ":" +
+        publication["publication_id"]
+    )
+    existing_baseline = next((
+        row["payload"] for row in reversed(history)
+        if row.get("event_key") == baseline_key
+    ), None)
+    if existing_baseline:
+        return {
+            "status": "BASELINE_FROZEN",
+            "baseline": existing_baseline,
+            "captured_entries": len(existing_baseline.get("lots", [])),
+            "total_entries": len(weights),
+            "new_entries": 0,
+            "baseline_created": False,
+            "pending_tickers": [],
+        }
+
+    schedule = market.security_entry_schedule(
+        now, publication["published_at"], policy, kinds
+    )
+    captured = {
+        row["payload"]["ticker"]: row["payload"]
+        for row in history
+        if row["kind"] == "SECURITY_ENTRY"
+        and row["payload"].get("publication_id") == publication["publication_id"]
+    }
+    captured_before = len(captured)
+    entry_waits = {}
+    for ticker, planned in schedule.items():
+        if ticker in captured or not planned["ready"]:
+            continue
+        try:
+            quote = market.fetch_entry_quote(ticker, planned, policy, now=now)
+        except market.AwaitingMarketEntry as exc:
+            schedule[ticker] = exc.planned_entry
+            entry_waits[ticker] = exc
+            continue
+        quote["publication_id"] = publication["publication_id"]
+        store.append(
+            conn, basket,
+            "security-entry:" + market.ENTRY_MODEL_VERSION + ":" +
+            publication["publication_id"] + ":" + ticker,
+            "SECURITY_ENTRY", publication["publication_id"], quote,
+        )
+        conn.commit()
+        captured[ticker] = quote
+
+    # A concurrent visitor/worker may have won an idempotent SECURITY_ENTRY
+    # key with a different provider retry. Rebuild from the committed chain so
+    # the baseline can only use the one immutable quote actually stored.
+    committed_after_capture = store.read(conn, basket)
+    captured = {
+        row["payload"]["ticker"]: row["payload"]
+        for row in committed_after_capture
+        if row["kind"] == "SECURITY_ENTRY"
+        and row["payload"].get("publication_id") == publication["publication_id"]
+    }
+    tickers = list(weights)
+    missing_entries = sorted(set(tickers) - set(captured))
+    if missing_entries:
+        if create_previews:
+            from .partial import estimate_captured_security, METHOD as PARTIAL_METHOD
+            for captured_ticker, captured_entry in sorted(captured.items()):
+                try:
+                    partial = estimate_captured_security(
+                        publication, captured_entry, policy, now
+                    )
+                    partial_key = (
+                        "partial-security-review:" + PARTIAL_METHOD + ":" +
+                        publication["publication_id"] + ":" + captured_ticker +
+                        ":" + partial["as_of"] + ":" + digest(policy)
+                    )
+                    store.append(
+                        conn, basket, partial_key, "SECURITY_REVIEW_PREVIEW",
+                        publication["publication_id"], partial,
+                    )
+                    conn.commit()
+                except Exception:
+                    # Forecast previews are optional; immutable entry capture is not.
+                    conn.rollback()
+        pending = [schedule[ticker] for ticker in missing_entries]
+        next_entry = min(pending, key=lambda row: row["requested_entry_at"])
+        waiting = entry_waits.get(next_entry["ticker"]) or market.AwaitingMarketEntry(
+            next_entry["entry_date"], next_entry["requested_entry_at"]
+        )
+        waiting.captured_entries = len(captured)
+        waiting.total_entries = len(tickers)
+        waiting.pending_tickers = missing_entries
+        return {
+            "status": "PARTIAL_ENTRY",
+            "baseline": None,
+            "captured_entries": len(captured),
+            "total_entries": len(tickers),
+            "new_entries": len(captured) - captured_before,
+            "baseline_created": False,
+            "pending_tickers": missing_entries,
+            "waiting": waiting,
+        }
+
+    entry_prices = {
+        ticker: float(captured[ticker]["price_inr"]) for ticker in tickers
+    }
+    entry = min(row["entry_date"] for row in captured.values())
+    capital = policy["capital_inr"] or math.ceil(
+        max((price + 60) / weights[ticker]
+            for ticker, price in entry_prices.items()) / 100
+    ) * 100
+    baseline = freeze(
+        publication, weights, entry_prices, entry, capital,
+        policy["instrument_kinds"], policy, now.isoformat(), captured,
+    )
+    store.append(
+        conn, basket, baseline_key, "BASELINE", baseline["baseline_id"], baseline
+    )
+    conn.commit()
+    # A concurrent worker may have won the unique event key. Always return the
+    # committed chain value rather than a locally calculated losing payload.
+    committed = store.read(conn, basket)
+    baseline = next(
+        row["payload"] for row in committed if row["event_key"] == baseline_key
+    )
+    return {
+        "status": "BASELINE_FROZEN",
+        "baseline": baseline,
+        "captured_entries": len(tickers),
+        "total_entries": len(tickers),
+        "new_entries": len(captured) - captured_before,
+        "baseline_created": True,
+        "pending_tickers": [],
+    }
+
+
 def run(conn, basket, policy, *, acknowledge=None, now=None):
     now = now or datetime.now(timezone.utc)
     store.init(conn)
@@ -335,75 +489,16 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                     raise ValueError("FROZEN_CLASSIFICATION_REVIEW_REQUIRED")
             tickers = [r["ticker"] for r in baseline["lots"]] if baseline else list(weights)
             if baseline is None:
-                stage = "entry_calendar"
-                schedule = market.security_entry_schedule(
-                    now, publication["published_at"], policy, kinds)
-                entry_waits = {}
-                captured = {row["payload"]["ticker"]: row["payload"] for row in history
-                            if row["kind"] == "SECURITY_ENTRY" and
-                            row["payload"].get("publication_id") == publication["publication_id"]}
-                for ticker, planned in schedule.items():
-                    if ticker in captured or not planned["ready"]:
-                        continue
-                    stage = "entry_market_data"
-                    try:
-                        quote = market.fetch_entry_quote(ticker, planned, policy, now=now)
-                    except market.AwaitingMarketEntry as exc:
-                        schedule[ticker] = exc.planned_entry
-                        entry_waits[ticker] = exc
-                        continue
-                    except ValueError as exc:
-                        raise
-                    quote["publication_id"] = publication["publication_id"]
-                    store.append(conn, basket,
-                                 "security-entry:" + market.ENTRY_MODEL_VERSION + ":" +
-                                 publication["publication_id"] + ":" + ticker,
-                                 "SECURITY_ENTRY", publication["publication_id"], quote)
-                    conn.commit()
-                    captured[ticker] = quote
-                missing_entries = sorted(set(tickers) - set(captured))
-                if missing_entries:
-                    from .partial import estimate_captured_security, METHOD as PARTIAL_METHOD
-                    for captured_ticker, captured_entry in sorted(captured.items()):
-                        try:
-                            partial = estimate_captured_security(publication, captured_entry,
-                                                                 policy, now)
-                            partial_key = ("partial-security-review:" + PARTIAL_METHOD + ":" +
-                                           publication["publication_id"] + ":" + captured_ticker +
-                                           ":" + partial["as_of"] + ":" + digest(policy))
-                            store.append(conn, basket, partial_key, "SECURITY_REVIEW_PREVIEW",
-                                         publication["publication_id"], partial)
-                            conn.commit()
-                        except Exception:
-                            # Entry capture must never be blocked by an optional
-                            # provisional forecast. The final baseline remains authoritative.
-                            conn.rollback()
-                    pending = [schedule[ticker] for ticker in missing_entries]
-                    next_entry = min(pending, key=lambda row: row["requested_entry_at"])
-                    exc = entry_waits.get(next_entry["ticker"]) or market.AwaitingMarketEntry(
-                        next_entry["entry_date"], next_entry["requested_entry_at"])
-                    exc.captured_entries = len(captured)
-                    exc.total_entries = len(tickers)
-                    exc.pending_tickers = missing_entries
-                    raise exc
-                entry_prices = {ticker: float(captured[ticker]["price_inr"])
-                                for ticker in tickers}
-                entry = min(row["entry_date"] for row in captured.values())
-                # Same economic concept as practical full-target entry, measured
-                # using immutable per-security entry prices; reserve fees explicitly.
-                capital = policy["capital_inr"] or math.ceil(max((p + 60) / weights[t] for t, p in entry_prices.items()) / 100) * 100
-                baseline = freeze(publication, weights, entry_prices, entry, capital,
-                                  policy["instrument_kinds"], policy, now.isoformat(), captured)
+                stage = "entry_market_data"
+                capture = capture_publication_entries(
+                    conn, basket, publication, policy, now=now,
+                    history=history, create_previews=True,
+                )
+                if not capture["baseline"]:
+                    raise capture["waiting"]
+                baseline = capture["baseline"]
                 baseline_id = baseline["baseline_id"]
-                baseline_key = ("baseline:" + market.ENTRY_MODEL_VERSION + ":" +
-                                publication["publication_id"])
-                store.append(conn, basket, baseline_key, "BASELINE", baseline_id, baseline)
-                conn.commit()
                 history = store.read(conn, basket)
-                # If another worker created this publication concurrently, use
-                # the committed baseline, not the losing allocation.
-                baseline = next(r["payload"] for r in history if r["event_key"] == baseline_key)
-                baseline_id = baseline["baseline_id"]
                 tickers = [row["ticker"] for row in baseline["lots"]]
             stage = "forecast_observation_window"
             forecast_ready = True

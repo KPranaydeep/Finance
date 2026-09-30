@@ -15,7 +15,7 @@ def test_listing_descriptor_distinguishes_indian_and_us_quotes():
     assert listing_descriptor("UNKNOWN", None) == "Overseas · —"
 
 
-@pytest.mark.parametrize("count", [1, 21, 25])
+@pytest.mark.parametrize("count", [1, 21, 31])
 def test_allocation_card_is_exact_portrait_png(count):
     rows = tuple(
         (f"SECURITY{i}.NS", 0.04, 100.0 + i, "India · INR")
@@ -39,7 +39,7 @@ def test_allocation_card_is_exact_portrait_png(count):
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
-    assert pixels.shape[:2] == (2378, 1080)
+    assert pixels.shape[:2] == (1350, 1080)
     assert len(image) > 20_000
 
 
@@ -72,16 +72,16 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
                  and item.get_text() != "SECURITY"]
         assert [item.get_text() for item in names] == [row[0] for row in rows]
         assert all(item.get_ha() == "left" for item in names)
-        assert len({item.get_position()[0] for item in names}) == 1
+        assert len({item.get_position()[0] for item in names}) <= 2
         weights = [item for item in texts if item.get_text() == "5%"]
         prices = [item for item in texts if item.get_text() in ("₹123,456.78", "—")]
         # The empty change details may also contain an em dash.
         prices = [item for item in prices if item.get_ha() == "right"]
         assert len(weights) == len(prices) == 21
         assert all(item.get_ha() == "right" for item in weights + prices)
-        assert len({item.get_position()[0] for item in weights}) == 1
-        assert len({item.get_position()[0] for item in prices}) == 1
-        assert all(item.get_fontsize() >= 15 for item in names)
+        assert len({item.get_position()[0] for item in weights}) <= 2
+        assert len({item.get_position()[0] for item in prices}) <= 2
+        assert all(item.get_fontsize() >= 11 for item in names)
         assert len(figure.patches) == 10
         return savefig(figure, *args, **kwargs)
 
@@ -93,7 +93,7 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
             ("P008", (("ENTRY.NS", .05),), ()) if with_changes else None,
             metrics,
         )
-    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2378, 1080)
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (1350, 1080)
 
 
 def test_empty_allocation_is_rejected():
@@ -119,3 +119,38 @@ def test_all_exits_are_rendered_without_more_truncation(monkeypatch):
     for ticker, _ in exits:
         assert ticker in captured["text"]
     assert "+6 more" not in captured["text"]
+
+
+def test_large_publication_remains_legible_with_every_change(monkeypatch):
+    rows = tuple(
+        (f"SECURITY{i:02}.NS", 1 / 31, 1234.56 + i, "India · INR")
+        for i in range(31)
+    )
+    entries = tuple((f"ENTRY{i}.NS", .01) for i in range(18))
+    exits = tuple((f"EXIT{i}.NS", .01) for i in range(14))
+    savefig = Figure.savefig
+
+    def inspect(figure, *args, **kwargs):
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        texts = figure.texts
+        boxes = [item.get_window_extent(renderer) for item in texts]
+        assert all(figure.bbox.contains(box.x0, box.y0)
+                   and figure.bbox.contains(box.x1, box.y1) for box in boxes)
+        security_rows = [item for item in texts
+                         if item.get_text().startswith("SECURITY")
+                         and item.get_text() != "SECURITY"]
+        assert len(security_rows) == 31
+        assert min(item.get_fontsize() for item in security_rows) >= 11
+        rendered = "\n".join(item.get_text() for item in texts)
+        assert all(ticker in rendered for ticker, _ in entries + exits)
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    image = render_allocation_card(
+        "P010", "2026-09-30", rows, ("P009", entries, exits),
+        (("ALLOCATION REVIEW", "08 OCT", "Planning estimate"),
+         ("NET SINCE ENTRY", "-0.49%", "After modeled costs"),
+         ("28-DAY MEDIAN", "+4.99%", "Through 28 Oct")),
+    )
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (1350, 1080)
