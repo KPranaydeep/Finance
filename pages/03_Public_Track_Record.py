@@ -27,6 +27,7 @@ from public_track_record import (
     percent,
     percentage_points,
     portfolio_cover_card,
+    SUMMARY_CARD_RENDERER_VERSION,
     share_text,
     whatsapp_card,
 )
@@ -154,9 +155,10 @@ if slide_number == 1:
             )
         st.image(summary_card, width="stretch")
         st.caption(
-            "Each security is measured against its lifecycle VWAP in INR. "
-            "Realized and active figures use published allocation weights; "
-            "the separate net return includes modeled implementation costs."
+            "Security returns run from recorded entry to exit, or entry to the "
+            "latest completed session for current holdings. Published allocation "
+            "weights are used; the separate net result includes modeled costs. "
+            f"Card renderer {SUMMARY_CARD_RENDERER_VERSION}."
         )
         if summary_failures:
             st.caption(
