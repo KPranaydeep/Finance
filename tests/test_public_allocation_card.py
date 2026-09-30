@@ -121,6 +121,27 @@ def test_all_exits_are_rendered_without_more_truncation(monkeypatch):
     assert "+6 more" not in captured["text"]
 
 
+def test_entry_and_exit_changes_use_restrained_semantic_colors(monkeypatch):
+    captured = {}
+    savefig = Figure.savefig
+
+    def inspect(figure, *args, **kwargs):
+        captured.update({item.get_text(): item.get_color() for item in figure.texts})
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    render_allocation_card(
+        "P010", "2026-09-30",
+        (("KEEP.NS", 1., 100., "India · INR"),),
+        ("P009", (("ENTRY.NS", .05),), (("EXIT.NS", .04),)),
+    )
+
+    assert captured["ENTRIES"] == "#3f6b55"
+    assert captured["ENTRY.NS 5%"] == "#3f6b55"
+    assert captured["EXITS"] == "#9f4339"
+    assert captured["EXIT.NS 4%"] == "#9f4339"
+
+
 def test_large_publication_remains_legible_with_every_change(monkeypatch):
     rows = tuple(
         (f"SECURITY{i:02}.NS", 1 / 31, 1234.56 + i, "India · INR")

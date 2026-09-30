@@ -64,7 +64,8 @@ def render_allocation_card(
         raise ValueError("ALLOCATION_CARD_REQUIRES_ROWS")
 
     paper, ink, muted = "#f5f0e6", "#29251f", "#6b665e"
-    accent, rule, alternate_row = "#9f4339", "#d8cfbf", "#f0ebe1"
+    accent, entry_green = "#9f4339", "#3f6b55"
+    exit_red, rule, alternate_row = "#9f4339", "#d8cfbf", "#f0ebe1"
     figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
 
     def text(x, y, value, size=14, *, color=ink, bold=False,
@@ -109,9 +110,10 @@ def render_allocation_card(
             (left, "ENTRIES", entries, "No new entries"),
             (0.53, "EXITS", exits, "No exits"),
         ):
+            change_color = entry_green if label == "ENTRIES" else exit_red
             headline, details = _change_summary(values, empty_text=empty)
             text(x, band_top - 0.025, label, 10.5,
-                 color=accent if label == "ENTRIES" else muted, bold=True)
+                 color=change_color, bold=True)
             text(x, band_top - 0.048, headline, 11.5, bold=True)
             # Character-aware wrapping preserves every item while allowing
             # short symbols to share more of the available half-width.
@@ -128,7 +130,7 @@ def render_allocation_card(
                 detail_lines.append(current)
             detail_line_counts.append(max(len(detail_lines), 1))
             text(x, band_top - 0.075, "\n".join(detail_lines), 8.8,
-                 color=muted, linespacing=1.45, valign="top")
+                 color=change_color, linespacing=1.45, valign="top")
         band_top -= 0.105 + max(0, max(detail_line_counts) - 1) * 0.015
     else:
         band_top -= 0.012

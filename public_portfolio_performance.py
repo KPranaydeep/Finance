@@ -531,11 +531,16 @@ if share_allocation.open:
                         review_card_summary["review_state"],
                     ) if review_card_summary else None,
                     (
-                        ("STARTING NET AFTER COSTS"
+                        ("ROUND-TRIP COST HURDLE"
                          if review_card_summary.get("review_state") == "Planning estimate"
                          else "NET SINCE ENTRY"),
-                        f'{review_card_summary["net_return"]:+.2%}',
-                        review_card_summary.get("net_return_label", "After modeled costs"),
+                        (f'{abs(review_card_summary["net_return"]):.2%}'
+                         if review_card_summary.get("review_state") == "Planning estimate"
+                         else f'{review_card_summary["net_return"]:+.2%}'),
+                        ("Return needed to break even"
+                         if review_card_summary.get("review_state") == "Planning estimate"
+                         else review_card_summary.get(
+                             "net_return_label", "After modeled costs")),
                     ) if review_card_summary and review_card_summary.get("net_return") is not None else None,
                     (
                         "28-DAY MEDIAN",

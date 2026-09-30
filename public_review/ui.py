@@ -402,11 +402,13 @@ def render_live_review_panel(basket_id, active_publications):
         if live and live.get("net_return") is not None:
             with st.container(border=True):
                 st.metric(
-                    "Indicative net return",
+                    "Latest indicative net return",
                     percent(live["net_return"]),
                     help=(
-                        "Latest available INR market marks minus modeled entry, "
-                        "exit, tax, FX and slippage costs. Not an executable quote."
+                        "Latest available per-market INR marks minus modeled "
+                        "entry, exit, tax, FX and slippage costs. This includes "
+                        "price movement after the planning baseline and is not "
+                        "an executable quote."
                     ),
                 )
                 basis = (
@@ -424,6 +426,12 @@ def render_live_review_panel(basket_id, active_publications):
                     "this page remains open. Indicative only; markets need not "
                     "be simultaneously open."
                 )
+                if live["provisional"]:
+                    st.caption(
+                        "This can differ from the round-trip cost hurdle below: "
+                        "the hurdle assumes an immediate sale at unchanged entry "
+                        "prices, while this figure uses the latest available marks."
+                    )
                 if (capture and capture.get("status") == "PARTIAL_ENTRY"
                         and capture.get("captured_entries")):
                     st.caption(
@@ -476,9 +484,14 @@ def render_fresh_preview(p):
             st.metric(display["date_label"], display["date_value"])
             if metrics:
                 st.metric(
-                    "Provisional net after costs" if p.get("provisional_net_return")
+                    "Estimated round-trip result" if p.get("provisional_net_return")
                     else "Net return",
                     percent(metrics.get("net_total_return")),
+                    help=(
+                        "Same-price immediate liquidation after modeled costs; "
+                        "this is a cost hurdle, not current portfolio performance."
+                        if p.get("provisional_net_return") else None
+                    ),
                 )
         if p.get("last_close_planning_baseline"):
             st.caption(
