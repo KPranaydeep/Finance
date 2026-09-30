@@ -3027,12 +3027,15 @@ def select_redundant_tickers(
     avg_volume=None,
     correlation_threshold=0.80,
     aggregation_days=5,
+    owned_tickers=(),
 ):
-    """Keep one representative per near-duplicate cluster, preferring the most liquid.
+    """Keep owned assets, then one liquid representative per candidate cluster.
 
     Eight gold ETFs are one bet, not eight, but a per-ticker weight cap cannot see
     that: blocked at the cap on one ticker, the optimizer simply rebuilds the same
     exposure out of clones. Collapsing them first is what makes the cap meaningful.
+    Existing holdings are never dropped by this statistical redundancy rule: that
+    would manufacture an exit merely because a correlated candidate is more liquid.
     """
     empty_report = pd.DataFrame(columns=["Dropped", "Kept Instead", "Correlation"])
     tickers = list(log_returns.columns)
@@ -3054,8 +3057,15 @@ def select_redundant_tickers(
     else:
         liquidity = pd.to_numeric(avg_volume, errors="coerce").reindex(tickers).fillna(0.0)
 
-    # Most liquid first, so the survivor of each cluster is the tradable one.
-    ordered = liquidity.sort_values(ascending=False, kind="mergesort").index.tolist()
+    owned = {str(ticker).strip().upper() for ticker in owned_tickers}
+    # Owned holdings precede candidates and can never remove one another. Among
+    # candidates, volume still chooses the more tradable representative.
+    liquidity_order = liquidity.sort_values(
+        ascending=False, kind="mergesort").index.tolist()
+    ordered = (
+        [ticker for ticker in liquidity_order if str(ticker).upper() in owned]
+        + [ticker for ticker in liquidity_order if str(ticker).upper() not in owned]
+    )
 
     removed = set()
     rows = []
@@ -3067,6 +3077,8 @@ def select_redundant_tickers(
                 continue
             pair_correlation = correlation.at[ticker, other]
             if pd.notna(pair_correlation) and pair_correlation >= correlation_threshold:
+                if str(other).upper() in owned:
+                    continue
                 removed.add(other)
                 rows.append({
                     "Dropped": other,
@@ -3174,6 +3186,7 @@ def get_daily_log_returns(
         log_returns,
         volume_df.mean() if not volume_df.empty else None,
         redundancy_corr_threshold,
+        owned_tickers=owned_tickers,
     )
     log_returns = log_returns[kept_tickers]
 
@@ -5023,7 +5036,8 @@ if run_btn:
             st.subheader("Merged Near-Duplicate Assets")
             st.caption(
                 f"Correlated at or above {redundancy_corr_threshold:.2f}; the most liquid "
-                "asset of each group was kept so the weight cap limits real exposure."
+                "candidate of each group was kept so the weight cap limits real exposure. "
+                "Existing owned holdings are protected from removal by this filter."
             )
             st.dataframe(
                 redundant_df.style.format({"Correlation": "{:.3f}"}),
