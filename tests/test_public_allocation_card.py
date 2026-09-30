@@ -72,16 +72,16 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
                  and item.get_text() != "SECURITY"]
         assert [item.get_text() for item in names] == [row[0] for row in rows]
         assert all(item.get_ha() == "left" for item in names)
-        assert len({item.get_position()[0] for item in names}) <= 2
+        assert len({item.get_position()[0] for item in names}) == 1
         weights = [item for item in texts if item.get_text() == "5%"]
         prices = [item for item in texts if item.get_text() in ("₹123,456.78", "—")]
         # The empty change details may also contain an em dash.
         prices = [item for item in prices if item.get_ha() == "right"]
         assert len(weights) == len(prices) == 21
         assert all(item.get_ha() == "right" for item in weights + prices)
-        assert len({item.get_position()[0] for item in weights}) <= 2
-        assert len({item.get_position()[0] for item in prices}) <= 2
-        assert all(item.get_fontsize() >= 11 for item in names)
+        assert len({item.get_position()[0] for item in weights}) == 1
+        assert len({item.get_position()[0] for item in prices}) == 1
+        assert all(item.get_fontsize() >= 18 for item in names)
         assert len(figure.patches) == 10
         return savefig(figure, *args, **kwargs)
 
@@ -162,7 +162,7 @@ def test_large_publication_remains_legible_with_every_change(monkeypatch):
                          if item.get_text().startswith("SECURITY")
                          and item.get_text() != "SECURITY"]
         assert len(security_rows) == 31
-        assert min(item.get_fontsize() for item in security_rows) >= 11
+        assert min(item.get_fontsize() for item in security_rows) >= 18
         rendered = "\n".join(item.get_text() for item in texts)
         assert all(ticker in rendered for ticker, _ in entries + exits)
         return savefig(figure, *args, **kwargs)

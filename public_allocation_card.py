@@ -59,9 +59,9 @@ def render_allocation_card(
 ) -> bytes:
     """Render a mobile-first, exact 1272×2000 allocation share card.
 
-    Holdings flow through two aligned reading columns. This preserves all
-    securities and all publication changes without turning a WhatsApp preview
-    into an illegibly long screenshot.
+    Ordinary portfolios use one full-width reading column for phone legibility.
+    Only unusually large portfolios use two columns, preserving every security
+    and publication change on the fixed canvas.
     """
     if not rows:
         raise ValueError("ALLOCATION_CARD_REQUIRES_ROWS")
@@ -98,10 +98,10 @@ def render_allocation_card(
         column_width = (right - left) / len(decision_strip)
         for index, (label, value, note) in enumerate(decision_strip):
             x = left + index * column_width
-            text(x, band_top, label, 9.5, color=muted, bold=True)
-            text(x, band_top - 0.027, value, 18, bold=True,
+            text(x, band_top, label, 12, color=muted, bold=True)
+            text(x, band_top - 0.027, value, 20, bold=True,
                  color=accent if index == 0 else ink)
-            text(x, band_top - 0.051, note, 9.5, color=muted)
+            text(x, band_top - 0.051, note, 12, color=muted)
         band_top -= 0.087
 
     if changes is not None:
@@ -115,16 +115,16 @@ def render_allocation_card(
         ):
             change_color = entry_green if label == "ENTRIES" else exit_red
             headline, details = _change_summary(values, empty_text=empty)
-            text(x, band_top - 0.025, label, 10.5,
+            text(x, band_top - 0.026, label, 15,
                  color=change_color, bold=True)
-            text(x, band_top - 0.048, headline, 11.5, bold=True)
+            text(x, band_top - 0.053, headline, 16.5, bold=True)
             # Character-aware wrapping preserves every item while allowing
             # short symbols to share more of the available half-width.
             parts = details.split("  ·  ")
             detail_lines, current = [], ""
             for part in parts:
                 candidate = part if not current else current + "  ·  " + part
-                if current and len(candidate) > 52:
+                if current and len(candidate) > 40:
                     detail_lines.append(current)
                     current = part
                 else:
@@ -132,16 +132,22 @@ def render_allocation_card(
             if current:
                 detail_lines.append(current)
             detail_line_counts.append(max(len(detail_lines), 1))
-            text(x, band_top - 0.075, "\n".join(detail_lines), 8.8,
+            text(x, band_top - 0.085, "\n".join(detail_lines), 14.5,
                  color=change_color, linespacing=1.45, valign="top")
-        band_top -= 0.105 + max(0, max(detail_line_counts) - 1) * 0.015
+        band_top -= 0.125 + max(0, max(detail_line_counts) - 1) * 0.022
     else:
         band_top -= 0.012
 
-    panel_lefts = (left, 0.525)
-    panel_rights = (0.475, right)
-    split = (len(rows) + 1) // 2
-    panels = (rows[:split], rows[split:])
+    use_two_columns = len(rows) > 24
+    if use_two_columns:
+        panel_lefts = (left, 0.525)
+        panel_rights = (0.475, right)
+        split = (len(rows) + 1) // 2
+        panels = (rows[:split], rows[split:])
+    else:
+        panel_lefts = (left,)
+        panel_rights = (right,)
+        panels = (rows,)
     header_y = band_top
     for panel_left, panel_right, panel_rows in zip(
             panel_lefts, panel_rights, panels):
@@ -150,30 +156,30 @@ def render_allocation_card(
         width = panel_right - panel_left
         columns = (
             panel_left + 0.003,
-            panel_left + width * 0.51,
-            panel_left + width * 0.78,
-            panel_left + width * 0.82,
+            panel_left + width * (0.51 if use_two_columns else 0.54),
+            panel_left + width * (0.78 if use_two_columns else 0.76),
+            panel_left + width * (0.82 if use_two_columns else 0.80),
         )
         for x, label, align in zip(
             columns, ("SECURITY", "TARGET", "INR CLOSE", "LISTING"),
             ("left", "right", "right", "left"),
         ):
-            text(x, header_y, label, 8.7, color=muted, bold=True, align=align)
+            text(x, header_y, label, 12.5, color=muted, bold=True, align=align)
         line(panel_left, panel_right, header_y - 0.014, color=ink, width=0.9)
 
     first_y, last_y = header_y - 0.038, 0.155
     maximum_panel_rows = max(len(panel) for panel in panels)
     step = min(0.035, (first_y - last_y) /
                max(maximum_panel_rows - 1, 1))
-    row_font = min(13.5, step * CARD_HEIGHT * 0.58 * 72 / 100)
+    row_font = min(24, step * CARD_HEIGHT * 0.76 * 72 / 100)
     for panel_index, panel_rows in enumerate(panels):
         panel_left, panel_right = panel_lefts[panel_index], panel_rights[panel_index]
         width = panel_right - panel_left
         columns = (
             panel_left + 0.003,
-            panel_left + width * 0.51,
-            panel_left + width * 0.78,
-            panel_left + width * 0.82,
+            panel_left + width * (0.51 if use_two_columns else 0.54),
+            panel_left + width * (0.78 if use_two_columns else 0.76),
+            panel_left + width * (0.82 if use_two_columns else 0.80),
         )
         for index, (ticker, weight, price, listing) in enumerate(panel_rows):
             y = first_y - index * step
@@ -187,7 +193,7 @@ def render_allocation_card(
             text(columns[1], y, f"{weight:.0%}", row_font,
                  color=accent, align="right")
             text(columns[2], y, _price_text(price), row_font, align="right")
-            text(columns[3], y, listing, max(row_font - 3.5, 7.5), color=muted)
+            text(columns[3], y, listing, max(row_font - 4, 12), color=muted)
 
     line(left, right, 0.126)
     total_weight = sum(row[1] for row in rows)

@@ -787,7 +787,7 @@ def batch_summary_card(
     *,
     net_return: float | None = None,
 ) -> bytes:
-    """Render a capital-aware lifecycle-VWAP portfolio summary card."""
+    """Render a plain-language public portfolio summary card."""
     paper, ink, muted, accent = "#f5f0e6", "#29251f", "#6b665e", "#9f4339"
 
     def outcome(row: dict) -> float:
@@ -808,11 +808,11 @@ def batch_summary_card(
         plt.Rectangle((.035,.025),.93,.95,transform=fig.transFigure,facecolor="none",edgecolor=ink,linewidth=1.2),
         plt.Rectangle((.044,.034),.912,.932,transform=fig.transFigure,facecolor="none",edgecolor="#d8cfbf",linewidth=.8),
     ])
-    fig.text(.09,.925,"PORTFOLIO",fontsize=31,fontweight="bold",family="serif",color=ink)
-    fig.text(.09,.888,"CARD SUMMARY",fontsize=31,fontweight="bold",family="serif",color=ink)
+    fig.text(.09,.925,"PUBLIC PORTFOLIO",fontsize=21,fontweight="bold",color=accent)
+    fig.text(.09,.882,"PERFORMANCE SNAPSHOT",fontsize=29,fontweight="bold",family="serif",color=ink)
     fig.text(.09,.852,f"{feed.get('portfolio_version','')} · {feed.get('publication_date','')}",fontsize=16,family="sans",color=muted)
 
-    fig.text(.09,.786,"FULLY COSTED NET RETURN",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.09,.786,"CURRENT PORTFOLIO · NET RESULT",fontsize=15,fontweight="bold",color=muted)
     fig.text(
         .09,.731,
         f"{net_return:+.2%}" if net_return is not None else "Pending verified baseline",
@@ -821,7 +821,7 @@ def batch_summary_card(
     )
     fig.text(
         .09,.695,
-        "Latest available marks after modeled entry, exit, tax, FX and slippage costs"
+        "Public model result after estimated trading costs and taxes"
         if net_return is not None else
         "The card will populate this after a costed model baseline is available",
         fontsize=12.5,color=muted,
@@ -830,34 +830,33 @@ def batch_summary_card(
                                 color="#d8cfbf",linewidth=.9))
 
     for x, label, row, color in [
-        (.09,"HIGHEST GAIN",gain,accent),
-        (.55,"HIGHEST LOSS",loss,ink),
+        (.09,"LARGEST RISE DURING ITS PORTFOLIO LIFE",gain,accent),
+        (.55,"LARGEST FALL DURING ITS PORTFOLIO LIFE",loss,ink),
     ]:
         fig.text(x,.615,label,fontsize=14,fontweight="bold",color=muted)
         fig.text(x,.565,row['ticker'] if row else "No data",fontsize=23,
                  fontweight="bold",color=color)
         fig.text(x,.520,f"{outcome(row):+.2%}" if row else "N/A",fontsize=25,
                  fontweight="bold",color=color)
-        fig.text(x,.485,"Endpoint versus lifecycle VWAP",fontsize=11.5,color=muted)
+        fig.text(x,.485,"Price vs its average while in the portfolio",fontsize=11.5,color=muted)
 
-    fig.text(.09,.395,"WEIGHTED REALIZED RETURN",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.09,.395,"PAST EXITS · PRICE MOVEMENT",fontsize=14,fontweight="bold",color=muted)
     fig.text(.09,.342,f"{weighted_finished:+.2%}" if weighted_finished is not None else "N/A",fontsize=28,fontweight="bold",color=accent)
-    fig.text(.09,.300,f"{len(finished)} exited · last published weights",fontsize=13,fontweight="bold",color=ink)
-    fig.text(.55,.395,"WEIGHTED ACTIVE RETURN",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.09,.300,f"{len(finished)} securities previously removed",fontsize=13,fontweight="bold",color=ink)
+    fig.text(.55,.395,"CURRENT HOLDINGS · PRICE MOVEMENT",fontsize=14,fontweight="bold",color=muted)
     fig.text(.55,.342,f"{weighted_active:+.2%}" if weighted_active is not None else "N/A",fontsize=28,fontweight="bold",color=accent)
-    fig.text(.55,.300,f"{len(active)} active · current target weights",fontsize=13,fontweight="bold",color=ink)
+    fig.text(.55,.300,f"{len(active)} securities currently held",fontsize=13,fontweight="bold",color=ink)
 
-    fig.text(.09,.195,"HOW THIS SUMMARY IS BUILT",fontsize=13,fontweight="bold",color=muted)
+    fig.text(.09,.195,"HOW TO READ THIS",fontsize=14,fontweight="bold",color=muted)
     fig.text(
         .09,.145,
-        "Each security uses daily volume-weighted mean price in INR over its own lifecycle:\n"
-        "publication entry → exit for removed holdings, or entry → latest completed session for active holdings.",
-        fontsize=13,color=ink,linespacing=1.55,
+        "The large number is the portfolio result after estimated costs. Security figures compare each\n"
+        "holding with its average price while it was—or remains—in the portfolio.",
+        fontsize=13.5,color=ink,linespacing=1.55,
     )
     fig.text(
         .09,.075,
-        "Security outcomes are then weighted by published capital allocation—not by share price. "
-        "Empirical history · not a forecast.",
+        "Security figures span different periods and do not add up to the net result. Historical record · not a trade instruction.",
         fontsize=11.5,color=muted,style="italic",
     )
     buf=BytesIO(); fig.savefig(buf,format="png",dpi=100,facecolor=paper,bbox_inches=None,pad_inches=0); plt.close(fig)
