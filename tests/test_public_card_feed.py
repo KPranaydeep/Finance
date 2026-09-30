@@ -182,11 +182,19 @@ def test_portfolio_summary_card_renders_empirical_outcomes():
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
-    assert pixels.shape[:2] == (2000, 1272)
+    assert pixels.shape[:2] == (1100, 1272)
     assert len(image) > 10_000
     assert "+141.51%" in captured["text"]
     assert "-9.51%" in captured["text"]
     assert "+20.00%" not in captured["text"]
+
+
+def test_portfolio_summary_card_pending_state_stays_compact():
+    feed = {"portfolio_version": "P010", "publication_date": "2026-09-30"}
+    image = batch_summary_card(feed, [], net_return=None)
+    pixels = mpimg.imread(BytesIO(image), format="png")
+
+    assert pixels.shape[:2] == (1160, 1272)
 
 
 def test_lifecycle_vwap_is_inr_adjusted_and_allocation_weighted():

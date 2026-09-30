@@ -6,11 +6,23 @@ import pytest
 from matplotlib.figure import Figure
 
 from public_allocation_card import (
+    _wrapped_ticker_lines,
     listing_descriptor,
     render_allocation_card,
     render_buy_plan_card,
     render_changes_card,
 )
+
+
+def test_change_paragraph_wraps_tickers_without_repeating_weights():
+    lines = _wrapped_ticker_lines(
+        (("FIRST.NS", .10), ("SECOND.NS", .07), ("THIRD", .03)), width=20
+    )
+
+    assert lines == ("FIRST.NS · SECOND.NS", "THIRD")
+    rendered = " ".join(lines)
+    assert all(ticker in rendered for ticker in ("FIRST.NS", "SECOND.NS", "THIRD"))
+    assert "%" not in rendered
 
 
 def test_listing_descriptor_distinguishes_indian_and_us_quotes():
@@ -22,7 +34,7 @@ def test_listing_descriptor_distinguishes_indian_and_us_quotes():
 
 @pytest.mark.parametrize(
     ("count", "expected_height"),
-    ((1, 2000), (21, 2000), (31, 2380)),
+    ((1, 2000), (21, 2000), (31, 2316)),
 )
 def test_allocation_card_is_exact_portrait_png(count, expected_height):
     rows = tuple(
@@ -259,7 +271,7 @@ def test_large_publication_contains_every_change_and_caps_height(monkeypatch):
          ("NET SINCE ENTRY", "-0.49%", "After modeled costs"),
          ("28-DAY MEDIAN", "+4.99%", "Through 28 Oct")),
     )
-    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2800, 1272)
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2481, 1272)
 
     def inspect_changes(figure, *args, **kwargs):
         figure.canvas.draw()

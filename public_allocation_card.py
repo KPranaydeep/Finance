@@ -44,6 +44,26 @@ def _change_summary(
     return headline, details
 
 
+def _wrapped_ticker_lines(
+    changes: tuple[tuple[str, float], ...], *, width: int = 38
+) -> tuple[str, ...]:
+    """Wrap complete ticker lists without splitting a symbol."""
+    if not changes:
+        return ("None",)
+    lines: list[str] = []
+    current = ""
+    for ticker, _weight in changes:
+        candidate = ticker if not current else f"{current} · {ticker}"
+        if current and len(candidate) > width:
+            lines.append(current)
+            current = ticker
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return tuple(lines)
+
+
 def render_changes_card(
     portfolio_version: str,
     publication_date: str,
@@ -530,27 +550,27 @@ def render_allocation_card(
     )
     entries = changes[1] if changes else ()
     exits = changes[2] if changes else ()
-    change_rows = max(len(entries), len(exits))
+    entry_lines = _wrapped_ticker_lines(entries)
+    exit_lines = _wrapped_ticker_lines(exits)
+    change_rows = max(len(entry_lines), len(exit_lines))
     allocation_rows = max(len(values) for _, values in allocation_groups)
 
-    change_step_px = 40.0
+    change_step_px = 33.0
     allocation_step_px = 44.0
-    change_intervals = max(change_rows - 1, 0)
     allocation_intervals = max(allocation_rows - 1, 0)
-    fixed_height = 1020 if changes is not None else 800
+    if changes is not None:
+        final_change_px = 588 + max(change_rows - 1, 0) * change_step_px
+        allocation_top_px = final_change_px + 72
+    else:
+        allocation_top_px = 430
     natural_height = (
-        fixed_height
-        + change_intervals * change_step_px
-        + allocation_intervals * allocation_step_px
+        allocation_top_px + 106
+        + allocation_intervals * allocation_step_px + 230
     )
     if natural_height > 2800:
-        variable = (
-            change_intervals * change_step_px
-            + allocation_intervals * allocation_step_px
-        )
-        scale = (2800 - fixed_height) / variable if variable else 1.0
-        change_step_px *= scale
-        allocation_step_px *= scale
+        available = 2800 - 230 - (allocation_top_px + 106)
+        if allocation_intervals:
+            allocation_step_px = max(34.0, available / allocation_intervals)
         natural_height = 2800
     height = int(min(2800, max(CARD_HEIGHT, round(natural_height))))
 
@@ -605,34 +625,20 @@ def render_allocation_card(
         text(left, from_top(430), f"CHANGES SINCE {previous_version}",
              11, color=muted, bold=True)
         change_panels = (
-            (left, 0.475, "ENTRIES", entries, green, "No new entries"),
-            (0.525, right, "EXITS", exits, red, "No exits"),
+            (left, 0.475, "ENTRIES", entries, entry_lines, green),
+            (0.525, right, "EXITS", exits, exit_lines, red),
         )
-        for panel_left, panel_right, label, values, color, empty in change_panels:
-            headline, _ = _change_summary(values, empty_text=empty)
+        for panel_left, panel_right, label, values, lines, color in change_panels:
+            count_label = "security" if len(values) == 1 else "securities"
             text(panel_left, from_top(472), label, 15, color=color, bold=True)
-            text(panel_left, from_top(512), headline, 15.5, bold=True)
+            text(panel_left, from_top(512), f"{len(values)} {count_label}",
+                 15.5, bold=True)
             line(panel_left, panel_right, from_top(548), color=color, width=0.9)
-            row_font = min(18.5, change_step_px * 0.65 * 72 / 100)
-            for index, (ticker, weight) in enumerate(values):
-                row_px = 588 + index * change_step_px
-                y = from_top(row_px)
-                if index % 2:
-                    figure.patches.append(Rectangle(
-                        (panel_left, y - change_step_px / height * 0.46),
-                        panel_right - panel_left,
-                        change_step_px / height * 0.92,
-                        transform=figure.transFigure,
-                        facecolor=alternate_row, edgecolor="none", linewidth=0,
-                    ))
-                text(panel_left + 0.005, y, ticker, row_font,
-                     color=color, bold=True, family="monospace")
-                text(panel_right - 0.005, y, f"{weight:.0%}", row_font,
-                     color=color, bold=True, align="right")
-        final_change_px = 588 + change_intervals * change_step_px
-        allocation_top_px = final_change_px + 72
-    else:
-        allocation_top_px = 430
+            text(
+                panel_left + 0.005, from_top(582), "\n".join(lines),
+                15.5, color=color, bold=True, family="monospace",
+                valign="top", linespacing=1.42,
+            )
 
     panel_gap = 0.05 if len(allocation_groups) == 2 else 0.0
     panel_width = (right - left - panel_gap) / len(allocation_groups)

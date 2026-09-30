@@ -27,7 +27,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 CARD_WIDTH = 1272
 CARD_HEIGHT = 2000
 CARD_FIGSIZE = (CARD_WIDTH / 100, CARD_HEIGHT / 100)
-SUMMARY_CARD_RENDERER_VERSION = "entry-return-v2"
+SUMMARY_CARD_RENDERER_VERSION = "compact-summary-v3"
 
 
 
@@ -776,7 +776,7 @@ def build_card_batch(feed: dict) -> bytes:
     return output.getvalue()
 
 
-def batch_summary_card(
+def _batch_summary_card_legacy(
     feed: dict,
     summaries: list[dict],
     *,
@@ -795,6 +795,8 @@ def batch_summary_card(
     active = [row for row in summaries if row["status"] != "removed"]
     weighted_finished = allocation_weighted_return(finished)
     weighted_active = allocation_weighted_return(active)
+    finished_noun = "security" if len(finished) == 1 else "securities"
+    active_noun = "security" if len(active) == 1 else "securities"
     fig = plt.figure(figsize=CARD_FIGSIZE, dpi=100, facecolor=paper)
     fig.patches.extend([
         plt.Rectangle((.035,.025),.93,.95,transform=fig.transFigure,facecolor="none",edgecolor=ink,linewidth=1.2),
@@ -854,6 +856,146 @@ def batch_summary_card(
     )
     buf=BytesIO(); fig.savefig(buf,format="png",dpi=100,facecolor=paper,bbox_inches=None,pad_inches=0); plt.close(fig)
     return buf.getvalue()
+
+
+def batch_summary_card(
+    feed: dict,
+    summaries: list[dict],
+    *,
+    net_return: float | None = None,
+) -> bytes:
+    """Render a compact, mobile-legible 1272px portfolio summary."""
+    paper, ink, muted, accent = "#f5f0e6", "#29251f", "#6b665e", "#9f4339"
+    faint = "#d8cfbf"
+    ordered = sorted(summaries, key=lambda row: float(row["return"]))
+    loss = ordered[0] if ordered else None
+    gain = ordered[-1] if ordered else None
+    finished = [row for row in summaries if row["status"] == "removed"]
+    active = [row for row in summaries if row["status"] != "removed"]
+    weighted_finished = allocation_weighted_return(finished)
+    weighted_active = allocation_weighted_return(active)
+    finished_noun = "security" if len(finished) == 1 else "securities"
+    active_noun = "security" if len(active) == 1 else "securities"
+    height = 1100 if net_return is not None else 1160
+    figure = plt.figure(
+        figsize=(CARD_WIDTH / 100, height / 100 + 1e-6),
+        dpi=100, facecolor=paper,
+    )
+
+    def y(pixels: float) -> float:
+        return 1.0 - pixels / height
+
+    def text(x, pixels, value, size=14, *, color=ink, bold=False,
+             align="left", family="sans-serif", **kwargs):
+        return figure.text(
+            x, y(pixels), value, fontsize=size, color=color,
+            fontweight="bold" if bold else "normal", family=family,
+            ha=align, va="center", **kwargs,
+        )
+
+    def line(pixels: float):
+        figure.lines.append(plt.Line2D(
+            (0.075, 0.925), (y(pixels), y(pixels)),
+            transform=figure.transFigure, color=faint, linewidth=0.9,
+        ))
+
+    figure.patches.extend([
+        plt.Rectangle(
+            (24 / CARD_WIDTH, 24 / height),
+            1 - 48 / CARD_WIDTH, 1 - 48 / height,
+            transform=figure.transFigure, facecolor="none",
+            edgecolor=ink, linewidth=1.2,
+        ),
+        plt.Rectangle(
+            (34 / CARD_WIDTH, 34 / height),
+            1 - 68 / CARD_WIDTH, 1 - 68 / height,
+            transform=figure.transFigure, facecolor="none",
+            edgecolor=faint, linewidth=0.8,
+        ),
+    ])
+
+    text(0.075, 58, "PUBLIC PORTFOLIO", 18, color=accent, bold=True)
+    text(0.075, 112, "PERFORMANCE SNAPSHOT", 30, bold=True, family="serif")
+    text(
+        0.075, 165,
+        f"{feed.get('portfolio_version', '')}  ·  {feed.get('publication_date', '')}",
+        15.5, color=muted,
+    )
+    line(205)
+
+    text(0.075, 248, "CURRENT PORTFOLIO · NET RESULT", 15,
+         color=muted, bold=True)
+    text(
+        0.075, 305,
+        f"{net_return:+.2%}" if net_return is not None else "Pending verified baseline",
+        36 if net_return is not None else 24,
+        color=accent if net_return is not None else ink,
+        bold=True, family="serif",
+    )
+    text(
+        0.075, 355,
+        "After estimated trading costs and taxes"
+        if net_return is not None else
+        "Appears after a costed model baseline is available",
+        14.5, color=muted,
+    )
+    line(395)
+
+    for x, label, row, color in (
+        (0.075, "LARGEST RISE SINCE ENTRY", gain, accent),
+        (0.54, "LARGEST FALL SINCE ENTRY", loss, ink),
+    ):
+        text(x, 440, label, 15, color=muted, bold=True)
+        text(x, 490, row["ticker"] if row else "No data", 23,
+             color=color, bold=True)
+        text(x, 540, f"{float(row['return']):+.2%}" if row else "N/A", 27,
+             color=color, bold=True)
+        period = (
+            "Entry to exit"
+            if row and row.get("status") == "removed"
+            else "Entry to latest completed session"
+        )
+        text(x, 580, period, 12.5, color=muted)
+    line(620)
+
+    for x, label, value, count_text in (
+        (
+            0.075, "PAST EXITS · RETURN",
+            f"{weighted_finished:+.2%}" if weighted_finished is not None else "N/A",
+            f"{len(finished)} {finished_noun} previously removed",
+        ),
+        (
+            0.54, "CURRENT HOLDINGS · RETURN",
+            f"{weighted_active:+.2%}" if weighted_active is not None else "N/A",
+            f"{len(active)} {active_noun} currently held",
+        ),
+    ):
+        text(x, 670, label, 15, color=muted, bold=True)
+        text(x, 720, value, 29, color=accent, bold=True)
+        text(x, 765, count_text, 14, bold=True)
+    line(810)
+
+    text(0.075, 855, "HOW TO READ THIS", 15, color=muted, bold=True)
+    text(
+        0.075, 910,
+        "The large number is the costed portfolio result. Security figures run from recorded entry\n"
+        "to exit, or to the latest completed session while held. Different periods do not add up.",
+        15.5, linespacing=1.5,
+    )
+    text(
+        0.075, height - 70,
+        "Historical record · not a forecast, recommendation, or trade instruction.",
+        12.5, color=muted, style="italic",
+    )
+
+    buffer = BytesIO()
+    with plt.rc_context({"savefig.bbox": None}):
+        figure.savefig(
+            buffer, format="png", dpi=100, facecolor=paper,
+            bbox_inches=None, pad_inches=0,
+        )
+    plt.close(figure)
+    return buffer.getvalue()
 
 
 @st.cache_data(ttl=300, max_entries=16, show_spinner=False)
