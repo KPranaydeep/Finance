@@ -37,11 +37,7 @@ def _change_summary(
         return empty_text, "—"
     total = sum(weight for _, weight in changes)
     headline = f"{len(changes)} securities · {total:.0%} total"
-    # Keep the publication-change summary consistent with the public page.
-    visible = changes[:3]
-    details = "  ·  ".join(f"{ticker} {weight:.0%}" for ticker, weight in visible)
-    if len(changes) > len(visible):
-        details += f"  ·  +{len(changes) - len(visible)} more"
+    details = "  ·  ".join(f"{ticker} {weight:.0%}" for ticker, weight in changes)
     return headline, details
 
 
@@ -107,6 +103,7 @@ def render_allocation_card(
         previous_version, entries, exits = changes
         text(left, band_top, f"CHANGES SINCE {previous_version}", 11,
              color=muted, bold=True)
+        detail_line_counts = []
         for x, label, values, empty in (
             (left, "ENTRIES", entries, "No new entries"),
             (0.53, "EXITS", exits, "No exits"),
@@ -120,9 +117,10 @@ def render_allocation_card(
             parts = details.split("  ·  ")
             detail_lines = ["  ·  ".join(parts[i:i + 2])
                             for i in range(0, len(parts), 2)]
+            detail_line_counts.append(max(len(detail_lines), 1))
             text(x, band_top - 0.064, "\n".join(detail_lines), 10.5,
                  color=muted, linespacing=1.6)
-        band_top -= 0.109
+        band_top -= 0.109 + max(0, max(detail_line_counts) - 2) * 0.014
     else:
         band_top -= 0.012
 

@@ -99,3 +99,23 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
 def test_empty_allocation_is_rejected():
     with pytest.raises(ValueError, match="ALLOCATION_CARD_REQUIRES_ROWS"):
         render_allocation_card("P009", "2026-09-23", ())
+
+
+def test_all_exits_are_rendered_without_more_truncation(monkeypatch):
+    exits = tuple((f"EXIT{i}.NS", .01) for i in range(9))
+    captured = {}
+    savefig = Figure.savefig
+
+    def inspect(figure, *args, **kwargs):
+        captured["text"] = "\n".join(item.get_text() for item in figure.texts)
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    render_allocation_card(
+        "P010", "2026-09-30",
+        tuple((f"KEEP{i}.NS", .05, 100., "India · INR") for i in range(20)),
+        ("P009", (), exits),
+    )
+    for ticker, _ in exits:
+        assert ticker in captured["text"]
+    assert "+6 more" not in captured["text"]

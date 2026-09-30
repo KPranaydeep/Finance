@@ -25,11 +25,10 @@ class SecurityTargetTests(unittest.TestCase):
             'decision': {'next_review': '2026-10-02', 'reasons': []},
             'forecast': {},
         })
-        self.assertEqual(planning, {
-            'review_date': '2026-10-02',
-            'review_state': 'Planning estimate',
-            'net_return': None,
-        })
+        self.assertEqual(planning['review_date'], '2026-10-02')
+        self.assertEqual(planning['review_state'], 'Planning estimate')
+        self.assertIsNone(planning['net_return'])
+        self.assertIsNone(planning['median_return'])
 
         early_observed = review_card_summary({
             'publication_id': 'PUB-TEST',
@@ -39,11 +38,9 @@ class SecurityTargetTests(unittest.TestCase):
             'forecast': {},
             'metrics': {'net_total_return': .0184},
         })
-        self.assertEqual(early_observed, {
-            'review_date': '2026-10-02',
-            'review_state': 'Planning estimate',
-            'net_return': .0184,
-        })
+        self.assertEqual(early_observed['review_date'], '2026-10-02')
+        self.assertEqual(early_observed['review_state'], 'Planning estimate')
+        self.assertEqual(early_observed['net_return'], .0184)
         observed = review_card_summary({
             'publication_id': 'PUB-TEST',
             'decision': {'next_review': '2026-10-03', 'reasons': []},
@@ -245,7 +242,7 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(d['next_review'], '2026-05-05')
         self.assertIn('SCHEDULED_REVIEW_DUE', d['reasons'])
 
-    def test_provisional_preview_has_no_performance_or_event_writes(self):
+    def test_provisional_preview_has_costed_planning_metrics_without_event_writes(self):
         from datetime import datetime, timezone
         from public_review.market import calendar
         p = policy()
@@ -268,7 +265,9 @@ class SecurityTargetTests(unittest.TestCase):
             result = historical_preview(publication, p, events,
                                         datetime(2026,9,10,11,tzinfo=timezone.utc))
         self.assertTrue(result['provisional'])
-        self.assertNotIn('metrics', result)
+        self.assertIn('metrics', result)
+        self.assertTrue(result['provisional_net_return'])
+        self.assertIsNotNone(result['provisional_outlook'])
         self.assertEqual(events, before)
         self.assertEqual(result['as_of'], '2026-09-10')
         self.assertEqual(result['assumed_entry_date'], '2026-09-10')
@@ -278,7 +277,7 @@ class SecurityTargetTests(unittest.TestCase):
             result['forecast']['research_candidate'],
         )
         self.assertEqual(
-            result['decision']['basis'], 'RESEARCH_PLANNING_DATE')
+            result['decision']['basis'], 'PROVISIONAL_ENTRY_TIME_FORECAST')
         self.assertIsNone(result['forecast']['next_review'])
 
     def test_existing_baseline_shows_observed_metrics_during_forecast_wait(self):

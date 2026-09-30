@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from public_review.ui import render_review_panel
+from public_review.ui import load_current_review_summary, render_review_panel
 from public_card_feed import build_card_feed, load_public_record
 
 import html
@@ -392,12 +392,25 @@ current_forecasts=[
     and (row.get("forecast_json") or {}).get("method") == METHOD
 ]
 current_forecast=current_forecasts[0] if current_forecasts else None
+planning_review_summary=load_current_review_summary(
+    basket["basket_id"], current["publication_id"]
+)
 current_forecast_values=(current_forecast.get("forecast_json") or {}) if current_forecast else {}
+if (not current_forecast_values and planning_review_summary
+        and planning_review_summary.get("median_return") is not None
+        and planning_review_summary.get("median_target_date")):
+    current_forecast_values = {
+        "median_return": planning_review_summary["median_return"],
+        "target_date": planning_review_summary["median_target_date"],
+        "provisional": True,
+    }
 median_outcome=pct(current_forecast_values.get("median_return"))
 forecast_note=(
     "28 calendar days · estimated"
     if current_forecast
-    else "Awaiting sufficient model history"
+    else ("28 calendar days · provisional last-close model"
+          if current_forecast_values.get("provisional")
+          else "Awaiting sufficient model history")
 )
 
 st.markdown(
@@ -423,7 +436,7 @@ st.markdown(
 
 review_card_summary=render_review_panel(
     basket["basket_id"], record.get("active_publications", [])
-)
+) or planning_review_summary
 
 # Informational only: this value never enters allocation, forecast or order inputs.
 mood=load_market_mood()
@@ -518,9 +531,11 @@ if share_allocation.open:
                         review_card_summary["review_state"],
                     ) if review_card_summary else None,
                     (
-                        "NET SINCE ENTRY",
+                        ("STARTING NET AFTER COSTS"
+                         if review_card_summary.get("review_state") == "Planning estimate"
+                         else "NET SINCE ENTRY"),
                         f'{review_card_summary["net_return"]:+.2%}',
-                        "After modeled costs",
+                        review_card_summary.get("net_return_label", "After modeled costs"),
                     ) if review_card_summary and review_card_summary.get("net_return") is not None else None,
                     (
                         "28-DAY MEDIAN",

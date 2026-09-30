@@ -243,6 +243,14 @@ def review_card_summary(payload):
                 net_return = None
         except (TypeError, ValueError):
             net_return = None
+    outlook = payload.get("provisional_outlook") or {}
+    median_return = outlook.get("median_return")
+    try:
+        median_return = float(median_return)
+        if not math.isfinite(median_return):
+            median_return = None
+    except (TypeError, ValueError):
+        median_return = None
     return {
         "review_date": review_date.date().isoformat(),
         "review_state": (
@@ -252,7 +260,27 @@ def review_card_summary(payload):
             else ("Review now" if display.get("due") else "Observed")
         ),
         "net_return": net_return,
+        "net_return_label": (
+            "Provisional net after costs"
+            if payload.get("provisional_net_return")
+            else "After modeled costs"
+        ),
+        "median_return": median_return,
+        "median_target_date": outlook.get("target_date"),
     }
+
+
+def load_current_review_summary(basket_id, publication_id):
+    """Return the latest read-only card summary for one publication."""
+    try:
+        return review_card_summary(load_fresh_preview(basket_id, publication_id))
+    except Exception:
+        try:
+            return _durable_review_card_summary(
+                load_events(basket_id), publication_id
+            )
+        except Exception:
+            return None
 
 
 def _durable_review_card_summary(events, publication_id, now=None):
@@ -294,7 +322,16 @@ def render_fresh_preview(p):
             st.metric("Current state", display["state"])
             st.metric(display["date_label"], display["date_value"])
             if metrics:
-                st.metric("Net return", percent(metrics.get("net_total_return")))
+                st.metric(
+                    "Provisional net after costs" if p.get("provisional_net_return")
+                    else "Net return",
+                    percent(metrics.get("net_total_return")),
+                )
+        if p.get("last_close_planning_baseline"):
+            st.caption(
+                "Latest completed common close used as a read-only planning baseline. "
+                "Verified opening entries will supersede it; no trade was assumed."
+            )
         if p.get("forecast_observation_pending") and p.get("observation_ready_at"):
             ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
                 ZoneInfo("Asia/Kolkata"))
