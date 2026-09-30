@@ -238,7 +238,7 @@ def lifecycle_vwap_inr(
 
 
 def allocation_weighted_return(
-    rows: list[dict], *, value_key: str = "vwap_return"
+    rows: list[dict], *, value_key: str = "return"
 ) -> float | None:
     """Aggregate comparable security outcomes by published capital weights."""
     usable = []
@@ -693,13 +693,7 @@ def build_card_batch(feed: dict) -> bytes:
                 f"{folder}/{safe}-caption.txt",
                 share_text(ticker, metrics, chart),
             )
-        ordered = sorted(
-            summaries,
-            key=lambda row: (
-                row["vwap_return"]
-                if row.get("vwap_return") is not None else row["return"]
-            ),
-        )
+        ordered = sorted(summaries, key=lambda row: float(row["return"]))
         finished = [row for row in summaries if row["status"] == "removed"]
         active = [row for row in summaries if row["status"] != "removed"]
         weighted_finished = allocation_weighted_return(finished)
@@ -727,10 +721,10 @@ def build_card_batch(feed: dict) -> bytes:
             "03-analysis/exited-securities-return-summary.json",
             json.dumps({
                 "definition": "Empirical realized-return summary of removed securities; not a guaranteed forecast.",
-                "method": "Lifecycle VWAP outcome weighted by last/current published allocation",
+                "method": "Entry-to-exit/current return weighted by last/current published allocation; lifecycle VWAP retained as price context",
                 "finished_trade_count": len(finished),
-                "allocation_weighted_vwap_realized_return": weighted_finished,
-                "allocation_weighted_vwap_active_return": weighted_active,
+                "allocation_weighted_realized_return": weighted_finished,
+                "allocation_weighted_active_return": weighted_active,
                 "active_count": len(active),
                 "finished_trades": finished,
             }, indent=2, sort_keys=True).encode(),
@@ -791,10 +785,7 @@ def batch_summary_card(
     paper, ink, muted, accent = "#f5f0e6", "#29251f", "#6b665e", "#9f4339"
 
     def outcome(row: dict) -> float:
-        value = row.get("vwap_return")
-        if value is None or not np.isfinite(float(value)):
-            value = row["return"]
-        return float(value)
+        return float(row["return"])
 
     ordered = sorted(summaries, key=outcome)
     loss = ordered[0] if ordered else None
@@ -830,33 +821,34 @@ def batch_summary_card(
                                 color="#d8cfbf",linewidth=.9))
 
     for x, label, row, color in [
-        (.09,"LARGEST RISE DURING ITS PORTFOLIO LIFE",gain,accent),
-        (.55,"LARGEST FALL DURING ITS PORTFOLIO LIFE",loss,ink),
+        (.09,"LARGEST RISE SINCE ENTRY",gain,accent),
+        (.55,"LARGEST FALL SINCE ENTRY",loss,ink),
     ]:
         fig.text(x,.615,label,fontsize=14,fontweight="bold",color=muted)
         fig.text(x,.565,row['ticker'] if row else "No data",fontsize=23,
                  fontweight="bold",color=color)
         fig.text(x,.520,f"{outcome(row):+.2%}" if row else "N/A",fontsize=25,
                  fontweight="bold",color=color)
-        fig.text(x,.485,"Price vs its average while in the portfolio",fontsize=11.5,color=muted)
+        period = "Entry to exit" if row and row.get("status") == "removed" else "Entry to latest completed session"
+        fig.text(x,.485,period,fontsize=11.5,color=muted)
 
-    fig.text(.09,.395,"PAST EXITS · PRICE MOVEMENT",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.09,.395,"PAST EXITS · RETURN",fontsize=14,fontweight="bold",color=muted)
     fig.text(.09,.342,f"{weighted_finished:+.2%}" if weighted_finished is not None else "N/A",fontsize=28,fontweight="bold",color=accent)
     fig.text(.09,.300,f"{len(finished)} securities previously removed",fontsize=13,fontweight="bold",color=ink)
-    fig.text(.55,.395,"CURRENT HOLDINGS · PRICE MOVEMENT",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.55,.395,"CURRENT HOLDINGS · RETURN",fontsize=14,fontweight="bold",color=muted)
     fig.text(.55,.342,f"{weighted_active:+.2%}" if weighted_active is not None else "N/A",fontsize=28,fontweight="bold",color=accent)
     fig.text(.55,.300,f"{len(active)} securities currently held",fontsize=13,fontweight="bold",color=ink)
 
     fig.text(.09,.195,"HOW TO READ THIS",fontsize=14,fontweight="bold",color=muted)
     fig.text(
         .09,.145,
-        "The large number is the portfolio result after estimated costs. Security figures compare each\n"
-        "holding with its average price while it was—or remains—in the portfolio.",
+        "The large number is the portfolio result after estimated costs. Security figures measure from\n"
+        "recorded entry to recorded exit, or from entry to the latest completed session when still held.",
         fontsize=13.5,color=ink,linespacing=1.55,
     )
     fig.text(
         .09,.075,
-        "Security figures span different periods and do not add up to the net result. Historical record · not a trade instruction.",
+        "Security periods differ and do not add up to net result. Average prices are context only. Historical record · not a trade instruction.",
         fontsize=11.5,color=muted,style="italic",
     )
     buf=BytesIO(); fig.savefig(buf,format="png",dpi=100,facecolor=paper,bbox_inches=None,pad_inches=0); plt.close(fig)

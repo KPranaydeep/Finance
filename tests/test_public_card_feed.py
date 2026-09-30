@@ -1,9 +1,11 @@
 from datetime import date
 from io import BytesIO
+from unittest.mock import patch
 
 import matplotlib.image as mpimg
 import pandas as pd
 import pytest
+from matplotlib.figure import Figure
 
 from public_card_feed import build_card_feed
 from public_track_record import (
@@ -168,12 +170,23 @@ def test_portfolio_summary_card_renders_empirical_outcomes():
          "target_weight": .3, "status": "removed"},
     ]
 
-    image = batch_summary_card(feed, summaries, net_return=.084)
+    captured = {}
+    savefig = Figure.savefig
+
+    def inspect(figure, *args, **kwargs):
+        captured["text"] = "\n".join(item.get_text() for item in figure.texts)
+        return savefig(figure, *args, **kwargs)
+
+    with patch.object(Figure, "savefig", inspect):
+        image = batch_summary_card(feed, summaries, net_return=.084)
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
     assert pixels.shape[:2] == (2000, 1272)
     assert len(image) > 10_000
+    assert "+141.51%" in captured["text"]
+    assert "-9.51%" in captured["text"]
+    assert "+20.00%" not in captured["text"]
 
 
 def test_lifecycle_vwap_is_inr_adjusted_and_allocation_weighted():
@@ -193,8 +206,8 @@ def test_lifecycle_vwap_is_inr_adjusted_and_allocation_weighted():
     assert vwap == pytest.approx(expected)
     assert endpoint == pytest.approx(12.0 * 82.0)
     assert allocation_weighted_return([
-        {"vwap_return": .10, "target_weight": .8},
-        {"vwap_return": -.20, "target_weight": .2},
+        {"return": .10, "target_weight": .8},
+        {"return": -.20, "target_weight": .2},
     ]) == pytest.approx(.04)
 
 

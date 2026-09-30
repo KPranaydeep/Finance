@@ -169,9 +169,13 @@ def render_allocation_card(
 
     first_y, last_y = header_y - 0.038, 0.155
     maximum_panel_rows = max(len(panel) for panel in panels)
-    step = min(0.035, (first_y - last_y) /
-               max(maximum_panel_rows - 1, 1))
-    row_font = min(24, step * CARD_HEIGHT * 0.76 * 72 / 100)
+    available_step = ((first_y - last_y) /
+                      max(maximum_panel_rows - 1, 1))
+    maximum_step = 0.065 if maximum_panel_rows <= 12 else 0.045
+    step = min(maximum_step, available_step)
+    maximum_font = 32 if maximum_panel_rows <= 12 else 24
+    row_font = min(maximum_font,
+                   step * CARD_HEIGHT * 0.76 * 72 / 100)
     for panel_index, panel_rows in enumerate(panels):
         panel_left, panel_right = panel_lefts[panel_index], panel_rights[panel_index]
         width = panel_right - panel_left
@@ -195,9 +199,11 @@ def render_allocation_card(
             text(columns[2], y, _price_text(price), row_font, align="right")
             text(columns[3], y, listing, max(row_font - 4, 12), color=muted)
 
-    line(left, right, 0.126)
+    final_row_y = first_y - (maximum_panel_rows - 1) * step
+    total_y = max(0.106, final_row_y - min(step * 1.25, 0.055))
+    line(left, right, total_y + 0.020)
     total_weight = sum(row[1] for row in rows)
-    text(left, 0.106, f"Total target  {total_weight:.0%}", 12.5, bold=True)
+    text(left, total_y, f"Total target  {total_weight:.0%}", 15, bold=True)
     text(left, 0.080,
          "Review dates request reassessment—not an automatic trade. "
          "28-day median is a separate statistical horizon.",
