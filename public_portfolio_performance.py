@@ -38,6 +38,7 @@ from public_release_checks import prepare_evidence_export
 from public_allocation_card import (
     listing_descriptor,
     render_allocation_card,
+    render_buy_plan_card,
     render_changes_card,
 )
 
@@ -610,8 +611,8 @@ if share_allocation.open:
             )
         st.caption(
             "Send the downloaded PNG directly in WhatsApp for an inline image. "
-            "The listing column shows market and native quote currency; closes "
-            "remain INR-normalized for comparison. When a companion changes card "
+            "Holdings are grouped by listing market; closes remain INR-normalized "
+            "for comparison. When a companion changes card "
             "appears, it preserves every entry and exit at a readable size; entries "
             "show new target weights and exits show last published weights—not trades."
         )
@@ -726,6 +727,54 @@ if execution_scenario == "Start fresh with cash":
                 file_name=f"{DEFAULT_BASKET_ID.lower()}-fresh-cash-buy-plan.csv",
                 mime="text/csv",width="stretch",
             )
+            share_buy_plan = st.popover(
+                "Share buy plan",
+                icon=":material/share:",
+                width="stretch",
+            )
+            if share_buy_plan.open:
+                with share_buy_plan:
+                    buy_plan_card = render_buy_plan_card(
+                        f'P{int(current["portfolio_version"]):03d}',
+                        current["as_of"].astimezone(IST).date().isoformat(),
+                        float(calculated_plan["amount_inr"]),
+                        float(calculated_plan["invested_inr"]),
+                        float(calculated_plan["residual_cash_inr"]),
+                        tuple(
+                            (
+                                str(order["ticker"]),
+                                int(order["quantity"]),
+                                float(order["planning_price"]),
+                                float(order["estimated_value"]),
+                                listing_descriptor(
+                                    str(order["ticker"]),
+                                    price_snapshot.get(str(order["ticker"]), {}).get(
+                                        "source_currency"
+                                    ),
+                                ),
+                            )
+                            for order in calculated_plan["orders"]
+                        ),
+                        mode_label=(
+                            "Starter allocation"
+                            if calculated_plan["mode"].startswith("STARTER")
+                            else "Target-weight allocation"
+                        ),
+                    )
+                    st.image(buy_plan_card, width="stretch")
+                    st.download_button(
+                        "Download buy-plan image",
+                        buy_plan_card,
+                        file_name=(
+                            f'{DEFAULT_BASKET_ID.lower()}-'
+                            f'p{int(current["portfolio_version"]):03d}-buy-plan.png'
+                        ),
+                        mime="image/png",
+                        icon=":material/download:",
+                        type="primary",
+                        width="stretch",
+                        on_click="ignore",
+                    )
         if calculated_plan["missing_prices"]:
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
         if not calculated_plan["orders"]:

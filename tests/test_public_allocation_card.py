@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 from public_allocation_card import (
     listing_descriptor,
     render_allocation_card,
+    render_buy_plan_card,
     render_changes_card,
 )
 
@@ -103,6 +104,79 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
 def test_empty_allocation_is_rejected():
     with pytest.raises(ValueError, match="ALLOCATION_CARD_REQUIRES_ROWS"):
         render_allocation_card("P009", "2026-09-23", ())
+
+
+def test_allocation_clusters_india_and_overseas_in_one_image(monkeypatch):
+    captured = {}
+    savefig = Figure.savefig
+
+    def inspect(figure, *args, **kwargs):
+        captured["text"] = [item.get_text() for item in figure.texts]
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    render_allocation_card(
+        "P010", "2026-09-30",
+        (
+            ("INDIA.NS", .60, 100.0, "India · INR"),
+            ("VT", .40, 9_300.0, "U.S. · USD"),
+        ),
+    )
+    assert "INDIA · INR" in captured["text"]
+    assert "U.S. · USD" in captured["text"]
+    assert "INDIA.NS" in captured["text"]
+    assert "VT" in captured["text"]
+
+
+@pytest.mark.parametrize(
+    ("count", "expected_height"),
+    ((1, 820), (4, 914), (12, 1442), (31, 2000)),
+)
+def test_buy_plan_card_has_fixed_width_and_content_driven_height(count, expected_height):
+    orders = tuple(
+        (
+            f"BUY{i:02}.NS", i + 1, 100.0 + i,
+            (i + 1) * (100.0 + i), "India · INR",
+        )
+        for i in range(count)
+    )
+    image = render_buy_plan_card(
+        "P010", "2026-09-30", 100_000, 98_500, 1_500, orders,
+        mode_label="Target-weight allocation",
+    )
+    pixels = mpimg.imread(BytesIO(image), format="png")
+    assert pixels.shape[:2] == (expected_height, 1272)
+
+
+def test_empty_buy_plan_card_is_rejected():
+    with pytest.raises(ValueError, match="BUY_PLAN_CARD_REQUIRES_ORDERS"):
+        render_buy_plan_card(
+            "P010", "2026-09-30", 1_000, 0, 1_000, (),
+            mode_label="Starter allocation",
+        )
+
+
+def test_buy_plan_clusters_india_and_overseas_in_one_image(monkeypatch):
+    captured = {}
+    savefig = Figure.savefig
+
+    def inspect(figure, *args, **kwargs):
+        captured["text"] = [item.get_text() for item in figure.texts]
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    render_buy_plan_card(
+        "P010", "2026-09-30", 10_000, 9_500, 500,
+        (
+            ("INDIA.NS", 2, 100.0, 200.0, "India · INR"),
+            ("VT", 1, 9_300.0, 9_300.0, "U.S. · USD"),
+        ),
+        mode_label="Target-weight allocation",
+    )
+    assert "INDIA · INR" in captured["text"]
+    assert "OVERSEAS LISTINGS" in captured["text"]
+    assert "INDIA.NS" in captured["text"]
+    assert "VT" in captured["text"]
 
 
 def test_all_exits_are_rendered_without_more_truncation(monkeypatch):
