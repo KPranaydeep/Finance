@@ -5,7 +5,11 @@ import matplotlib.pyplot as plt
 import pytest
 from matplotlib.figure import Figure
 
-from public_allocation_card import listing_descriptor, render_allocation_card
+from public_allocation_card import (
+    listing_descriptor,
+    render_allocation_card,
+    render_changes_card,
+)
 
 
 def test_listing_descriptor_distinguishes_indian_and_us_quotes():
@@ -142,7 +146,7 @@ def test_entry_and_exit_changes_use_restrained_semantic_colors(monkeypatch):
     assert captured["EXIT.NS 4%"] == "#9f4339"
 
 
-def test_large_publication_remains_legible_with_every_change(monkeypatch):
+def test_large_publication_uses_legible_allocation_and_companion_changes(monkeypatch):
     rows = tuple(
         (f"SECURITY{i:02}.NS", 1 / 31, 1234.56 + i, "India · INR")
         for i in range(31)
@@ -151,7 +155,7 @@ def test_large_publication_remains_legible_with_every_change(monkeypatch):
     exits = tuple((f"EXIT{i}.NS", .01) for i in range(14))
     savefig = Figure.savefig
 
-    def inspect(figure, *args, **kwargs):
+    def inspect_allocation(figure, *args, **kwargs):
         figure.canvas.draw()
         renderer = figure.canvas.get_renderer()
         texts = figure.texts
@@ -164,10 +168,11 @@ def test_large_publication_remains_legible_with_every_change(monkeypatch):
         assert len(security_rows) == 31
         assert min(item.get_fontsize() for item in security_rows) >= 18
         rendered = "\n".join(item.get_text() for item in texts)
-        assert all(ticker in rendered for ticker, _ in entries + exits)
+        assert "Full symbol list on companion Changes card" in rendered
+        assert not any(ticker in rendered for ticker, _ in entries + exits)
         return savefig(figure, *args, **kwargs)
 
-    monkeypatch.setattr(Figure, "savefig", inspect)
+    monkeypatch.setattr(Figure, "savefig", inspect_allocation)
     image = render_allocation_card(
         "P010", "2026-09-30", rows, ("P009", entries, exits),
         (("ALLOCATION REVIEW", "08 OCT", "Planning estimate"),
@@ -175,3 +180,21 @@ def test_large_publication_remains_legible_with_every_change(monkeypatch):
          ("28-DAY MEDIAN", "+4.99%", "Through 28 Oct")),
     )
     assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2000, 1272)
+
+    def inspect_changes(figure, *args, **kwargs):
+        figure.canvas.draw()
+        rendered = "\n".join(item.get_text() for item in figure.texts)
+        assert all(ticker in rendered for ticker, _ in entries + exits)
+        rows_rendered = [
+            item for item in figure.texts
+            if item.get_text().startswith(("ENTRY", "EXIT"))
+            and item.get_text() not in ("ENTRIES", "EXITS")
+        ]
+        assert min(item.get_fontsize() for item in rows_rendered) >= 18
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", inspect_changes)
+    changes_image = render_changes_card(
+        "P010", "2026-09-30", "P009", entries, exits,
+    )
+    assert mpimg.imread(BytesIO(changes_image), format="png").shape[:2] == (2000, 1272)
