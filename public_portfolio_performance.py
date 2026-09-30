@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from public_review.ui import load_current_review_summary, render_live_review_panel
+from public_review.ui import (
+    load_current_review_summary,
+    load_indicative_net_return,
+    render_live_review_panel,
+)
 from public_card_feed import build_card_feed, load_public_record
 
 import html
@@ -509,6 +513,12 @@ share_allocation=st.popover(
 )
 if share_allocation.open:
     with share_allocation:
+        try:
+            allocation_live_net = load_indicative_net_return(
+                DEFAULT_BASKET_ID, str(current["publication_id"])
+            )
+        except Exception:
+            allocation_live_net = None
         card_changes=(
             (
                 str(latest_changes["previous_version"]),
@@ -531,17 +541,20 @@ if share_allocation.open:
                         review_card_summary["review_state"],
                     ) if review_card_summary else None,
                     (
-                        ("ROUND-TRIP COST HURDLE"
-                         if review_card_summary.get("review_state") == "Planning estimate"
-                         else "NET SINCE ENTRY"),
-                        (f'{abs(review_card_summary["net_return"]):.2%}'
-                         if review_card_summary.get("review_state") == "Planning estimate"
-                         else f'{review_card_summary["net_return"]:+.2%}'),
-                        ("Return needed to break even"
-                         if review_card_summary.get("review_state") == "Planning estimate"
-                         else review_card_summary.get(
-                             "net_return_label", "After modeled costs")),
-                    ) if review_card_summary and review_card_summary.get("net_return") is not None else None,
+                        "INDICATIVE NET RETURN",
+                        f'{float(allocation_live_net["net_return"]):+.2%}',
+                        "Latest available marks · fully costed",
+                    ) if allocation_live_net and allocation_live_net.get("net_return") is not None else (
+                        (
+                            "ROUND-TRIP COST HURDLE",
+                            f'{abs(review_card_summary["net_return"]):.2%}',
+                            "Return needed to break even",
+                        )
+                        if review_card_summary
+                        and review_card_summary.get("review_state") == "Planning estimate"
+                        and review_card_summary.get("net_return") is not None
+                        else None
+                    ),
                     (
                         "28-DAY MEDIAN",
                         f'{float(current_forecast_values["median_return"]):+.2%}',

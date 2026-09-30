@@ -15,7 +15,7 @@ from public_portfolio_publications import load_trust_records
 
 IST = ZoneInfo("Asia/Kolkata")
 CARD_FEED_SCHEMA = "public-portfolio-card-feed"
-CARD_FEED_SCHEMA_VERSION = 1
+CARD_FEED_SCHEMA_VERSION = 2
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -74,8 +74,8 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
             publication_dates[publication_id] = _display_date(published)
 
     active_publication_ids = set(publication_dates)
-    holdings_by_publication: dict[str, set[str]] = {
-        publication_id: set() for publication_id in active_publication_ids
+    holdings_by_publication: dict[str, dict[str, float]] = {
+        publication_id: {} for publication_id in active_publication_ids
     }
     for position in record.get("publication_positions", []):
         publication_id = position.get("publication_id")
@@ -83,7 +83,9 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
             continue
         ticker = str(position.get("ticker", "")).strip()
         if ticker:
-            holdings_by_publication[publication_id].add(ticker)
+            holdings_by_publication[publication_id][ticker] = float(
+                position.get("target_weight") or 0.0
+            )
 
     constituents = record.get("constituents", [])
     current_by_ticker = {
@@ -95,7 +97,7 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
         if publication.get("publication_id") in publication_dates
     ]
     all_tickers = sorted(
-        set().union(*(holdings_by_publication.values()))
+        set().union(*(set(holdings) for holdings in holdings_by_publication.values()))
         if holdings_by_publication
         else set()
     )
@@ -124,10 +126,19 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
             if current_row is None and last_held_index + 1 < len(publication_sequence)
             else None
         )
+        last_weight = holdings_by_publication[
+            publication_sequence[last_held_index]
+        ][ticker]
         securities.append(
             {
                 "ticker": ticker,
-                "target_weight": float(current_row["target_weight"]) if current_row else 0.0,
+                # Active rows use the current target. Removed rows retain the
+                # last published target so portfolio summaries can be
+                # allocation-weighted instead of equal-weighted.
+                "target_weight": (
+                    float(current_row["target_weight"])
+                    if current_row else float(last_weight)
+                ),
                 "publication_date": entry_date,
                 "entry_date": entry_date,
                 "last_allocation_date": last_allocation_date,

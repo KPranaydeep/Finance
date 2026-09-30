@@ -24,6 +24,9 @@ FX_TICKER = "INR=X"
 WORLD_LABEL = "Global stocks — VT (INR)"
 IST = ZoneInfo("Asia/Kolkata")
 NEW_YORK = ZoneInfo("America/New_York")
+CARD_WIDTH = 1272
+CARD_HEIGHT = 2000
+CARD_FIGSIZE = (CARD_WIDTH / 100, CARD_HEIGHT / 100)
 
 
 
@@ -177,6 +180,80 @@ def price_columns(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     )
     valid = close.gt(0) & adjusted.gt(0) & np.isfinite(close) & np.isfinite(adjusted)
     return close.where(valid).dropna(), adjusted.where(valid).dropna()
+
+
+def lifecycle_vwap_inr(
+    security_frame: pd.DataFrame,
+    fx_frame: pd.DataFrame,
+    start: date,
+    *,
+    ticker_currency: str,
+) -> tuple[float | None, float | None]:
+    """Return lifecycle VWAP and its final completed close, both in INR.
+
+    VWAP is calculated only within the supplied, already-trimmed lifecycle:
+    publication entry through exit for removed securities, and publication
+    entry through the latest completed session for active securities. A
+    missing/zero volume series returns no VWAP rather than inventing one.
+    """
+    frame = security_frame[security_frame.index >= pd.Timestamp(start)].copy()
+    if frame.empty or "Close" not in frame or "Volume" not in frame:
+        return None, None
+    close = pd.to_numeric(frame["Close"], errors="coerce")
+    volume = pd.to_numeric(frame["Volume"], errors="coerce")
+    if {"High", "Low"}.issubset(frame.columns):
+        high = pd.to_numeric(frame["High"], errors="coerce")
+        low = pd.to_numeric(frame["Low"], errors="coerce")
+        price = (high + low + close) / 3.0
+    else:
+        price = close.copy()
+    if ticker_currency.strip().upper() == "USD":
+        if fx_frame.empty or "Close" not in fx_frame:
+            return None, None
+        fx = pd.to_numeric(fx_frame["Close"], errors="coerce")
+        converted = pd.concat(
+            [price.rename("price"), close.rename("close"),
+             volume.rename("volume"), fx.rename("fx")], axis=1,
+        ).dropna()
+        converted["price"] *= converted["fx"]
+        converted["close"] *= converted["fx"]
+    else:
+        converted = pd.concat(
+            [price.rename("price"), close.rename("close"),
+             volume.rename("volume")], axis=1,
+        ).dropna()
+    converted = converted[
+        converted["price"].gt(0)
+        & converted["close"].gt(0)
+        & converted["volume"].gt(0)
+        & np.isfinite(converted).all(axis=1)
+    ]
+    if converted.empty or float(converted["volume"].sum()) <= 0:
+        return None, None
+    vwap = float(
+        (converted["price"] * converted["volume"]).sum()
+        / converted["volume"].sum()
+    )
+    return vwap, float(converted["close"].iloc[-1])
+
+
+def allocation_weighted_return(
+    rows: list[dict], *, value_key: str = "vwap_return"
+) -> float | None:
+    """Aggregate comparable security outcomes by published capital weights."""
+    usable = []
+    for row in rows:
+        try:
+            value = float(row[value_key])
+            weight = float(row["target_weight"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if np.isfinite(value) and np.isfinite(weight) and weight > 0:
+            usable.append((value, weight))
+    denominator = sum(weight for _, weight in usable)
+    if denominator <= 0:
+        return None
+    return sum(value * weight for value, weight in usable) / denominator
 
 
 def analyze(ticker_frame: pd.DataFrame, benchmark_frame: pd.DataFrame,
@@ -342,7 +419,7 @@ def load_security_evidence(
 @st.cache_data(ttl=900, max_entries=16, show_spinner=False)
 def load_portfolio_summaries(
     publication_id: str,
-    securities: tuple[tuple[str, str, str | None, str], ...],
+    securities: tuple[tuple, ...],
     refresh_bucket: str = "",
 ) -> tuple[list[dict], list[str]]:
     """Compute all security outcomes from one cached daily-history download.
@@ -386,7 +463,11 @@ def load_portfolio_summaries(
     summaries: list[dict] = []
     failures: list[str] = []
 
-    for ticker, entry_value, exit_value, status in securities:
+    for security_input in securities:
+        ticker, entry_value, exit_value, status = security_input[:4]
+        target_weight = (
+            float(security_input[4]) if len(security_input) >= 5 else 1.0
+        )
         try:
             is_indian = ticker.endswith((".NS", ".BO"))
             security = _single_ticker_frame(frame, ticker)
@@ -412,6 +493,12 @@ def load_portfolio_summaries(
                 date.fromisoformat(entry_value[:10]),
                 ticker_currency="INR" if is_indian else "USD",
             )
+            period_vwap, endpoint_inr = lifecycle_vwap_inr(
+                security,
+                security_fx,
+                date.fromisoformat(entry_value[:10]),
+                ticker_currency="INR" if is_indian else "USD",
+            )
             summaries.append(
                 {
                     "ticker": ticker,
@@ -419,6 +506,13 @@ def load_portfolio_summaries(
                     "exit_date": exit_value[:10] if exit_value else None,
                     "data_through": metrics["as_of"],
                     "return": metrics["ticker_return"],
+                    "period_vwap_inr": period_vwap,
+                    "endpoint_price_inr": endpoint_inr,
+                    "vwap_return": (
+                        endpoint_inr / period_vwap - 1
+                        if period_vwap and endpoint_inr else None
+                    ),
+                    "target_weight": target_weight,
                     "status": status,
                 }
             )
@@ -562,6 +656,14 @@ def build_card_batch(feed: dict) -> bytes:
             metrics["ltp"] = metrics["endpoint_price"]
             metrics["ltp_as_of"] = metrics["endpoint_as_of"]
             metrics["entry_source"] = "Immutable public portfolio publication"
+            period_vwap, endpoint_inr = lifecycle_vwap_inr(
+                ticker_history,
+                fx_history,
+                start,
+                ticker_currency=(
+                    "INR" if ticker.endswith((".NS", ".BO")) else "USD"
+                ),
+            )
             summaries.append({
                 "ticker": ticker,
                 "entry_date": start.isoformat(),
@@ -572,6 +674,13 @@ def build_card_batch(feed: dict) -> bytes:
                 ),
                 "data_through": metrics["as_of"],
                 "return": metrics["ticker_return"],
+                "period_vwap_inr": period_vwap,
+                "endpoint_price_inr": endpoint_inr,
+                "vwap_return": (
+                    endpoint_inr / period_vwap - 1
+                    if period_vwap and endpoint_inr else None
+                ),
+                "target_weight": float(item.get("target_weight") or 0.0),
                 "status": status,
             })
             safe = ticker.replace("^", "").replace("/", "-")
@@ -584,11 +693,17 @@ def build_card_batch(feed: dict) -> bytes:
                 f"{folder}/{safe}-caption.txt",
                 share_text(ticker, metrics, chart),
             )
-        ordered = sorted(summaries, key=lambda row: row["return"])
+        ordered = sorted(
+            summaries,
+            key=lambda row: (
+                row["vwap_return"]
+                if row.get("vwap_return") is not None else row["return"]
+            ),
+        )
         finished = [row for row in summaries if row["status"] == "removed"]
         active = [row for row in summaries if row["status"] != "removed"]
-        finished_returns = [float(row["return"]) for row in finished]
-        active_returns = [float(row["return"]) for row in active]
+        weighted_finished = allocation_weighted_return(finished)
+        weighted_active = allocation_weighted_return(active)
         recent_exits = exited_symbol_rows(feed, lookback_days=90)
         annual_exits = exited_symbol_rows(feed, lookback_days=365)
         all_dated_exits = exited_symbol_rows(feed, lookback_days=None)
@@ -612,12 +727,11 @@ def build_card_batch(feed: dict) -> bytes:
             "03-analysis/exited-securities-return-summary.json",
             json.dumps({
                 "definition": "Empirical realized-return summary of removed securities; not a guaranteed forecast.",
-                "finished_trade_count": len(finished_returns),
-                "mean_realized_return": (sum(finished_returns) / len(finished_returns)) if finished_returns else None,
-                "median_realized_return": (float(np.median(finished_returns)) if finished_returns else None),
-                "mean_unrealized_return": (sum(active_returns) / len(active_returns)) if active_returns else None,
-                "median_unrealized_return": (float(np.median(active_returns)) if active_returns else None),
-                "active_count": len(active_returns),
+                "method": "Lifecycle VWAP outcome weighted by last/current published allocation",
+                "finished_trade_count": len(finished),
+                "allocation_weighted_vwap_realized_return": weighted_finished,
+                "allocation_weighted_vwap_active_return": weighted_active,
+                "active_count": len(active),
                 "finished_trades": finished,
             }, indent=2, sort_keys=True).encode(),
         )
@@ -667,37 +781,85 @@ def build_card_batch(feed: dict) -> bytes:
     return output.getvalue()
 
 
-def batch_summary_card(feed: dict, summaries: list[dict]) -> bytes:
-    """Render a human-readable summary card matching the individual-card style."""
+def batch_summary_card(
+    feed: dict,
+    summaries: list[dict],
+    *,
+    net_return: float | None = None,
+) -> bytes:
+    """Render a capital-aware lifecycle-VWAP portfolio summary card."""
     paper, ink, muted, accent = "#f5f0e6", "#29251f", "#6b665e", "#9f4339"
-    ordered = sorted(summaries, key=lambda row: row["return"])
+
+    def outcome(row: dict) -> float:
+        value = row.get("vwap_return")
+        if value is None or not np.isfinite(float(value)):
+            value = row["return"]
+        return float(value)
+
+    ordered = sorted(summaries, key=outcome)
     loss = ordered[0] if ordered else None
     gain = ordered[-1] if ordered else None
-    finished = [row["return"] for row in summaries if row["status"] == "removed"]
-    active = [row["return"] for row in summaries if row["status"] != "removed"]
-    mean_finished = sum(finished) / len(finished) if finished else None
-    mean_active = sum(active) / len(active) if active else None
-    fig = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
+    finished = [row for row in summaries if row["status"] == "removed"]
+    active = [row for row in summaries if row["status"] != "removed"]
+    weighted_finished = allocation_weighted_return(finished)
+    weighted_active = allocation_weighted_return(active)
+    fig = plt.figure(figsize=CARD_FIGSIZE, dpi=100, facecolor=paper)
     fig.patches.extend([
         plt.Rectangle((.035,.025),.93,.95,transform=fig.transFigure,facecolor="none",edgecolor=ink,linewidth=1.2),
         plt.Rectangle((.044,.034),.912,.932,transform=fig.transFigure,facecolor="none",edgecolor="#d8cfbf",linewidth=.8),
     ])
-    fig.text(.09,.91,"PORTFOLIO",fontsize=28,fontweight="bold",family="serif",color=ink)
-    fig.text(.09,.865,"CARD SUMMARY",fontsize=28,fontweight="bold",family="serif",color=ink)
-    fig.text(.09,.82,f"{feed.get('portfolio_version','')} · {feed.get('publication_date','')}",fontsize=14,family="sans",color=muted)
-    y=.70
-    for label,row,color in [("HIGHEST GAIN",gain,accent),("HIGHEST LOSS",loss,ink)]:
-        fig.text(.09,y,label,fontsize=13,fontweight="bold",color=muted)
-        fig.text(.09,y-.075,row['ticker'] if row else "No data",fontsize=24,fontweight="bold",color=color)
-        fig.text(.09,y-.125,f"{row['return']:+.2%}" if row else "N/A",fontsize=21,fontweight="bold",color=color)
-        y-=.22
-    fig.text(.09,.255,"MEAN REALIZED RETURN",fontsize=13,fontweight="bold",color=muted)
-    fig.text(.09,.205,f"{mean_finished:+.2%}" if mean_finished is not None else "N/A",fontsize=24,fontweight="bold",color=accent)
-    fig.text(.09,.16,f"{len(finished)} exited",fontsize=13,fontweight="bold",color=ink)
-    fig.text(.55,.255,"MEAN ACTIVE RETURN",fontsize=13,fontweight="bold",color=muted)
-    fig.text(.55,.205,f"{mean_active:+.2%}" if mean_active is not None else "N/A",fontsize=24,fontweight="bold",color=accent)
-    fig.text(.55,.16,f"{len(active)} active",fontsize=13,fontweight="bold",color=ink)
-    fig.text(.09,.065,"Equal-weight security means · empirical history · not a forecast",fontsize=11,color=muted,style="italic")
+    fig.text(.09,.925,"PORTFOLIO",fontsize=31,fontweight="bold",family="serif",color=ink)
+    fig.text(.09,.888,"CARD SUMMARY",fontsize=31,fontweight="bold",family="serif",color=ink)
+    fig.text(.09,.852,f"{feed.get('portfolio_version','')} · {feed.get('publication_date','')}",fontsize=16,family="sans",color=muted)
+
+    fig.text(.09,.786,"FULLY COSTED NET RETURN",fontsize=14,fontweight="bold",color=muted)
+    fig.text(
+        .09,.731,
+        f"{net_return:+.2%}" if net_return is not None else "Pending verified baseline",
+        fontsize=34 if net_return is not None else 22,
+        fontweight="bold",family="serif",color=accent if net_return is not None else ink,
+    )
+    fig.text(
+        .09,.695,
+        "Latest available marks after modeled entry, exit, tax, FX and slippage costs"
+        if net_return is not None else
+        "The card will populate this after a costed model baseline is available",
+        fontsize=12.5,color=muted,
+    )
+    fig.lines.append(plt.Line2D([.09,.91],[.665,.665],transform=fig.transFigure,
+                                color="#d8cfbf",linewidth=.9))
+
+    for x, label, row, color in [
+        (.09,"HIGHEST GAIN",gain,accent),
+        (.55,"HIGHEST LOSS",loss,ink),
+    ]:
+        fig.text(x,.615,label,fontsize=14,fontweight="bold",color=muted)
+        fig.text(x,.565,row['ticker'] if row else "No data",fontsize=23,
+                 fontweight="bold",color=color)
+        fig.text(x,.520,f"{outcome(row):+.2%}" if row else "N/A",fontsize=25,
+                 fontweight="bold",color=color)
+        fig.text(x,.485,"Endpoint versus lifecycle VWAP",fontsize=11.5,color=muted)
+
+    fig.text(.09,.395,"WEIGHTED REALIZED RETURN",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.09,.342,f"{weighted_finished:+.2%}" if weighted_finished is not None else "N/A",fontsize=28,fontweight="bold",color=accent)
+    fig.text(.09,.300,f"{len(finished)} exited · last published weights",fontsize=13,fontweight="bold",color=ink)
+    fig.text(.55,.395,"WEIGHTED ACTIVE RETURN",fontsize=14,fontweight="bold",color=muted)
+    fig.text(.55,.342,f"{weighted_active:+.2%}" if weighted_active is not None else "N/A",fontsize=28,fontweight="bold",color=accent)
+    fig.text(.55,.300,f"{len(active)} active · current target weights",fontsize=13,fontweight="bold",color=ink)
+
+    fig.text(.09,.195,"HOW THIS SUMMARY IS BUILT",fontsize=13,fontweight="bold",color=muted)
+    fig.text(
+        .09,.145,
+        "Each security uses daily volume-weighted mean price in INR over its own lifecycle:\n"
+        "publication entry → exit for removed holdings, or entry → latest completed session for active holdings.",
+        fontsize=13,color=ink,linespacing=1.55,
+    )
+    fig.text(
+        .09,.075,
+        "Security outcomes are then weighted by published capital allocation—not by share price. "
+        "Empirical history · not a forecast.",
+        fontsize=11.5,color=muted,style="italic",
+    )
     buf=BytesIO(); fig.savefig(buf,format="png",dpi=100,facecolor=paper,bbox_inches=None,pad_inches=0); plt.close(fig)
     return buf.getvalue()
 
@@ -734,7 +896,7 @@ def portfolio_cover_card(
     )
     shown = ordered[:5]
 
-    figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
+    figure = plt.figure(figsize=CARD_FIGSIZE, dpi=100, facecolor=paper)
     figure.patches.extend(
         [
             plt.Rectangle(
@@ -823,7 +985,7 @@ def portfolio_cover_card(
 
 
 def whatsapp_card(ticker: str, metrics: dict, chart: pd.DataFrame) -> bytes:
-    """Render a glance-readable 1080×1350 humanistic share card."""
+    """Render a glance-readable 1272×2000 humanistic share card."""
     paper = "#f5f0e6"
     ink = "#29251f"
     muted = "#625d55"
@@ -850,7 +1012,7 @@ def whatsapp_card(ticker: str, metrics: dict, chart: pd.DataFrame) -> bytes:
             return f"Beat {name} by {value * 100:.2f} pp"
         return f"Trailed {name} by {abs(value) * 100:.2f} pp"
 
-    figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
+    figure = plt.figure(figsize=CARD_FIGSIZE, dpi=100, facecolor=paper)
     figure.patches.extend([
         plt.Rectangle(
             (0.035, 0.028), 0.930, 0.944, transform=figure.transFigure,

@@ -12,6 +12,7 @@ import streamlit as st
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
+from public_review.ui import load_indicative_net_return
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
@@ -124,6 +125,7 @@ if slide_number == 1:
             str(item["entry_date"]),
             str(item["exit_date"]) if item.get("exit_date") else None,
             str(item.get("status", "active")).lower(),
+            float(item.get("target_weight") or 0.0),
         )
         for item in feed["securities"]
     )
@@ -136,12 +138,25 @@ if slide_number == 1:
             )
             if not summaries:
                 raise ValueError("No security outcomes are currently available.")
-            summary_card = batch_summary_card(feed, summaries)
+            try:
+                live_net = load_indicative_net_return(
+                    DEFAULT_BASKET_ID, str(feed["publication_id"])
+                )
+                net_return = (
+                    float(live_net["net_return"])
+                    if live_net and live_net.get("net_return") is not None
+                    else None
+                )
+            except Exception:
+                net_return = None
+            summary_card = batch_summary_card(
+                feed, summaries, net_return=net_return
+            )
         st.image(summary_card, width="stretch")
         st.caption(
-            "Highest gain and loss use publication-linked security returns. "
-            "Realized and active figures are equal-weight means across the "
-            "successfully analysed securities—not the portfolio NAV return."
+            "Each security is measured against its lifecycle VWAP in INR. "
+            "Realized and active figures use published allocation weights; "
+            "the separate net return includes modeled implementation costs."
         )
         if summary_failures:
             st.caption(

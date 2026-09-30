@@ -39,7 +39,7 @@ def test_allocation_card_is_exact_portrait_png(count):
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
-    assert pixels.shape[:2] == (1350, 1080)
+    assert pixels.shape[:2] == (2000, 1272)
     assert len(image) > 20_000
 
 
@@ -93,7 +93,7 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
             ("P008", (("ENTRY.NS", .05),), ()) if with_changes else None,
             metrics,
         )
-    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (1350, 1080)
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2000, 1272)
 
 
 def test_empty_allocation_is_rejected():
@@ -174,4 +174,4 @@ def test_large_publication_remains_legible_with_every_change(monkeypatch):
          ("NET SINCE ENTRY", "-0.49%", "After modeled costs"),
          ("28-DAY MEDIAN", "+4.99%", "Through 28 Oct")),
     )
-    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (1350, 1080)
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2000, 1272)

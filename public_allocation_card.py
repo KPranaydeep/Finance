@@ -9,6 +9,9 @@ from matplotlib.patches import Rectangle
 
 
 PUBLIC_PORTFOLIO_URL = "https://theportfolio.streamlit.app/#target-allocation"
+CARD_WIDTH = 1272
+CARD_HEIGHT = 2000
+CARD_FIGSIZE = (CARD_WIDTH / 100, CARD_HEIGHT / 100)
 
 
 def listing_descriptor(ticker: str, source_currency: str | None) -> str:
@@ -54,7 +57,7 @@ def render_allocation_card(
     *,
     public_url: str = PUBLIC_PORTFOLIO_URL,
 ) -> bytes:
-    """Render a mobile-first, exact 1080×1350 allocation share card.
+    """Render a mobile-first, exact 1272×2000 allocation share card.
 
     Holdings flow through two aligned reading columns. This preserves all
     securities and all publication changes without turning a WhatsApp preview
@@ -66,7 +69,7 @@ def render_allocation_card(
     paper, ink, muted = "#f5f0e6", "#29251f", "#6b665e"
     accent, entry_green = "#9f4339", "#3f6b55"
     exit_red, rule, alternate_row = "#9f4339", "#d8cfbf", "#f0ebe1"
-    figure = plt.figure(figsize=(10.8, 13.5), dpi=100, facecolor=paper)
+    figure = plt.figure(figsize=CARD_FIGSIZE, dpi=100, facecolor=paper)
 
     def text(x, y, value, size=14, *, color=ink, bold=False,
              align="left", family="sans-serif", valign="center", **kwargs):
@@ -162,7 +165,7 @@ def render_allocation_card(
     maximum_panel_rows = max(len(panel) for panel in panels)
     step = min(0.035, (first_y - last_y) /
                max(maximum_panel_rows - 1, 1))
-    row_font = min(13.5, step * 1350 * 0.58 * 72 / 100)
+    row_font = min(13.5, step * CARD_HEIGHT * 0.58 * 72 / 100)
     for panel_index, panel_rows in enumerate(panels):
         panel_left, panel_right = panel_lefts[panel_index], panel_rights[panel_index]
         width = panel_right - panel_left

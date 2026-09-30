@@ -1,14 +1,19 @@
 from datetime import date
+from io import BytesIO
 
+import matplotlib.image as mpimg
 import pandas as pd
 import pytest
 
 from public_card_feed import build_card_feed
 from public_track_record import (
+    allocation_weighted_return,
     analyze,
     batch_summary_card,
+    lifecycle_vwap_inr,
     load_portfolio_summaries,
     portfolio_cover_card,
+    whatsapp_card,
 )
 
 
@@ -50,6 +55,7 @@ def test_card_feed_tracks_active_and_exited_lifecycles():
     assert rows["KEEP.NS"]["target_weight"] == 1.0
     assert rows["EXIT.NS"]["status"] == "removed"
     assert rows["EXIT.NS"]["exit_date"] == "2026-09-15"
+    assert rows["EXIT.NS"]["target_weight"] == pytest.approx(0.4)
 
 
 def test_reentered_security_uses_current_lifecycle_start():
@@ -146,6 +152,7 @@ def test_portfolio_cover_slide_requires_no_market_history():
     )
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2000, 1272)
     assert len(image) > 10_000
 
 
@@ -155,14 +162,70 @@ def test_portfolio_summary_card_renders_empirical_outcomes():
         "publication_date": "2026-09-15",
     }
     summaries = [
-        {"ticker": "GAIN.NS", "return": 1.4151, "status": "active"},
-        {"ticker": "LOSS.NS", "return": -0.0951, "status": "removed"},
+        {"ticker": "GAIN.NS", "return": 1.4151, "vwap_return": .20,
+         "target_weight": .7, "status": "active"},
+        {"ticker": "LOSS.NS", "return": -0.0951, "vwap_return": -.05,
+         "target_weight": .3, "status": "removed"},
     ]
 
-    image = batch_summary_card(feed, summaries)
+    image = batch_summary_card(feed, summaries, net_return=.084)
+    pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
+    assert pixels.shape[:2] == (2000, 1272)
     assert len(image) > 10_000
+
+
+def test_lifecycle_vwap_is_inr_adjusted_and_allocation_weighted():
+    index = pd.to_datetime(["2026-09-01", "2026-09-02"])
+    security = pd.DataFrame(
+        {
+            "High": [11.0, 13.0], "Low": [9.0, 11.0],
+            "Close": [10.0, 12.0], "Volume": [100.0, 300.0],
+        },
+        index=index,
+    )
+    fx = pd.DataFrame({"Close": [80.0, 82.0]}, index=index)
+    vwap, endpoint = lifecycle_vwap_inr(
+        security, fx, date(2026, 9, 1), ticker_currency="USD"
+    )
+    expected = (10.0 * 80.0 * 100.0 + 12.0 * 82.0 * 300.0) / 400.0
+    assert vwap == pytest.approx(expected)
+    assert endpoint == pytest.approx(12.0 * 82.0)
+    assert allocation_weighted_return([
+        {"vwap_return": .10, "target_weight": .8},
+        {"vwap_return": -.20, "target_weight": .2},
+    ]) == pytest.approx(.04)
+
+
+def test_security_share_card_uses_standard_dimensions():
+    index = pd.to_datetime(["2026-09-01", "2026-09-02"])
+    chart = pd.DataFrame(
+        {
+            "Ticker": [100.0, 110.0],
+            "Nifty 50": [100.0, 101.0],
+            "Global stocks — VT (INR)": [100.0, 102.0],
+        },
+        index=index,
+    )
+    metrics = {
+        "requested_start": "2026-09-01",
+        "as_of": "2026-09-02",
+        "calendar_days": 1,
+        "ticker_sessions": 2,
+        "ticker_return": .10,
+        "benchmark_return": .01,
+        "world_return": .02,
+        "excess_return": .09,
+        "excess_world_return": .08,
+        "entry_close": 100.0,
+        "endpoint_price": 110.0,
+        "endpoint_label": "Latest completed close",
+        "endpoint_as_of": "2026-09-02",
+        "price_symbol": "₹",
+    }
+    image = whatsapp_card("TEST.NS", metrics, chart)
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2000, 1272)
 
 
 def test_bulk_summary_downloads_history_once_and_converts_us_return(monkeypatch):
@@ -175,12 +238,13 @@ def test_bulk_summary_downloads_history_once_and_converts_us_return(monkeypatch)
         "INR=X": [80.0, 160.0],
     }
     columns = pd.MultiIndex.from_product(
-        [values, ["Close", "Adj Close"]], names=["Ticker", "Price"]
+        [values, ["Close", "Adj Close", "Volume"]], names=["Ticker", "Price"]
     )
     frame = pd.DataFrame(index=index, columns=columns, dtype=float)
     for ticker, prices in values.items():
         frame[(ticker, "Close")] = prices
         frame[(ticker, "Adj Close")] = prices
+        frame[(ticker, "Volume")] = [100.0, 200.0]
     calls = []
 
     def fake_download(*args, **kwargs):
