@@ -6,11 +6,13 @@ silently rewriting an earlier result.
 
 ## Entry rule
 
-- `entry_wait_after_open_minutes`: `60`
+- `entry_wait_after_open_minutes`: `15`
   - If a security's exchange is open at publication, its requested entry time
     is exactly the immutable publication timestamp.
   - Otherwise its requested entry time is its own next exchange open plus this
-    delay.
+    delay. Fifteen minutes avoids using the most volatile opening minutes while
+    allowing a new mixed-market publication to establish its overseas entries
+    promptly.
 - `entry_quote_interval`: `1m`
   - Fixed to one-minute Yahoo bars by validation.
 - `entry_max_quote_delay_minutes`: `330`
