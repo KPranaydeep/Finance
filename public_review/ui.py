@@ -313,6 +313,10 @@ def capture_current_entry_evidence(basket_id, publication_id):
             conn, basket_id, publication, policy,
             now=datetime.now(timezone.utc), history=events,
             create_previews=False,
+            # Never make page startup synchronously fetch an entire newly
+            # eligible overseas basket. The scheduled worker remains
+            # unlimited; the live page advances one immutable entry per tick.
+            max_new_entries=1,
         )
     # Never leak exception objects or provider details into Streamlit state.
     return {

@@ -286,7 +286,8 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
 
 
 def capture_publication_entries(conn, basket, publication, policy, *, now=None,
-                                history=None, create_previews=False):
+                                history=None, create_previews=False,
+                                max_new_entries=None):
     """Append every chronology-safe security entry available at ``now``.
 
     This deliberately stops at entry evidence and baseline creation.  It does
@@ -336,6 +337,9 @@ def capture_publication_entries(conn, basket, publication, policy, *, now=None,
     captured_before = len(captured)
     entry_waits = {}
     for ticker, planned in schedule.items():
+        if (max_new_entries is not None
+                and len(captured) - captured_before >= max_new_entries):
+            break
         if ticker in captured or not planned["ready"]:
             continue
         try:

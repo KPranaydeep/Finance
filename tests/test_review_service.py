@@ -135,6 +135,37 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(sum(r['kind']=='SECURITY_ENTRY' for r in db.rows),2)
         self.assertEqual(sum(r['kind']=='BASELINE' for r in db.rows),1)
 
+    def test_page_capture_budget_limits_synchronous_provider_work(self):
+        p=policy(); p['capital_inr']=10000
+        b=baseline(); db=FakeDB()
+        pub={k:b[k] for k in ['publication_id','basket_id','portfolio_version',
+                              'published_at','weights']}
+        now=datetime(2026,9,9,13,tzinfo=timezone.utc)
+        schedule={ticker:{'ticker':ticker,'kind':p['instrument_kinds'][ticker],
+                  'market':'NSE','requested_entry_at':'2026-09-09T04:01:00+00:00',
+                  'session_open_at':'2026-09-09T03:45:00+00:00',
+                  'session_close_at':'2026-09-09T10:00:00+00:00',
+                  'entry_date':'2026-09-09','basis':'PUBLICATION_IN_SESSION',
+                  'ready':True} for ticker in pub['weights']}
+        calls=[]
+
+        def quote(ticker, planned, policy_, now=None):
+            calls.append(ticker)
+            return {**planned,'price_inr':100.,'native_price':100.,
+                    'fx_to_inr':1.,'quote_at':'2026-09-09T04:02:00+00:00',
+                    'source':'test'}
+
+        with patch('public_review.market.security_entry_schedule',
+                   return_value=schedule), \
+             patch('public_review.market.fetch_entry_quote', side_effect=quote):
+            partial=capture_publication_entries(
+                db,'TEST',pub,p,now=now,history=[],max_new_entries=1)
+
+        self.assertEqual(partial['status'],'PARTIAL_ENTRY')
+        self.assertEqual(partial['new_entries'],1)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(sum(r['kind']=='SECURITY_ENTRY' for r in db.rows),1)
+
     def test_build_assessment_marks_unchanged_review_as_acknowledged(self):
         from public_review.service import build_assessment, review_trigger_state
         from public_review.core import digest
