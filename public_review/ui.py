@@ -283,6 +283,96 @@ def load_current_review_summary(basket_id, publication_id):
             return None
 
 
+@st.cache_data(ttl=900, max_entries=16, show_spinner=False)
+def load_indicative_net_return(basket_id, publication_id):
+    """Value the current model lots at latest available INR market marks."""
+    from .config import load_policy
+    from .core import evaluate
+    from public_price_currency import download_inr
+
+    events = load_events(basket_id)
+    durable = [
+        row["payload"] for row in events
+        if row.get("kind") == "BASELINE"
+        and row.get("payload", {}).get("publication_id") == publication_id
+    ]
+    provisional = False
+    if durable:
+        baseline = max(durable, key=lambda row: row.get("portfolio_version", 0))
+    else:
+        preview = load_fresh_preview(basket_id, publication_id)
+        baseline = preview.get("planning_baseline")
+        provisional = True
+    if not baseline or not baseline.get("lots"):
+        return None
+
+    tickers = tuple(lot["ticker"] for lot in baseline["lots"])
+    closes, _ = download_inr(tickers, period="7d", auto_adjust=False)
+    marks, dates = {}, {}
+    for lot in baseline["lots"]:
+        ticker = lot["ticker"]
+        if ticker not in closes:
+            return None
+        series = pd.to_numeric(closes[ticker], errors="coerce").dropna()
+        if series.empty:
+            return None
+        marks[ticker] = float(series.iloc[-1])
+        dates[ticker] = pd.Timestamp(series.index[-1]).date().isoformat()
+        if dates[ticker] < lot["entry_date"]:
+            return None
+    valuation_date = max(dates.values())
+    metrics = evaluate(baseline, marks, valuation_date, load_policy())
+    return {
+        "net_return": metrics.get("net_total_return"),
+        "net_profit": metrics.get("net_profit"),
+        "valuation_date": valuation_date,
+        "oldest_mark_date": min(dates.values()),
+        "newest_mark_date": max(dates.values()),
+        "provisional": provisional,
+        "mixed_market_timing": len(set(dates.values())) > 1,
+    }
+
+
+@st.fragment(run_every="15m")
+def render_live_review_panel(basket_id, active_publications):
+    """Auto-refresh read-only valuation and review research while viewed."""
+    publication_id = (
+        active_publications[0].get("publication_id")
+        if active_publications else None
+    )
+    if publication_id:
+        try:
+            live = load_indicative_net_return(basket_id, publication_id)
+        except Exception:
+            live = None
+        if live and live.get("net_return") is not None:
+            with st.container(border=True):
+                st.metric(
+                    "Indicative net return",
+                    percent(live["net_return"]),
+                    help=(
+                        "Latest available INR market marks minus modeled entry, "
+                        "exit, tax, FX and slippage costs. Not an executable quote."
+                    ),
+                )
+                basis = (
+                    "Provisional last-close model entry"
+                    if live["provisional"] else "Verified model entry"
+                )
+                timing = (
+                    f"marks span {live['oldest_mark_date']} to "
+                    f"{live['newest_mark_date']}"
+                    if live["mixed_market_timing"]
+                    else f"marks through {live['valuation_date']}"
+                )
+                st.caption(
+                    f"{basis} · {timing} · refreshes every 15 minutes while "
+                    "this page remains open. Indicative only; markets need not "
+                    "be simultaneously open."
+                )
+    return render_review_panel(basket_id, active_publications)
+
+
 def _durable_review_card_summary(events, publication_id, now=None):
     """Use a recent observed assessment when a fresh preview is unavailable."""
     if not events or not publication_id:

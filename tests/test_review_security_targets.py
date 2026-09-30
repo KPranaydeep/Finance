@@ -50,6 +50,24 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(observed['review_state'], 'Observed')
         self.assertEqual(observed['net_return'], .0184)
 
+    def test_indicative_net_return_uses_latest_inr_marks_without_writes(self):
+        from public_review.ui import load_indicative_net_return
+        b, p = baseline(), policy()
+        closes = pd.DataFrame(
+            {'A.NS': [110.], 'B.NS': [55.]},
+            index=pd.to_datetime(['2026-05-05']),
+        )
+        load_indicative_net_return.clear()
+        with patch('public_review.ui.load_events', return_value=[{
+                'kind': 'BASELINE', 'payload': b,
+             }]), patch('public_review.config.load_policy', return_value=p), \
+             patch('public_price_currency.download_inr',
+                   return_value=(closes, {'A.NS': 'INR', 'B.NS': 'INR'})):
+            result = load_indicative_net_return('LIVE-TEST', b['publication_id'])
+        self.assertIsNotNone(result['net_return'])
+        self.assertEqual(result['valuation_date'], '2026-05-05')
+        self.assertFalse(result['provisional'])
+
     def test_security_crosses_even_when_basket_does_not(self):
         b, p, r, v = self.setup_case()
         shocks = np.zeros((100, 2, 2))

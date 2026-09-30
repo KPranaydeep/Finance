@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from public_review.ui import load_current_review_summary, render_review_panel
+from public_review.ui import load_current_review_summary, render_live_review_panel
 from public_card_feed import build_card_feed, load_public_record
 
 import html
@@ -434,7 +434,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-review_card_summary=render_review_panel(
+review_card_summary=render_live_review_panel(
     basket["basket_id"], record.get("active_publications", [])
 ) or planning_review_summary
 

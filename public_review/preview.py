@@ -208,6 +208,9 @@ def _last_close_publication_preview(publication, policy, events, now, ack_epoch)
     )
     preview["last_close_planning_baseline"] = True
     preview["assumed_entry_date"] = history_as_of
+    # Read-only input for the page's indicative 15-minute valuation. This is
+    # never persisted and is superseded by a durable opening-price baseline.
+    preview["planning_baseline"] = baseline
     return preview
 
 
