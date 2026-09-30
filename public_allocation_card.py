@@ -253,7 +253,7 @@ def render_buy_plan_card(
     return output.getvalue()
 
 
-def render_allocation_card(
+def _render_allocation_card_legacy(
     portfolio_version: str,
     publication_date: str,
     rows: tuple[tuple[str, float, float | None, str], ...],
@@ -494,6 +494,198 @@ def render_allocation_card(
 
     output = BytesIO()
     # Do not allow an ambient savefig.bbox='tight' to crop the fixed canvas.
+    with plt.rc_context({"savefig.bbox": None}):
+        figure.savefig(output, format="png", dpi=100, facecolor=paper,
+                       bbox_inches=None, pad_inches=0)
+    plt.close(figure)
+    return output.getvalue()
+
+
+def render_allocation_card(
+    portfolio_version: str,
+    publication_date: str,
+    rows: tuple[tuple[str, float, float | None, str], ...],
+    changes: tuple[
+        str,
+        tuple[tuple[str, float], ...],
+        tuple[tuple[str, float], ...],
+    ] | None = None,
+    decision_strip: tuple[tuple[str, str, str], ...] = (),
+    *,
+    public_url: str = PUBLIC_PORTFOLIO_URL,
+) -> bytes:
+    """Render one readable allocation image, expanding to at most 2800 px."""
+    if not rows:
+        raise ValueError("ALLOCATION_CARD_REQUIRES_ROWS")
+
+    india_rows = tuple(row for row in rows if row[3].startswith("India"))
+    global_rows = tuple(row for row in rows if not row[3].startswith("India"))
+    allocation_groups = tuple(
+        (label, values)
+        for label, values in (
+            ("INDIA · INR", india_rows),
+            ("OVERSEAS LISTINGS", global_rows),
+        )
+        if values
+    )
+    entries = changes[1] if changes else ()
+    exits = changes[2] if changes else ()
+    change_rows = max(len(entries), len(exits))
+    allocation_rows = max(len(values) for _, values in allocation_groups)
+
+    change_step_px = 40.0
+    allocation_step_px = 44.0
+    change_intervals = max(change_rows - 1, 0)
+    allocation_intervals = max(allocation_rows - 1, 0)
+    fixed_height = 1020 if changes is not None else 800
+    natural_height = (
+        fixed_height
+        + change_intervals * change_step_px
+        + allocation_intervals * allocation_step_px
+    )
+    if natural_height > 2800:
+        variable = (
+            change_intervals * change_step_px
+            + allocation_intervals * allocation_step_px
+        )
+        scale = (2800 - fixed_height) / variable if variable else 1.0
+        change_step_px *= scale
+        allocation_step_px *= scale
+        natural_height = 2800
+    height = int(min(2800, max(CARD_HEIGHT, round(natural_height))))
+
+    paper, ink, muted = "#f5f0e6", "#29251f", "#6b665e"
+    accent, green, red = "#9f4339", "#3f6b55", "#9f4339"
+    rule, alternate_row = "#d8cfbf", "#f0ebe1"
+    figure = plt.figure(
+        figsize=(CARD_WIDTH / 100, height / 100 + 1e-6),
+        dpi=100, facecolor=paper,
+    )
+
+    def text(x, y, value, size=14, *, color=ink, bold=False,
+             align="left", family="sans-serif", valign="center", **kwargs):
+        return figure.text(
+            x, y, value, fontsize=size, color=color,
+            fontweight="bold" if bold else "normal", family=family,
+            ha=align, va=valign, **kwargs,
+        )
+
+    def line(left, right, y, *, color=rule, width=0.8):
+        figure.lines.append(plt.Line2D(
+            (left, right), (y, y), transform=figure.transFigure,
+            color=color, linewidth=width,
+        ))
+
+    def from_top(pixels: float) -> float:
+        return 1.0 - pixels / height
+
+    left, right = 0.06, 0.94
+    text(left, from_top(58), "PUBLIC PORTFOLIO", 15,
+         color=accent, bold=True)
+    text(left, from_top(118), "TARGET ALLOCATION", 27,
+         bold=True, family="serif")
+    text(
+        left, from_top(175),
+        f"{portfolio_version}  ·  {publication_date}  ·  {len(rows)} securities",
+        12.5, color=muted,
+    )
+    line(left, right, from_top(225), color=ink, width=1.1)
+
+    if decision_strip:
+        metric_width = (right - left) / len(decision_strip)
+        for index, (label, value, note) in enumerate(decision_strip):
+            x = left + index * metric_width
+            text(x, from_top(282), label, 11.5, color=muted, bold=True)
+            text(x, from_top(330), value, 20, bold=True,
+                 color=accent if index == 0 else ink)
+            text(x, from_top(372), note, 11.5, color=muted)
+
+    if changes is not None:
+        previous_version = changes[0]
+        text(left, from_top(430), f"CHANGES SINCE {previous_version}",
+             11, color=muted, bold=True)
+        change_panels = (
+            (left, 0.475, "ENTRIES", entries, green, "No new entries"),
+            (0.525, right, "EXITS", exits, red, "No exits"),
+        )
+        for panel_left, panel_right, label, values, color, empty in change_panels:
+            headline, _ = _change_summary(values, empty_text=empty)
+            text(panel_left, from_top(472), label, 15, color=color, bold=True)
+            text(panel_left, from_top(512), headline, 15.5, bold=True)
+            line(panel_left, panel_right, from_top(548), color=color, width=0.9)
+            row_font = min(18.5, change_step_px * 0.65 * 72 / 100)
+            for index, (ticker, weight) in enumerate(values):
+                row_px = 588 + index * change_step_px
+                y = from_top(row_px)
+                if index % 2:
+                    figure.patches.append(Rectangle(
+                        (panel_left, y - change_step_px / height * 0.46),
+                        panel_right - panel_left,
+                        change_step_px / height * 0.92,
+                        transform=figure.transFigure,
+                        facecolor=alternate_row, edgecolor="none", linewidth=0,
+                    ))
+                text(panel_left + 0.005, y, ticker, row_font,
+                     color=color, bold=True, family="monospace")
+                text(panel_right - 0.005, y, f"{weight:.0%}", row_font,
+                     color=color, bold=True, align="right")
+        final_change_px = 588 + change_intervals * change_step_px
+        allocation_top_px = final_change_px + 72
+    else:
+        allocation_top_px = 430
+
+    panel_gap = 0.05 if len(allocation_groups) == 2 else 0.0
+    panel_width = (right - left - panel_gap) / len(allocation_groups)
+    for group_index, (group_label, values) in enumerate(allocation_groups):
+        panel_left = left + group_index * (panel_width + panel_gap)
+        panel_right = panel_left + panel_width
+        price_x = panel_right - 0.005
+        target_x = panel_left + panel_width * 0.67
+        text(panel_left, from_top(allocation_top_px), group_label, 15,
+             color=accent, bold=True)
+        column_y = allocation_top_px + 42
+        text(panel_left + 0.005, from_top(column_y), "SECURITY", 11.5,
+             color=muted, bold=True)
+        text(target_x, from_top(column_y), "TARGET", 11.5,
+             color=muted, bold=True, align="right")
+        text(price_x, from_top(column_y), "PRICE", 11.5,
+             color=muted, bold=True, align="right")
+        line(panel_left, panel_right, from_top(allocation_top_px + 68),
+             color=ink, width=0.9)
+        row_font = min(19, allocation_step_px * 0.64 * 72 / 100)
+        for index, (ticker, weight, price, _listing) in enumerate(values):
+            row_px = allocation_top_px + 106 + index * allocation_step_px
+            y = from_top(row_px)
+            if index % 2:
+                figure.patches.append(Rectangle(
+                    (panel_left, y - allocation_step_px / height * 0.46),
+                    panel_width, allocation_step_px / height * 0.92,
+                    transform=figure.transFigure,
+                    facecolor=alternate_row, edgecolor="none", linewidth=0,
+                ))
+            text(panel_left + 0.005, y, ticker, row_font, bold=True)
+            text(target_x, y, f"{weight:.0%}", row_font,
+                 color=accent, bold=True, align="right")
+            text(price_x, y, _price_text(price), row_font, align="right")
+
+    final_allocation_px = (
+        allocation_top_px + 106
+        + allocation_intervals * allocation_step_px
+    )
+    footer_line_px = final_allocation_px + 62
+    line(left, right, from_top(footer_line_px))
+    text(left, from_top(footer_line_px + 35),
+         f"Total target  {sum(row[1] for row in rows):.0%}",
+         14.5, bold=True)
+    text(
+        left, from_top(height - 92),
+        "Review dates request reassessment—not an automatic trade. "
+        "Entries and exits compare publications—not executions.",
+        9.8, color=muted, style="italic",
+    )
+    text(left, from_top(height - 43), public_url, 10, color=accent)
+
+    output = BytesIO()
     with plt.rc_context({"savefig.bbox": None}):
         figure.savefig(output, format="png", dpi=100, facecolor=paper,
                        bbox_inches=None, pad_inches=0)

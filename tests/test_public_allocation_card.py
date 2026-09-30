@@ -20,8 +20,11 @@ def test_listing_descriptor_distinguishes_indian_and_us_quotes():
     assert listing_descriptor("UNKNOWN", None) == "Overseas · —"
 
 
-@pytest.mark.parametrize("count", [1, 21, 31])
-def test_allocation_card_is_exact_portrait_png(count):
+@pytest.mark.parametrize(
+    ("count", "expected_height"),
+    ((1, 2000), (21, 2000), (31, 2380)),
+)
+def test_allocation_card_is_exact_portrait_png(count, expected_height):
     rows = tuple(
         (f"SECURITY{i}.NS", 0.04, 100.0 + i, "India · INR")
         for i in range(count)
@@ -44,7 +47,7 @@ def test_allocation_card_is_exact_portrait_png(count):
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
-    assert pixels.shape[:2] == (2000, 1272)
+    assert pixels.shape[:2] == (expected_height, 1272)
     assert len(image) > 20_000
 
 
@@ -78,7 +81,10 @@ def test_portrait_content_fits_and_numeric_columns_align(monkeypatch, with_chang
         assert [item.get_text() for item in names] == [row[0] for row in rows]
         assert all(item.get_ha() == "left" for item in names)
         assert len({item.get_position()[0] for item in names}) == 1
-        weights = [item for item in texts if item.get_text() == "5%"]
+        weights = [
+            item for item in texts
+            if item.get_text() == "5%" and item.get_color() == "#9f4339"
+        ]
         prices = [item for item in texts if item.get_text() in ("₹123,456.78", "—")]
         # The empty change details may also contain an em dash.
         prices = [item for item in prices if item.get_ha() == "right"]
@@ -123,7 +129,7 @@ def test_allocation_clusters_india_and_overseas_in_one_image(monkeypatch):
         ),
     )
     assert "INDIA · INR" in captured["text"]
-    assert "U.S. · USD" in captured["text"]
+    assert "OVERSEAS LISTINGS" in captured["text"]
     assert "INDIA.NS" in captured["text"]
     assert "VT" in captured["text"]
 
@@ -215,12 +221,12 @@ def test_entry_and_exit_changes_use_restrained_semantic_colors(monkeypatch):
     )
 
     assert captured["ENTRIES"] == "#3f6b55"
-    assert captured["ENTRY.NS 5%"] == "#3f6b55"
+    assert captured["ENTRY.NS"] == "#3f6b55"
     assert captured["EXITS"] == "#9f4339"
-    assert captured["EXIT.NS 4%"] == "#9f4339"
+    assert captured["EXIT.NS"] == "#9f4339"
 
 
-def test_large_publication_uses_legible_allocation_and_companion_changes(monkeypatch):
+def test_large_publication_contains_every_change_and_caps_height(monkeypatch):
     rows = tuple(
         (f"SECURITY{i:02}.NS", 1 / 31, 1234.56 + i, "India · INR")
         for i in range(31)
@@ -242,8 +248,8 @@ def test_large_publication_uses_legible_allocation_and_companion_changes(monkeyp
         assert len(security_rows) == 31
         assert min(item.get_fontsize() for item in security_rows) >= 18
         rendered = "\n".join(item.get_text() for item in texts)
-        assert "Full symbol list on companion Changes card" in rendered
-        assert not any(ticker in rendered for ticker, _ in entries + exits)
+        assert "Full symbol list on companion Changes card" not in rendered
+        assert all(ticker in rendered for ticker, _ in entries + exits)
         return savefig(figure, *args, **kwargs)
 
     monkeypatch.setattr(Figure, "savefig", inspect_allocation)
@@ -253,7 +259,7 @@ def test_large_publication_uses_legible_allocation_and_companion_changes(monkeyp
          ("NET SINCE ENTRY", "-0.49%", "After modeled costs"),
          ("28-DAY MEDIAN", "+4.99%", "Through 28 Oct")),
     )
-    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2000, 1272)
+    assert mpimg.imread(BytesIO(image), format="png").shape[:2] == (2800, 1272)
 
     def inspect_changes(figure, *args, **kwargs):
         figure.canvas.draw()

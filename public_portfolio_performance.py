@@ -39,7 +39,6 @@ from public_allocation_card import (
     listing_descriptor,
     render_allocation_card,
     render_buy_plan_card,
-    render_changes_card,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -583,37 +582,10 @@ if share_allocation.open:
             width="stretch",
             on_click="ignore",
         )
-        if card_changes is not None and (
-            len(allocation_card_rows) > 24
-            or len(card_changes[1]) + len(card_changes[2]) > 12
-        ):
-            changes_card = render_changes_card(
-                f'P{int(current["portfolio_version"]):03d}',
-                current["as_of"].astimezone(IST).date().isoformat(),
-                card_changes[0],
-                card_changes[1],
-                card_changes[2],
-            )
-            st.markdown("#### Changes from the previous publication")
-            st.image(changes_card, width="stretch")
-            st.download_button(
-                "Download entries-and-exits image",
-                changes_card,
-                file_name=(
-                    f'public-01-P{int(current["portfolio_version"]):03d}-'
-                    f'changes-since-{card_changes[0]}-'
-                    f'{current["as_of"].astimezone(IST):%Y-%m-%d}.png'
-                ),
-                mime="image/png",
-                icon=":material/download:",
-                width="stretch",
-                on_click="ignore",
-            )
         st.caption(
             "Send the downloaded PNG directly in WhatsApp for an inline image. "
             "Holdings are grouped by listing market; closes remain INR-normalized "
-            "for comparison. When a companion changes card "
-            "appears, it preserves every entry and exit at a readable size; entries "
+            "for comparison. The same image preserves every entry and exit: entries "
             "show new target weights and exits show last published weights—not trades."
         )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
