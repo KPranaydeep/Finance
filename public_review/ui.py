@@ -93,7 +93,9 @@ def load_fresh_preview(basket_id, publication_id, review_window_model):
         raise ValueError("REVIEW_WINDOW_MODEL_MISMATCH")
     from .preview import historical_preview
     from .config import load_policy
+    from .instruments import complete_policy, frozen_instrument_kinds
     from .service import publications
+    from .windows import estimate_review_window
     from public_basket_postgres import get_public_basket_database_url, connect_public_basket_db
     policy = load_policy()
     with connect_public_basket_db(get_public_basket_database_url()) as conn:
@@ -101,7 +103,42 @@ def load_fresh_preview(basket_id, publication_id, review_window_model):
         pubs = publications(conn, basket_id)
         publication = next(p for p in pubs if p["publication_id"] == publication_id)
         events = store.read(conn, basket_id)
-    return historical_preview(publication, policy, events)
+    preview = historical_preview(publication, policy, events)
+    if not preview.get("operational_review_window"):
+        decision = preview.get("decision") or {}
+        forecast = preview.get("forecast") or {}
+        review_date = (
+            decision.get("next_review")
+            or decision.get("planning_review")
+            or forecast.get("next_review")
+            or forecast.get("research_candidate")
+            or forecast.get("review_session")
+        )
+        if review_date:
+            resolved_policy = complete_policy(
+                policy,
+                publication["weights"],
+                frozen_kinds=frozen_instrument_kinds(events),
+            )
+            kinds = {
+                ticker: resolved_policy["instrument_kinds"][ticker]
+                for ticker in publication["weights"]
+            }
+            try:
+                operational = estimate_review_window(
+                    review_date, resolved_policy, kinds
+                )
+            except ValueError as exc:
+                if str(exc) not in {
+                    "INCOMPLETE_SESSION_CALENDAR",
+                    "NO_PRACTICAL_REVIEW_WINDOW",
+                    "CALENDAR_REVIEW_REQUIRED",
+                }:
+                    raise
+            else:
+                preview = dict(preview)
+                preview["operational_review_window"] = operational
+    return preview
 
 
 @st.cache_data(ttl=300, max_entries=16, show_spinner=False)
