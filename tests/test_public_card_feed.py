@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from matplotlib.figure import Figure
 
-from public_card_feed import build_card_feed
+from public_card_feed import basket_since_launch_return, build_card_feed
 from public_track_record import (
     allocation_weighted_return,
     analyze,
@@ -58,6 +58,16 @@ def test_card_feed_tracks_active_and_exited_lifecycles():
     assert rows["EXIT.NS"]["status"] == "removed"
     assert rows["EXIT.NS"]["exit_date"] == "2026-09-15"
     assert rows["EXIT.NS"]["target_weight"] == pytest.approx(0.4)
+
+
+def test_basket_since_launch_excludes_development_backfill():
+    rows = [
+        {"nav_date": "2026-08-31", "net_nav": 50.0, "is_backfill": True},
+        {"nav_date": "2026-09-01", "net_nav": 100.0, "is_backfill": False},
+        {"nav_date": "2026-09-15", "net_nav": 108.0, "is_backfill": False},
+    ]
+
+    assert basket_since_launch_return(rows) == pytest.approx(0.08)
 
 
 def test_reentered_security_uses_current_lifecycle_start():
@@ -178,7 +188,7 @@ def test_portfolio_summary_card_renders_empirical_outcomes():
         return savefig(figure, *args, **kwargs)
 
     with patch.object(Figure, "savefig", inspect):
-        image = batch_summary_card(feed, summaries, net_return=.084)
+        image = batch_summary_card(feed, summaries, basket_return=.084)
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
@@ -187,11 +197,13 @@ def test_portfolio_summary_card_renders_empirical_outcomes():
     assert "+141.51%" in captured["text"]
     assert "-9.51%" in captured["text"]
     assert "+20.00%" not in captured["text"]
+    assert "BASKET SINCE FIRST PUBLICATION" in captured["text"]
+    assert "REALIZED EXITS · WEIGHTED RETURN" in captured["text"]
 
 
 def test_portfolio_summary_card_pending_state_stays_compact():
     feed = {"portfolio_version": "P010", "publication_date": "2026-09-30"}
-    image = batch_summary_card(feed, [], net_return=None)
+    image = batch_summary_card(feed, [], basket_return=None)
     pixels = mpimg.imread(BytesIO(image), format="png")
 
     assert pixels.shape[:2] == (1160, 1272)

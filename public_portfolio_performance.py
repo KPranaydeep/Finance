@@ -7,7 +7,11 @@ from public_review.ui import (
     load_indicative_net_return,
     render_live_review_panel,
 )
-from public_card_feed import build_card_feed, load_public_record
+from public_card_feed import (
+    basket_since_launch_return,
+    build_card_feed,
+    load_public_record,
+)
 
 import html
 import json
@@ -714,54 +718,54 @@ if execution_scenario == "Start fresh with cash":
                 file_name=f"{DEFAULT_BASKET_ID.lower()}-fresh-cash-buy-plan.csv",
                 mime="text/csv",width="stretch",
             )
-            share_buy_plan = st.popover(
-                "Share buy plan",
-                icon=":material/share:",
-                width="stretch",
-            )
-            if share_buy_plan.open:
-                with share_buy_plan:
-                    buy_plan_card = render_buy_plan_card(
-                        f'P{int(current["portfolio_version"]):03d}',
-                        current["as_of"].astimezone(IST).date().isoformat(),
-                        float(calculated_plan["amount_inr"]),
-                        float(calculated_plan["invested_inr"]),
-                        float(calculated_plan["residual_cash_inr"]),
-                        tuple(
-                            (
+            try:
+                buy_plan_card = render_buy_plan_card(
+                    f'P{int(current["portfolio_version"]):03d}',
+                    current["as_of"].astimezone(IST).date().isoformat(),
+                    float(calculated_plan["amount_inr"]),
+                    float(calculated_plan["invested_inr"]),
+                    float(calculated_plan["residual_cash_inr"]),
+                    tuple(
+                        (
+                            str(order["ticker"]),
+                            int(order["quantity"]),
+                            float(order["planning_price"]),
+                            float(order["estimated_value"]),
+                            listing_descriptor(
                                 str(order["ticker"]),
-                                int(order["quantity"]),
-                                float(order["planning_price"]),
-                                float(order["estimated_value"]),
-                                listing_descriptor(
-                                    str(order["ticker"]),
-                                    price_snapshot.get(str(order["ticker"]), {}).get(
-                                        "source_currency"
-                                    ),
+                                price_snapshot.get(str(order["ticker"]), {}).get(
+                                    "source_currency"
                                 ),
-                            )
-                            for order in calculated_plan["orders"]
-                        ),
-                        mode_label=(
-                            "Starter allocation"
-                            if calculated_plan["mode"].startswith("STARTER")
-                            else "Target-weight allocation"
-                        ),
-                    )
+                            ),
+                        )
+                        for order in calculated_plan["orders"]
+                    ),
+                    mode_label=(
+                        "Starter allocation"
+                        if calculated_plan["mode"].startswith("STARTER")
+                        else "Target-weight allocation"
+                    ),
+                )
+                st.download_button(
+                    "Download share buy-plan image",
+                    buy_plan_card,
+                    file_name=(
+                        f'{DEFAULT_BASKET_ID.lower()}-'
+                        f'p{int(current["portfolio_version"]):03d}-buy-plan.png'
+                    ),
+                    mime="image/png",
+                    icon=":material/download:",
+                    type="primary",
+                    width="stretch",
+                    on_click="ignore",
+                )
+                with st.expander("Preview share buy-plan image", expanded=False):
                     st.image(buy_plan_card, width="stretch")
-                    st.download_button(
-                        "Download buy-plan image",
-                        buy_plan_card,
-                        file_name=(
-                            f'{DEFAULT_BASKET_ID.lower()}-'
-                            f'p{int(current["portfolio_version"]):03d}-buy-plan.png'
-                        ),
-                        mime="image/png",
-                        icon=":material/download:",
-                        type="primary",
-                        width="stretch",
-                        on_click="ignore",
-                    )
+            except Exception:
+                st.caption(
+                    "The image could not be rendered for this plan. The CSV "
+                    "download above remains available."
+                )
         if calculated_plan["missing_prices"]:
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
         if not calculated_plan["orders"]:
@@ -870,17 +874,22 @@ has_backfill=any(bool(row.get("is_backfill")) for row in nav)
 if has_backfill:
     st.warning("Development backfill is active. History before the first publication simulates the earliest active portfolio; later publications retain their dated allocation changes. These results are not a live investment track record.")
 all_metrics=performance_metrics(nav)
+observed_nav=[row for row in nav if not bool(row.get("is_backfill"))]
+observed_metrics=performance_metrics(observed_nav)
 gross_nav=[{**row,"nav":row.get("gross_nav") or row["nav"]} for row in nav]
 gross_metrics=performance_metrics(gross_nav)
 total_turnover=sum(float(row.get("turnover") or 0) for row in nav)
+observed_turnover=sum(float(row.get("turnover") or 0) for row in observed_nav)
 estimated_drag=sum(float(row.get("estimated_drag") or 0) for row in nav)
 m1,m2,m3,m4=st.columns(4)
-m1.metric("Estimated net return",pct(all_metrics.get("total_return")))
-m2.metric("Maximum drawdown",pct(all_metrics.get("maximum_drawdown")))
-m3.metric("Annualized volatility",pct(all_metrics.get("annualized_volatility")))
-m4.metric("Portfolio turnover",pct(total_turnover) if nav else "N/A")
+m1.metric("Basket net since launch",pct(basket_since_launch_return(nav)))
+m2.metric("Observed drawdown",pct(observed_metrics.get("maximum_drawdown")))
+m3.metric("Observed volatility",pct(observed_metrics.get("annualized_volatility")))
+m4.metric("Turnover since launch",pct(observed_turnover) if observed_nav else "N/A")
 st.caption(
-    f"Estimated net model performance deducts {MODEL_SLIPPAGE_RATE:.2%} slippage and "
+    "Basket net follows the continuous public model NAV from its first observed session through "
+    "the latest portfolio version. It does not restart when a new version is published. "
+    f"The model deducts {MODEL_SLIPPAGE_RATE:.2%} slippage and "
     f"{MODEL_TRANSACTION_COST_RATE:.2%} transaction costs from published allocation turnover. "
     "It is not a broker-account return; investor-specific entry costs are handled in the execution plan."
 )

@@ -27,7 +27,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 CARD_WIDTH = 1272
 CARD_HEIGHT = 2000
 CARD_FIGSIZE = (CARD_WIDTH / 100, CARD_HEIGHT / 100)
-SUMMARY_CARD_RENDERER_VERSION = "compact-summary-v3"
+SUMMARY_CARD_RENDERER_VERSION = "basket-summary-v4"
 
 
 
@@ -862,9 +862,9 @@ def batch_summary_card(
     feed: dict,
     summaries: list[dict],
     *,
-    net_return: float | None = None,
+    basket_return: float | None = None,
 ) -> bytes:
-    """Render a compact, mobile-legible 1272px portfolio summary."""
+    """Render a compact summary with unambiguous portfolio return scopes."""
     paper, ink, muted, accent = "#f5f0e6", "#29251f", "#6b665e", "#9f4339"
     faint = "#d8cfbf"
     ordered = sorted(summaries, key=lambda row: float(row["return"]))
@@ -876,7 +876,9 @@ def batch_summary_card(
     weighted_active = allocation_weighted_return(active)
     finished_noun = "security" if len(finished) == 1 else "securities"
     active_noun = "security" if len(active) == 1 else "securities"
-    height = 1100 if net_return is not None else 1160
+    if basket_return is None:
+        basket_return = feed.get("basket_since_launch_return")
+    height = 1100 if basket_return is not None else 1160
     figure = plt.figure(
         figsize=(CARD_WIDTH / 100, height / 100 + 1e-6),
         dpi=100, facecolor=paper,
@@ -923,20 +925,20 @@ def batch_summary_card(
     )
     line(205)
 
-    text(0.075, 248, "CURRENT PORTFOLIO · NET RESULT", 15,
+    text(0.075, 248, "BASKET SINCE FIRST PUBLICATION", 15,
          color=muted, bold=True)
     text(
         0.075, 305,
-        f"{net_return:+.2%}" if net_return is not None else "Pending verified baseline",
-        36 if net_return is not None else 24,
-        color=accent if net_return is not None else ink,
+        f"{basket_return:+.2%}" if basket_return is not None else "Pending NAV history",
+        36 if basket_return is not None else 24,
+        color=accent if basket_return is not None else ink,
         bold=True, family="serif",
     )
     text(
         0.075, 355,
-        "After estimated trading costs and taxes"
-        if net_return is not None else
-        "Appears after a costed model baseline is available",
+        "Continuous version-aware net model return after implementation costs"
+        if basket_return is not None else
+        "Appears after two observed public NAV sessions are available",
         14.5, color=muted,
     )
     line(395)
@@ -960,12 +962,12 @@ def batch_summary_card(
 
     for x, label, value, count_text in (
         (
-            0.075, "PAST EXITS · RETURN",
+            0.075, "REALIZED EXITS · WEIGHTED RETURN",
             f"{weighted_finished:+.2%}" if weighted_finished is not None else "N/A",
             f"{len(finished)} {finished_noun} previously removed",
         ),
         (
-            0.54, "CURRENT HOLDINGS · RETURN",
+            0.54, "CURRENT HOLDINGS · SINCE ENTRY",
             f"{weighted_active:+.2%}" if weighted_active is not None else "N/A",
             f"{len(active)} {active_noun} currently held",
         ),
@@ -978,8 +980,8 @@ def batch_summary_card(
     text(0.075, 855, "HOW TO READ THIS", 15, color=muted, bold=True)
     text(
         0.075, 910,
-        "The large number is the costed portfolio result. Security figures run from recorded entry\n"
-        "to exit, or to the latest completed session while held. Different periods do not add up.",
+        "The large number follows one continuous basket NAV across every published version.\n"
+        "Realized exits and current holdings use separate security lifecycles; they do not add up.",
         15.5, linespacing=1.5,
     )
     text(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -15,7 +16,31 @@ from public_portfolio_publications import load_trust_records
 
 IST = ZoneInfo("Asia/Kolkata")
 CARD_FEED_SCHEMA = "public-portfolio-card-feed"
-CARD_FEED_SCHEMA_VERSION = 2
+CARD_FEED_SCHEMA_VERSION = 3
+
+
+def basket_since_launch_return(nav_rows: list[dict[str, Any]]) -> float | None:
+    """Return the continuous net model result since the first public session.
+
+    Development backfill is deliberately excluded.  The remaining NAV chain is
+    version-aware, so publication changes and their modeled implementation drag
+    remain part of the result instead of restarting performance at each version.
+    """
+    observations: list[tuple[str, float]] = []
+    for row in nav_rows or []:
+        if bool(row.get("is_backfill")):
+            continue
+        try:
+            value = float(row.get("net_nav", row.get("nav")))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value) or value <= 0:
+            continue
+        observations.append((str(row.get("nav_date") or ""), value))
+    observations.sort(key=lambda item: item[0])
+    if len(observations) < 2:
+        return None
+    return observations[-1][1] / observations[0][1] - 1.0
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -161,5 +186,8 @@ def build_card_feed(record: dict[str, Any], current: dict[str, Any]) -> dict[str
         "portfolio_version": f"P{int(current['portfolio_version']):03d}",
         "publication_date": publication_date,
         "data_as_of": current.get("as_of"),
+        "basket_since_launch_return": basket_since_launch_return(
+            record.get("nav") or []
+        ),
         "securities": securities,
     }

@@ -12,7 +12,6 @@ import streamlit as st
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
-from public_review.ui import load_indicative_net_return
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
@@ -139,25 +138,17 @@ if slide_number == 1:
             )
             if not summaries:
                 raise ValueError("No security outcomes are currently available.")
-            try:
-                live_net = load_indicative_net_return(
-                    DEFAULT_BASKET_ID, str(feed["publication_id"])
-                )
-                net_return = (
-                    float(live_net["net_return"])
-                    if live_net and live_net.get("net_return") is not None
-                    else None
-                )
-            except Exception:
-                net_return = None
             summary_card = batch_summary_card(
-                feed, summaries, net_return=net_return
+                feed,
+                summaries,
+                basket_return=feed.get("basket_since_launch_return"),
             )
         st.image(summary_card, width="stretch")
         st.caption(
             "Security returns run from recorded entry to exit, or entry to the "
             "latest completed session for current holdings. Published allocation "
-            "weights are used; the separate net result includes modeled costs. "
+            "weights are used. The basket result is the continuous net model "
+            "index from the first public session through the latest version. "
             f"Card renderer {SUMMARY_CARD_RENDERER_VERSION}."
         )
         if summary_failures:
