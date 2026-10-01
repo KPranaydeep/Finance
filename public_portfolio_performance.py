@@ -7,11 +7,7 @@ from public_review.ui import (
     load_indicative_net_return,
     render_live_review_panel,
 )
-from public_card_feed import (
-    basket_since_launch_return,
-    build_card_feed,
-    load_public_record,
-)
+from public_card_feed import build_card_feed, load_public_record
 
 import html
 import json
@@ -882,7 +878,7 @@ total_turnover=sum(float(row.get("turnover") or 0) for row in nav)
 observed_turnover=sum(float(row.get("turnover") or 0) for row in observed_nav)
 estimated_drag=sum(float(row.get("estimated_drag") or 0) for row in nav)
 m1,m2,m3,m4=st.columns(4)
-m1.metric("Basket net since launch",pct(basket_since_launch_return(nav)))
+m1.metric("Basket net since launch",pct(observed_metrics.get("total_return")))
 m2.metric("Observed drawdown",pct(observed_metrics.get("maximum_drawdown")))
 m3.metric("Observed volatility",pct(observed_metrics.get("annualized_volatility")))
 m4.metric("Turnover since launch",pct(observed_turnover) if observed_nav else "N/A")
