@@ -98,10 +98,9 @@ class SecurityTargetTests(unittest.TestCase):
     def test_legacy_payload_reconstructs_window_from_security_evidence(self):
         window = resolved_operational_window({
             'decision': {'planning_review': '2026-10-08'},
-            'forecast': {},
-            'valuation_timing': {'rows': [
-                {'ticker': 'MAFANG.NS'},
-                {'ticker': 'ABBV'},
+            'forecast': {'security_crossings': [
+                {'ticker': 'MAFANG.NS', 'crossing_date': None},
+                {'ticker': 'ABBV', 'crossing_date': '2026-10-08'},
             ]},
         })
         self.assertEqual(window['date_label'], '09 OCT')

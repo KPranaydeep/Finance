@@ -378,7 +378,11 @@ def resolved_operational_window(payload):
         for row in valuation.get("rows") or []:
             if row.get("ticker"):
                 tickers.add(str(row["ticker"]))
-        forecast_rows = forecast.get("security_estimates") or []
+        forecast_rows = (
+            forecast.get("security_crossings")
+            or forecast.get("security_estimates")
+            or []
+        )
         for row in forecast_rows:
             if row.get("ticker"):
                 tickers.add(str(row["ticker"]))
