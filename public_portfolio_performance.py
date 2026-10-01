@@ -6,6 +6,7 @@ from public_review.ui import (
     load_current_review_summary,
     load_indicative_net_return,
     load_review_reference_prices,
+    retain_review_card_summary,
     render_live_review_panel,
 )
 from public_card_feed import build_card_feed, load_public_record
@@ -453,6 +454,9 @@ st.markdown(
 review_card_summary=render_live_review_panel(
     basket["basket_id"], record.get("active_publications", [])
 ) or planning_review_summary
+review_card_summary=retain_review_card_summary(
+    st.session_state, str(current["publication_id"]), review_card_summary
+)
 
 # Informational only: this value never enters allocation, forecast or order inputs.
 mood=load_market_mood()

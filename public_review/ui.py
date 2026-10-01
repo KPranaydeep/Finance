@@ -349,6 +349,23 @@ def review_card_summary(payload):
     }
 
 
+def retain_review_card_summary(state, publication_id, summary):
+    """Keep the last valid share-card summary across Streamlit reruns.
+
+    Opening a popover reruns the app.  A transient preview/database miss during
+    that rerun must not remove a review date that was already shown for the
+    same immutable publication.  The publication-scoped key prevents a prior
+    portfolio version's date from leaking into the current card.
+    """
+    key = f"public_review_card_summary:{publication_id}"
+    if summary:
+        retained = dict(summary)
+        state[key] = retained
+        return retained
+    cached = state.get(key)
+    return dict(cached) if cached else None
+
+
 def load_current_review_summary(basket_id, publication_id):
     """Return the latest read-only card summary for one publication."""
     try:

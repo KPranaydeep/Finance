@@ -6,7 +6,11 @@ import pandas as pd
 from public_review.forecast import estimate, METHOD
 from public_review.core import decision, evaluate, digest
 from public_review.preview import historical_preview, _immediate_baseline_preview
-from public_review.ui import load_review_reference_prices, review_card_summary
+from public_review.ui import (
+    load_review_reference_prices,
+    retain_review_card_summary,
+    review_card_summary,
+)
 from review_fixtures import baseline, policy
 
 
@@ -49,6 +53,30 @@ class SecurityTargetTests(unittest.TestCase):
         })
         self.assertEqual(observed['review_state'], 'Observed')
         self.assertEqual(observed['net_return'], .0184)
+
+    def test_review_card_summary_survives_popover_rerun_per_publication(self):
+        state = {}
+        summary = {
+            'review_date': '2026-10-08',
+            'review_state': 'Planning estimate',
+        }
+        retained = retain_review_card_summary(state, 'PUB-CURRENT', summary)
+        self.assertEqual(retained, summary)
+
+        # A transient miss during the popover rerun retains the current
+        # publication's date, but never borrows it for another publication.
+        self.assertEqual(
+            retain_review_card_summary(state, 'PUB-CURRENT', None), summary
+        )
+        self.assertIsNone(
+            retain_review_card_summary(state, 'PUB-NEXT', None)
+        )
+
+        updated = dict(summary, review_date='2026-10-09',
+                       review_state='Observed')
+        self.assertEqual(
+            retain_review_card_summary(state, 'PUB-CURRENT', updated), updated
+        )
 
     def test_review_reference_prices_restore_missing_live_planning_inputs(self):
         planning = baseline()
