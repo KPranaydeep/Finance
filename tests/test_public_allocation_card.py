@@ -144,6 +144,8 @@ def test_allocation_clusters_india_and_overseas_in_one_image(monkeypatch):
     assert "OVERSEAS LISTINGS" in captured["text"]
     assert "INDIA.NS" in captured["text"]
     assert "VT" in captured["text"]
+    assert "ALLOCATION" in captured["text"]
+    assert "Total allocation  100%" in captured["text"]
 
 
 @pytest.mark.parametrize(

@@ -442,7 +442,7 @@ def _render_allocation_card_legacy(
                  color=accent, bold=True)
             text(panel_left + 0.003, header_y - 0.028, "SECURITY", 11.5,
                  color=muted, bold=True)
-            text(panel_right - 0.003, header_y - 0.028, "TARGET", 11.5,
+            text(panel_right - 0.003, header_y - 0.028, "ALLOCATION", 11.5,
                  color=muted, bold=True, align="right")
             line(panel_left, panel_right, header_y - 0.044,
                  color=ink, width=0.9)
@@ -476,7 +476,7 @@ def _render_allocation_card_legacy(
         total_y = max(0.105, final_row_y - min(step * 0.72, 0.038))
         line(left, right, total_y + 0.018)
         total_weight = sum(row[1] for row in rows)
-        text(left, total_y, f"Total target  {total_weight:.0%}", 15, bold=True)
+        text(left, total_y, f"Total allocation  {total_weight:.0%}", 15, bold=True)
     else:
         for panel_left, panel_right, panel_rows in zip(
                 panel_lefts, panel_rights, panels):
@@ -490,7 +490,7 @@ def _render_allocation_card_legacy(
                 panel_left + width * 0.80,
             )
             for x, label, align in zip(
-                columns, ("SECURITY", "TARGET", "INR CLOSE", "LISTING"),
+                columns, ("SECURITY", "ALLOCATION", "INR CLOSE", "LISTING"),
                 ("left", "right", "right", "left"),
             ):
                 text(x, header_y, label, 12.5, color=muted,
@@ -688,7 +688,7 @@ def render_allocation_card(
         column_y = allocation_top_px + 42
         text(panel_left + 0.005, from_top(column_y), "SECURITY", 11.5,
              color=muted, bold=True)
-        text(target_x, from_top(column_y), "TARGET", 11.5,
+        text(target_x, from_top(column_y), "ALLOCATION", 11.5,
              color=muted, bold=True, align="right")
         text(price_x, from_top(column_y), "PRICE", 11.5,
              color=muted, bold=True, align="right")
@@ -717,7 +717,7 @@ def render_allocation_card(
     footer_line_px = final_allocation_px + 62
     line(left, right, from_top(footer_line_px))
     text(left, from_top(footer_line_px + 35),
-         f"Total target  {sum(row[1] for row in rows):.0%}",
+         f"Total allocation  {sum(row[1] for row in rows):.0%}",
          14.5, bold=True)
     text(
         left, from_top(height - 92),
