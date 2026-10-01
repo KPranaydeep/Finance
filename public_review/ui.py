@@ -606,6 +606,15 @@ def render_fresh_preview(p):
     planning_only = bool(p.get("planning_estimate"))
     display = review_display_state(p)
     metrics = p.get("metrics") or {}
+    publication_id = p.get("publication_id")
+    summary = review_card_summary(p)
+    if publication_id and summary:
+        # Persist at the source of truth: if this function can visibly render
+        # a review date, the share-card popover must be able to reuse the same
+        # normalized date even though it reruns independently.
+        retain_review_card_summary(
+            st.session_state, str(publication_id), summary
+        )
     with st.container(border=True):
         with st.container(horizontal=True):
             st.metric("Current state", display["state"])

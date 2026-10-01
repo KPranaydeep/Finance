@@ -259,6 +259,11 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(at.metric[0].value, 'Planning estimate')
         self.assertEqual(at.metric[1].label, 'Planning review')
         self.assertEqual(at.metric[1].value, '2020-01-02')
+        retained = at.session_state[
+            'public_review_card_summary:TEST'
+        ]
+        self.assertEqual(retained['review_date'], '2020-01-02')
+        self.assertEqual(retained['review_state'], 'Planning estimate')
 
     def test_active_trigger_replaces_past_next_review_date(self):
         from public_review.ui import review_display_state
