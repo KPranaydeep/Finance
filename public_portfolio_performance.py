@@ -262,7 +262,14 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
 
     try:
         from public_price_currency import download_inr
-        close, currencies = download_inr(list(tickers), period="7d", auto_adjust=False)
+        known_currencies = {
+            ticker: "INR" if ticker.endswith(".NS") else "USD"
+            for ticker in tickers
+        }
+        close, currencies = download_inr(
+            list(tickers), period="7d", auto_adjust=False,
+            currencies=known_currencies,
+        )
         result = {}
         for ticker in tickers:
             if close is None or ticker not in close.columns:
@@ -549,6 +556,14 @@ if share_allocation.open:
                         f'{float(allocation_live_net["net_return"]):+.2%}',
                         "Latest available marks · fully costed",
                     ) if allocation_live_net and allocation_live_net.get("net_return") is not None else (
+                        (
+                            "NET SINCE ENTRY",
+                            f'{float(review_card_summary["net_return"]):+.2%}',
+                            review_card_summary.get("net_return_label") or "After modeled costs",
+                        )
+                        if review_card_summary
+                        and review_card_summary.get("net_return") is not None
+                        else
                         (
                             "ROUND-TRIP COST HURDLE",
                             f'{abs(review_card_summary["net_return"]):.2%}',

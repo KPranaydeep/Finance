@@ -352,7 +352,15 @@ def load_indicative_net_return(basket_id, publication_id):
         return None
 
     tickers = tuple(lot["ticker"] for lot in baseline["lots"])
-    closes, _ = download_inr(tickers, period="7d", auto_adjust=False)
+    currencies = {
+        lot["ticker"]: (
+            "USD" if lot.get("kind") == "foreign_us_listing" else "INR"
+        )
+        for lot in baseline["lots"]
+    }
+    closes, _ = download_inr(
+        tickers, period="7d", auto_adjust=False, currencies=currencies
+    )
     marks, dates = {}, {}
     for lot in baseline["lots"]:
         ticker = lot["ticker"]
@@ -444,6 +452,18 @@ def render_live_review_panel(basket_id, active_publications):
                         f"{capture['total_entries']} securities. Each remaining "
                         "security freezes independently after its first eligible "
                         "post-publication trade."
+                    )
+        else:
+            summary = load_current_review_summary(basket_id, publication_id)
+            if summary and summary.get("net_return") is not None:
+                with st.container(border=True):
+                    st.metric(
+                        "Latest assessed net return",
+                        percent(summary["net_return"]),
+                    )
+                    st.caption(
+                        f"{summary.get('net_return_label') or 'After modeled costs'} · "
+                        "stored assessment fallback while a complete live mark set is unavailable."
                     )
     return render_review_panel(basket_id, active_publications)
 

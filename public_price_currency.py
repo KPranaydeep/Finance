@@ -30,13 +30,20 @@ def to_inr(closes, currencies, usd_inr=None):
     return result
 
 
-def download_inr(tickers, *, start=None, end=None, period=None, auto_adjust=False):
-    currencies = {}
-    for ticker in tickers:
-        currency = "INR" if ticker.endswith(".NS") else yf.Ticker(ticker).get_history_metadata().get("currency")
-        if currency not in {"INR", "USD"}:
+def download_inr(tickers, *, start=None, end=None, period=None,
+                 auto_adjust=False, currencies=None):
+    if currencies is None:
+        currencies = {}
+        for ticker in tickers:
+            currency = ("INR" if ticker.endswith(".NS") else
+                        yf.Ticker(ticker).get_history_metadata().get("currency"))
+            if currency not in {"INR", "USD"}:
+                raise ValueError("UNSUPPORTED_QUOTE_CURRENCY")
+            currencies[ticker] = currency
+    else:
+        currencies = {ticker: currencies.get(ticker) for ticker in tickers}
+        if any(value not in {"INR", "USD"} for value in currencies.values()):
             raise ValueError("UNSUPPORTED_QUOTE_CURRENCY")
-        currencies[ticker] = currency
     requested = list(tickers) + (["INR=X"] if "USD" in currencies.values() else [])
     options = {"period": period} if period else {"start": start, "end": end}
     data = yf.download(requested, interval="1d", auto_adjust=auto_adjust,
