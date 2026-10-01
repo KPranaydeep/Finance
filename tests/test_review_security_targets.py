@@ -6,7 +6,7 @@ import pandas as pd
 from public_review.forecast import estimate, METHOD
 from public_review.core import decision, evaluate, digest
 from public_review.preview import historical_preview, _immediate_baseline_preview
-from public_review.ui import review_card_summary
+from public_review.ui import load_review_reference_prices, review_card_summary
 from review_fixtures import baseline, policy
 
 
@@ -49,6 +49,22 @@ class SecurityTargetTests(unittest.TestCase):
         })
         self.assertEqual(observed['review_state'], 'Observed')
         self.assertEqual(observed['net_return'], .0184)
+
+    def test_review_reference_prices_restore_missing_live_planning_inputs(self):
+        planning = baseline()
+        planning['lots'][0]['kind'] = 'equity'
+        planning['lots'][1]['kind'] = 'foreign_us_listing'
+        load_review_reference_prices.clear()
+        with patch(
+            'public_review.ui.load_fresh_preview',
+            return_value={'planning_baseline': planning},
+        ):
+            prices = load_review_reference_prices('TEST', 'PUB-TEST')
+
+        self.assertEqual(prices['A.NS']['price'], 100.)
+        self.assertEqual(prices['A.NS']['source_currency'], 'INR')
+        self.assertEqual(prices['B.NS']['source_currency'], 'USD')
+        self.assertEqual(prices['B.NS']['price_basis'], 'review_baseline')
 
     def test_indicative_net_return_uses_latest_inr_marks_without_writes(self):
         from public_review.ui import load_indicative_net_return

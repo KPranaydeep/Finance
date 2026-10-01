@@ -5,6 +5,7 @@ from __future__ import annotations
 from public_review.ui import (
     load_current_review_summary,
     load_indicative_net_return,
+    load_review_reference_prices,
     render_live_review_panel,
 )
 from public_card_feed import build_card_feed, load_public_record
@@ -473,6 +474,18 @@ st.subheader("Target allocation")
 allocation=pd.DataFrame(record["constituents"])
 price_snapshot=load_latest_prices(tuple(allocation["ticker"].astype(str)))
 try:
+    reference_prices=load_review_reference_prices(
+        basket["basket_id"], str(current["publication_id"])
+    )
+except Exception:
+    reference_prices={}
+for ticker, reference in reference_prices.items():
+    price_snapshot.setdefault(ticker, reference)
+uses_reference_prices=any(
+    item.get("price_basis") == "review_baseline"
+    for item in price_snapshot.values()
+)
+try:
     entry_estimate=estimate_minimum_entry_capital(record["constituents"],price_snapshot)
 except Exception:
     entry_estimate=None
@@ -500,7 +513,7 @@ for item in allocation[["Security","Allocation","Price","Listing"]].to_dict("rec
     )
 st.markdown(
     '<div class="allocation-wrap"><table class="allocation-table"><thead><tr>'
-    '<th>Security</th><th>Target weight</th><th>Latest close</th><th>Listing</th></tr></thead><tbody>'
+    '<th>Security</th><th>Target weight</th><th>Planning price</th><th>Listing</th></tr></thead><tbody>'
     + ''.join(allocation_rows) + '</tbody></table></div>',
     unsafe_allow_html=True,
 )
@@ -605,7 +618,12 @@ if share_allocation.open:
         )
 price_dates=sorted({item["price_as_of"] for item in price_snapshot.values()})
 if price_dates:
-    st.caption(f"Prices: latest available unadjusted close in INR · through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR. Direct-US review estimates use the versioned Tickertape Pro and HDFC cost assumptions; displayed closes are not executable quotes.")
+    price_basis_note=(
+        " Missing live closes use the latest chronology-safe review baseline; "
+        "recheck prices before placing any order."
+        if uses_reference_prices else ""
+    )
+    st.caption(f"Planning prices in INR · data through {price_dates[-1]}. USD listings use same-date USD/INR; NSE-listed overseas ETFs are already INR.{price_basis_note} Direct-US review estimates use the versioned Tickertape Pro and HDFC cost assumptions; displayed prices are not executable quotes.")
 if any(item.get("source_currency") == "USD" for item in price_snapshot.values()):
     from public_us_funding import known_cost_floor
     funding_floor = known_cost_floor()

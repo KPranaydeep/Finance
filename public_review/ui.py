@@ -101,6 +101,52 @@ def load_fresh_preview(basket_id, publication_id):
     return historical_preview(publication, policy, events)
 
 
+@st.cache_data(ttl=300, max_entries=16, show_spinner=False)
+def load_review_reference_prices(basket_id, publication_id):
+    """Return chronology-safe INR planning prices when live quotes are absent.
+
+    A read-only planning baseline is preferred for a publication that is still
+    capturing entries.  Once the immutable baseline exists, its frozen lots are
+    used instead.  These values are a resilience fallback for public planning
+    tools; callers must label them as review-baseline prices, not live quotes.
+    """
+    preview = load_fresh_preview(basket_id, publication_id)
+    baseline = preview.get("planning_baseline")
+    if not baseline:
+        durable = [
+            row for row in load_events(basket_id)
+            if row.get("kind") == "BASELINE"
+            and row.get("payload", {}).get("publication_id") == publication_id
+        ]
+        baseline = (
+            max(durable, key=lambda row: row.get("seq", 0))["payload"]
+            if durable else None
+        )
+    if not baseline or not baseline.get("lots"):
+        return {}
+    result = {}
+    for lot in baseline["lots"]:
+        try:
+            price = float(lot["price"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(price) or price <= 0:
+            continue
+        ticker = str(lot["ticker"])
+        result[ticker] = {
+            "price": price,
+            "currency": "INR",
+            "source_currency": (
+                "USD" if lot.get("kind") == "foreign_us_listing" else "INR"
+            ),
+            "price_as_of": str(
+                lot.get("entry_date") or baseline.get("entry_date") or ""
+            )[:10],
+            "price_basis": "review_baseline",
+        }
+    return result
+
+
 def render_crossings(forecast, sort_key="security_crossings_sort"):
     rows = forecast.get("security_crossings", [])
     reached = [row for row in rows if row.get("crossing_date")]
