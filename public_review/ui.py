@@ -323,6 +323,7 @@ def review_card_summary(payload):
         except (TypeError, ValueError):
             net_return = None
     outlook = payload.get("provisional_outlook") or {}
+    operational_window = payload.get("operational_review_window") or {}
     median_return = outlook.get("median_return")
     try:
         median_return = float(median_return)
@@ -346,6 +347,12 @@ def review_card_summary(payload):
         ),
         "median_return": median_return,
         "median_target_date": outlook.get("target_date"),
+        "review_window_start": operational_window.get("start_at"),
+        "review_window_end": operational_window.get("end_at"),
+        "review_window_date_label": operational_window.get("date_label"),
+        "review_window_time_label": operational_window.get("time_label"),
+        "review_window_context": operational_window.get("market_context"),
+        "review_execution_windows": operational_window.get("execution_windows"),
     }
 
 
@@ -601,6 +608,28 @@ def _durable_review_card_summary(events, publication_id, now=None):
     return review_card_summary(payload)
 
 
+def render_operational_window(payload):
+    operational = payload.get("operational_review_window") or {}
+    if not operational.get("start_at") or not operational.get("end_at"):
+        return
+    st.info(
+        "Recommended one-hour review: "
+        + operational["date_label"]
+        + " · " + operational["time_label"]
+        + " · " + operational.get("market_context", "")
+    )
+    execution_windows = operational.get("execution_windows") or {}
+    if execution_windows:
+        execution_text = " · ".join(
+            f"{name} from {pd.Timestamp(timestamp).strftime('%d %b %H:%M')}"
+            for name, timestamp in sorted(execution_windows.items())
+        )
+        st.caption(
+            "Earliest post-review execution access: " + execution_text
+            + ". Reassess first; this is not an automatic trade instruction."
+        )
+
+
 def render_fresh_preview(p):
     d, f = p["decision"], p["forecast"]
     planning_only = bool(p.get("planning_estimate"))
@@ -662,6 +691,7 @@ def render_fresh_preview(p):
             )
         else:
             st.caption("No configured review trigger is active.")
+        render_operational_window(p)
 
     followup = f.get("next_common_review_session")
     if d.get("target_crossed_securities"):
@@ -688,6 +718,14 @@ def render_fresh_preview(p):
     )
 
     with st.expander("Research and audit details", expanded=False):
+        operational = p.get("operational_review_window") or {}
+        if operational:
+            st.caption(
+                "Operational-window method: every represented exchange contributes "
+                "one calendar and one next-execution timestamp. The selected window "
+                "requires complete review-date data, minimises the last and average "
+                "market-reach time, and respects the configured owner hours."
+            )
         forecast_date = f.get("next_review")
         if planning_only and not forecast_date:
             forecast_date = d.get("next_review")
@@ -913,6 +951,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.metric("Estimated net XIRR", percent(m["xirr"]))
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
+    render_operational_window(p)
     forecast_review = p.get("forecast", {}).get("next_review")
     if p.get("forecast_observation_pending"):
         forecast_review = d.get("planning_review")

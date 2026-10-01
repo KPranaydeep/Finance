@@ -1,7 +1,7 @@
 import json
 import math
 import os
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from .costs import KINDS
 
@@ -33,17 +33,27 @@ def load_policy(today=None):
               "entry_wait_after_open_minutes": (0, 240),
               "entry_max_quote_delay_minutes": (1, 720),
               "fx_quote_max_age_minutes": (1, 1440),
-              "assessment_wait_after_close_minutes": (0, 180)}
+              "assessment_wait_after_close_minutes": (0, 180),
+              "owner_review_duration_minutes": (15, 240),
+              "review_window_step_minutes": (1, 60),
+              "execution_wait_after_open_minutes": (0, 240)}
+    optional_defaults = {
+        "owner_review_duration_minutes": 60,
+        "review_window_step_minutes": 15,
+        "execution_wait_after_open_minutes": 15,
+    }
     for key, (low, high) in ranges.items():
-        value = policy[key]
+        value = policy.get(key, optional_defaults.get(key))
         if isinstance(value, bool) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError("INVALID_POLICY_" + key.upper())
     for key in ("minimum_forecast_review_sessions", "max_review_sessions", "simulation_paths", "block_length", "seed", "validation_train",
                 "validation_horizon", "validation_min_folds", "history_years", "tariff_max_age_days",
                 "entry_wait_after_open_minutes", "entry_max_quote_delay_minutes",
                 "fx_quote_max_age_minutes",
-                "assessment_wait_after_close_minutes"):
-        if not isinstance(policy[key], int):
+                "assessment_wait_after_close_minutes",
+                "owner_review_duration_minutes", "review_window_step_minutes",
+                "execution_wait_after_open_minutes"):
+        if not isinstance(policy.get(key, optional_defaults.get(key)), int):
             raise ValueError("INTEGER_POLICY_REQUIRED")
     if policy["minimum_forecast_review_sessions"] > min(
             policy["max_review_sessions"], policy["validation_horizon"]):
@@ -52,6 +62,18 @@ def load_policy(today=None):
         raise ValueError("INVALID_POLICY_ENTRY_QUOTE_INTERVAL")
     if policy.get("profit_review_rule") != "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR":
         raise ValueError("INVALID_POLICY_PROFIT_REVIEW_RULE")
+    try:
+        start = time.fromisoformat(policy.get("owner_review_day_start", "08:00"))
+        end = time.fromisoformat(policy.get("owner_review_day_end", "22:00"))
+    except (TypeError, ValueError):
+        raise ValueError("INVALID_POLICY_REVIEW_CLOCK") from None
+    if start >= end:
+        raise ValueError("INVALID_POLICY_REVIEW_CLOCK")
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(policy.get("review_timezone", "Asia/Kolkata"))
+    except Exception:
+        raise ValueError("INVALID_POLICY_REVIEW_TIMEZONE") from None
     # ``instrument_kinds`` is a resolved runtime field, not owner policy.
     # Accept it temporarily for backward-compatible tests/old deployments, but
     # production policy files no longer need or maintain a ticker registry.

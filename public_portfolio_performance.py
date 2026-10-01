@@ -585,9 +585,15 @@ if share_allocation.open:
             tuple(
                 item for item in (
                     (
-                        "ALLOCATION REVIEW",
-                        pd.Timestamp(allocation_review_summary["review_date"]).strftime("%d %b").upper(),
-                        allocation_review_summary["review_state"],
+                        "REVIEW WINDOW",
+                        (
+                            allocation_review_summary.get("review_window_date_label")
+                            or pd.Timestamp(allocation_review_summary["review_date"]).strftime("%d %b").upper()
+                        ),
+                        (
+                            allocation_review_summary.get("review_window_time_label")
+                            or allocation_review_summary["review_state"]
+                        ),
                     ) if allocation_review_summary else None,
                     (
                         "INDICATIVE NET RETURN",

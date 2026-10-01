@@ -9,6 +9,7 @@ from . import store, market
 from .core import freeze, evaluate, compare_exits, decision, digest
 from .forecast import estimate, validate, METHOD
 from .notifications import send
+from .windows import estimate_review_window
 
 SAFE_ERRORS = {
     "INSTRUMENT_CLASSIFICATION_REQUIRED", "FROZEN_CLASSIFICATION_REVIEW_REQUIRED",
@@ -273,10 +274,29 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
         # an otherwise valid portfolio assessment when a single sale scenario
         # cannot be reconciled.
         exit_comparisons = []
+    operational_date = (
+        assessed.get("next_review")
+        or assessed.get("planning_review")
+    )
+    operational_window = None
+    if operational_date:
+        try:
+            operational_window = estimate_review_window(
+                operational_date,
+                policy,
+                {lot["ticker"]: lot["kind"] for lot in baseline["lots"]},
+            )
+        except ValueError as exc:
+            if str(exc) not in {
+                "INCOMPLETE_SESSION_CALENDAR", "NO_PRACTICAL_REVIEW_WINDOW",
+                "CALENDAR_REVIEW_REQUIRED",
+            }:
+                raise
     return {"version": VERSION, "baseline_id": baseline["baseline_id"], "as_of": as_of,
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
             "comparisons": exit_comparisons,
+            "operational_review_window": operational_window,
             "forecast_observation_pending": not forecast_ready,
             "observation_ready_at": observation_ready_at,
             "observation_rows": observation_rows or [],

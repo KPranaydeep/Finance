@@ -34,6 +34,26 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertIsNone(planning['net_return'])
         self.assertIsNone(planning['median_return'])
 
+        windowed = review_card_summary({
+            'publication_id': 'PUB-TEST',
+            'planning_estimate': True,
+            'decision': {'next_review': '2026-10-08', 'reasons': []},
+            'forecast': {},
+            'operational_review_window': {
+                'start_at': '2026-10-09T08:00:00+05:30',
+                'end_at': '2026-10-09T09:00:00+05:30',
+                'date_label': '09 OCT',
+                'time_label': '08:00-09:00 IST',
+                'market_context': 'Post NYSE | Pre NSE',
+                'execution_windows': {
+                    'NSE': '2026-10-09T09:30:00+05:30',
+                    'NYSE': '2026-10-09T19:15:00+05:30',
+                },
+            },
+        })
+        self.assertEqual(windowed['review_window_date_label'], '09 OCT')
+        self.assertEqual(windowed['review_window_time_label'], '08:00-09:00 IST')
+
         early_observed = review_card_summary({
             'publication_id': 'PUB-TEST',
             'forecast_observation_pending': True,

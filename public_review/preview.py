@@ -5,6 +5,7 @@ import pandas as pd
 from . import market
 from .core import digest, evaluate, freeze
 from .forecast import estimate, validate
+from .windows import estimate_review_window
 
 
 def _planning_outlook(returns, baseline, forecast_date):
@@ -113,6 +114,17 @@ def _immediate_baseline_preview(
     forecast = estimate(baseline, marks, returns, future, policy,
                         baseline["capital"], validation)
     candidate = forecast.get("next_review") or forecast.get("research_candidate") or future[0]
+    try:
+        operational_window = estimate_review_window(candidate, policy, kinds)
+    except ValueError as exc:
+        if str(exc) not in {
+            "INCOMPLETE_SESSION_CALENDAR", "NO_PRACTICAL_REVIEW_WINDOW",
+            "CALENDAR_REVIEW_REQUIRED",
+        }:
+            raise
+        # Operational scheduling is supplementary. A temporarily incomplete
+        # future calendar must not suppress an otherwise valid model date.
+        operational_window = None
     # Current baselines produced by ``freeze`` contain the exact quantities,
     # cash and entry charges required for a fully costed liquidation estimate.
     # Legacy/read-only fixtures may not; do not manufacture those fields.
@@ -141,6 +153,7 @@ def _immediate_baseline_preview(
                                   "all_prices_synchronized": False,
                                   "rows": timing},
             "forecast": forecast,
+            "operational_review_window": operational_window,
             "provisional_outlook": outlook,
             "metrics": metrics,
             "decision": {"next_review": candidate, "reasons": [],
