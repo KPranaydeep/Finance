@@ -9,6 +9,7 @@ from public_review.preview import historical_preview, _immediate_baseline_previe
 from public_review.ui import (
     load_review_reference_prices,
     retain_review_card_summary,
+    resolved_operational_window,
     review_card_summary,
 )
 from review_fixtures import baseline, policy
@@ -73,6 +74,26 @@ class SecurityTargetTests(unittest.TestCase):
         })
         self.assertEqual(observed['review_state'], 'Observed')
         self.assertEqual(observed['net_return'], .0184)
+
+    def test_missing_window_is_reconstructed_from_runtime_policy(self):
+        import json
+        from pathlib import Path
+
+        review_policy = json.loads(
+            (Path(__file__).resolve().parents[1] / 'public_review_policy.json')
+            .read_text(encoding='utf-8')
+        )
+        review_policy['instrument_kinds'] = {
+            'A.NS': 'equity', 'ABBV': 'foreign_us_listing'
+        }
+        window = resolved_operational_window({
+            'decision': {'planning_review': '2026-10-08'},
+            'forecast': {},
+            'policy': review_policy,
+        })
+        self.assertEqual(window['date_label'], '09 OCT')
+        self.assertEqual(window['time_label'], '08:00-09:00 IST')
+        self.assertEqual(window['market_context'], 'Post NYSE | Pre NSE')
 
     def test_review_card_summary_survives_popover_rerun_per_publication(self):
         state = {}

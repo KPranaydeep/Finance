@@ -339,6 +339,43 @@ def review_display_state(p, today=None):
     }
 
 
+def resolved_operational_window(payload):
+    """Return or reconstruct the supplementary owner review window.
+
+    Durable assessments created before the window model was introduced can
+    still contain a valid statistical review date and resolved runtime
+    instrument classifications.  Reconstructing here keeps the read-only UI
+    and share card current without rewriting the immutable ledger.
+    """
+    operational = payload.get("operational_review_window") or {}
+    if operational.get("start_at") and operational.get("end_at"):
+        return operational
+    policy = payload.get("policy") or {}
+    kinds = policy.get("instrument_kinds") or {}
+    decision = payload.get("decision") or {}
+    forecast = payload.get("forecast") or {}
+    review_date = (
+        decision.get("next_review")
+        or decision.get("planning_review")
+        or forecast.get("next_review")
+        or forecast.get("research_candidate")
+        or forecast.get("review_session")
+    )
+    if not review_date or not kinds:
+        return {}
+    from .windows import estimate_review_window
+    try:
+        return estimate_review_window(review_date, policy, kinds) or {}
+    except ValueError as exc:
+        if str(exc) not in {
+            "INCOMPLETE_SESSION_CALENDAR",
+            "NO_PRACTICAL_REVIEW_WINDOW",
+            "CALENDAR_REVIEW_REQUIRED",
+        }:
+            raise
+    return {}
+
+
 def review_card_summary(payload):
     """Normalize a current-publication review payload for share-card use."""
     if not payload:
@@ -365,7 +402,7 @@ def review_card_summary(payload):
         except (TypeError, ValueError):
             net_return = None
     outlook = payload.get("provisional_outlook") or {}
-    operational_window = payload.get("operational_review_window") or {}
+    operational_window = resolved_operational_window(payload)
     median_return = outlook.get("median_return")
     try:
         median_return = float(median_return)
@@ -655,7 +692,7 @@ def _durable_review_card_summary(events, publication_id, now=None):
 
 
 def render_operational_window(payload):
-    operational = payload.get("operational_review_window") or {}
+    operational = resolved_operational_window(payload)
     if not operational.get("start_at") or not operational.get("end_at"):
         return
     st.info(
@@ -764,7 +801,7 @@ def render_fresh_preview(p):
     )
 
     with st.expander("Research and audit details", expanded=False):
-        operational = p.get("operational_review_window") or {}
+        operational = resolved_operational_window(p)
         if operational:
             st.caption(
                 "Operational-window method: every represented exchange contributes "
