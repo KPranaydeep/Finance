@@ -171,8 +171,25 @@ def render_buy_plan_card(
         )
         if values
     )
-    largest_group = max(len(values) for _, values in order_groups)
-    height = min(CARD_HEIGHT, max(820, 650 + largest_group * 66))
+    total_orders = sum(len(values) for _, values in order_groups)
+    # Market sections are stacked at full width.  This costs a little vertical
+    # space but keeps all four order fields on one strong reading line when the
+    # image is reduced to a phone preview.  Dense plans progressively tighten
+    # their rows, while the canvas remains within the share-card height cap.
+    content_top_px = 390
+    group_overhead_px = 89
+    footer_space_px = 125
+    preferred_row_px = 64
+    height = min(
+        CARD_HEIGHT,
+        max(
+            900,
+            content_top_px
+            + len(order_groups) * group_overhead_px
+            + total_orders * preferred_row_px
+            + footer_space_px,
+        ),
+    )
     paper, ink, muted = "#f5f0e6", "#29251f", "#6b665e"
     green, rule, alternate_row = "#3f6b55", "#d8cfbf", "#f0ebe1"
     figure = plt.figure(
@@ -222,41 +239,60 @@ def render_buy_plan_card(
         text(x, from_top(335), value, 21, color=green if index == 1 else ink,
              bold=True)
 
-    panel_gap = 0.05 if len(order_groups) == 2 else 0.0
-    panel_width = (right - left - panel_gap) / len(order_groups)
+    available_row_space = (
+        height
+        - content_top_px
+        - len(order_groups) * group_overhead_px
+        - footer_space_px
+    )
+    row_px = min(preferred_row_px, available_row_space / total_orders)
+    row_step = row_px / height
+    primary_font = min(20.5, max(14.0, row_px * 0.32))
+    cursor_px = content_top_px
+
+    # Stable numeric anchors make every order readable in one horizontal pass.
+    security_x = left + 0.005
+    price_x = 0.53
+    shares_x = 0.71
+    value_x = right - 0.005
     for group_index, (group_label, values) in enumerate(order_groups):
-        panel_left = left + group_index * (panel_width + panel_gap)
-        panel_right = panel_left + panel_width
-        text(panel_left, from_top(415), group_label, 14.5,
+        text(left, from_top(cursor_px), group_label, 15,
              color=green, bold=True)
-        text(panel_left, from_top(465), "SECURITY", 11.5,
+        text(right, from_top(cursor_px),
+             f"{len(values)} {'ORDER' if len(values) == 1 else 'ORDERS'}",
+             11.5, color=muted, bold=True, align="right")
+
+        header_px = cursor_px + 38
+        text(security_x, from_top(header_px), "SECURITY", 12,
              color=muted, bold=True)
-        text(panel_right, from_top(465), "SHARES", 11.5, color=muted,
-             bold=True, align="right")
-        line(panel_left, panel_right, from_top(500), color=ink, width=0.9)
-        first_row_px, last_row_px = 550, height - 175
-        step_px = ((last_row_px - first_row_px) /
-                   max(len(values) - 1, 1))
-        step = step_px / height
-        primary_font = min(21, step_px * 0.48 * 72 / 100)
-        secondary_font = max(primary_font - 5, 11.5)
+        text(price_x, from_top(header_px), "PRICE", 12,
+             color=muted, bold=True, align="right")
+        text(shares_x, from_top(header_px), "SHARES", 12,
+             color=muted, bold=True, align="right")
+        text(value_x, from_top(header_px), "PLANNED VALUE", 12,
+             color=muted, bold=True, align="right")
+        line(left, right, from_top(cursor_px + 61), color=ink, width=0.9)
+
+        rows_top_px = cursor_px + 75
         for index, (ticker, shares, price, value, _listing) in enumerate(values):
-            row_px = first_row_px + index * step_px
-            y = from_top(row_px)
+            center_px = rows_top_px + (index + 0.5) * row_px
+            y = from_top(center_px)
             if index % 2:
                 figure.patches.append(Rectangle(
-                    (panel_left, y - step * 0.46), panel_width, step * 0.92,
-                    transform=figure.transFigure, facecolor=alternate_row,
-                    edgecolor="none", linewidth=0,
+                    (left, y - row_step * 0.47), right - left,
+                    row_step * 0.94, transform=figure.transFigure,
+                    facecolor=alternate_row, edgecolor="none", linewidth=0,
                 ))
-            text(panel_left + 0.005, y + step * 0.10, ticker,
-                 primary_font, bold=True, family="monospace")
-            text(panel_right - 0.005, y + step * 0.10, f"× {int(shares):,}",
-                 primary_font, bold=True, align="right")
-            text(panel_left + 0.005, y - step * 0.23, f"₹{price:,.2f}",
-                 secondary_font, color=muted)
-            text(panel_right - 0.005, y - step * 0.23, f"₹{value:,.0f}",
-                 secondary_font, color=green, bold=True, align="right")
+            text(security_x, y, ticker, primary_font,
+                 bold=True, family="monospace")
+            text(price_x, y, f"₹{price:,.2f}", primary_font - 1,
+                 color=muted, align="right")
+            text(shares_x, y, f"× {int(shares):,}", primary_font,
+                 bold=True, align="right")
+            text(value_x, y, f"₹{value:,.0f}", primary_font,
+                 color=green, bold=True, align="right")
+
+        cursor_px = rows_top_px + len(values) * row_px + 14
 
     line(left, right, from_top(height - 130))
     text(

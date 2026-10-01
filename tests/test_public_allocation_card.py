@@ -148,7 +148,7 @@ def test_allocation_clusters_india_and_overseas_in_one_image(monkeypatch):
 
 @pytest.mark.parametrize(
     ("count", "expected_height"),
-    ((1, 820), (4, 914), (12, 1442), (31, 2000)),
+    ((1, 900), (4, 900), (12, 1372), (31, 2000)),
 )
 def test_buy_plan_card_has_fixed_width_and_content_driven_height(count, expected_height):
     orders = tuple(
@@ -180,6 +180,9 @@ def test_buy_plan_clusters_india_and_overseas_in_one_image(monkeypatch):
 
     def inspect(figure, *args, **kwargs):
         captured["text"] = [item.get_text() for item in figure.texts]
+        captured["positions"] = {
+            item.get_text(): item.get_position() for item in figure.texts
+        }
         return savefig(figure, *args, **kwargs)
 
     monkeypatch.setattr(Figure, "savefig", inspect)
@@ -195,6 +198,11 @@ def test_buy_plan_clusters_india_and_overseas_in_one_image(monkeypatch):
     assert "OVERSEAS LISTINGS" in captured["text"]
     assert "INDIA.NS" in captured["text"]
     assert "VT" in captured["text"]
+    assert "PRICE" in captured["text"]
+    assert "PLANNED VALUE" in captured["text"]
+    # Full-width market sections are vertically stacked, not squeezed into
+    # two half-width panels.
+    assert captured["positions"]["INDIA · INR"][1] > captured["positions"]["OVERSEAS LISTINGS"][1]
 
 
 def test_all_exits_are_rendered_without_more_truncation(monkeypatch):
