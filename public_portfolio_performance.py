@@ -656,6 +656,12 @@ if entry_estimate:
             "cash-use, target-coverage and execution-drag conditions all pass. The full-portfolio estimate additionally "
             "covers every target security with low tracking error. These are planning estimates, not return forecasts."
         )
+else:
+    st.info(
+        "Minimum viable starter and practical full-portfolio entry are being "
+        "prepared. They appear automatically as soon as planning prices are "
+        "available for the complete published allocation."
+    )
 st.caption(f"Strategy {current['strategy_version']} · Published {current['published_at'].astimezone(IST):%d %b %Y %H:%M IST}")
 
 with st.container(border=True):

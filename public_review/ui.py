@@ -110,22 +110,55 @@ def load_review_reference_prices(basket_id, publication_id):
     used instead.  These values are a resilience fallback for public planning
     tools; callers must label them as review-baseline prices, not live quotes.
     """
-    preview = load_fresh_preview(basket_id, publication_id)
-    baseline = preview.get("planning_baseline")
-    if not baseline:
-        durable = [
-            row for row in load_events(basket_id)
-            if row.get("kind") == "BASELINE"
-            and row.get("payload", {}).get("publication_id") == publication_id
-        ]
-        baseline = (
-            max(durable, key=lambda row: row.get("seq", 0))["payload"]
-            if durable else None
-        )
-    if not baseline or not baseline.get("lots"):
+    # Read immutable evidence first.  A transient Yahoo/history failure must
+    # never hide planning tools when the database already contains prices.
+    events = load_events(basket_id)
+    durable = [
+        row for row in events
+        if row.get("kind") == "BASELINE"
+        and row.get("payload", {}).get("publication_id") == publication_id
+    ]
+    baseline = (
+        max(durable, key=lambda row: row.get("seq", 0))["payload"]
+        if durable else None
+    )
+    if baseline and baseline.get("lots"):
+        lots = baseline["lots"]
+        baseline_entry_date = baseline.get("entry_date")
+    else:
+        # While a new global basket is still capturing exchange-specific
+        # entries, prefer the complete read-only last-close planning baseline.
+        # If that calculation is temporarily unavailable, retain every
+        # immutable per-security entry already captured instead of returning
+        # an empty all-or-nothing result.
+        try:
+            preview = load_fresh_preview(basket_id, publication_id)
+        except Exception:
+            preview = {}
+        baseline = preview.get("planning_baseline")
+        if baseline and baseline.get("lots"):
+            lots = baseline["lots"]
+            baseline_entry_date = baseline.get("entry_date")
+        else:
+            captured = [
+                row.get("payload", {}) for row in events
+                if row.get("kind") == "SECURITY_ENTRY"
+                and row.get("payload", {}).get("publication_id") == publication_id
+            ]
+            lots = [
+                {
+                    "ticker": row.get("ticker"),
+                    "price": row.get("price_inr"),
+                    "kind": row.get("kind"),
+                    "entry_date": row.get("entry_date"),
+                }
+                for row in captured
+            ]
+            baseline_entry_date = None
+    if not lots:
         return {}
     result = {}
-    for lot in baseline["lots"]:
+    for lot in lots:
         try:
             price = float(lot["price"])
         except (KeyError, TypeError, ValueError):
@@ -140,7 +173,7 @@ def load_review_reference_prices(basket_id, publication_id):
                 "USD" if lot.get("kind") == "foreign_us_listing" else "INR"
             ),
             "price_as_of": str(
-                lot.get("entry_date") or baseline.get("entry_date") or ""
+                lot.get("entry_date") or baseline_entry_date or ""
             )[:10],
             "price_basis": "review_baseline",
         }

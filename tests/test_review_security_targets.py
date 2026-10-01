@@ -55,7 +55,7 @@ class SecurityTargetTests(unittest.TestCase):
         planning['lots'][0]['kind'] = 'equity'
         planning['lots'][1]['kind'] = 'foreign_us_listing'
         load_review_reference_prices.clear()
-        with patch(
+        with patch('public_review.ui.load_events', return_value=[]), patch(
             'public_review.ui.load_fresh_preview',
             return_value={'planning_baseline': planning},
         ):
@@ -65,6 +65,41 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(prices['A.NS']['source_currency'], 'INR')
         self.assertEqual(prices['B.NS']['source_currency'], 'USD')
         self.assertEqual(prices['B.NS']['price_basis'], 'review_baseline')
+
+    def test_review_reference_prices_use_durable_baseline_before_market_data(self):
+        frozen = baseline()
+        load_review_reference_prices.clear()
+        with patch('public_review.ui.load_events', return_value=[{
+                'seq': 4, 'kind': 'BASELINE', 'payload': frozen,
+             }]), patch(
+                'public_review.ui.load_fresh_preview',
+                side_effect=AssertionError('market data must not be called'),
+             ):
+            prices = load_review_reference_prices('TEST-DURABLE', 'PUB-TEST')
+
+        self.assertEqual(set(prices), {'A.NS', 'B.NS'})
+        self.assertEqual(prices['A.NS']['price'], 100.)
+
+    def test_review_reference_prices_keep_partial_captured_entries(self):
+        load_review_reference_prices.clear()
+        event = {
+            'kind': 'SECURITY_ENTRY',
+            'payload': {
+                'publication_id': 'PUB-PARTIAL', 'ticker': 'A.NS',
+                'price_inr': 123.45, 'kind': 'equity',
+                'entry_date': '2026-10-01',
+            },
+        }
+        with patch('public_review.ui.load_events', return_value=[event]), patch(
+                'public_review.ui.load_fresh_preview',
+                side_effect=ValueError('temporary history failure'),
+             ):
+            prices = load_review_reference_prices(
+                'TEST-PARTIAL', 'PUB-PARTIAL'
+            )
+
+        self.assertEqual(prices['A.NS']['price'], 123.45)
+        self.assertEqual(prices['A.NS']['price_as_of'], '2026-10-01')
 
     def test_indicative_net_return_uses_latest_inr_marks_without_writes(self):
         from public_review.ui import load_indicative_net_return
