@@ -451,9 +451,20 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-review_card_summary=render_live_review_panel(
+rendered_review_summary=render_live_review_panel(
     basket["basket_id"], record.get("active_publications", [])
-) or planning_review_summary
+)
+# The live fragment may establish entry evidence that did not exist during the
+# earlier planning-summary lookup. Read once more after it runs so the share
+# card receives the same review date that the visible review panel displays.
+post_fragment_review_summary=load_current_review_summary(
+    basket["basket_id"], current["publication_id"]
+)
+review_card_summary=(
+    rendered_review_summary
+    or post_fragment_review_summary
+    or planning_review_summary
+)
 review_card_summary=retain_review_card_summary(
     st.session_state, str(current["publication_id"]), review_card_summary
 )
