@@ -95,6 +95,19 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(window['time_label'], '08:00-09:00 IST')
         self.assertEqual(window['market_context'], 'Post NYSE | Pre NSE')
 
+    def test_legacy_payload_reconstructs_window_from_security_evidence(self):
+        window = resolved_operational_window({
+            'decision': {'planning_review': '2026-10-08'},
+            'forecast': {},
+            'valuation_timing': {'rows': [
+                {'ticker': 'MAFANG.NS'},
+                {'ticker': 'ABBV'},
+            ]},
+        })
+        self.assertEqual(window['date_label'], '09 OCT')
+        self.assertEqual(window['time_label'], '08:00-09:00 IST')
+        self.assertEqual(window['market_context'], 'Post NYSE | Pre NSE')
+
     def test_review_card_summary_survives_popover_rerun_per_publication(self):
         state = {}
         summary = {

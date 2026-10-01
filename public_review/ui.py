@@ -361,8 +361,35 @@ def resolved_operational_window(payload):
         or forecast.get("research_candidate")
         or forecast.get("review_session")
     )
-    if not review_date or not kinds:
+    if not review_date:
         return {}
+    if not kinds:
+        # Durable previews and cached planning payloads created before the
+        # operational-window model do not carry the runtime-only policy map.
+        # Their security evidence is still sufficient to resolve markets at
+        # the read-only display boundary.  This keeps immutable ledger rows
+        # untouched and avoids waiting for a new assessment merely to show an
+        # owner-friendly review hour.
+        tickers = set()
+        for row in payload.get("observation_rows") or []:
+            if row.get("ticker"):
+                tickers.add(str(row["ticker"]))
+        valuation = payload.get("valuation_timing") or {}
+        for row in valuation.get("rows") or []:
+            if row.get("ticker"):
+                tickers.add(str(row["ticker"]))
+        forecast_rows = forecast.get("security_estimates") or []
+        for row in forecast_rows:
+            if row.get("ticker"):
+                tickers.add(str(row["ticker"]))
+        if not tickers:
+            return {}
+        from .config import load_policy
+        from .instruments import complete_policy
+        policy = complete_policy(load_policy(), sorted(tickers))
+        kinds = policy.get("instrument_kinds") or {}
+        if not kinds:
+            return {}
     from .windows import estimate_review_window
     try:
         return estimate_review_window(review_date, policy, kinds) or {}

@@ -14,7 +14,7 @@ import pandas as pd
 
 from . import market
 
-REVIEW_WINDOW_MODEL = "equal-market-calendar-score-v4"
+REVIEW_WINDOW_MODEL = "equal-market-calendar-score-v5"
 
 
 def _clock(value, key):
