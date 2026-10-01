@@ -561,7 +561,15 @@ def render_live_review_panel(basket_id, active_publications):
                         f"{summary.get('net_return_label') or 'After modeled costs'} · "
                         "stored assessment fallback while a complete live mark set is unavailable."
                     )
-    return render_review_panel(basket_id, active_publications)
+    summary = render_review_panel(basket_id, active_publications)
+    if publication_id:
+        # Fragment return values are not a dependable data channel for the
+        # surrounding full-app rerun. Persist the exact summary rendered by
+        # this fragment so share-card generation can read it immediately.
+        return retain_review_card_summary(
+            st.session_state, publication_id, summary
+        )
+    return summary
 
 
 def _durable_review_card_summary(events, publication_id, now=None):
