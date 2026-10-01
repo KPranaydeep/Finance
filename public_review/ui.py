@@ -8,6 +8,7 @@ import streamlit as st
 from . import store
 from .forecast import TIMING_MODEL
 from .market import ENTRY_MODEL_VERSION
+from .windows import REVIEW_WINDOW_MODEL
 
 
 @st.cache_data(ttl=300, max_entries=16, show_spinner=False)
@@ -87,7 +88,9 @@ def has_durable_preview(events, publication_id):
 
 
 @st.cache_data(ttl=300, max_entries=16, show_spinner=False)
-def load_fresh_preview(basket_id, publication_id):
+def load_fresh_preview(basket_id, publication_id, review_window_model):
+    if review_window_model != REVIEW_WINDOW_MODEL:
+        raise ValueError("REVIEW_WINDOW_MODEL_MISMATCH")
     from .preview import historical_preview
     from .config import load_policy
     from .service import publications
@@ -132,7 +135,9 @@ def load_review_reference_prices(basket_id, publication_id):
         # immutable per-security entry already captured instead of returning
         # an empty all-or-nothing result.
         try:
-            preview = load_fresh_preview(basket_id, publication_id)
+            preview = load_fresh_preview(
+                basket_id, publication_id, REVIEW_WINDOW_MODEL
+            )
         except Exception:
             preview = {}
         baseline = preview.get("planning_baseline")
@@ -376,7 +381,9 @@ def retain_review_card_summary(state, publication_id, summary):
 def load_current_review_summary(basket_id, publication_id):
     """Return the latest read-only card summary for one publication."""
     try:
-        return review_card_summary(load_fresh_preview(basket_id, publication_id))
+        return review_card_summary(load_fresh_preview(
+            basket_id, publication_id, REVIEW_WINDOW_MODEL
+        ))
     except Exception:
         try:
             return _durable_review_card_summary(
@@ -448,7 +455,9 @@ def load_indicative_net_return(basket_id, publication_id):
     if durable:
         baseline = max(durable, key=lambda row: row.get("portfolio_version", 0))
     else:
-        preview = load_fresh_preview(basket_id, publication_id)
+        preview = load_fresh_preview(
+            basket_id, publication_id, REVIEW_WINDOW_MODEL
+        )
         baseline = preview.get("planning_baseline")
         provisional = True
     if not baseline or not baseline.get("lots"):
@@ -1023,7 +1032,11 @@ def render_review_panel(basket_id, active_publications):
     if active_publications:
         try:
             with st.spinner("Assessing security targets from available history..."):
-                preview = load_fresh_preview(basket_id, active_publications[0]["publication_id"])
+                preview = load_fresh_preview(
+                    basket_id,
+                    active_publications[0]["publication_id"],
+                    REVIEW_WINDOW_MODEL,
+                )
             render_fresh_preview(preview)
             fresh_preview_shown = True
             card_summary = review_card_summary(preview)

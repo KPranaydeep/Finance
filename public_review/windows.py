@@ -14,6 +14,8 @@ import pandas as pd
 
 from . import market
 
+REVIEW_WINDOW_MODEL = "equal-market-calendar-score-v1"
+
 
 def _clock(value, key):
     try:
@@ -190,5 +192,5 @@ def estimate_review_window(review_date, policy, instrument_kinds):
             name: timestamp.tz_convert(local_tz).isoformat()
             for name, timestamp in executions.items()
         },
-        "selection_method": "equal-market-calendar-score-v1",
+        "selection_method": REVIEW_WINDOW_MODEL,
     }
