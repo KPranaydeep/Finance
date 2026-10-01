@@ -142,6 +142,10 @@ def _immediate_baseline_preview(
     return {"provisional": True, "publication_id": publication["publication_id"],
             "planning_estimate": True,
             "provisional_net_return": True,
+            # Runtime-only resolved classifications let the read-only UI
+            # reconstruct supplementary owner timing for legacy/cached
+            # assessments. They are not written to policy or ledger storage.
+            "policy": policy,
             "policy_version": policy.get("policy_version"),
             "policy_digest": digest(policy),
             "history_coverage": coverage, "ack_epoch": ack_epoch,
