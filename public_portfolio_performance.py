@@ -552,6 +552,16 @@ share_allocation=st.popover(
 )
 if share_allocation.open:
     with share_allocation:
+        # A popover has its own rerun boundary. Resolve the review summary at
+        # image-generation time instead of relying on the value captured by
+        # the earlier full-page run, which may predate entry-evidence capture.
+        allocation_review_summary=retain_review_card_summary(
+            st.session_state,
+            str(current["publication_id"]),
+            load_current_review_summary(
+                basket["basket_id"], str(current["publication_id"])
+            ),
+        ) or review_card_summary
         try:
             allocation_live_net = load_indicative_net_return(
                 DEFAULT_BASKET_ID, str(current["publication_id"])
@@ -576,9 +586,9 @@ if share_allocation.open:
                 item for item in (
                     (
                         "ALLOCATION REVIEW",
-                        pd.Timestamp(review_card_summary["review_date"]).strftime("%d %b").upper(),
-                        review_card_summary["review_state"],
-                    ) if review_card_summary else None,
+                        pd.Timestamp(allocation_review_summary["review_date"]).strftime("%d %b").upper(),
+                        allocation_review_summary["review_state"],
+                    ) if allocation_review_summary else None,
                     (
                         "INDICATIVE NET RETURN",
                         f'{float(allocation_live_net["net_return"]):+.2%}',
@@ -586,20 +596,20 @@ if share_allocation.open:
                     ) if allocation_live_net and allocation_live_net.get("net_return") is not None else (
                         (
                             "NET SINCE ENTRY",
-                            f'{float(review_card_summary["net_return"]):+.2%}',
-                            review_card_summary.get("net_return_label") or "After modeled costs",
+                            f'{float(allocation_review_summary["net_return"]):+.2%}',
+                            allocation_review_summary.get("net_return_label") or "After modeled costs",
                         )
-                        if review_card_summary
-                        and review_card_summary.get("net_return") is not None
+                        if allocation_review_summary
+                        and allocation_review_summary.get("net_return") is not None
                         else
                         (
                             "ROUND-TRIP COST HURDLE",
-                            f'{abs(review_card_summary["net_return"]):.2%}',
+                            f'{abs(allocation_review_summary["net_return"]):.2%}',
                             "Return needed to break even",
                         )
-                        if review_card_summary
-                        and review_card_summary.get("review_state") == "Planning estimate"
-                        and review_card_summary.get("net_return") is not None
+                        if allocation_review_summary
+                        and allocation_review_summary.get("review_state") == "Planning estimate"
+                        and allocation_review_summary.get("net_return") is not None
                         else None
                     ),
                     (
