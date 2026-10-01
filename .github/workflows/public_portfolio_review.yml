@@ -44,11 +44,13 @@ jobs:
     environment: PRODUCTION
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
+      - name: Check review-policy maintenance horizon
+        run: python check_public_review_maintenance.py
       - run: pip install -r requirements.txt
       - name: Test model monitoring
         run: python -m unittest discover -s tests -p 'test_review_*.py' -v
