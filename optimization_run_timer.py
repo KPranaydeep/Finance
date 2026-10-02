@@ -1,4 +1,4 @@
-"""Rerun-safe timing primitives for an optimization-to-download lifecycle."""
+"""Rerun-safe timing primitives for an optimization lifecycle."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ def start_run_timer(*, monotonic_now: float | None = None,
         "started_at": wall_now.astimezone(timezone.utc).isoformat(timespec="seconds"),
         "monotonic_start": monotonic_now,
         "elapsed_seconds": None,
-        "download_file": None,
+        "finish_event": None,
         "finished_at": None,
     }
 
 
-def finish_run_timer(timer: dict, download_file: str, *,
+def finish_run_timer(timer: dict, finish_event: str, *,
                      monotonic_now: float | None = None,
                      wall_now: datetime | None = None) -> dict:
     result = dict(timer or {})
@@ -32,7 +32,7 @@ def finish_run_timer(timer: dict, download_file: str, *,
     result.update({
         "status": "finished",
         "elapsed_seconds": max(monotonic_now - started, 0.0),
-        "download_file": str(download_file),
+        "finish_event": str(finish_event),
         "finished_at": wall_now.astimezone(timezone.utc).isoformat(timespec="seconds"),
     })
     return result
@@ -48,7 +48,7 @@ def abort_run_timer(timer: dict, reason: str, *,
     wall_now = wall_now or datetime.now(timezone.utc)
     started = float(result["monotonic_start"])
     result.update({
-        "status": "stopped_without_download",
+        "status": "stopped_without_plan",
         "elapsed_seconds": max(monotonic_now - started, 0.0),
         "stop_reason": str(reason),
         "finished_at": wall_now.astimezone(timezone.utc).isoformat(timespec="seconds"),
