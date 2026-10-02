@@ -9,7 +9,7 @@ $venvRoot = Join-Path $repoRoot ".venv"
 $venvPython = Join-Path $venvRoot "Scripts\python.exe"
 $dependencyMarker = Join-Path $venvRoot ".requirements.sha256"
 
-$host.UI.RawUI.WindowTitle = "Portfolio Rebalancer — Local"
+$host.UI.RawUI.WindowTitle = "Portfolio Rebalancer - Local"
 Set-Location -LiteralPath $repoRoot
 
 if (-not (Test-Path -LiteralPath $appPath)) {
