@@ -27,6 +27,13 @@ from public_lumpsum_allocator import allocate_public_lumpsum
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 import portfolio_optimizer_config as _optimizer_config
+from optimization_run_timer import (
+    abort_run_timer,
+    finish_run_timer,
+    format_elapsed,
+    serializable_timer,
+    start_run_timer,
+)
 
 # Streamlit may retain an already-imported helper module across a hot deploy.
 # Reload only when the running process still has the pre-momentum configuration;
@@ -163,7 +170,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_BUILD = "2026-08-13-yf-resilient-downloads-v1"
+APP_BUILD = "2026-10-02-run-to-download-timer-v1"
+OPTIMIZATION_TIMER_KEY = "optimization_run_to_download_timer_v1"
 
 # =========================================================
 # HELPERS
@@ -1185,6 +1193,57 @@ def _detect_holdings_report_type(uploaded_file):
     )
 
 
+def _start_optimization_download_timer():
+    st.session_state[OPTIMIZATION_TIMER_KEY] = start_run_timer()
+
+
+def _persist_finished_timer(timer):
+    owner = str(st.session_state.get("current_user") or "").strip()
+    if not owner or timer.get("status") != "finished":
+        return
+    payload = load_latest_analysis(owner)
+    if not payload:
+        return
+    saved_timer = payload.get("run_to_download_timing") or {}
+    if saved_timer.get("started_at") != timer.get("started_at"):
+        return
+    payload["run_to_download_timing"] = serializable_timer(timer)
+    save_latest_analysis(payload, owner)
+
+
+def _finish_optimization_download_timer(download_file, persist=True):
+    timer = st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}
+    finished = finish_run_timer(timer, download_file)
+    st.session_state[OPTIMIZATION_TIMER_KEY] = finished
+    if persist:
+        _persist_finished_timer(finished)
+    return finished
+
+
+def _abort_optimization_download_timer(reason):
+    timer = st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}
+    stopped = abort_run_timer(timer, reason)
+    st.session_state[OPTIMIZATION_TIMER_KEY] = stopped
+    return stopped
+
+
+def _timer_summary(timer):
+    if not timer:
+        return None
+    status = timer.get("status")
+    elapsed = format_elapsed(timer.get("elapsed_seconds"))
+    if status == "running":
+        return "running", "Timer running: Run optimization → first result download."
+    if status == "finished":
+        return "finished", (
+            f"Run-to-download time: **{elapsed}** · "
+            f"{timer.get('download_file') or 'result download'}"
+        )
+    if status == "stopped_without_download":
+        return "stopped", f"Run stopped without a download after **{elapsed}**."
+    return None
+
+
 def _read_indian_broker_holdings(uploaded_file):
     """Parse an Indian broker CSV/Excel with Stock Name/ISIN/Quantity/
     Average Buy Price/Buy Value/Closing Price/Closing Value/Unrealised P&L columns.
@@ -1888,6 +1947,16 @@ def render_saved_analysis(placeholder, owner):
         summary_col2.metric("Total invested", f"₹{total_invested:,.2f}")
         summary_col3.metric("Executable trades", executable_trade_count)
 
+        run_timing = payload.get("run_to_download_timing") or {}
+        if run_timing.get("status") == "finished":
+            st.info(
+                "**Run-to-download time:** "
+                + format_elapsed(run_timing.get("elapsed_seconds"))
+                + " · Finished when "
+                + str(run_timing.get("download_file") or "the first result")
+                + " was triggered."
+            )
+
         backup_json = json.dumps(
             make_json_safe(payload),
             ensure_ascii=False,
@@ -1903,6 +1972,8 @@ def render_saved_analysis(placeholder, owner):
             mime="application/json",
             width="stretch",
             key="download_saved_analysis_main_" + saved_at,
+            on_click=_finish_optimization_download_timer,
+            args=(f"portfolio_analysis_backup_{backup_date}.json",),
         )
 
         saved_lumpsum = payload.get("lumpsum_plan") or {}
@@ -1942,6 +2013,8 @@ def render_saved_analysis(placeholder, owner):
                     mime="text/csv",
                     width="content",
                     key="download_saved_lumpsum_allocation_csv_" + saved_at,
+                    on_click=_finish_optimization_download_timer,
+                    args=("lumpsum_optimal_allocation.csv",),
                 )
             with saved_sheet_col:
                 st.download_button(
@@ -1951,6 +2024,8 @@ def render_saved_analysis(placeholder, owner):
                     mime="text/html",
                     width="content",
                     key="download_saved_lumpsum_execution_sheet_" + saved_at,
+                    on_click=_finish_optimization_download_timer,
+                    args=("lumpsum_buy_orders.html",),
                 )
 
         current_stats = payload.get("current_stats") or {}
@@ -4486,7 +4561,20 @@ with step_col3:
             width="stretch",
             type="primary",
             key="run_optimization_btn_main",
+            on_click=_start_optimization_download_timer,
         )
+        optimization_timer_placeholder = st.empty()
+        timer_summary = _timer_summary(
+            st.session_state.get(OPTIMIZATION_TIMER_KEY)
+        )
+        if timer_summary:
+            timer_state, timer_text = timer_summary
+            if timer_state == "finished":
+                optimization_timer_placeholder.success(timer_text)
+            elif timer_state == "stopped":
+                optimization_timer_placeholder.warning(timer_text)
+            else:
+                optimization_timer_placeholder.info(timer_text)
 
 st.divider()
 with st.expander("🌐 Universal Portfolio", expanded=False):
@@ -4913,6 +5001,8 @@ else:
 if run_btn:
     try:
         if master_df.empty:
+            stopped_timer = _abort_optimization_download_timer("empty holdings")
+            optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             st.error("Add at least one symbol before running the analysis.")
             st.stop()
 
@@ -4920,6 +5010,8 @@ if run_btn:
             portfolio_df, invalid_holding_rows = build_current_allocation_from_db(CURRENT_USER)
 
         if portfolio_df.empty:
+            stopped_timer = _abort_optimization_download_timer("no usable holdings")
+            optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             st.error(
                 "No usable holdings were found. Add valid Average Price and Quantity values in the master table."
             )
@@ -4968,6 +5060,8 @@ if run_btn:
         yahoo_tickers = portfolio_df["Yahoo Ticker"].dropna().astype(str).tolist()
         unresolved = []
         if not yahoo_tickers:
+            stopped_timer = _abort_optimization_download_timer("no resolved Yahoo tickers")
+            optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             st.error("No valid Yahoo tickers resolved.")
             st.stop()
 
@@ -4983,6 +5077,8 @@ if run_btn:
             )
 
         if optimal_weights is None:
+            stopped_timer = _abort_optimization_download_timer("no usable allocation")
+            optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             st.error("Portfolio optimization did not return a usable allocation.")
             st.stop()
         # Show optimal portfolio weights table
@@ -5007,6 +5103,9 @@ if run_btn:
             file_name="optimal_portfolio_weights.csv",
             mime="text/csv",
             width="stretch",
+            key="download_optimal_portfolio_csv",
+            on_click=_finish_optimization_download_timer,
+            args=("optimal_portfolio_weights.csv",),
         )
 
         if not meta["dropped_df"].empty:
@@ -5154,6 +5253,8 @@ if run_btn:
                 mime="text/csv",
                 width="stretch",
                 key="download_holdings_action_summary",
+                on_click=_finish_optimization_download_timer,
+                args=("holdings_action_summary.csv",),
             )
 
         lumpsum_plan_payload = None
@@ -5182,6 +5283,13 @@ if run_btn:
                 "lumpsum_buy_orders.html",
                 "text/html",
             )
+            finished_timer = _finish_optimization_download_timer(
+                "lumpsum_buy_orders.html",
+                persist=False,
+            )
+            optimization_timer_placeholder.success(
+                _timer_summary(finished_timer)[1]
+            )
 
         st.subheader("Rebalancing Plan")
 
@@ -5202,6 +5310,9 @@ if run_btn:
                 file_name="rebalancing_plan.csv",
                 mime="text/csv",
                 width="stretch",
+                key="download_rebalancing_plan_csv",
+                on_click=_finish_optimization_download_timer,
+                args=("rebalancing_plan.csv",),
             )
 
         publication_run_id = f"RUN-{uuid.uuid4().hex.upper()}"
@@ -5227,6 +5338,9 @@ if run_btn:
                 "purpose": "Optimizer provenance, not a predicted target-XIRR date. Review must independently validate current common history and exit costs.",
             },
             "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "run_to_download_timing": serializable_timer(
+                st.session_state.get(OPTIMIZATION_TIMER_KEY)
+            ),
             "run_id": publication_run_id,
             "holdings_analyzed": int((portfolio_df["Quantity"] > 0).sum()),
             "total_invested": float(total_invested),
@@ -5320,6 +5434,10 @@ if run_btn:
         st.session_state["approved_publication_candidate"] = analysis_payload["publication_candidate"]
 
     except Exception as e:
+        stopped_timer = _abort_optimization_download_timer(str(e))
+        timer_summary = _timer_summary(stopped_timer)
+        if timer_summary:
+            optimization_timer_placeholder.warning(timer_summary[1])
         st.error(f"Error: {e}")
 
 
