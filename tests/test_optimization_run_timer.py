@@ -5,8 +5,10 @@ from optimization_run_timer import (
     abort_run_timer,
     finish_run_timer,
     format_elapsed,
+    estimate_run_seconds,
     serializable_timer,
     start_run_timer,
+    update_run_stage,
 )
 
 
@@ -46,6 +48,21 @@ class OptimizationRunTimerTests(unittest.TestCase):
         serialized = serializable_timer(state)
         self.assertNotIn("monotonic_start", serialized)
         self.assertEqual(serialized["status"], "running")
+
+    def test_eta_scales_only_workload_sensitive_share(self):
+        estimate = estimate_run_seconds(300, 1000, 2000)
+        self.assertEqual(estimate, 405)
+        self.assertEqual(estimate_run_seconds(None, None, 2000), 360)
+
+    def test_stage_update_reports_adaptive_remaining_time(self):
+        state = start_run_timer(monotonic_now=100, estimated_total_seconds=300)
+        updated = update_run_stage(
+            state, "Shortlisting candidates", 0.25, monotonic_now=160
+        )
+        self.assertEqual(updated["stage"], "Shortlisting candidates")
+        self.assertEqual(updated["progress"], 0.25)
+        self.assertGreater(updated["eta_seconds"], 0)
+        self.assertLess(updated["eta_seconds"], 300)
 
 
 if __name__ == "__main__":

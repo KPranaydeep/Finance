@@ -30,10 +30,12 @@ from scalable_universe_preselection import rank_scalable_candidates
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
+    estimate_run_seconds,
     finish_run_timer,
     format_elapsed,
     serializable_timer,
     start_run_timer,
+    update_run_stage,
 )
 from universal_portfolio_summary import summarize_universal_portfolio
 from universal_portfolio_import import (
@@ -1246,8 +1248,41 @@ def _detect_holdings_report_type(uploaded_file):
     )
 
 
-def _start_optimization_plan_timer():
-    st.session_state[OPTIMIZATION_TIMER_KEY] = start_run_timer()
+def _previous_run_estimate(owner):
+    previous = load_latest_analysis(owner) or {}
+    timing = previous.get("run_to_rebalancing_plan_timing") or {}
+    preselection = (previous.get("settings") or {}).get("universe_preselection") or {}
+    return timing.get("elapsed_seconds"), preselection.get("eligible")
+
+
+def _start_optimization_plan_timer(owner):
+    previous_elapsed, _ = _previous_run_estimate(owner)
+    estimate = estimate_run_seconds(previous_elapsed, None, None)
+    st.session_state[OPTIMIZATION_TIMER_KEY] = start_run_timer(
+        estimated_total_seconds=estimate
+    )
+
+
+def _set_optimization_plan_stage(stage, progress, estimated_total_seconds=None):
+    timer = st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}
+    updated = update_run_stage(
+        timer,
+        stage,
+        progress,
+        estimated_total_seconds=estimated_total_seconds,
+    )
+    st.session_state[OPTIMIZATION_TIMER_KEY] = updated
+    return updated
+
+
+def _display_optimization_stage(placeholder, stage, progress, estimated_total_seconds=None):
+    timer = _set_optimization_plan_stage(
+        stage, progress, estimated_total_seconds=estimated_total_seconds
+    )
+    summary = _timer_summary(timer)
+    if summary:
+        placeholder.info(summary[1])
+    return timer
 
 
 def _finish_optimization_plan_timer():
@@ -1270,7 +1305,15 @@ def _timer_summary(timer):
     status = timer.get("status")
     elapsed = format_elapsed(timer.get("elapsed_seconds"))
     if status == "running":
-        return "running", "Timer running: Run optimization → rebalancing plan ready."
+        stage = str(timer.get("stage") or "Running")
+        progress = float(timer.get("progress") or 0.0)
+        eta = timer.get("eta_seconds")
+        eta_text = format_elapsed(eta) if eta is not None else "estimating"
+        return (
+            "running",
+            f"**{stage}** · {progress:.0%} · estimated time remaining **{eta_text}**. "
+            "The estimate adapts after each completed stage.",
+        )
     if status == "finished":
         return "finished", f"Run-to-plan time: **{elapsed}** · Rebalancing plan generated"
     if status == "stopped_without_plan":
@@ -4978,6 +5021,7 @@ with step_col3:
             type="primary",
             key="run_optimization_btn_main",
             on_click=_start_optimization_plan_timer,
+            args=(CURRENT_USER,),
         )
         optimization_timer_placeholder = st.empty()
         timer_summary = _timer_summary(
@@ -5960,6 +6004,9 @@ else:
 
 if run_btn:
     try:
+        _display_optimization_stage(
+            optimization_timer_placeholder, "Loading holdings", 0.03
+        )
         if master_df.empty:
             stopped_timer = _abort_optimization_plan_timer("empty holdings")
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
@@ -5983,12 +6030,29 @@ if run_btn:
                 + ", ".join(invalid_holding_rows)
             )
 
+        _display_optimization_stage(
+            optimization_timer_placeholder,
+            "Shortlisting the broad candidate universe",
+            0.08,
+        )
         with st.spinner("Adding Universal Portfolio symbols as buy candidates..."):
             (
                 portfolio_df,
                 universal_candidate_symbols,
                 universal_preselection,
             ) = extend_allocation_with_universal_candidates(portfolio_df)
+        previous_elapsed, previous_workload = _previous_run_estimate(CURRENT_USER)
+        refined_estimate = estimate_run_seconds(
+            previous_elapsed,
+            previous_workload,
+            universal_preselection.get("eligible"),
+        )
+        _display_optimization_stage(
+            optimization_timer_placeholder,
+            "Candidate shortlist ready",
+            0.35,
+            estimated_total_seconds=refined_estimate,
+        )
         if universal_candidate_symbols:
             st.info(
                 f"Universal candidate shortlist: {len(universal_candidate_symbols):,} of "
@@ -6034,6 +6098,11 @@ if run_btn:
             st.error("No valid Yahoo tickers resolved.")
             st.stop()
 
+        _display_optimization_stage(
+            optimization_timer_placeholder,
+            "Downloading full history and optimizing risk/return",
+            0.42,
+        )
         with st.spinner("Running optimization..."):
             optimal_weights, log_returns, current_stats, optimal_stats, meta = run_portfolio_analysis_multi(
                 yahoo_tickers,
@@ -6044,6 +6113,12 @@ if run_btn:
                 buffer_days=history_buffer_days,
                 redundancy_corr_threshold=redundancy_corr_threshold,
             )
+
+        _display_optimization_stage(
+            optimization_timer_placeholder,
+            "Optimization complete; preparing execution plan",
+            0.88,
+        )
 
         if optimal_weights is None:
             stopped_timer = _abort_optimization_plan_timer("no usable allocation")
@@ -6175,6 +6250,11 @@ if run_btn:
 
                 st.dataframe(top_corrs.head(5), width="stretch")
 
+        _display_optimization_stage(
+            optimization_timer_placeholder,
+            "Fetching final prices and generating trades",
+            0.94,
+        )
         with st.spinner("Fetching latest prices for the rebalancing plan..."):
             latest_prices = log_returns.columns.tolist()
             price_map = get_latest_price_map(latest_prices)
