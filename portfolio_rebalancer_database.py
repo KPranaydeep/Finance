@@ -34,6 +34,7 @@ from optimization_run_timer import (
     serializable_timer,
     start_run_timer,
 )
+from universal_portfolio_summary import summarize_universal_portfolio
 
 # Streamlit may retain an already-imported helper module across a hot deploy.
 # Reload only when the running process still has the pre-momentum configuration;
@@ -4559,10 +4560,52 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
 
     with st.container(border=True):
-        st.markdown("**Shared symbols**")
+        st.markdown("**Composition at a glance**")
         if universal_df.empty:
             st.info("The universal portfolio is empty. Add symbols below.")
         else:
+            universal_summary, universal_clusters = summarize_universal_portfolio(universal_df)
+            universal_metric_cols = st.columns(4, gap="small")
+            universal_metric_cols[0].metric(
+                "Candidates", f'{universal_summary["total_symbols"]:,}', border=True
+            )
+            universal_metric_cols[1].metric(
+                "India listed", f'{universal_summary["india_listed"]:,}', border=True
+            )
+            universal_metric_cols[2].metric(
+                "Overseas listed", f'{universal_summary["overseas_listed"]:,}', border=True
+            )
+            universal_metric_cols[3].metric(
+                "Listing clusters", f'{universal_summary["listing_clusters"]:,}', border=True
+            )
+            coverage_parts = []
+            if universal_summary["exchanges"]:
+                coverage_parts.append(
+                    f'{len(universal_summary["exchanges"])} exchanges'
+                )
+            if universal_summary["currencies"]:
+                coverage_parts.append(
+                    "currencies " + ", ".join(universal_summary["currencies"])
+                )
+            if coverage_parts:
+                st.caption("Coverage: " + " · ".join(coverage_parts))
+            st.dataframe(
+                universal_clusters,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Securities": st.column_config.NumberColumn(format="%d"),
+                    "Share of universe": st.column_config.NumberColumn(format="percent"),
+                },
+            )
+            st.caption(
+                "A listing cluster is one exchange–currency group. It describes market "
+                "coverage; it is not a sector classification or an allocation target."
+            )
+
+    if not universal_df.empty:
+        with st.container(border=True):
+            st.markdown("**Shared symbols**")
             st.dataframe(
                 universal_df[["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency"]],
                 width="stretch",
