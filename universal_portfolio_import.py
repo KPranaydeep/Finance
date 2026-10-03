@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS universal_import_jobs (
     job_id TEXT PRIMARY KEY,
     source_hash TEXT NOT NULL,
     file_name TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'merge',
     status TEXT NOT NULL,
     source_rows INTEGER NOT NULL,
     unique_symbols INTEGER NOT NULL,
@@ -63,6 +64,14 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,31}$")
 def ensure_import_schema(conn: sqlite3.Connection) -> None:
     conn.execute(JOB_DDL)
     conn.execute(ITEM_DDL)
+    job_columns = {
+        str(row[1]).lower()
+        for row in conn.execute("PRAGMA table_info(universal_import_jobs)").fetchall()
+    }
+    if "mode" not in job_columns:
+        conn.execute(
+            "ALTER TABLE universal_import_jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'merge'"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_universal_import_source "
         "ON universal_import_jobs(source_hash, updated_at)"
@@ -158,22 +167,37 @@ def _utc_now_text() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _is_india_listing(row) -> bool:
+    ticker = str(row["yahoo_ticker"] or row["symbol"] or "").strip().upper()
+    exchange = str(row["exchange"] or "").strip().upper()
+    currency = str(row["currency"] or "").strip().upper()
+    return (
+        ticker.endswith((".NS", ".BO"))
+        or exchange in {"NSE", "NSI", "BSE", "BOM"}
+        or currency == "INR"
+    )
+
+
 def prepare_import_job(
     conn: sqlite3.Connection,
     content: bytes,
     file_name: str,
     owner: str,
+    mode: str = "merge",
 ) -> tuple[str, bool, dict]:
     """Create a durable staging job, or resume the same source file idempotently."""
     ensure_import_schema(conn)
+    mode = str(mode or "merge").strip().lower()
+    if mode not in {"merge", "replace_overseas"}:
+        raise ValueError("Unsupported Universal Portfolio import mode.")
     source_hash = hashlib.sha256(content).hexdigest()
     prior = conn.execute(
         """
         SELECT job_id FROM universal_import_jobs
-        WHERE source_hash = ?
+        WHERE source_hash = ? AND COALESCE(mode, 'merge') = ?
         ORDER BY updated_at DESC LIMIT 1
         """,
-        (source_hash,),
+        (source_hash, mode),
     ).fetchone()
     if prior is not None:
         job_id = str(prior["job_id"] if hasattr(prior, "keys") else prior[0])
@@ -181,7 +205,8 @@ def prepare_import_job(
 
     normalized, parse_stats = parse_universal_source_csv(content)
     existing_rows = conn.execute(
-        "SELECT symbol, yahoo_ticker FROM master_holdings WHERE owner = ?",
+        "SELECT symbol, yahoo_ticker, exchange, currency "
+        "FROM master_holdings WHERE owner = ?",
         (owner,),
     ).fetchall()
     by_symbol = {}
@@ -190,9 +215,9 @@ def prepare_import_job(
         symbol = str(row["symbol"] or "").strip().upper()
         ticker = str(row["yahoo_ticker"] or "").strip().upper()
         if symbol:
-            by_symbol[symbol] = ticker
+            by_symbol[symbol] = row
         if ticker:
-            by_ticker[ticker] = symbol
+            by_ticker[ticker] = row
 
     job_id = "UNI-" + uuid.uuid4().hex.upper()
     now = _utc_now_text()
@@ -201,14 +226,15 @@ def prepare_import_job(
         conn.execute(
             """
             INSERT INTO universal_import_jobs
-                (job_id, source_hash, file_name, status, source_rows,
+                (job_id, source_hash, file_name, mode, status, source_rows,
                  unique_symbols, created_at, updated_at)
-            VALUES (?, ?, ?, 'prepared', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, 'prepared', ?, ?, ?, ?)
             """,
             (
                 job_id,
                 source_hash,
                 str(file_name or "universal-source.csv")[:255],
+                mode,
                 parse_stats["source_rows"],
                 parse_stats["unique_symbols"],
                 now,
@@ -217,10 +243,30 @@ def prepare_import_job(
         )
         for row in normalized.itertuples(index=False):
             source_symbol = str(row.source_symbol)
-            existing_ticker = by_symbol.get(source_symbol)
+            existing_row = by_symbol.get(source_symbol)
+            existing_ticker = (
+                str(existing_row["yahoo_ticker"] or "").strip().upper()
+                if existing_row is not None
+                else ""
+            )
+            ticker_row = by_ticker.get(source_symbol)
             if not bool(row.valid_symbol):
                 status = "rejected"
                 reason = "Symbol format is not supported."
+            elif mode == "replace_overseas" and existing_row is not None:
+                if _is_india_listing(existing_row):
+                    status = "conflict"
+                    reason = "Symbol key belongs to an India-listed security; preserved."
+                else:
+                    status = "pending"
+                    reason = None
+            elif mode == "replace_overseas" and ticker_row is not None:
+                if _is_india_listing(ticker_row):
+                    status = "conflict"
+                    reason = "Ticker belongs to an India-listed security; preserved."
+                else:
+                    status = "pending"
+                    reason = None
             elif source_symbol in by_ticker or existing_ticker == source_symbol:
                 status = "existing"
                 reason = "Already present in the Universal Portfolio."
@@ -289,10 +335,12 @@ def get_import_job(conn: sqlite3.Connection, job_id: str) -> dict:
     return values
 
 
-def latest_import_job(conn: sqlite3.Connection) -> dict | None:
+def latest_import_job(conn: sqlite3.Connection, mode: str = "merge") -> dict | None:
     ensure_import_schema(conn)
     row = conn.execute(
-        "SELECT job_id FROM universal_import_jobs ORDER BY updated_at DESC LIMIT 1"
+        "SELECT job_id FROM universal_import_jobs "
+        "WHERE COALESCE(mode, 'merge')=? ORDER BY updated_at DESC LIMIT 1",
+        (str(mode or "merge").strip().lower(),),
     ).fetchone()
     if row is None:
         return None
@@ -443,6 +491,104 @@ def apply_verified_import(conn: sqlite3.Connection, job_id: str, owner: str) -> 
     return {
         "added": added,
         "already_present": already_present,
+        "job": get_import_job(conn, job_id),
+    }
+
+
+def apply_verified_overseas_replacement(
+    conn: sqlite3.Connection,
+    job_id: str,
+    owner: str,
+    min_verified_ratio: float = 0.50,
+) -> dict:
+    """Atomically retain India listings and replace every overseas universe row."""
+    job = get_import_job(conn, job_id)
+    if job.get("mode") != "replace_overseas":
+        raise ValueError("This staged job is not an overseas replacement.")
+    if job["counts"].get("pending", 0):
+        raise ValueError("Validation is incomplete. Resume it before replacing overseas rows.")
+    verified_count = int(job["counts"].get("verified", 0))
+    verified_ratio = verified_count / max(int(job["unique_symbols"]), 1)
+    if verified_count == 0 or verified_ratio < float(min_verified_ratio):
+        raise ValueError(
+            f"Only {verified_ratio:.1%} of uploaded symbols were verified. "
+            "The overseas universe was not changed."
+        )
+    verified_rows = conn.execute(
+        """
+        SELECT source_symbol, stock_name, yahoo_ticker, exchange, currency
+        FROM universal_import_items
+        WHERE job_id=? AND status='verified' ORDER BY input_order
+        """,
+        (job_id,),
+    ).fetchall()
+    current_rows = conn.execute(
+        """
+        SELECT symbol, yahoo_ticker, exchange, currency
+        FROM master_holdings WHERE owner=?
+        """,
+        (owner,),
+    ).fetchall()
+    overseas_symbols = [
+        str(row["symbol"]) for row in current_rows if not _is_india_listing(row)
+    ]
+    retained_india = len(current_rows) - len(overseas_symbols)
+    now = _utc_now_text()
+    added = 0
+    conn.execute("BEGIN")
+    try:
+        for symbol in overseas_symbols:
+            conn.execute(
+                "DELETE FROM master_holdings WHERE owner=? AND symbol=?",
+                (owner, symbol),
+            )
+        for row in verified_rows:
+            before = conn.total_changes
+            conn.execute(
+                """
+                INSERT INTO master_holdings
+                    (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
+                     quantity, average_price, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+                ON CONFLICT(owner, symbol) DO NOTHING
+                """,
+                (
+                    owner,
+                    row["source_symbol"],
+                    row["stock_name"],
+                    row["yahoo_ticker"],
+                    row["exchange"],
+                    row["currency"],
+                    now,
+                    now,
+                ),
+            )
+            if conn.total_changes > before:
+                added += 1
+            conn.execute(
+                """
+                UPDATE universal_import_items
+                SET status='added', reason='Added by overseas replacement.', updated_at=?
+                WHERE job_id=? AND source_symbol=?
+                """,
+                (now, job_id, row["source_symbol"]),
+            )
+        conn.execute(
+            """
+            UPDATE universal_import_jobs
+            SET status='applied', updated_at=?, applied_at=? WHERE job_id=?
+            """,
+            (now, now, job_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {
+        "removed_overseas": len(overseas_symbols),
+        "added_overseas": added,
+        "retained_india": retained_india,
+        "verified_ratio": verified_ratio,
         "job": get_import_job(conn, job_id),
     }
 

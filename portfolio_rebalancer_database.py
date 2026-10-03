@@ -36,6 +36,7 @@ from optimization_run_timer import (
 )
 from universal_portfolio_summary import summarize_universal_portfolio
 from universal_portfolio_import import (
+    apply_verified_overseas_replacement,
     apply_verified_import,
     ensure_import_schema,
     get_import_job,
@@ -2477,7 +2478,7 @@ def _probe_recent_import_batch(tickers):
         period="10d",
         progress=False,
         auto_adjust=True,
-        threads=False,
+        threads=True,
         max_retries=2,
     )
     close_frame = _extract_close_prices_frame(downloaded, normalized)
@@ -2524,7 +2525,7 @@ def _format_import_eta(seconds):
     return f"{remainder}s"
 
 
-def validate_universal_import_with_progress(job_id, batch_size=75, max_seconds=720):
+def validate_universal_import_with_progress(job_id, batch_size=180, max_seconds=720):
     """Validate a durable import job, checkpointing after every Yahoo batch."""
     started = time.perf_counter()
     with get_db_connection() as conn:
@@ -5072,6 +5073,169 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 icon=":material/download:",
                 width="stretch",
                 key="download_universal_import_report",
+            )
+
+    with st.container(border=True):
+        st.markdown("**Replace overseas universe from Tickertape**")
+        st.caption(
+            "Upload a Tickertape U.S. screener CSV. The app validates and checkpoints "
+            "the file before making any change. When you confirm replacement, all "
+            "existing non-India Universal Portfolio rows are removed and the verified "
+            "uploaded symbols are added in the same database transaction. India-listed "
+            "rows are preserved."
+        )
+        overseas_source_upload = st.file_uploader(
+            "Tickertape overseas screener CSV",
+            type=["csv"],
+            key="overseas_replacement_source_csv",
+            help=(
+                "The supplied Tickertape format with name and ticker columns is supported. "
+                "Other screener columns are ignored."
+            ),
+        )
+        prepare_overseas_replacement_btn = st.button(
+            "Stage overseas replacement",
+            icon=":material/inventory_2:",
+            width="stretch",
+            key="prepare_overseas_replacement",
+            disabled=overseas_source_upload is None,
+        )
+        overseas_job = None
+        if prepare_overseas_replacement_btn and overseas_source_upload is not None:
+            try:
+                with get_db_connection() as conn:
+                    overseas_job_id, resumed_job, overseas_job = prepare_import_job(
+                        conn,
+                        overseas_source_upload.getvalue(),
+                        overseas_source_upload.name,
+                        UNIVERSAL_OWNER,
+                        mode="replace_overseas",
+                    )
+                st.session_state["active_overseas_replacement_job"] = overseas_job_id
+                if resumed_job:
+                    st.info("This exact Tickertape file is already staged. Resuming it.")
+                else:
+                    st.success(
+                        f"Staged {overseas_job['unique_symbols']:,} unique overseas "
+                        "symbols. The current Universal Portfolio is unchanged."
+                    )
+            except Exception as exc:
+                update_errors.append(f"Could not stage the overseas replacement: {exc}")
+
+        active_overseas_job_id = st.session_state.get(
+            "active_overseas_replacement_job"
+        )
+        try:
+            with get_db_connection() as conn:
+                if active_overseas_job_id:
+                    overseas_job = get_import_job(conn, active_overseas_job_id)
+                elif overseas_job is None:
+                    overseas_job = latest_import_job(conn, mode="replace_overseas")
+            if overseas_job is not None:
+                st.session_state["active_overseas_replacement_job"] = overseas_job["job_id"]
+        except Exception as exc:
+            overseas_job = None
+            update_errors.append(f"Could not load the overseas replacement job: {exc}")
+
+        if overseas_job is not None:
+            overseas_counts = overseas_job["counts"]
+            overseas_pending = int(overseas_counts.get("pending", 0))
+            overseas_verified = int(
+                overseas_counts.get("verified", 0) + overseas_counts.get("added", 0)
+            )
+            validate_overseas_btn = st.button(
+                "Validate / resume overseas symbols",
+                icon=":material/fact_check:",
+                width="stretch",
+                key="validate_overseas_replacement",
+                disabled=(overseas_pending == 0 or overseas_job["status"] == "applied"),
+            )
+            if validate_overseas_btn:
+                try:
+                    validate_universal_import_with_progress(overseas_job["job_id"])
+                    st.rerun()
+                except Exception as exc:
+                    update_errors.append(
+                        "Overseas validation stopped safely; the checkpoint can be resumed. "
+                        f"Details: {exc}"
+                    )
+
+            overseas_metrics = st.columns(4, gap="small")
+            overseas_metrics[0].metric(
+                "Uploaded symbols", f"{overseas_job['unique_symbols']:,}"
+            )
+            overseas_metrics[1].metric("Verified", f"{overseas_verified:,}")
+            overseas_metrics[2].metric("Pending", f"{overseas_pending:,}")
+            overseas_metrics[3].metric(
+                "Omitted",
+                f"{overseas_counts.get('unresolved', 0) + overseas_counts.get('rejected', 0) + overseas_counts.get('conflict', 0):,}",
+            )
+            st.progress(
+                float(overseas_job["progress"]),
+                text=(
+                    f"Processed {overseas_job['processed']:,} of "
+                    f"{overseas_job['unique_symbols']:,} · {overseas_job['status']}"
+                ),
+            )
+
+            replacement_ready = (
+                overseas_pending == 0
+                and int(overseas_counts.get("verified", 0)) > 0
+                and overseas_job["status"] != "applied"
+            )
+            if replacement_ready:
+                st.warning(
+                    "The next action replaces the complete overseas candidate universe. "
+                    "Your personal holdings are not changed, and every India-listed "
+                    "Universal Portfolio row is retained."
+                )
+                st.checkbox(
+                    "I reviewed the validation result and want to replace the overseas universe",
+                    key="confirm_overseas_replacement",
+                )
+                overseas_confirmation = st.text_input(
+                    "Type `REPLACE OVERSEAS` to confirm",
+                    key="overseas_replacement_phrase",
+                )
+                apply_overseas_replacement_btn = st.button(
+                    "Replace overseas universe",
+                    icon=":material/sync_alt:",
+                    type="primary",
+                    width="stretch",
+                    key="apply_overseas_replacement",
+                    disabled=(
+                        not st.session_state.get("confirm_overseas_replacement", False)
+                        or overseas_confirmation.strip() != "REPLACE OVERSEAS"
+                    ),
+                )
+                if apply_overseas_replacement_btn:
+                    try:
+                        with get_db_connection() as conn:
+                            replacement_result = apply_verified_overseas_replacement(
+                                conn, overseas_job["job_id"], UNIVERSAL_OWNER
+                            )
+                        st.session_state["holdings_flash_success"] = (
+                            f"Replaced the overseas universe: removed "
+                            f"{replacement_result['removed_overseas']:,} prior overseas "
+                            f"symbols, added {replacement_result['added_overseas']:,} "
+                            f"verified Tickertape symbols, and retained "
+                            f"{replacement_result['retained_india']:,} India-listed symbols."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        update_errors.append(f"Could not replace the overseas universe: {exc}")
+
+            with get_db_connection() as conn:
+                overseas_job = get_import_job(conn, overseas_job["job_id"])
+                overseas_items = import_items_frame(conn, overseas_job["job_id"])
+            st.download_button(
+                "Download overseas validation report",
+                data=safe_report_csv(overseas_items),
+                file_name=f"overseas_replacement_{overseas_job['job_id']}.csv",
+                mime="text/csv",
+                icon=":material/download:",
+                width="stretch",
+                key="download_overseas_replacement_report",
             )
 
     with st.container(border=True):
