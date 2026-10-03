@@ -26,6 +26,7 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
+from scalable_universe_preselection import rank_scalable_candidates
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
@@ -84,6 +85,7 @@ OPTIMIZER_CONFIG = _optimizer_config.OPTIMIZER_CONFIG
 OPTIMIZER_CONFIG_VERSION = _optimizer_config.OPTIMIZER_CONFIG_VERSION
 RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
 TRADING_DAYS_PER_YEAR = _optimizer_config.TRADING_DAYS_PER_YEAR
+UNIVERSAL_PRESELECTION_CAP = 400
 from robust_momentum_filter import apply_robust_momentum_filter
 
 
@@ -407,6 +409,7 @@ def _download_close_prices_resilient(
     period=None,
     batch_size=12,
     threads=False,
+    fallback_missing=True,
 ):
     """Download close-price history with chunking and per-ticker fallback."""
     unique_tickers = [
@@ -445,6 +448,9 @@ def _download_close_prices_resilient(
         recovered = set(batch_frame.columns)
         for ticker in batch:
             if ticker in recovered:
+                continue
+            if not fallback_missing:
+                failures.setdefault(ticker, "No usable history returned by the bulk request.")
                 continue
             try:
                 kwargs = {
@@ -2969,31 +2975,67 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     This lets the optimizer treat every shared Universal Portfolio symbol as a
     candidate for the optimal allocation (current weight 0) alongside the user's
     real holdings, so the rebalancing plan can recommend buying new stocks too.
-    Returns (extended_df, added_symbols).
+    Returns (extended_df, added_symbols, preselection_summary).
     """
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
     if universal_df.empty:
-        return portfolio_df, []
+        return portfolio_df, [], {
+            "method": "scalable-preselection-v1", "eligible": 0,
+            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+        }
 
     with get_db_connection() as conn:
         exclusions = optimizer_exclusions_frame(conn)
     universal_df = filter_optimizer_candidates(universal_df, exclusions)
     if universal_df.empty:
-        return portfolio_df, []
+        return portfolio_df, [], {
+            "method": "scalable-preselection-v1", "eligible": 0,
+            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+        }
 
     held_symbols = set(portfolio_df["Symbol"]) if not portfolio_df.empty else set()
     candidates = universal_df[~universal_df["Symbol"].isin(held_symbols)].copy()
     if candidates.empty:
-        return portfolio_df, []
+        return portfolio_df, [], {
+            "method": "scalable-preselection-v1", "eligible": 0,
+            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+        }
 
     candidates["Symbol"] = candidates["Symbol"].map(normalize_portfolio_symbol)
     candidates["Yahoo Ticker"] = candidates["Yahoo Ticker"].fillna("").astype(str).str.strip().str.upper()
     candidates["Currency"] = candidates["Currency"].fillna("").map(_normalize_currency_code)
     candidates = candidates[candidates["Yahoo Ticker"] != ""]
     if candidates.empty:
-        return portfolio_df, []
+        return portfolio_df, [], {
+            "method": "scalable-preselection-v1", "eligible": 0,
+            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+        }
 
-    latest_price_map = get_latest_price_map(tuple(candidates["Yahoo Ticker"].tolist()))
+    eligible_count = len(candidates)
+    ticker_clusters = tuple(
+        sorted(
+            (
+                str(row["Yahoo Ticker"]),
+                f"{str(row.get('Exchange') or 'Unknown')} · {str(row.get('Currency') or 'Unknown')}",
+            )
+            for _, row in candidates.iterrows()
+        )
+    )
+    shortlisted_tickers, recent_price_map, shortlist_report = preselect_universal_candidates(
+        ticker_clusters,
+        maximum_candidates=UNIVERSAL_PRESELECTION_CAP,
+    )
+    if shortlisted_tickers:
+        candidates = candidates[candidates["Yahoo Ticker"].isin(shortlisted_tickers)].copy()
+        latest_price_map = recent_price_map
+    elif eligible_count <= UNIVERSAL_PRESELECTION_CAP:
+        latest_price_map = get_latest_price_map(tuple(candidates["Yahoo Ticker"].tolist()))
+    else:
+        raise ValueError(
+            "The broad-universe preselection could not obtain enough recent market data. "
+            "No unranked candidate set was sent to the optimizer; retry when Yahoo data "
+            "is available."
+        )
     fx_map = get_fx_to_inr_map(candidates["Currency"].tolist())
 
     rows = []
@@ -3024,10 +3066,21 @@ def extend_allocation_with_universal_candidates(portfolio_df):
         added_symbols.append(row["Symbol"])
 
     if not rows:
-        return portfolio_df, []
+        return portfolio_df, [], {
+            "method": "scalable-preselection-v1",
+            "eligible": eligible_count,
+            "shortlisted": 0,
+            "cap": UNIVERSAL_PRESELECTION_CAP,
+        }
 
     extended_df = pd.concat([portfolio_df, pd.DataFrame(rows)], ignore_index=True)
-    return extended_df, added_symbols
+    return extended_df, added_symbols, {
+        "method": "scalable-preselection-v1",
+        "eligible": eligible_count,
+        "shortlisted": len(added_symbols),
+        "cap": UNIVERSAL_PRESELECTION_CAP,
+        "scored": int(len(shortlist_report)),
+    }
 
 # =========================================================
 # RETURNS / OPTIMIZATION
@@ -3040,6 +3093,8 @@ def _download_volume_history_resilient(
     end=None,
     period=None,
     batch_size=12,
+    threads=False,
+    fallback_missing=True,
 ):
     """Download volume history with the same resilient-per-ticker logic as price data."""
     unique_tickers = [
@@ -3059,7 +3114,7 @@ def _download_volume_history_resilient(
             kwargs = {
                 "progress": False,
                 "auto_adjust": True,
-                "threads": False,
+                "threads": threads,
             }
             if period is not None:
                 kwargs["period"] = period
@@ -3078,6 +3133,9 @@ def _download_volume_history_resilient(
         recovered = set(batch_frame.columns)
         for ticker in batch:
             if ticker in recovered:
+                continue
+            if not fallback_missing:
+                failures.setdefault(ticker, "No usable volume returned by the bulk request.")
                 continue
             try:
                 kwargs = {
@@ -3141,8 +3199,88 @@ def _extract_volume_frame(data, expected_tickers):
             frame = frame[["Volume"] * 0]
             return pd.DataFrame()
 
+    frame.columns = [str(col).strip().upper() for col in frame.columns]
     frame = frame.apply(pd.to_numeric, errors="coerce")
     return frame
+
+
+def _download_recent_market_data_bulk(tickers, period="2y", batch_size=180):
+    """Fetch closes and volumes together once per large Yahoo batch."""
+    unique_tickers = tuple(
+        str(ticker).strip().upper()
+        for ticker in dict.fromkeys(tickers)
+        if str(ticker).strip()
+    )
+    close_frames = []
+    volume_frames = []
+    for batch in _chunked(unique_tickers, int(batch_size)):
+        try:
+            downloaded = _yf_download_quiet(
+                batch,
+                period=period,
+                progress=False,
+                auto_adjust=True,
+                threads=True,
+            )
+        except Exception:
+            continue
+        closes = _extract_close_prices_frame(downloaded, batch)
+        volumes = _extract_volume_frame(downloaded, batch)
+        if not closes.empty:
+            close_frames.append(closes)
+        if not volumes.empty:
+            volume_frames.append(volumes)
+    closes = (
+        pd.concat(close_frames, axis=1).loc[:, lambda frame: ~frame.columns.duplicated()].sort_index()
+        if close_frames
+        else pd.DataFrame()
+    )
+    volumes = (
+        pd.concat(volume_frames, axis=1).loc[:, lambda frame: ~frame.columns.duplicated()].sort_index()
+        if volume_frames
+        else pd.DataFrame()
+    )
+    return closes, volumes
+
+
+@st.cache_data(show_spinner=False, ttl="24h", max_entries=8)
+def preselect_universal_candidates(ticker_cluster_pairs, maximum_candidates=400):
+    """Build a scalable recent-data shortlist before costly full-history analysis."""
+    pairs = tuple(
+        (str(ticker).strip().upper(), str(cluster))
+        for ticker, cluster in ticker_cluster_pairs
+        if str(ticker).strip()
+    )
+    tickers = tuple(dict.fromkeys(ticker for ticker, _ in pairs))
+    if not tickers:
+        return [], {}, pd.DataFrame()
+    if len(tickers) <= int(maximum_candidates):
+        prices = get_latest_price_map(tickers)
+        return list(tickers), prices, pd.DataFrame({"Ticker": list(tickers), "Selected": True})
+
+    closes, volumes = _download_recent_market_data_bulk(
+        tickers, period="2y", batch_size=180
+    )
+    selected, report = rank_scalable_candidates(
+        closes,
+        volumes,
+        dict(pairs),
+        maximum_candidates=int(maximum_candidates),
+        minimum_per_cluster=5,
+    )
+    if closes.empty:
+        return [], {}, report
+    recent = closes.ffill().iloc[-1]
+    price_map = {
+        ticker: float(recent[ticker])
+        for ticker in selected
+        if ticker in recent.index
+        and pd.notna(recent[ticker])
+        and np.isfinite(float(recent[ticker]))
+        and float(recent[ticker]) > 0
+    }
+    selected = [ticker for ticker in selected if ticker in price_map]
+    return selected, price_map, report
 
 
 def effective_history_end(end_date=None, buffer_days=0):
@@ -5846,11 +5984,18 @@ if run_btn:
             )
 
         with st.spinner("Adding Universal Portfolio symbols as buy candidates..."):
-            portfolio_df, universal_candidate_symbols = extend_allocation_with_universal_candidates(portfolio_df)
+            (
+                portfolio_df,
+                universal_candidate_symbols,
+                universal_preselection,
+            ) = extend_allocation_with_universal_candidates(portfolio_df)
         if universal_candidate_symbols:
             st.info(
-                "Universal Portfolio candidates included in this optimization (quantity 0): "
-                + ", ".join(universal_candidate_symbols)
+                f"Universal candidate shortlist: {len(universal_candidate_symbols):,} of "
+                f"{universal_preselection['eligible']:,} eligible symbols. The shortlist "
+                "uses recent risk-adjusted momentum, trading capacity, data continuity "
+                "and minimum representation for each listing cluster; all shortlisted "
+                "symbols still face the complete optimizer funnel."
             )
 
         col1, col2 = st.columns([2, 1], gap="medium")
@@ -6163,6 +6308,7 @@ if run_btn:
                 "internal_max_dd": float(max_dd),
                 "drop_bottom_fraction": float(drop_bottom_pct),
                 "momentum_filter": dict(MOMENTUM_FILTER_CONFIG),
+                "universe_preselection": dict(universal_preselection),
                 "sell_trade_policy": "omit-partial-sells-v1",
                 "history_buffer_days": int(history_buffer_days),
                 "redundancy_corr_threshold": float(redundancy_corr_threshold),
