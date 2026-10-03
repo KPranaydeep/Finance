@@ -4853,6 +4853,20 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             if validate_import_btn:
                 try:
                     staged_job = validate_universal_import_with_progress(staged_job["job_id"])
+                    remaining_pending = staged_job["counts"].get("pending", 0)
+                    if remaining_pending:
+                        st.session_state["holdings_flash_warning"] = (
+                            f"Validation checkpoint saved with {remaining_pending:,} symbols "
+                            "still pending. Select Validate / resume to continue."
+                        )
+                    else:
+                        st.session_state["holdings_flash_success"] = (
+                            f"Validation complete. {staged_job['counts'].get('verified', 0):,} "
+                            "verified additions are ready for review and application."
+                        )
+                    # The buttons above were instantiated from the pre-validation
+                    # counts. Rerun once so Apply is enabled from the durable result.
+                    st.rerun()
                 except Exception as exc:
                     update_errors.append(
                         "Universal CSV validation stopped safely. Its last checkpoint is "
