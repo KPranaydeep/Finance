@@ -3022,7 +3022,10 @@ def build_current_allocation_from_db(owner):
     return portfolio_df, invalid_rows
 
 
-def extend_allocation_with_universal_candidates(portfolio_df):
+def extend_allocation_with_universal_candidates(
+    portfolio_df,
+    maximum_candidates=UNIVERSAL_PRESELECTION_CAP,
+):
     """Add zero-quantity rows for Universal Portfolio symbols not already held.
 
     This lets the optimizer treat every shared Universal Portfolio symbol as a
@@ -3030,11 +3033,12 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     real holdings, so the rebalancing plan can recommend buying new stocks too.
     Returns (extended_df, added_symbols, preselection_summary).
     """
+    candidate_cap = max(int(maximum_candidates), 1)
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
     if universal_df.empty:
         return portfolio_df, [], {
             "method": "scalable-preselection-v1", "eligible": 0,
-            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+            "shortlisted": 0, "cap": candidate_cap,
         }
 
     with get_db_connection() as conn:
@@ -3043,7 +3047,7 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     if universal_df.empty:
         return portfolio_df, [], {
             "method": "scalable-preselection-v1", "eligible": 0,
-            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+            "shortlisted": 0, "cap": candidate_cap,
         }
 
     held_symbols = set(portfolio_df["Symbol"]) if not portfolio_df.empty else set()
@@ -3051,7 +3055,7 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     if candidates.empty:
         return portfolio_df, [], {
             "method": "scalable-preselection-v1", "eligible": 0,
-            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+            "shortlisted": 0, "cap": candidate_cap,
         }
 
     candidates["Symbol"] = candidates["Symbol"].map(normalize_portfolio_symbol)
@@ -3061,7 +3065,7 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     if candidates.empty:
         return portfolio_df, [], {
             "method": "scalable-preselection-v1", "eligible": 0,
-            "shortlisted": 0, "cap": UNIVERSAL_PRESELECTION_CAP,
+            "shortlisted": 0, "cap": candidate_cap,
         }
 
     eligible_count = len(candidates)
@@ -3081,12 +3085,12 @@ def extend_allocation_with_universal_candidates(portfolio_df):
         shortlist_diagnostics,
     ) = preselect_universal_candidates(
         ticker_clusters,
-        maximum_candidates=UNIVERSAL_PRESELECTION_CAP,
+        maximum_candidates=candidate_cap,
     )
     if shortlisted_tickers:
         candidates = candidates[candidates["Yahoo Ticker"].isin(shortlisted_tickers)].copy()
         latest_price_map = recent_price_map
-    elif eligible_count <= UNIVERSAL_PRESELECTION_CAP:
+    elif eligible_count <= candidate_cap:
         latest_price_map = get_latest_price_map(tuple(candidates["Yahoo Ticker"].tolist()))
     else:
         recovered = int(shortlist_diagnostics.get("recovered", 0))
@@ -3133,7 +3137,7 @@ def extend_allocation_with_universal_candidates(portfolio_df):
             "method": "scalable-preselection-v1",
             "eligible": eligible_count,
             "shortlisted": 0,
-            "cap": UNIVERSAL_PRESELECTION_CAP,
+            "cap": candidate_cap,
         }
 
     extended_df = pd.concat([portfolio_df, pd.DataFrame(rows)], ignore_index=True)
@@ -3141,7 +3145,7 @@ def extend_allocation_with_universal_candidates(portfolio_df):
         "method": "scalable-preselection-v1",
         "eligible": eligible_count,
         "shortlisted": len(added_symbols),
-        "cap": UNIVERSAL_PRESELECTION_CAP,
+        "cap": candidate_cap,
         "scored": int(len(shortlist_report)),
         "market_data": dict(shortlist_diagnostics),
     }
@@ -4920,6 +4924,22 @@ with st.sidebar:
         )
     )
 
+    universal_preselection_cap = int(
+        st.number_input(
+            "Universal candidate shortlist cap",
+            min_value=50,
+            max_value=1000,
+            value=UNIVERSAL_PRESELECTION_CAP,
+            step=50,
+            key="universal_preselection_cap",
+            help=(
+                "Maximum Universal Portfolio candidates sent into full-history "
+                "analysis before the existing liquidity, history, momentum and "
+                "near-duplicate filters. Larger values increase runtime and memory use."
+            ),
+        )
+    )
+
     redundancy_corr_threshold = float(
         st.number_input(
             "Merge assets correlated above",
@@ -6109,7 +6129,10 @@ if run_btn:
                 portfolio_df,
                 universal_candidate_symbols,
                 universal_preselection,
-            ) = extend_allocation_with_universal_candidates(portfolio_df)
+            ) = extend_allocation_with_universal_candidates(
+                portfolio_df,
+                maximum_candidates=universal_preselection_cap,
+            )
         previous_elapsed, previous_workload = _previous_run_estimate(CURRENT_USER)
         refined_estimate = estimate_run_seconds(
             previous_elapsed,
