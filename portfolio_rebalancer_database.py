@@ -26,6 +26,10 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
+from portfolio_risk_metrics import (
+    empirical_expected_shortfall,
+    moving_block_bootstrap_expected_shortfall,
+)
 from scalable_universe_preselection import rank_scalable_candidates
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
@@ -3957,19 +3961,21 @@ def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
 
 
 def portfolio_stats(weights, log_returns):
-    from scipy.stats import kurtosis, norm, skew
     portfolio_returns = log_returns @ weights
     mean = portfolio_returns.mean()
     std = portfolio_returns.std()
     annualized_return = mean * TRADING_DAYS_PER_YEAR
     annualized_vol = std * np.sqrt(TRADING_DAYS_PER_YEAR)
-
-    s = skew(portfolio_returns)
-    k = kurtosis(portfolio_returns, fisher=True)
-    alpha = 0.05
-    z = norm.ppf(alpha)
-    z_cf = z + (1/6)*(z**2 - 1)*s + (1/24)*(z**3 - 3*z)*k - (1/36)*(2*z**3 - 5*z)*s**2
-    cvar_cf = -(mean + z_cf * std) * TRADING_DAYS_PER_YEAR
+    simple_returns = np.expm1(np.asarray(portfolio_returns, dtype=float))
+    expected_shortfall_1 = empirical_expected_shortfall(
+        simple_returns,
+        confidence=0.95,
+    )
+    expected_shortfall_20 = moving_block_bootstrap_expected_shortfall(
+        np.asarray(portfolio_returns, dtype=float),
+        horizon_sessions=20,
+        confidence=0.95,
+    )
 
     excess_return = annualized_return - RISK_FREE_RATE_ANNUAL
     sharpe = excess_return / annualized_vol if annualized_vol != 0 else 0
@@ -3977,7 +3983,8 @@ def portfolio_stats(weights, log_returns):
     return {
         "Annual Return": annualized_return,
         "Annual Volatility": annualized_vol,
-        "Cornish-Fisher CVaR": cvar_cf,
+        "Historical ES 95% (1 Session)": expected_shortfall_1,
+        "Block-Bootstrap ES 95% (20 Sessions)": expected_shortfall_20,
         "Sharpe Ratio": sharpe,
     }
 
