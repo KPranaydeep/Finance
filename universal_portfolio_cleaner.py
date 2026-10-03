@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import sqlite3
 import uuid
@@ -90,6 +91,106 @@ def available_clusters(frame: pd.DataFrame) -> list[str]:
         for row in frame[["Exchange", "Currency"]].itertuples(index=False)
     }
     return sorted(keys)
+
+
+def cluster_members_frame(
+    conn: sqlite3.Connection, universal_owner: str, selected_cluster: str
+) -> pd.DataFrame:
+    """Return the current Universal Portfolio rows belonging to one exact cluster."""
+    rows = conn.execute(
+        """
+        SELECT symbol, stock_name, yahoo_ticker, exchange, currency
+        FROM master_holdings WHERE owner=? ORDER BY symbol
+        """,
+        (universal_owner,),
+    ).fetchall()
+    records = [
+        {
+            "Symbol": row["symbol"],
+            "Stock name": row["stock_name"],
+            "Yahoo ticker": row["yahoo_ticker"] or row["symbol"],
+            "Exchange": row["exchange"],
+            "Currency": row["currency"],
+        }
+        for row in rows
+        if cluster_key(row["exchange"], row["currency"]) == selected_cluster
+    ]
+    return pd.DataFrame.from_records(records)
+
+
+def representative_cluster_sample(
+    members: pd.DataFrame, selected_cluster: str, sample_size: int = 20
+) -> pd.DataFrame:
+    """Return a stable pseudo-random sample without depending on row ordering."""
+    if members is None or members.empty:
+        return pd.DataFrame(columns=["Symbol", "Stock name", "Yahoo ticker"])
+    frame = members.copy()
+    frame["_sample_order"] = frame["Yahoo ticker"].fillna(frame["Symbol"]).map(
+        lambda ticker: hashlib.sha256(
+            f"{selected_cluster}|{str(ticker).upper()}".encode("utf-8")
+        ).hexdigest()
+    )
+    size = min(max(int(sample_size), 1), len(frame))
+    return (
+        frame.sort_values("_sample_order", kind="mergesort")
+        .head(size)[["Symbol", "Stock name", "Yahoo ticker"]]
+        .reset_index(drop=True)
+    )
+
+
+def delete_cluster_snapshot(
+    conn: sqlite3.Connection,
+    universal_owner: str,
+    selected_cluster: str,
+    snapshot_symbols: list[str],
+) -> dict:
+    """Delete reviewed cluster members atomically, protecting all owned tickers."""
+    requested = {str(symbol).strip() for symbol in snapshot_symbols if str(symbol).strip()}
+    if not requested:
+        raise ValueError("The reviewed cluster snapshot is empty.")
+    current = cluster_members_frame(conn, universal_owner, selected_cluster)
+    current_symbols = set(current.get("Symbol", pd.Series(dtype=str)).astype(str))
+    eligible_symbols = requested & current_symbols
+    if not eligible_symbols:
+        raise ValueError("The reviewed cluster no longer contains the sampled symbols.")
+
+    symbol_to_ticker = {
+        str(symbol): str(ticker or symbol).upper()
+        for symbol, ticker in zip(current["Symbol"], current["Yahoo ticker"])
+    }
+    protected_tickers = {
+        str(row["yahoo_ticker"] or "").upper()
+        for row in conn.execute(
+            """
+            SELECT yahoo_ticker FROM master_holdings
+            WHERE owner<>? AND quantity>0 AND yahoo_ticker IS NOT NULL
+            """,
+            (universal_owner,),
+        ).fetchall()
+    }
+    removed = []
+    protected = []
+    conn.execute("BEGIN")
+    try:
+        for symbol in sorted(eligible_symbols):
+            if symbol_to_ticker.get(symbol, "") in protected_tickers:
+                protected.append(symbol)
+                continue
+            cursor = conn.execute(
+                "DELETE FROM master_holdings WHERE owner=? AND symbol=?",
+                (universal_owner, symbol),
+            )
+            if cursor.rowcount:
+                removed.append(symbol)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {
+        "removed": removed,
+        "protected": protected,
+        "not_in_reviewed_snapshot": sorted(current_symbols - requested),
+    }
 
 
 def score_price_history(series: pd.Series, as_of=None, stale_days=15) -> dict:

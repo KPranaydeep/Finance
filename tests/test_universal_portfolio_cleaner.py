@@ -5,11 +5,14 @@ import pandas as pd
 
 from universal_portfolio_cleaner import (
     apply_cleaner_job,
+    cluster_members_frame,
+    delete_cluster_snapshot,
     ensure_cleaner_schema,
     finalize_cleaner_job,
     get_cleaner_job,
     insider_sale_signal,
     prepare_cleaner_job,
+    representative_cluster_sample,
     record_history_batch,
     score_price_history,
 )
@@ -122,6 +125,36 @@ def test_cluster_scope_and_owned_holdings_are_protected():
 
     assert job["total_symbols"] == 1
     assert job["counts"]["protected"] == 1
+
+
+def test_cluster_sample_is_stable_and_cluster_delete_uses_reviewed_snapshot_only():
+    conn = connection()
+    for index in range(8):
+        add_row(conn, "__universal__", f"US{index}", f"US{index}", "NYQ", "USD")
+    add_row(conn, "__universal__", "INDIA.NS", "INDIA.NS", "NSI", "INR")
+    conn.commit()
+    members = cluster_members_frame(conn, "__universal__", "NYQ · USD")
+    sample_a = representative_cluster_sample(members, "NYQ · USD", sample_size=4)
+    sample_b = representative_cluster_sample(
+        members.iloc[::-1], "NYQ · USD", sample_size=4
+    )
+
+    assert len(members) == 8
+    assert sample_a["Symbol"].tolist() == sample_b["Symbol"].tolist()
+
+    reviewed = members["Symbol"].head(2).tolist()
+    add_row(conn, "alice", reviewed[0], reviewed[0], quantity=3)
+    conn.commit()
+    result = delete_cluster_snapshot(
+        conn, "__universal__", "NYQ · USD", reviewed
+    )
+
+    assert result["protected"] == [reviewed[0]]
+    assert result["removed"] == [reviewed[1]]
+    assert len(result["not_in_reviewed_snapshot"]) == 6
+    assert conn.execute(
+        "SELECT COUNT(*) FROM master_holdings WHERE owner='__universal__'"
+    ).fetchone()[0] == 8
 
 
 def test_final_proposal_is_ranked_and_hard_capped_then_rechecks_ownership():

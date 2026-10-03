@@ -51,6 +51,8 @@ from universal_portfolio_cleaner import (
     available_clusters,
     cleaner_audit_frame,
     cleaner_preview_frame,
+    cluster_members_frame,
+    delete_cluster_snapshot,
     ensure_cleaner_schema,
     finalize_cleaner_job,
     get_cleaner_job,
@@ -60,6 +62,7 @@ from universal_portfolio_cleaner import (
     pending_insider_items,
     prepare_cleaner_job,
     prepare_insider_shortlist,
+    representative_cluster_sample,
     record_history_batch,
     record_insider_signal,
     score_price_history,
@@ -5269,6 +5272,119 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 "delisted. A broad data outage blocks the proposal. Management filings "
                 "can reflect grants, exercises or planned sales, so they never act alone."
             )
+
+    with st.container(border=True):
+        st.markdown("**Remove an unsupported listing cluster**")
+        st.caption(
+            "Use this only when your investing platform cannot provide a listing cluster. "
+            "Prepare a frozen sample, check those tickers on Tickertape, then explicitly "
+            "confirm the cluster removal. Personal holdings remain protected."
+        )
+        cluster_to_review = st.selectbox(
+            "Listing cluster",
+            options=available_clusters(universal_df),
+            index=None,
+            placeholder="Choose one cluster to verify",
+            key="cluster_delete_selection",
+        )
+        prepare_cluster_review = st.button(
+            "Prepare verification sample",
+            icon=":material/preview:",
+            width="stretch",
+            key="prepare_cluster_delete_review",
+            disabled=cluster_to_review is None,
+        )
+        if prepare_cluster_review and cluster_to_review is not None:
+            try:
+                with get_db_connection() as conn:
+                    cluster_members = cluster_members_frame(
+                        conn, UNIVERSAL_OWNER, cluster_to_review
+                    )
+                st.session_state["cluster_delete_snapshot"] = {
+                    "cluster": cluster_to_review,
+                    "members": cluster_members.to_dict(orient="records"),
+                }
+                st.session_state["cluster_delete_checked"] = False
+                st.session_state["cluster_delete_phrase"] = ""
+            except Exception as exc:
+                update_errors.append(f"Could not prepare the cluster sample: {exc}")
+
+        cluster_snapshot = st.session_state.get("cluster_delete_snapshot")
+        if (
+            cluster_snapshot
+            and cluster_to_review == cluster_snapshot.get("cluster")
+        ):
+            reviewed_members = pd.DataFrame(cluster_snapshot.get("members", []))
+            sample = representative_cluster_sample(
+                reviewed_members, cluster_to_review, sample_size=20
+            )
+            st.warning(
+                f"This cluster contains {len(reviewed_members):,} symbols. Check the "
+                f"{len(sample):,} representative tickers below on Tickertape before "
+                "deciding. The sample is stable and distributed independently of table order."
+            )
+            st.dataframe(sample, hide_index=True, width="stretch")
+            if not sample.empty:
+                st.code(", ".join(sample["Yahoo ticker"].astype(str)), language=None)
+            st.download_button(
+                "Download complete cluster snapshot",
+                data=safe_report_csv(reviewed_members),
+                file_name=(
+                    "universal_cluster_"
+                    + re.sub(r"[^A-Za-z0-9]+", "_", cluster_to_review).strip("_").lower()
+                    + ".csv"
+                ),
+                mime="text/csv",
+                icon=":material/download:",
+                width="stretch",
+                key="download_cluster_delete_snapshot",
+            )
+            st.checkbox(
+                "I checked the sample and this cluster is not usable on my platform",
+                key="cluster_delete_checked",
+            )
+            required_phrase = f"DELETE {cluster_to_review}"
+            entered_phrase = st.text_input(
+                f"Type `{required_phrase}` to confirm",
+                key="cluster_delete_phrase",
+            )
+            delete_cluster_btn = st.button(
+                "Delete reviewed cluster",
+                icon=":material/delete_forever:",
+                type="primary",
+                width="stretch",
+                key="delete_reviewed_cluster",
+                disabled=(
+                    not st.session_state.get("cluster_delete_checked", False)
+                    or entered_phrase.strip() != required_phrase
+                    or reviewed_members.empty
+                ),
+            )
+            if delete_cluster_btn:
+                try:
+                    with get_db_connection() as conn:
+                        cluster_delete_result = delete_cluster_snapshot(
+                            conn,
+                            UNIVERSAL_OWNER,
+                            cluster_to_review,
+                            reviewed_members["Symbol"].astype(str).tolist(),
+                        )
+                    protected_note = (
+                        f" {len(cluster_delete_result['protected']):,} personally owned "
+                        "symbols remained protected."
+                        if cluster_delete_result["protected"]
+                        else ""
+                    )
+                    st.session_state["holdings_flash_success"] = (
+                        f"Removed {len(cluster_delete_result['removed']):,} reviewed "
+                        f"symbols from {cluster_to_review}.{protected_note}"
+                    )
+                    st.session_state.pop("cluster_delete_snapshot", None)
+                    st.rerun()
+                except Exception as exc:
+                    update_errors.append(f"Could not delete the reviewed cluster: {exc}")
+        elif cluster_snapshot and cluster_to_review is not None:
+            st.info("Prepare a new verification sample for the selected cluster.")
 
     with st.container(border=True):
         st.markdown("**Add / remove symbols**")
