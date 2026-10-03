@@ -400,6 +400,7 @@ def _download_close_prices_resilient(
     end=None,
     period=None,
     batch_size=12,
+    threads=False,
 ):
     """Download close-price history with chunking and per-ticker fallback."""
     unique_tickers = [
@@ -419,7 +420,7 @@ def _download_close_prices_resilient(
             kwargs = {
                 "progress": False,
                 "auto_adjust": True,
-                "threads": False,
+                "threads": threads,
             }
             if period is not None:
                 kwargs["period"] = period
@@ -2604,7 +2605,7 @@ def validate_universal_import_with_progress(job_id, batch_size=75, max_seconds=7
         return finished
 
 
-def scan_universal_cleaner_with_progress(job_id, batch_size=30, max_seconds=720):
+def scan_universal_cleaner_with_progress(job_id, batch_size=180, max_seconds=720):
     """Resume a cleaner job with durable checkpoints and a bounded UI run."""
     started = time.perf_counter()
     with get_db_connection() as conn:
@@ -2624,7 +2625,10 @@ def scan_universal_cleaner_with_progress(job_id, batch_size=30, max_seconds=720)
                 break
             tickers = [item["yahoo_ticker"] for item in batch]
             history, failures = _download_close_prices_resilient(
-                tickers, period="2y", batch_size=min(batch_size, 12)
+                tickers,
+                period="1y",
+                batch_size=min(batch_size, 90),
+                threads=True,
             )
             results = {}
             for item in batch:
