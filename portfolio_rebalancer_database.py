@@ -35,6 +35,17 @@ from optimization_run_timer import (
     start_run_timer,
 )
 from universal_portfolio_summary import summarize_universal_portfolio
+from universal_portfolio_import import (
+    apply_verified_import,
+    ensure_import_schema,
+    get_import_job,
+    import_items_frame,
+    latest_import_job,
+    pending_import_items,
+    prepare_import_job,
+    record_validation_batch,
+    safe_report_csv,
+)
 
 # Streamlit may retain an already-imported helper module across a hot deploy.
 # Reload only when the running process still has the pre-momentum configuration;
@@ -273,6 +284,14 @@ def _infer_market_from_ticker(ticker):
         return "HKEX", "HKD"
     if ticker.endswith(".T"):
         return "TSE", "JPY"
+    if ticker.endswith(".WA"):
+        return "WSE", "PLN"
+    if ticker.endswith(".CN"):
+        return "CSE", "CAD"
+    if ticker.endswith(".ME"):
+        return "MOEX", "RUB"
+    if ticker.endswith(".F"):
+        return "FRA", "EUR"
     return "US/Global", "USD"
 
 
@@ -641,6 +660,7 @@ def _ensure_master_holdings_schema(conn):
     """Create the table and repair older compatible schemas in place."""
     conn.execute(MASTER_HOLDINGS_DDL)
     conn.execute(LATEST_ANALYSIS_DDL)
+    ensure_import_schema(conn)
     now = datetime.now().isoformat(timespec="seconds")
 
     latest_columns = {
@@ -2422,6 +2442,147 @@ def add_symbols_to_universal(symbols):
         conn.commit()
 
     return added, duplicates, invalid_symbols
+
+
+def _probe_recent_import_batch(tickers):
+    """Return Yahoo tickers with a usable recent close from one batched request."""
+    normalized = [str(value).strip().upper() for value in tickers if str(value).strip()]
+    if not normalized:
+        return set()
+    downloaded = _yf_download_quiet(
+        normalized,
+        period="10d",
+        progress=False,
+        auto_adjust=True,
+        threads=False,
+        max_retries=2,
+    )
+    close_frame = _extract_close_prices_frame(downloaded, normalized)
+    return {
+        ticker
+        for ticker in normalized
+        if ticker in close_frame.columns
+        and pd.to_numeric(close_frame[ticker], errors="coerce").notna().any()
+    }
+
+
+def _import_validation_metadata(item, active_tickers):
+    ticker = str(item["source_symbol"]).strip().upper()
+    if ticker not in active_tickers:
+        return None
+    inferred_exchange, inferred_currency = _infer_market_from_ticker(ticker)
+    # The supplied American-company files use unsuffixed Yahoo symbols. Avoid
+    # thousands of metadata calls; USD is their quoted currency. Explicit
+    # non-US suffixes are rare and are enriched individually for correct FX.
+    if "." in ticker:
+        metadata = get_yahoo_metadata(ticker)
+        exchange = metadata.get("exchange") or inferred_exchange
+        currency = metadata.get("currency") or inferred_currency
+    else:
+        exchange = inferred_exchange
+        currency = inferred_currency
+    return {
+        "yahoo_ticker": ticker,
+        "exchange": str(exchange),
+        "currency": _normalize_currency_code(currency),
+    }
+
+
+def _format_import_eta(seconds):
+    if seconds is None or not np.isfinite(seconds) or seconds < 0:
+        return "estimating"
+    seconds = int(round(seconds))
+    minutes, remainder = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {remainder:02d}s"
+    return f"{remainder}s"
+
+
+def validate_universal_import_with_progress(job_id, batch_size=75, max_seconds=720):
+    """Validate a durable import job, checkpointing after every Yahoo batch."""
+    started = time.perf_counter()
+    with get_db_connection() as conn:
+        initial = get_import_job(conn, job_id)
+    total = max(int(initial["unique_symbols"]), 1)
+    initial_processed = int(initial["processed"])
+    progress_bar = st.progress(
+        float(initial["progress"]),
+        text=f"Processed {initial_processed:,} of {total:,} · ETA estimating",
+    )
+    with st.status("Validating recent Yahoo availability", expanded=True) as status:
+        status_line = st.empty()
+        batches = 0
+        while True:
+            with get_db_connection() as conn:
+                batch = pending_import_items(conn, job_id, batch_size)
+            if not batch:
+                break
+            tickers = [str(item["source_symbol"]).upper() for item in batch]
+            try:
+                active_tickers = _probe_recent_import_batch(tickers)
+            except Exception as exc:
+                status.update(
+                    label="Yahoo validation paused; checkpoint preserved",
+                    state="error",
+                    expanded=True,
+                )
+                status_line.error(
+                    "Yahoo could not complete this batch. No row was changed. "
+                    "Use Resume validation later. " + str(exc)
+                )
+                with get_db_connection() as conn:
+                    return get_import_job(conn, job_id)
+
+            active_metadata = {}
+            for item in batch:
+                metadata = _import_validation_metadata(item, active_tickers)
+                if metadata is not None:
+                    active_metadata[str(item["source_symbol"]).upper()] = metadata
+            with get_db_connection() as conn:
+                current = record_validation_batch(
+                    conn,
+                    job_id,
+                    tickers,
+                    active_metadata,
+                    max_attempts=3,
+                )
+            batches += 1
+            elapsed = max(time.perf_counter() - started, 0.001)
+            newly_processed = max(int(current["processed"]) - initial_processed, 0)
+            remaining = int(current["unique_symbols"]) - int(current["processed"])
+            rate = newly_processed / elapsed if newly_processed else 0.0
+            eta = remaining / rate if rate > 0 else None
+            progress_bar.progress(
+                float(current["progress"]),
+                text=(
+                    f'Processed {int(current["processed"]):,} of '
+                    f'{int(current["unique_symbols"]):,} · ETA {_format_import_eta(eta)}'
+                ),
+            )
+            status_line.caption(
+                f"Batch {batches:,} · {len(active_metadata):,} recently active · "
+                f"checkpoint saved · elapsed {_format_import_eta(elapsed)}"
+            )
+            if elapsed >= max_seconds and current["counts"].get("pending", 0):
+                status.update(
+                    label="Validation paused at the safe time limit",
+                    state="complete",
+                    expanded=False,
+                )
+                return current
+
+        with get_db_connection() as conn:
+            finished = get_import_job(conn, job_id)
+        progress_bar.progress(1.0, text=f"Processed {finished['unique_symbols']:,} of {total:,}")
+        status.update(
+            label="Validation complete; review before applying",
+            state="complete",
+            expanded=False,
+        )
+        return finished
 
 
 def remove_symbols_from_master(symbols, owner):
@@ -4610,6 +4771,159 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 universal_df[["Symbol", "Stock Name", "Yahoo Ticker", "Exchange", "Currency"]],
                 width="stretch",
                 hide_index=True,
+            )
+
+    with st.container(border=True):
+        st.markdown("**Staged CSV update**")
+        st.caption(
+            "Upload a symbol list such as a CompaniesMarketCap export. The app stages "
+            "and checkpoints it first, validates recent Yahoo prices in batches, and "
+            "omits unresolved or conflicting rows. Nothing is removed or overwritten. "
+            "Source P/E ratios and prices are ignored because they may be stale."
+        )
+        universal_source_upload = st.file_uploader(
+            "Universal portfolio source CSV",
+            type=["csv"],
+            key="universal_source_csv",
+            help="Supported symbol headers include Symbol, Ticker, Ticker Symbol and Stock Code.",
+        )
+        prepare_universal_import_btn = st.button(
+            "Prepare safe update",
+            icon=":material/inventory_2:",
+            width="stretch",
+            key="prepare_universal_import",
+            disabled=universal_source_upload is None,
+        )
+
+        staged_job = None
+        if prepare_universal_import_btn and universal_source_upload is not None:
+            try:
+                with get_db_connection() as conn:
+                    staged_job_id, resumed_job, staged_job = prepare_import_job(
+                        conn,
+                        universal_source_upload.getvalue(),
+                        universal_source_upload.name,
+                        UNIVERSAL_OWNER,
+                    )
+                st.session_state["active_universal_import_job"] = staged_job_id
+                if resumed_job:
+                    st.info("This exact file was already staged. Continuing its saved job.")
+                else:
+                    parse_stats = staged_job.get("parse_stats", {})
+                    st.success(
+                        f"Staged {staged_job['unique_symbols']:,} unique symbols from "
+                        f"{staged_job['source_rows']:,} source rows. "
+                        f"Removed {parse_stats.get('duplicates_removed', 0):,} duplicates."
+                    )
+            except Exception as exc:
+                update_errors.append(f"Could not prepare universal CSV update: {exc}")
+
+        active_import_job_id = st.session_state.get("active_universal_import_job")
+        try:
+            with get_db_connection() as conn:
+                if active_import_job_id:
+                    staged_job = get_import_job(conn, active_import_job_id)
+                elif staged_job is None:
+                    staged_job = latest_import_job(conn)
+            if staged_job is not None:
+                st.session_state["active_universal_import_job"] = staged_job["job_id"]
+        except Exception as exc:
+            staged_job = None
+            update_errors.append(f"Could not load the saved universal import job: {exc}")
+
+        if staged_job is not None:
+            pending_count = staged_job["counts"].get("pending", 0)
+            verified_count = staged_job["counts"].get("verified", 0)
+            action_row = st.container(horizontal=True)
+            with action_row:
+                validate_import_btn = st.button(
+                    "Validate / resume",
+                    icon=":material/fact_check:",
+                    key="validate_universal_import",
+                    disabled=(pending_count == 0 or staged_job["status"] == "applied"),
+                )
+                apply_import_btn = st.button(
+                    "Apply verified additions",
+                    icon=":material/add_task:",
+                    type="primary",
+                    key="apply_universal_import",
+                    disabled=(pending_count > 0 or verified_count == 0),
+                )
+
+            if validate_import_btn:
+                try:
+                    staged_job = validate_universal_import_with_progress(staged_job["job_id"])
+                except Exception as exc:
+                    update_errors.append(
+                        "Universal CSV validation stopped safely. Its last checkpoint is "
+                        f"available to resume. Details: {exc}"
+                    )
+
+            if apply_import_btn:
+                try:
+                    with get_db_connection() as conn:
+                        applied_result = apply_verified_import(
+                            conn, staged_job["job_id"], UNIVERSAL_OWNER
+                        )
+                    st.session_state["holdings_flash_success"] = (
+                        f"Added {applied_result['added']:,} verified symbols to the "
+                        "Universal Portfolio. Existing, unresolved and conflicting rows "
+                        "were left unchanged."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    update_errors.append(f"Could not apply the staged universal update: {exc}")
+
+            with get_db_connection() as conn:
+                staged_job = get_import_job(conn, staged_job["job_id"])
+                staged_items = import_items_frame(conn, staged_job["job_id"])
+            staged_counts = staged_job["counts"]
+            import_metrics = st.columns(4, gap="small")
+            import_metrics[0].metric("Source symbols", f"{staged_job['unique_symbols']:,}")
+            import_metrics[1].metric(
+                "Recently active",
+                f"{staged_counts.get('verified', 0) + staged_counts.get('added', 0):,}",
+            )
+            import_metrics[2].metric("Already present", f"{staged_counts.get('existing', 0):,}")
+            import_metrics[3].metric(
+                "Omitted safely",
+                f"{staged_counts.get('unresolved', 0) + staged_counts.get('rejected', 0) + staged_counts.get('conflict', 0):,}",
+            )
+            st.progress(
+                float(staged_job["progress"]),
+                text=(
+                    f"Processed {staged_job['processed']:,} of "
+                    f"{staged_job['unique_symbols']:,} · {staged_job['status']}"
+                ),
+            )
+            count_rows = [
+                {"Result": label, "Symbols": int(staged_counts.get(status, 0))}
+                for status, label in (
+                    ("pending", "Pending validation"),
+                    ("verified", "Verified and ready to add"),
+                    ("added", "Added"),
+                    ("existing", "Already present"),
+                    ("unresolved", "No recent usable price"),
+                    ("conflict", "Ticker/exchange conflict"),
+                    ("rejected", "Invalid source symbol"),
+                )
+                if staged_counts.get(status, 0)
+            ]
+            if count_rows:
+                st.dataframe(pd.DataFrame(count_rows), hide_index=True, width="stretch")
+            st.caption(
+                "No recent usable price is a conservative omission, not proof of delisting: "
+                "the symbol may also be suspended or temporarily unavailable from Yahoo. "
+                "Re-uploading the identical file resumes the same checkpoint and never duplicates rows."
+            )
+            st.download_button(
+                "Download validation report",
+                data=safe_report_csv(staged_items),
+                file_name=f"universal_import_{staged_job['job_id']}.csv",
+                mime="text/csv",
+                icon=":material/download:",
+                width="stretch",
+                key="download_universal_import_report",
             )
 
     with st.container(border=True):
