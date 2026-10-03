@@ -315,8 +315,8 @@ def prepare_cleaner_job(
 ) -> dict:
     ensure_cleaner_schema(conn)
     percentile = float(removal_percentile)
-    if not 1 <= percentile <= 20:
-        raise ValueError("Removal percentile must be between 1% and 20%.")
+    if not 1 <= percentile <= 100:
+        raise ValueError("Removal percentile must be between 1% and 100%.")
     valid_criteria = {"unavailable", "bearish", "management"}
     selected_criteria = valid_criteria if criteria is None else set(criteria)
     if not selected_criteria or not selected_criteria.issubset(valid_criteria):

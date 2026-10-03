@@ -5103,14 +5103,15 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
         cleaner_limit = st.slider(
             "Maximum removal percentile",
             min_value=1,
-            max_value=20,
+            max_value=100,
             value=10,
             step=1,
             format="%d%%",
             key="universal_cleaner_percentile",
             help=(
-                "This is a hard cap, not a removal target. The cleaner can propose fewer "
-                "symbols when the evidence is weak."
+                "This is a hard cap, not a removal target. At 100%, every qualifying "
+                "unowned symbol in the selected scope can be excluded from optimization; "
+                "the Universal Portfolio rows are still not deleted."
             ),
         )
         cleaner_criterion_labels = {

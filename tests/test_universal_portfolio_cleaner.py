@@ -2,6 +2,7 @@ import sqlite3
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from universal_portfolio_cleaner import (
     apply_cleaner_exclusions,
@@ -128,6 +129,18 @@ def test_cluster_scope_and_owned_holdings_are_protected():
 
     assert job["total_symbols"] == 1
     assert job["counts"]["protected"] == 1
+
+
+def test_cleaner_accepts_full_exclusion_cap_and_rejects_above_100():
+    conn = connection()
+    add_row(conn, "__universal__", "AAA", "AAA")
+    conn.commit()
+
+    job = prepare_cleaner_job(conn, "__universal__", [], 100, False)
+
+    assert job["removal_percentile"] == 100
+    with pytest.raises(ValueError, match="between 1% and 100%"):
+        prepare_cleaner_job(conn, "__universal__", [], 101, False)
 
 
 def test_cluster_sample_is_stable_and_cluster_delete_uses_reviewed_snapshot_only():
