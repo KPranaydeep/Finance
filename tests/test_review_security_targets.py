@@ -68,7 +68,9 @@ class SecurityTargetTests(unittest.TestCase):
         self.assertEqual(early_observed['net_return'], .0184)
         observed = review_card_summary({
             'publication_id': 'PUB-TEST',
-            'decision': {'next_review': '2026-10-03', 'reasons': []},
+            # Keep this safely in the future so the test does not turn into
+            # "Review now" when the wall clock reaches the fixture date.
+            'decision': {'next_review': '2099-10-03', 'reasons': []},
             'forecast': {},
             'metrics': {'net_total_return': .0184},
         })
