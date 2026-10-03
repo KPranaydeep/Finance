@@ -6,6 +6,7 @@ from optimization_run_timer import (
     finish_run_timer,
     format_elapsed,
     estimate_run_seconds,
+    safe_stop_reason,
     serializable_timer,
     start_run_timer,
     update_run_stage,
@@ -42,6 +43,14 @@ class OptimizationRunTimerTests(unittest.TestCase):
         self.assertEqual(stopped["status"], "stopped_without_plan")
         self.assertEqual(stopped["elapsed_seconds"], 3.5)
         self.assertIsNone(stopped["finish_event"])
+
+    def test_stop_reason_is_compact_and_redacts_connection_strings(self):
+        reason = safe_stop_reason(
+            "download failed\npostgresql://user:secret@example.invalid/db " + "x" * 400
+        )
+        self.assertNotIn("secret", reason)
+        self.assertNotIn("\n", reason)
+        self.assertLessEqual(len(reason), 280)
 
     def test_serialized_state_excludes_process_clock(self):
         state = start_run_timer(monotonic_now=42.0)

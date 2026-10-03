@@ -33,6 +33,7 @@ from optimization_run_timer import (
     estimate_run_seconds,
     finish_run_timer,
     format_elapsed,
+    safe_stop_reason,
     serializable_timer,
     start_run_timer,
     update_run_stage,
@@ -1317,7 +1318,12 @@ def _timer_summary(timer):
     if status == "finished":
         return "finished", f"Run-to-plan time: **{elapsed}** · Rebalancing plan generated"
     if status == "stopped_without_plan":
-        return "stopped", f"Run stopped before a plan was generated after **{elapsed}**."
+        stage = str(timer.get("stage") or "Unknown stage")
+        reason = safe_stop_reason(timer.get("stop_reason"))
+        return (
+            "stopped",
+            f"Run stopped during **{stage}** after **{elapsed}**. Reason: {reason}",
+        )
     return None
 
 
@@ -3064,7 +3070,12 @@ def extend_allocation_with_universal_candidates(portfolio_df):
             for _, row in candidates.iterrows()
         )
     )
-    shortlisted_tickers, recent_price_map, shortlist_report = preselect_universal_candidates(
+    (
+        shortlisted_tickers,
+        recent_price_map,
+        shortlist_report,
+        shortlist_diagnostics,
+    ) = preselect_universal_candidates(
         ticker_clusters,
         maximum_candidates=UNIVERSAL_PRESELECTION_CAP,
     )
@@ -3074,10 +3085,15 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     elif eligible_count <= UNIVERSAL_PRESELECTION_CAP:
         latest_price_map = get_latest_price_map(tuple(candidates["Yahoo Ticker"].tolist()))
     else:
+        recovered = int(shortlist_diagnostics.get("recovered", 0))
+        requests = int(shortlist_diagnostics.get("requests", 0))
+        failed = int(shortlist_diagnostics.get("failed_or_empty_requests", 0))
         raise ValueError(
-            "The broad-universe preselection could not obtain enough recent market data. "
-            "No unranked candidate set was sent to the optimizer; retry when Yahoo data "
-            "is available."
+            "Broad-universe preselection recovered "
+            f"{recovered:,} of {eligible_count:,} recent price histories across "
+            f"{requests:,} batched Yahoo requests ({failed:,} failed or empty). "
+            "No unranked candidate set was sent to the optimizer. Retry when Yahoo "
+            "data is available."
         )
     fx_map = get_fx_to_inr_map(candidates["Currency"].tolist())
 
@@ -3123,6 +3139,7 @@ def extend_allocation_with_universal_candidates(portfolio_df):
         "shortlisted": len(added_symbols),
         "cap": UNIVERSAL_PRESELECTION_CAP,
         "scored": int(len(shortlist_report)),
+        "market_data": dict(shortlist_diagnostics),
     }
 
 # =========================================================
@@ -3247,8 +3264,13 @@ def _extract_volume_frame(data, expected_tickers):
     return frame
 
 
-def _download_recent_market_data_bulk(tickers, period="2y", batch_size=180):
-    """Fetch closes and volumes together once per large Yahoo batch."""
+def _download_recent_market_data_bulk(
+    tickers,
+    period="2y",
+    batch_size=120,
+    fallback_batch_size=40,
+):
+    """Fetch recent data in fast batches, retrying missing names in smaller batches."""
     unique_tickers = tuple(
         str(ticker).strip().upper()
         for ticker in dict.fromkeys(tickers)
@@ -3256,7 +3278,12 @@ def _download_recent_market_data_bulk(tickers, period="2y", batch_size=180):
     )
     close_frames = []
     volume_frames = []
-    for batch in _chunked(unique_tickers, int(batch_size)):
+    requested_batches = 0
+    failed_batches = 0
+
+    def collect(batch):
+        nonlocal requested_batches, failed_batches
+        requested_batches += 1
         try:
             downloaded = _yf_download_quiet(
                 batch,
@@ -3266,13 +3293,27 @@ def _download_recent_market_data_bulk(tickers, period="2y", batch_size=180):
                 threads=True,
             )
         except Exception:
-            continue
+            failed_batches += 1
+            return set()
         closes = _extract_close_prices_frame(downloaded, batch)
         volumes = _extract_volume_frame(downloaded, batch)
         if not closes.empty:
             close_frames.append(closes)
         if not volumes.empty:
             volume_frames.append(volumes)
+        recovered = set(closes.columns)
+        if not recovered:
+            failed_batches += 1
+        return recovered
+
+    primary_size = max(int(batch_size), 1)
+    retry_size = max(min(int(fallback_batch_size), primary_size), 1)
+    for batch in _chunked(unique_tickers, primary_size):
+        recovered = collect(batch)
+        missing = [ticker for ticker in batch if ticker not in recovered]
+        if missing and retry_size < len(batch):
+            for retry_batch in _chunked(missing, retry_size):
+                collect(retry_batch)
     closes = (
         pd.concat(close_frames, axis=1).loc[:, lambda frame: ~frame.columns.duplicated()].sort_index()
         if close_frames
@@ -3283,7 +3324,15 @@ def _download_recent_market_data_bulk(tickers, period="2y", batch_size=180):
         if volume_frames
         else pd.DataFrame()
     )
-    return closes, volumes
+    diagnostics = {
+        "requested": len(unique_tickers),
+        "recovered": int(len(closes.columns)),
+        "requests": int(requested_batches),
+        "failed_or_empty_requests": int(failed_batches),
+        "primary_batch_size": primary_size,
+        "fallback_batch_size": retry_size,
+    }
+    return closes, volumes, diagnostics
 
 
 @st.cache_data(show_spinner=False, ttl="24h", max_entries=8)
@@ -3296,13 +3345,24 @@ def preselect_universal_candidates(ticker_cluster_pairs, maximum_candidates=400)
     )
     tickers = tuple(dict.fromkeys(ticker for ticker, _ in pairs))
     if not tickers:
-        return [], {}, pd.DataFrame()
+        return [], {}, pd.DataFrame(), {"requested": 0, "recovered": 0, "requests": 0}
     if len(tickers) <= int(maximum_candidates):
         prices = get_latest_price_map(tickers)
-        return list(tickers), prices, pd.DataFrame({"Ticker": list(tickers), "Selected": True})
+        diagnostics = {
+            "requested": len(tickers),
+            "recovered": len(prices),
+            "requests": 0,
+            "method": "direct-price-map",
+        }
+        return (
+            list(tickers),
+            prices,
+            pd.DataFrame({"Ticker": list(tickers), "Selected": True}),
+            diagnostics,
+        )
 
-    closes, volumes = _download_recent_market_data_bulk(
-        tickers, period="2y", batch_size=180
+    closes, volumes, diagnostics = _download_recent_market_data_bulk(
+        tickers, period="2y", batch_size=120, fallback_batch_size=40
     )
     selected, report = rank_scalable_candidates(
         closes,
@@ -3312,7 +3372,7 @@ def preselect_universal_candidates(ticker_cluster_pairs, maximum_candidates=400)
         minimum_per_cluster=5,
     )
     if closes.empty:
-        return [], {}, report
+        return [], {}, report, diagnostics
     recent = closes.ffill().iloc[-1]
     price_map = {
         ticker: float(recent[ticker])
@@ -3323,7 +3383,9 @@ def preselect_universal_candidates(ticker_cluster_pairs, maximum_candidates=400)
         and float(recent[ticker]) > 0
     }
     selected = [ticker for ticker in selected if ticker in price_map]
-    return selected, price_map, report
+    diagnostics["scored"] = int(len(report))
+    diagnostics["selected"] = int(len(selected))
+    return selected, price_map, report, diagnostics
 
 
 def effective_history_end(end_date=None, buffer_days=0):

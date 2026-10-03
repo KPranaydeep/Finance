@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 
@@ -125,6 +126,20 @@ def abort_run_timer(timer: dict, reason: str, *,
         "finished_at": wall_now.astimezone(timezone.utc).isoformat(timespec="seconds"),
     })
     return result
+
+
+def safe_stop_reason(reason: object, maximum_length: int = 280) -> str:
+    """Return a compact user-facing diagnostic without multiline log noise."""
+    text = " ".join(str(reason or "").split())
+    if not text:
+        return "No diagnostic reason was recorded."
+    text = re.sub(
+        r"(?i)(postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^\s]+",
+        r"\1://[redacted]",
+        text,
+    )
+    limit = max(int(maximum_length), 40)
+    return text if len(text) <= limit else f"{text[: limit - 1].rstrip()}…"
 
 
 def serializable_timer(timer: dict | None) -> dict | None:
