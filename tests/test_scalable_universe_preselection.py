@@ -1,7 +1,10 @@
 import numpy as np
 import pandas as pd
 
-from scalable_universe_preselection import rank_scalable_candidates
+from scalable_universe_preselection import (
+    convert_candidate_history_to_inr,
+    rank_scalable_candidates,
+)
 
 
 def histories():
@@ -71,3 +74,21 @@ def test_emerging_winner_sleeve_retains_recent_breakout_with_volume_confirmation
     assert "EMERGING" in selected
     sleeve = report.loc[report["Ticker"].eq("EMERGING"), "Selection sleeve"].iloc[0]
     assert sleeve == "Emerging winner"
+
+
+def test_recent_candidate_histories_are_converted_to_inr_without_double_fallback():
+    index = pd.bdate_range("2026-01-01", periods=3)
+    closes = pd.DataFrame(
+        {"INDIA.NS": [100.0, 101.0, 102.0], "US": [10.0, 11.0, 12.0], "UK": [5.0, 6.0, 7.0]},
+        index=index,
+    )
+    converted, omitted = convert_candidate_history_to_inr(
+        closes,
+        {"INDIA.NS": "INR", "US": "USD", "UK": "GBP"},
+        {"USD": pd.Series([80.0, 81.0, 82.0], index=index)},
+    )
+
+    assert converted["INDIA.NS"].tolist() == closes["INDIA.NS"].tolist()
+    assert converted["US"].tolist() == [800.0, 891.0, 984.0]
+    assert "UK" not in converted.columns
+    assert omitted == ["GBP"]

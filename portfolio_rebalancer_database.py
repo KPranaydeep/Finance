@@ -30,7 +30,10 @@ from portfolio_risk_metrics import (
     empirical_expected_shortfall,
     moving_block_bootstrap_expected_shortfall,
 )
-from scalable_universe_preselection import rank_scalable_candidates
+from scalable_universe_preselection import (
+    convert_candidate_history_to_inr,
+    rank_scalable_candidates,
+)
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
@@ -3074,6 +3077,7 @@ def extend_allocation_with_universal_candidates(
             (
                 str(row["Yahoo Ticker"]),
                 f"{str(row.get('Exchange') or 'Unknown')} · {str(row.get('Currency') or 'Unknown')}",
+                str(row.get("Currency") or "INR"),
             )
             for _, row in candidates.iterrows()
         )
@@ -3344,14 +3348,18 @@ def _download_recent_market_data_bulk(
 
 
 @st.cache_data(show_spinner=False, ttl="24h", max_entries=8)
-def preselect_universal_candidates(ticker_cluster_pairs, maximum_candidates=400):
-    """Build a scalable recent-data shortlist before costly full-history analysis."""
-    pairs = tuple(
-        (str(ticker).strip().upper(), str(cluster))
-        for ticker, cluster in ticker_cluster_pairs
+def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candidates=400):
+    """Build an INR-adjusted recent-data shortlist before full-history analysis."""
+    rows = tuple(
+        (
+            str(ticker).strip().upper(),
+            str(cluster),
+            _normalize_currency_code(currency),
+        )
+        for ticker, cluster, currency in ticker_cluster_currency_rows
         if str(ticker).strip()
     )
-    tickers = tuple(dict.fromkeys(ticker for ticker, _ in pairs))
+    tickers = tuple(dict.fromkeys(ticker for ticker, _, _ in rows))
     if not tickers:
         return [], {}, pd.DataFrame(), {"requested": 0, "recovered": 0, "requests": 0}
     if len(tickers) <= int(maximum_candidates):
@@ -3369,19 +3377,49 @@ def preselect_universal_candidates(ticker_cluster_pairs, maximum_candidates=400)
             diagnostics,
         )
 
-    closes, volumes, diagnostics = _download_recent_market_data_bulk(
+    local_closes, volumes, diagnostics = _download_recent_market_data_bulk(
         tickers, period="2y", batch_size=120, fallback_batch_size=40
+    )
+    if local_closes.empty:
+        diagnostics.update({"ranking_currency": "INR", "inr_adjusted": True})
+        return [], {}, pd.DataFrame(), diagnostics
+    ticker_currencies = {ticker: currency for ticker, _, currency in rows}
+    fx_histories = {}
+    fx_download_failures = []
+    for currency in sorted(set(ticker_currencies.values()) - {"INR"}):
+        try:
+            fx_histories[currency] = download_fx_history_to_inr(
+                currency,
+                local_closes.index.min(),
+                local_closes.index.max(),
+            )
+        except Exception:
+            fx_download_failures.append(currency)
+    closes, omitted_currencies = convert_candidate_history_to_inr(
+        local_closes,
+        ticker_currencies,
+        fx_histories,
+    )
+    omitted_currencies = sorted(set(omitted_currencies) | set(fx_download_failures))
+    volumes = volumes.reindex(columns=closes.columns)
+    diagnostics.update(
+        {
+            "ranking_currency": "INR",
+            "inr_adjusted": True,
+            "fx_currencies_requested": len(set(ticker_currencies.values()) - {"INR"}),
+            "fx_currencies_omitted": omitted_currencies,
+        }
     )
     selected, report = rank_scalable_candidates(
         closes,
         volumes,
-        dict(pairs),
+        {ticker: cluster for ticker, cluster, _ in rows},
         maximum_candidates=int(maximum_candidates),
         minimum_per_cluster=5,
     )
     if closes.empty:
         return [], {}, report, diagnostics
-    recent = closes.ffill().iloc[-1]
+    recent = local_closes.ffill().iloc[-1]
     price_map = {
         ticker: float(recent[ticker])
         for ticker in selected

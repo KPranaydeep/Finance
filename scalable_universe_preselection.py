@@ -6,6 +6,36 @@ import numpy as np
 import pandas as pd
 
 
+def convert_candidate_history_to_inr(
+    close_history: pd.DataFrame,
+    ticker_currencies: dict[str, str],
+    fx_history_to_inr: dict[str, pd.Series],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Convert recent candidate histories to INR, omitting unconvertible currencies."""
+    if close_history is None or close_history.empty:
+        return pd.DataFrame(), []
+
+    converted = pd.DataFrame(index=close_history.index)
+    omitted_currencies: set[str] = set()
+    for ticker in close_history.columns:
+        currency = str(ticker_currencies.get(str(ticker).upper(), "INR")).strip().upper()
+        prices = pd.to_numeric(close_history[ticker], errors="coerce")
+        if currency == "INR":
+            converted[ticker] = prices
+            continue
+        fx = fx_history_to_inr.get(currency)
+        if fx is None or fx.empty:
+            omitted_currencies.add(currency)
+            continue
+        aligned_fx = pd.to_numeric(fx, errors="coerce").reindex(close_history.index).ffill().bfill()
+        if aligned_fx.isna().all():
+            omitted_currencies.add(currency)
+            continue
+        converted[ticker] = prices * aligned_fx
+
+    return converted, sorted(omitted_currencies)
+
+
 def rank_scalable_candidates(
     close_history: pd.DataFrame,
     volume_history: pd.DataFrame,
