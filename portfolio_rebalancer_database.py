@@ -46,6 +46,24 @@ from universal_portfolio_import import (
     record_validation_batch,
     safe_report_csv,
 )
+from universal_portfolio_cleaner import (
+    apply_cleaner_job,
+    available_clusters,
+    cleaner_audit_frame,
+    cleaner_preview_frame,
+    ensure_cleaner_schema,
+    finalize_cleaner_job,
+    get_cleaner_job,
+    insider_sale_signal,
+    latest_cleaner_job,
+    pending_history_items,
+    pending_insider_items,
+    prepare_cleaner_job,
+    prepare_insider_shortlist,
+    record_history_batch,
+    record_insider_signal,
+    score_price_history,
+)
 
 # Streamlit may retain an already-imported helper module across a hot deploy.
 # Reload only when the running process still has the pre-momentum configuration;
@@ -661,6 +679,7 @@ def _ensure_master_holdings_schema(conn):
     conn.execute(MASTER_HOLDINGS_DDL)
     conn.execute(LATEST_ANALYSIS_DDL)
     ensure_import_schema(conn)
+    ensure_cleaner_schema(conn)
     now = datetime.now().isoformat(timespec="seconds")
 
     latest_columns = {
@@ -2582,6 +2601,114 @@ def validate_universal_import_with_progress(job_id, batch_size=75, max_seconds=7
             state="complete",
             expanded=False,
         )
+        return finished
+
+
+def scan_universal_cleaner_with_progress(job_id, batch_size=30, max_seconds=720):
+    """Resume a cleaner job with durable checkpoints and a bounded UI run."""
+    started = time.perf_counter()
+    with get_db_connection() as conn:
+        initial = get_cleaner_job(conn, job_id)
+    total = max(int(initial["total_symbols"]), 1)
+    initial_done = total - int(initial["counts"]["history_pending"])
+    progress_bar = st.progress(
+        initial_done / total,
+        text=f"Analysed {initial_done:,} of {total:,} price histories · ETA estimating",
+    )
+    with st.status("Screening the selected universe", expanded=True) as status:
+        status_line = st.empty()
+        while True:
+            with get_db_connection() as conn:
+                batch = pending_history_items(conn, job_id, batch_size)
+            if not batch:
+                break
+            tickers = [item["yahoo_ticker"] for item in batch]
+            history, failures = _download_close_prices_resilient(
+                tickers, period="2y", batch_size=min(batch_size, 12)
+            )
+            results = {}
+            for item in batch:
+                ticker = item["yahoo_ticker"]
+                metrics = score_price_history(
+                    history[ticker] if ticker in history.columns else pd.Series(dtype=float)
+                )
+                if metrics["history_status"] == "no_price" and ticker in failures:
+                    metrics["reason"] = "No usable recent price history; review manually."
+                results[item["symbol"]] = metrics
+            with get_db_connection() as conn:
+                current = record_history_batch(conn, job_id, results)
+            done = total - int(current["counts"]["history_pending"])
+            elapsed = max(time.perf_counter() - started, 0.001)
+            rate = max(done - initial_done, 0) / elapsed
+            eta = (total - done) / rate if rate > 0 else None
+            progress_bar.progress(
+                done / total,
+                text=(
+                    f"Analysed {done:,} of {total:,} price histories · "
+                    f"ETA {_format_import_eta(eta)}"
+                ),
+            )
+            status_line.caption(
+                f"Price checkpoint saved · elapsed {_format_import_eta(elapsed)}"
+            )
+            if elapsed >= max_seconds and current["counts"]["history_pending"]:
+                status.update(
+                    label="Cleaner paused at the safe time limit; checkpoint preserved",
+                    state="complete",
+                    expanded=False,
+                )
+                return current
+
+        with get_db_connection() as conn:
+            current = get_cleaner_job(conn, job_id)
+            if current["include_insider"] and not current["counts"]["insider_pending"]:
+                prepare_insider_shortlist(conn, job_id)
+                current = get_cleaner_job(conn, job_id)
+
+        if current["counts"]["insider_pending"]:
+            import yfinance as yf
+
+            status_line.caption(
+                "Checking recent management transactions for a small U.S. shortlist. "
+                "Missing coverage remains neutral."
+            )
+            while True:
+                with get_db_connection() as conn:
+                    items = pending_insider_items(conn, job_id, limit=1)
+                if not items:
+                    break
+                item = items[0]
+                try:
+                    transactions = yf.Ticker(item["yahoo_ticker"]).get_insider_transactions()
+                    signal = insider_sale_signal(transactions)
+                except Exception:
+                    signal = {"status": "unavailable"}
+                with get_db_connection() as conn:
+                    record_insider_signal(conn, job_id, item["symbol"], signal)
+                    current = get_cleaner_job(conn, job_id)
+                if time.perf_counter() - started >= max_seconds:
+                    status.update(
+                        label="Cleaner paused at the safe time limit; checkpoint preserved",
+                        state="complete",
+                        expanded=False,
+                    )
+                    return current
+
+        with get_db_connection() as conn:
+            finished = finalize_cleaner_job(conn, job_id)
+        progress_bar.progress(1.0, text=f"Analysed {total:,} of {total:,} symbols")
+        if finished["status"] == "blocked":
+            status.update(
+                label="Cleaner stopped: market-data coverage was insufficient",
+                state="error",
+                expanded=True,
+            )
+        else:
+            status.update(
+                label="Cleaner proposal ready for review",
+                state="complete",
+                expanded=False,
+            )
         return finished
 
 
@@ -4938,6 +5065,205 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 icon=":material/download:",
                 width="stretch",
                 key="download_universal_import_report",
+            )
+
+    with st.container(border=True):
+        st.markdown("**Percentile cleaner**")
+        st.caption(
+            "Stage a conservative cleanup proposal using recent price availability, the "
+            "strict bearish sequence Price < 25-DMA < 50-DMA < 200-DMA, and—where "
+            "available—recent management net selling as a secondary signal. Your owned "
+            "holdings are protected. Nothing is removed until you review and apply it."
+        )
+        cleaner_cluster_options = available_clusters(universal_df)
+        cleaner_clusters = st.multiselect(
+            "Listing clusters to inspect",
+            options=cleaner_cluster_options,
+            default=[],
+            placeholder="All listing clusters",
+            help=(
+                "Leave empty to inspect the full Universal Portfolio, or select one or "
+                "more exchange–currency clusters."
+            ),
+            key="universal_cleaner_clusters",
+        )
+        cleaner_limit = st.slider(
+            "Maximum removal percentile",
+            min_value=1,
+            max_value=20,
+            value=10,
+            step=1,
+            format="%d%%",
+            key="universal_cleaner_percentile",
+            help=(
+                "This is a hard cap, not a removal target. The cleaner can propose fewer "
+                "symbols when the evidence is weak."
+            ),
+        )
+        cleaner_criterion_labels = {
+            "Potentially obsolete / delisted": "unavailable",
+            "Strict bearish DMA stack": "bearish",
+            "Recent management net selling": "management",
+        }
+        cleaner_criteria_labels = st.multiselect(
+            "Evidence to consider",
+            options=list(cleaner_criterion_labels),
+            default=list(cleaner_criterion_labels),
+            key="universal_cleaner_criteria",
+            help=(
+                "Potentially obsolete/delisted means no usable recent Yahoo history and "
+                "still requires manual review. Management selling is used only for a "
+                "bounded U.S. shortlist; missing or ambiguous filing data is neutral."
+            ),
+        )
+        cleaner_criteria = [
+            cleaner_criterion_labels[label] for label in cleaner_criteria_labels
+        ]
+        prepare_cleaner_btn = st.button(
+            "Prepare cleaner",
+            icon=":material/filter_alt:",
+            width="stretch",
+            key="prepare_universal_cleaner",
+            disabled=(universal_df.empty or not cleaner_criteria),
+        )
+
+        cleaner_job = None
+        if prepare_cleaner_btn:
+            try:
+                with get_db_connection() as conn:
+                    cleaner_job = prepare_cleaner_job(
+                        conn,
+                        UNIVERSAL_OWNER,
+                        cleaner_clusters,
+                        cleaner_limit,
+                        "management" in cleaner_criteria,
+                        cleaner_criteria,
+                    )
+                st.session_state["active_universal_cleaner_job"] = cleaner_job["job_id"]
+                st.success(
+                    f"Prepared a reversible snapshot of {cleaner_job['total_symbols']:,} "
+                    "symbols. Run the scan to build the proposal."
+                )
+            except Exception as exc:
+                update_errors.append(f"Could not prepare the Universal Portfolio cleaner: {exc}")
+
+        active_cleaner_job_id = st.session_state.get("active_universal_cleaner_job")
+        try:
+            with get_db_connection() as conn:
+                if active_cleaner_job_id:
+                    cleaner_job = get_cleaner_job(conn, active_cleaner_job_id)
+                elif cleaner_job is None:
+                    cleaner_job = latest_cleaner_job(conn)
+            if cleaner_job is not None:
+                st.session_state["active_universal_cleaner_job"] = cleaner_job["job_id"]
+        except Exception as exc:
+            cleaner_job = None
+            update_errors.append(f"Could not load the saved cleaner job: {exc}")
+
+        if cleaner_job is not None:
+            cleaner_counts = cleaner_job["counts"]
+            cleaner_incomplete = bool(
+                cleaner_counts["history_pending"] or cleaner_counts["insider_pending"]
+            )
+            cleaner_actions = st.container(horizontal=True)
+            with cleaner_actions:
+                run_cleaner_btn = st.button(
+                    "Scan / resume",
+                    icon=":material/manage_search:",
+                    key="run_universal_cleaner",
+                    disabled=(
+                        cleaner_job["status"] in {"ready", "blocked", "applied"}
+                        and not cleaner_incomplete
+                    ),
+                )
+                apply_cleaner_btn = st.button(
+                    "Apply proposed removals",
+                    icon=":material/delete_sweep:",
+                    type="primary",
+                    key="apply_universal_cleaner",
+                    disabled=(
+                        cleaner_job["status"] != "ready"
+                        or cleaner_counts["proposed"] == 0
+                    ),
+                )
+
+            if run_cleaner_btn:
+                try:
+                    scan_universal_cleaner_with_progress(cleaner_job["job_id"])
+                    st.rerun()
+                except Exception as exc:
+                    update_errors.append(
+                        "Cleaner scan stopped safely; its last checkpoint can be resumed. "
+                        f"Details: {exc}"
+                    )
+
+            if apply_cleaner_btn:
+                try:
+                    with get_db_connection() as conn:
+                        cleaner_result = apply_cleaner_job(
+                            conn, cleaner_job["job_id"], UNIVERSAL_OWNER
+                        )
+                    protected_suffix = (
+                        f" {len(cleaner_result['protected_at_apply']):,} newly owned symbols "
+                        "were protected."
+                        if cleaner_result["protected_at_apply"]
+                        else ""
+                    )
+                    st.session_state["holdings_flash_success"] = (
+                        f"Removed {len(cleaner_result['removed']):,} reviewed symbols from "
+                        f"the Universal Portfolio.{protected_suffix}"
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    update_errors.append(f"Could not apply the cleaner proposal: {exc}")
+
+            with get_db_connection() as conn:
+                cleaner_job = get_cleaner_job(conn, cleaner_job["job_id"])
+                cleaner_preview = cleaner_preview_frame(conn, cleaner_job["job_id"])
+                cleaner_audit = cleaner_audit_frame(conn, cleaner_job["job_id"])
+            cleaner_counts = cleaner_job["counts"]
+            cleaner_metrics = st.columns(4, gap="small")
+            cleaner_metrics[0].metric("In scope", f"{cleaner_job['total_symbols']:,}")
+            cleaner_metrics[1].metric("Awaiting scan", f"{cleaner_counts['history_pending']:,}")
+            cleaner_metrics[2].metric("Owned and protected", f"{cleaner_counts['protected']:,}")
+            cleaner_metrics[3].metric("Proposed removals", f"{cleaner_counts['proposed']:,}")
+            if cleaner_job.get("note"):
+                if cleaner_job["status"] == "blocked":
+                    st.error(cleaner_job["note"])
+                else:
+                    st.caption(cleaner_job["note"])
+            if cleaner_job["clusters"]:
+                st.caption("Scope: " + ", ".join(cleaner_job["clusters"]))
+            else:
+                st.caption("Scope: all listing clusters")
+            if not cleaner_preview.empty:
+                st.markdown("**Review proposed removals**")
+                st.dataframe(
+                    cleaner_preview,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Price": st.column_config.NumberColumn(format="%.2f"),
+                        "25-DMA": st.column_config.NumberColumn(format="%.2f"),
+                        "50-DMA": st.column_config.NumberColumn(format="%.2f"),
+                        "200-DMA": st.column_config.NumberColumn(format="%.2f"),
+                        "Management net-sale ratio": st.column_config.NumberColumn(format="percent"),
+                        "Removal score": st.column_config.NumberColumn(format="%.3f"),
+                    },
+                )
+            st.download_button(
+                "Download cleaner audit",
+                data=safe_report_csv(cleaner_audit),
+                file_name=f"universal_cleaner_{cleaner_job['job_id']}.csv",
+                mime="text/csv",
+                icon=":material/download:",
+                width="stretch",
+                key="download_universal_cleaner_audit",
+            )
+            st.caption(
+                "No usable recent price is a review flag—not proof that a symbol is "
+                "delisted. A broad data outage blocks the proposal. Management filings "
+                "can reflect grants, exercises or planned sales, so they never act alone."
             )
 
     with st.container(border=True):
