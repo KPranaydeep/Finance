@@ -50,3 +50,24 @@ def test_preselection_skips_unusable_history_and_is_deterministic():
 
     assert first == second
     assert "BROKEN" not in report["Ticker"].tolist()
+
+
+def test_emerging_winner_sleeve_retains_recent_breakout_with_volume_confirmation():
+    index = pd.bdate_range("2025-01-01", periods=320)
+    close = pd.DataFrame(index=index)
+    volume = pd.DataFrame(index=index)
+    for number in range(9):
+        ticker = f"CORE{number}"
+        close[ticker] = 100 * np.exp(np.linspace(0, 0.15 + number * 0.02, len(index)))
+        volume[ticker] = 1_000_000
+    close["EMERGING"] = np.r_[np.full(285, 100.0), np.linspace(100, 165, 35)]
+    volume["EMERGING"] = np.r_[np.full(299, 100_000.0), np.full(21, 2_000_000.0)]
+    clusters = {ticker: "NYQ · USD" for ticker in close.columns}
+
+    selected, report = rank_scalable_candidates(
+        close, volume, clusters, maximum_candidates=4, minimum_per_cluster=0
+    )
+
+    assert "EMERGING" in selected
+    sleeve = report.loc[report["Ticker"].eq("EMERGING"), "Selection sleeve"].iloc[0]
+    assert sleeve == "Emerging winner"

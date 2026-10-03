@@ -44,6 +44,13 @@ def rank_scalable_candidates(
                 horizon_returns.append(float(prices.iloc[endpoint] / prices.iloc[start] - 1.0))
         if not horizon_returns:
             continue
+        trailing_returns = {}
+        for horizon in (21, 63, 126, 252):
+            trailing_returns[horizon] = (
+                float(prices.iloc[-1] / prices.iloc[-1 - horizon] - 1.0)
+                if len(prices) > horizon and prices.iloc[-1 - horizon] > 0
+                else np.nan
+            )
         daily = np.log(prices / prices.shift(1)).dropna().tail(252)
         annual_vol = float(daily.std(ddof=1) * np.sqrt(250)) if len(daily) > 1 else np.nan
         risk_scale = max(annual_vol, 0.05) if np.isfinite(annual_vol) else 0.50
@@ -53,6 +60,28 @@ def rank_scalable_candidates(
             if not recent_volume.empty
             else 0.0
         )
+        prior_volume = (
+            volume[ticker].dropna().iloc[-84:-21]
+            if ticker in volume and len(volume[ticker].dropna()) >= 84
+            else pd.Series(dtype=float)
+        )
+        latest_volume = (
+            volume[ticker].dropna().tail(21)
+            if ticker in volume
+            else pd.Series(dtype=float)
+        )
+        prior_median = float(prior_volume.median()) if not prior_volume.empty else 0.0
+        volume_surge = (
+            float(latest_volume.median() / prior_median - 1.0)
+            if prior_median > 0 and not latest_volume.empty
+            else 0.0
+        )
+        trailing_high = float(prices.tail(252).max())
+        breakout_proximity = float(prices.iloc[-1] / trailing_high) if trailing_high > 0 else 0.0
+        acceleration = float(
+            np.nan_to_num(trailing_returns[21], nan=0.0)
+            - np.nan_to_num(trailing_returns[63], nan=0.0) / 3.0
+        )
         rows.append(
             {
                 "Ticker": str(ticker).upper(),
@@ -61,6 +90,11 @@ def rank_scalable_candidates(
                 "Turnover": max(turnover, 0.0),
                 "Continuity": float(prices.count() / max(len(close.index), 1)),
                 "Latest Price": float(prices.iloc[-1]),
+                "21-session return": trailing_returns[21],
+                "63-session return": trailing_returns[63],
+                "Acceleration": acceleration,
+                "Breakout proximity": breakout_proximity,
+                "Volume surge": volume_surge,
             }
         )
     report = pd.DataFrame(rows)
@@ -70,10 +104,22 @@ def rank_scalable_candidates(
     report["Momentum rank"] = grouped["Momentum"].rank(pct=True, method="average")
     report["Liquidity rank"] = grouped["Turnover"].rank(pct=True, method="average")
     report["Continuity rank"] = grouped["Continuity"].rank(pct=True, method="average")
+    report["Acceleration rank"] = grouped["Acceleration"].rank(pct=True, method="average")
+    report["Breakout rank"] = grouped["Breakout proximity"].rank(pct=True, method="average")
+    report["Volume-surge rank"] = grouped["Volume surge"].rank(pct=True, method="average")
     report["Preselection score"] = (
         0.60 * report["Momentum rank"]
         + 0.30 * report["Liquidity rank"]
         + 0.10 * report["Continuity rank"]
+    )
+    report["Emerging-winner score"] = (
+        0.40 * report["Acceleration rank"]
+        + 0.25 * report["Breakout rank"]
+        + 0.20 * report["Volume-surge rank"]
+        + 0.15 * report["Liquidity rank"]
+    )
+    report["Balanced score"] = np.maximum(
+        report["Preselection score"], report["Emerging-winner score"]
     )
     report = report.sort_values(
         ["Preselection score", "Momentum", "Turnover", "Ticker"],
@@ -82,17 +128,56 @@ def rank_scalable_candidates(
     ).reset_index(drop=True)
     if len(report) <= cap:
         report["Selected"] = True
+        report["Selection sleeve"] = "All eligible"
         return report["Ticker"].tolist(), report
 
     selected: list[str] = []
+    sleeves: dict[str, str] = {}
     if floor:
-        for _, cluster_rows in report.groupby("Cluster", sort=True, dropna=False):
+        diversified = report.sort_values(
+            ["Balanced score", "Ticker"], ascending=[False, True], kind="mergesort"
+        )
+        for _, cluster_rows in diversified.groupby("Cluster", sort=True, dropna=False):
             for ticker in cluster_rows.head(floor)["Ticker"]:
                 if ticker not in selected and len(selected) < cap:
                     selected.append(ticker)
-    for ticker in report["Ticker"]:
+                    sleeves[ticker] = "Cluster reserve"
+
+    remaining_capacity = max(cap - len(selected), 0)
+    core_slots = int(round(remaining_capacity * 0.70))
+    emerging_slots = int(round(remaining_capacity * 0.20))
+
+    core_order = report.sort_values(
+        ["Preselection score", "Momentum", "Ticker"],
+        ascending=[False, False, True], kind="mergesort",
+    )["Ticker"]
+    core_added = 0
+    for ticker in core_order:
+        if ticker not in selected and len(selected) < cap and core_added < core_slots:
+            selected.append(ticker)
+            sleeves[ticker] = "Stable momentum"
+            core_added += 1
+
+    emerging_order = report.sort_values(
+        ["Emerging-winner score", "Acceleration", "Ticker"],
+        ascending=[False, False, True], kind="mergesort",
+    )["Ticker"]
+    emerging_added = 0
+    for ticker in emerging_order:
+        if ticker not in selected and len(selected) < cap and emerging_added < emerging_slots:
+            selected.append(ticker)
+            sleeves[ticker] = "Emerging winner"
+            emerging_added += 1
+
+    balanced_order = report.sort_values(
+        ["Balanced score", "Turnover", "Ticker"],
+        ascending=[False, False, True], kind="mergesort",
+    )["Ticker"]
+    for ticker in balanced_order:
         if ticker not in selected and len(selected) < cap:
             selected.append(ticker)
+            sleeves[ticker] = "Balanced reserve"
     selected_set = set(selected)
     report["Selected"] = report["Ticker"].isin(selected_set)
+    report["Selection sleeve"] = report["Ticker"].map(sleeves).fillna("Not selected")
     return selected, report

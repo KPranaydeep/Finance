@@ -5993,9 +5993,11 @@ if run_btn:
             st.info(
                 f"Universal candidate shortlist: {len(universal_candidate_symbols):,} of "
                 f"{universal_preselection['eligible']:,} eligible symbols. The shortlist "
-                "uses recent risk-adjusted momentum, trading capacity, data continuity "
-                "and minimum representation for each listing cluster; all shortlisted "
-                "symbols still face the complete optimizer funnel."
+                "combines stable risk-adjusted momentum with an emerging-winner sleeve "
+                "for price acceleration, breakout proximity and volume confirmation, "
+                "plus minimum representation for each listing cluster. All shortlisted "
+                "symbols still face the complete optimizer funnel; no screen can guarantee "
+                "capturing every future multibagger."
             )
 
         col1, col2 = st.columns([2, 1], gap="medium")
