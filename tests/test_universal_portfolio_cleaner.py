@@ -4,13 +4,16 @@ import numpy as np
 import pandas as pd
 
 from universal_portfolio_cleaner import (
-    apply_cleaner_job,
+    apply_cleaner_exclusions,
+    clear_optimizer_exclusions,
     cluster_members_frame,
     delete_cluster_snapshot,
     ensure_cleaner_schema,
     finalize_cleaner_job,
+    filter_optimizer_candidates,
     get_cleaner_job,
     insider_sale_signal,
+    optimizer_exclusions_frame,
     prepare_cleaner_job,
     representative_cluster_sample,
     record_history_batch,
@@ -183,13 +186,63 @@ def test_final_proposal_is_ranked_and_hard_capped_then_rechecks_ownership():
     add_row(conn, "alice", newly_owned, newly_owned, quantity=1)
     conn.commit()
 
-    result = apply_cleaner_job(conn, job["job_id"], "__universal__")
+    result = apply_cleaner_exclusions(conn, job["job_id"], "__universal__")
 
     assert result["protected_at_apply"] == [newly_owned]
-    assert len(result["removed"]) == 1
+    assert len(result["excluded"]) == 1
     assert conn.execute(
         "SELECT COUNT(*) FROM master_holdings WHERE owner='__universal__'"
-    ).fetchone()[0] == 9
+    ).fetchone()[0] == 10
+    assert optimizer_exclusions_frame(conn)["Symbol"].tolist() == result["excluded"]
+
+
+def test_scoped_cleaner_exclusions_accumulate_and_are_reversible():
+    conn = connection()
+    for symbol, exchange, currency in (("US", "NYQ", "USD"), ("IN.NS", "NSI", "INR")):
+        add_row(conn, "__universal__", symbol, symbol, exchange, currency)
+    conn.commit()
+
+    for cluster in ("NYQ · USD", "NSI · INR"):
+        job = prepare_cleaner_job(conn, "__universal__", [cluster], 20, False)
+        symbol = "US" if cluster.startswith("NYQ") else "IN.NS"
+        record_history_batch(conn, job["job_id"], {symbol: score_price_history(falling_history())})
+        ready = finalize_cleaner_job(conn, job["job_id"])
+        # A one-row scope is conservatively capped to one eligible exclusion.
+        conn.execute(
+            "UPDATE universal_cleaner_items SET proposed_remove=1 WHERE job_id=?",
+            (ready["job_id"],),
+        )
+        conn.execute(
+            "UPDATE universal_cleaner_jobs SET status='ready' WHERE job_id=?",
+            (ready["job_id"],),
+        )
+        conn.commit()
+        apply_cleaner_exclusions(conn, ready["job_id"], "__universal__")
+
+    assert set(optimizer_exclusions_frame(conn)["Symbol"]) == {"US", "IN.NS"}
+    assert clear_optimizer_exclusions(conn) == 2
+    assert optimizer_exclusions_frame(conn).empty
+
+
+def test_optimizer_filter_matches_symbol_or_ticker_without_mutating_input():
+    candidates = pd.DataFrame(
+        [
+            {"Symbol": "AAA", "Yahoo Ticker": "AAA"},
+            {"Symbol": "BRK", "Yahoo Ticker": "BRK-B"},
+            {"Symbol": "KEEP", "Yahoo Ticker": "KEEP"},
+        ]
+    )
+    exclusions = pd.DataFrame(
+        [
+            {"Symbol": "AAA", "Yahoo ticker": "AAA"},
+            {"Symbol": "OLD-BRK", "Yahoo ticker": "BRK-B"},
+        ]
+    )
+
+    filtered = filter_optimizer_candidates(candidates, exclusions)
+
+    assert filtered["Symbol"].tolist() == ["KEEP"]
+    assert len(candidates) == 3
 
 
 def test_broad_market_data_failure_blocks_all_removals():

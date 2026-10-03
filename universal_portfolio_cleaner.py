@@ -55,10 +55,23 @@ CREATE TABLE IF NOT EXISTS universal_cleaner_items (
 )
 """
 
+EXCLUSION_DDL = """
+CREATE TABLE IF NOT EXISTS universal_optimizer_exclusions (
+    symbol TEXT PRIMARY KEY,
+    yahoo_ticker TEXT NOT NULL,
+    exchange TEXT,
+    currency TEXT,
+    cleaner_job_id TEXT NOT NULL,
+    reason TEXT,
+    excluded_at TEXT NOT NULL
+)
+"""
+
 
 def ensure_cleaner_schema(conn: sqlite3.Connection) -> None:
     conn.execute(JOB_DDL)
     conn.execute(ITEM_DDL)
+    conn.execute(EXCLUSION_DDL)
     job_columns = {
         str(row[1]).lower()
         for row in conn.execute("PRAGMA table_info(universal_cleaner_jobs)").fetchall()
@@ -72,6 +85,10 @@ def ensure_cleaner_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_cleaner_insider "
         "ON universal_cleaner_items(job_id, insider_status, symbol)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_optimizer_exclusion_ticker "
+        "ON universal_optimizer_exclusions(yahoo_ticker)"
     )
 
 
@@ -637,7 +654,7 @@ def finalize_cleaner_job(conn, job_id, min_history_coverage=0.80) -> dict:
         conn.execute(
             "UPDATE universal_cleaner_jobs SET status='ready', note=?, updated_at=? WHERE job_id=?",
             (
-                f"Proposed {len(selected_symbols)} removals, capped at "
+                f"Proposed {len(selected_symbols)} optimizer exclusions, capped at "
                 f"{job['removal_percentile']:.1f}% of unprotected selected symbols.",
                 now,
                 job_id,
@@ -656,7 +673,7 @@ def cleaner_preview_frame(conn, job_id) -> pd.DataFrame:
         SELECT symbol AS Symbol, exchange AS Exchange, currency AS Currency,
                latest_price AS Price, dma25 AS "25-DMA", dma50 AS "50-DMA",
                dma200 AS "200-DMA", insider_net_sale_ratio AS "Management net-sale ratio",
-               final_score AS "Removal score", reason AS Reason
+               final_score AS "Exclusion score", reason AS Reason
         FROM universal_cleaner_items
         WHERE job_id=? AND proposed_remove=1
         ORDER BY final_score DESC, symbol
@@ -672,13 +689,13 @@ def cleaner_audit_frame(conn, job_id) -> pd.DataFrame:
         """
         SELECT symbol AS Symbol, exchange AS Exchange, currency AS Currency,
                CASE WHEN protected=1 THEN 'Protected holding'
-                    WHEN proposed_remove=1 THEN 'Proposed removal'
+                    WHEN proposed_remove=1 THEN 'Proposed optimizer exclusion'
                     ELSE 'Keep' END AS Decision,
                history_status AS "Price-history status", latest_price AS Price,
                dma25 AS "25-DMA", dma50 AS "50-DMA", dma200 AS "200-DMA",
                insider_status AS "Management-data status",
                insider_net_sale_ratio AS "Management net-sale ratio",
-               final_score AS "Removal score", reason AS Reason
+               final_score AS "Exclusion score", reason AS Reason
         FROM universal_cleaner_items
         WHERE job_id=?
         ORDER BY proposed_remove DESC, protected DESC, final_score DESC, symbol
@@ -688,12 +705,54 @@ def cleaner_audit_frame(conn, job_id) -> pd.DataFrame:
     )
 
 
-def apply_cleaner_job(conn, job_id, universal_owner) -> dict:
+def optimizer_exclusions_frame(conn) -> pd.DataFrame:
+    """Return the persistent, reversible optimizer exclusion registry."""
+    ensure_cleaner_schema(conn)
+    return pd.read_sql_query(
+        """
+        SELECT symbol AS Symbol, yahoo_ticker AS "Yahoo ticker",
+               exchange AS Exchange, currency AS Currency,
+               reason AS Reason, excluded_at AS "Excluded at"
+        FROM universal_optimizer_exclusions
+        ORDER BY exchange, currency, symbol
+        """,
+        conn,
+    )
+
+
+def filter_optimizer_candidates(
+    candidates: pd.DataFrame, exclusions: pd.DataFrame
+) -> pd.DataFrame:
+    """Remove excluded universe candidates without touching personally held rows."""
+    if candidates is None or candidates.empty or exclusions is None or exclusions.empty:
+        return candidates.copy() if candidates is not None else pd.DataFrame()
+    excluded_symbols = set(exclusions.get("Symbol", pd.Series(dtype=str)).astype(str).str.upper())
+    excluded_tickers = set(
+        exclusions.get("Yahoo ticker", pd.Series(dtype=str)).astype(str).str.upper()
+    )
+    symbols = candidates.get("Symbol", pd.Series("", index=candidates.index)).astype(str).str.upper()
+    tickers = candidates.get(
+        "Yahoo Ticker", pd.Series("", index=candidates.index)
+    ).astype(str).str.upper()
+    return candidates.loc[~symbols.isin(excluded_symbols) & ~tickers.isin(excluded_tickers)].copy()
+
+
+def clear_optimizer_exclusions(conn) -> int:
+    """Restore every cleaner-excluded symbol to optimizer eligibility."""
+    ensure_cleaner_schema(conn)
+    cursor = conn.execute("DELETE FROM universal_optimizer_exclusions")
+    conn.commit()
+    return int(cursor.rowcount or 0)
+
+
+def apply_cleaner_exclusions(conn, job_id, universal_owner) -> dict:
+    """Replace exclusions in the job scope; never delete Universal Portfolio rows."""
     job = get_cleaner_job(conn, job_id)
     if job["status"] != "ready":
         raise ValueError("Cleaner proposal is not ready to apply.")
     rows = conn.execute(
-        "SELECT symbol, yahoo_ticker FROM universal_cleaner_items "
+        "SELECT symbol, yahoo_ticker, exchange, currency, reason "
+        "FROM universal_cleaner_items "
         "WHERE job_id=? AND proposed_remove=1",
         (job_id,),
     ).fetchall()
@@ -705,21 +764,50 @@ def apply_cleaner_job(conn, job_id, universal_owner) -> dict:
             (universal_owner,),
         ).fetchall()
     }
-    removed = []
+    excluded = []
     skipped = []
     conn.execute("BEGIN")
     try:
+        existing = conn.execute(
+            "SELECT symbol, exchange, currency FROM universal_optimizer_exclusions"
+        ).fetchall()
+        selected_clusters = set(job.get("clusters") or [])
+        clear_symbols = [
+            row["symbol"]
+            for row in existing
+            if not selected_clusters
+            or cluster_key(row["exchange"], row["currency"]) in selected_clusters
+        ]
+        if clear_symbols:
+            placeholders = ",".join("?" for _ in clear_symbols)
+            conn.execute(
+                f"DELETE FROM universal_optimizer_exclusions WHERE symbol IN ({placeholders})",
+                clear_symbols,
+            )
+        now = _now()
         for row in rows:
             if str(row["yahoo_ticker"] or "").upper() in protected_now:
                 skipped.append(row["symbol"])
                 continue
-            cursor = conn.execute(
-                "DELETE FROM master_holdings WHERE owner=? AND symbol=?",
-                (universal_owner, row["symbol"]),
+            conn.execute(
+                """
+                INSERT INTO universal_optimizer_exclusions
+                    (symbol, yahoo_ticker, exchange, currency, cleaner_job_id, reason, excluded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    yahoo_ticker=excluded.yahoo_ticker,
+                    exchange=excluded.exchange,
+                    currency=excluded.currency,
+                    cleaner_job_id=excluded.cleaner_job_id,
+                    reason=excluded.reason,
+                    excluded_at=excluded.excluded_at
+                """,
+                (
+                    row["symbol"], row["yahoo_ticker"], row["exchange"],
+                    row["currency"], job_id, row["reason"], now,
+                ),
             )
-            if cursor.rowcount:
-                removed.append(row["symbol"])
-        now = _now()
+            excluded.append(row["symbol"])
         conn.execute(
             "UPDATE universal_cleaner_jobs SET status='applied', applied_at=?, updated_at=? WHERE job_id=?",
             (now, now, job_id),
@@ -728,4 +816,8 @@ def apply_cleaner_job(conn, job_id, universal_owner) -> dict:
     except Exception:
         conn.rollback()
         raise
-    return {"removed": removed, "protected_at_apply": skipped}
+    return {
+        "excluded": excluded,
+        "protected_at_apply": skipped,
+        "replaced_prior": len(clear_symbols),
+    }

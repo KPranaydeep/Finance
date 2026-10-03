@@ -37,7 +37,6 @@ from optimization_run_timer import (
 from universal_portfolio_summary import summarize_universal_portfolio
 from universal_portfolio_import import (
     apply_verified_overseas_replacement,
-    apply_verified_import,
     ensure_import_schema,
     get_import_job,
     import_items_frame,
@@ -48,17 +47,20 @@ from universal_portfolio_import import (
     safe_report_csv,
 )
 from universal_portfolio_cleaner import (
-    apply_cleaner_job,
+    apply_cleaner_exclusions,
     available_clusters,
+    clear_optimizer_exclusions,
     cleaner_audit_frame,
     cleaner_preview_frame,
     cluster_members_frame,
     delete_cluster_snapshot,
     ensure_cleaner_schema,
     finalize_cleaner_job,
+    filter_optimizer_candidates,
     get_cleaner_job,
     insider_sale_signal,
     latest_cleaner_job,
+    optimizer_exclusions_frame,
     pending_history_items,
     pending_insider_items,
     prepare_cleaner_job,
@@ -2973,6 +2975,12 @@ def extend_allocation_with_universal_candidates(portfolio_df):
     if universal_df.empty:
         return portfolio_df, []
 
+    with get_db_connection() as conn:
+        exclusions = optimizer_exclusions_frame(conn)
+    universal_df = filter_optimizer_candidates(universal_df, exclusions)
+    if universal_df.empty:
+        return portfolio_df, []
+
     held_symbols = set(portfolio_df["Symbol"]) if not portfolio_df.empty else set()
     candidates = universal_df[~universal_df["Symbol"].isin(held_symbols)].copy()
     if candidates.empty:
@@ -4909,173 +4917,6 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             )
 
     with st.container(border=True):
-        st.markdown("**Staged CSV update**")
-        st.caption(
-            "Upload a symbol list such as a CompaniesMarketCap export. The app stages "
-            "and checkpoints it first, validates recent Yahoo prices in batches, and "
-            "omits unresolved or conflicting rows. Nothing is removed or overwritten. "
-            "Source P/E ratios and prices are ignored because they may be stale."
-        )
-        universal_source_upload = st.file_uploader(
-            "Universal portfolio source CSV",
-            type=["csv"],
-            key="universal_source_csv",
-            help="Supported symbol headers include Symbol, Ticker, Ticker Symbol and Stock Code.",
-        )
-        prepare_universal_import_btn = st.button(
-            "Prepare safe update",
-            icon=":material/inventory_2:",
-            width="stretch",
-            key="prepare_universal_import",
-            disabled=universal_source_upload is None,
-        )
-
-        staged_job = None
-        if prepare_universal_import_btn and universal_source_upload is not None:
-            try:
-                with get_db_connection() as conn:
-                    staged_job_id, resumed_job, staged_job = prepare_import_job(
-                        conn,
-                        universal_source_upload.getvalue(),
-                        universal_source_upload.name,
-                        UNIVERSAL_OWNER,
-                    )
-                st.session_state["active_universal_import_job"] = staged_job_id
-                if resumed_job:
-                    st.info("This exact file was already staged. Continuing its saved job.")
-                else:
-                    parse_stats = staged_job.get("parse_stats", {})
-                    st.success(
-                        f"Staged {staged_job['unique_symbols']:,} unique symbols from "
-                        f"{staged_job['source_rows']:,} source rows. "
-                        f"Removed {parse_stats.get('duplicates_removed', 0):,} duplicates."
-                    )
-            except Exception as exc:
-                update_errors.append(f"Could not prepare universal CSV update: {exc}")
-
-        active_import_job_id = st.session_state.get("active_universal_import_job")
-        try:
-            with get_db_connection() as conn:
-                if active_import_job_id:
-                    staged_job = get_import_job(conn, active_import_job_id)
-                elif staged_job is None:
-                    staged_job = latest_import_job(conn)
-            if staged_job is not None:
-                st.session_state["active_universal_import_job"] = staged_job["job_id"]
-        except Exception as exc:
-            staged_job = None
-            update_errors.append(f"Could not load the saved universal import job: {exc}")
-
-        if staged_job is not None:
-            pending_count = staged_job["counts"].get("pending", 0)
-            verified_count = staged_job["counts"].get("verified", 0)
-            action_row = st.container(horizontal=True)
-            with action_row:
-                validate_import_btn = st.button(
-                    "Validate / resume",
-                    icon=":material/fact_check:",
-                    key="validate_universal_import",
-                    disabled=(pending_count == 0 or staged_job["status"] == "applied"),
-                )
-                apply_import_btn = st.button(
-                    "Apply verified additions",
-                    icon=":material/add_task:",
-                    type="primary",
-                    key="apply_universal_import",
-                    disabled=(pending_count > 0 or verified_count == 0),
-                )
-
-            if validate_import_btn:
-                try:
-                    staged_job = validate_universal_import_with_progress(staged_job["job_id"])
-                    remaining_pending = staged_job["counts"].get("pending", 0)
-                    if remaining_pending:
-                        st.session_state["holdings_flash_warning"] = (
-                            f"Validation checkpoint saved with {remaining_pending:,} symbols "
-                            "still pending. Select Validate / resume to continue."
-                        )
-                    else:
-                        st.session_state["holdings_flash_success"] = (
-                            f"Validation complete. {staged_job['counts'].get('verified', 0):,} "
-                            "verified additions are ready for review and application."
-                        )
-                    # The buttons above were instantiated from the pre-validation
-                    # counts. Rerun once so Apply is enabled from the durable result.
-                    st.rerun()
-                except Exception as exc:
-                    update_errors.append(
-                        "Universal CSV validation stopped safely. Its last checkpoint is "
-                        f"available to resume. Details: {exc}"
-                    )
-
-            if apply_import_btn:
-                try:
-                    with get_db_connection() as conn:
-                        applied_result = apply_verified_import(
-                            conn, staged_job["job_id"], UNIVERSAL_OWNER
-                        )
-                    st.session_state["holdings_flash_success"] = (
-                        f"Added {applied_result['added']:,} verified symbols to the "
-                        "Universal Portfolio. Existing, unresolved and conflicting rows "
-                        "were left unchanged."
-                    )
-                    st.rerun()
-                except Exception as exc:
-                    update_errors.append(f"Could not apply the staged universal update: {exc}")
-
-            with get_db_connection() as conn:
-                staged_job = get_import_job(conn, staged_job["job_id"])
-                staged_items = import_items_frame(conn, staged_job["job_id"])
-            staged_counts = staged_job["counts"]
-            import_metrics = st.columns(4, gap="small")
-            import_metrics[0].metric("Source symbols", f"{staged_job['unique_symbols']:,}")
-            import_metrics[1].metric(
-                "Recently active",
-                f"{staged_counts.get('verified', 0) + staged_counts.get('added', 0):,}",
-            )
-            import_metrics[2].metric("Already present", f"{staged_counts.get('existing', 0):,}")
-            import_metrics[3].metric(
-                "Omitted safely",
-                f"{staged_counts.get('unresolved', 0) + staged_counts.get('rejected', 0) + staged_counts.get('conflict', 0):,}",
-            )
-            st.progress(
-                float(staged_job["progress"]),
-                text=(
-                    f"Processed {staged_job['processed']:,} of "
-                    f"{staged_job['unique_symbols']:,} · {staged_job['status']}"
-                ),
-            )
-            count_rows = [
-                {"Result": label, "Symbols": int(staged_counts.get(status, 0))}
-                for status, label in (
-                    ("pending", "Pending validation"),
-                    ("verified", "Verified and ready to add"),
-                    ("added", "Added"),
-                    ("existing", "Already present"),
-                    ("unresolved", "No recent usable price"),
-                    ("conflict", "Ticker/exchange conflict"),
-                    ("rejected", "Invalid source symbol"),
-                )
-                if staged_counts.get(status, 0)
-            ]
-            if count_rows:
-                st.dataframe(pd.DataFrame(count_rows), hide_index=True, width="stretch")
-            st.caption(
-                "No recent usable price is a conservative omission, not proof of delisting: "
-                "the symbol may also be suspended or temporarily unavailable from Yahoo. "
-                "Re-uploading the identical file resumes the same checkpoint and never duplicates rows."
-            )
-            st.download_button(
-                "Download validation report",
-                data=safe_report_csv(staged_items),
-                file_name=f"universal_import_{staged_job['job_id']}.csv",
-                mime="text/csv",
-                icon=":material/download:",
-                width="stretch",
-                key="download_universal_import_report",
-            )
-
-    with st.container(border=True):
         st.markdown("**Replace overseas universe from Tickertape**")
         st.caption(
             "Upload a Tickertape U.S. screener CSV. The app validates and checkpoints "
@@ -5241,10 +5082,11 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
     with st.container(border=True):
         st.markdown("**Percentile cleaner**")
         st.caption(
-            "Stage a conservative cleanup proposal using recent price availability, the "
+            "Stage a conservative optimizer-exclusion proposal using recent price availability, the "
             "strict bearish sequence Price < 25-DMA < 50-DMA < 200-DMA, and—where "
             "available—recent management net selling as a secondary signal. Your owned "
-            "holdings are protected. Nothing is removed until you review and apply it."
+            "holdings are protected. Applying a result never deletes a Universal Portfolio "
+            "row; it only omits the selected candidates from future optimization runs."
         )
         cleaner_cluster_options = available_clusters(universal_df)
         cleaner_clusters = st.multiselect(
@@ -5348,8 +5190,8 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                     ),
                 )
                 apply_cleaner_btn = st.button(
-                    "Apply proposed removals",
-                    icon=":material/delete_sweep:",
+                    "Apply optimizer exclusions",
+                    icon=":material/filter_alt:",
                     type="primary",
                     key="apply_universal_cleaner",
                     disabled=(
@@ -5371,7 +5213,7 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             if apply_cleaner_btn:
                 try:
                     with get_db_connection() as conn:
-                        cleaner_result = apply_cleaner_job(
+                        cleaner_result = apply_cleaner_exclusions(
                             conn, cleaner_job["job_id"], UNIVERSAL_OWNER
                         )
                     protected_suffix = (
@@ -5381,8 +5223,8 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                         else ""
                     )
                     st.session_state["holdings_flash_success"] = (
-                        f"Removed {len(cleaner_result['removed']):,} reviewed symbols from "
-                        f"the Universal Portfolio.{protected_suffix}"
+                        f"Excluded {len(cleaner_result['excluded']):,} reviewed candidates "
+                        f"from optimization without deleting them.{protected_suffix}"
                     )
                     st.rerun()
                 except Exception as exc:
@@ -5397,7 +5239,7 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             cleaner_metrics[0].metric("In scope", f"{cleaner_job['total_symbols']:,}")
             cleaner_metrics[1].metric("Awaiting scan", f"{cleaner_counts['history_pending']:,}")
             cleaner_metrics[2].metric("Owned and protected", f"{cleaner_counts['protected']:,}")
-            cleaner_metrics[3].metric("Proposed removals", f"{cleaner_counts['proposed']:,}")
+            cleaner_metrics[3].metric("Proposed exclusions", f"{cleaner_counts['proposed']:,}")
             if cleaner_job.get("note"):
                 if cleaner_job["status"] == "blocked":
                     st.error(cleaner_job["note"])
@@ -5408,7 +5250,7 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             else:
                 st.caption("Scope: all listing clusters")
             if not cleaner_preview.empty:
-                st.markdown("**Review proposed removals**")
+                st.markdown("**Review proposed optimizer exclusions**")
                 st.dataframe(
                     cleaner_preview,
                     width="stretch",
@@ -5419,7 +5261,7 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                         "50-DMA": st.column_config.NumberColumn(format="%.2f"),
                         "200-DMA": st.column_config.NumberColumn(format="%.2f"),
                         "Management net-sale ratio": st.column_config.NumberColumn(format="percent"),
-                        "Removal score": st.column_config.NumberColumn(format="%.3f"),
+                        "Exclusion score": st.column_config.NumberColumn(format="%.3f"),
                     },
                 )
             st.download_button(
@@ -5436,6 +5278,31 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 "delisted. A broad data outage blocks the proposal. Management filings "
                 "can reflect grants, exercises or planned sales, so they never act alone."
             )
+
+        with get_db_connection() as conn:
+            active_exclusions = optimizer_exclusions_frame(conn)
+        if not active_exclusions.empty:
+            exclusion_row = st.container(horizontal=True, vertical_alignment="center")
+            with exclusion_row:
+                st.metric(
+                    "Currently omitted from optimization",
+                    f"{len(active_exclusions):,}",
+                    help="These rows remain in the Universal Portfolio and can be restored.",
+                )
+                restore_exclusions = st.button(
+                    "Restore all candidates",
+                    icon=":material/undo:",
+                    key="restore_optimizer_exclusions",
+                )
+            with st.expander("Active optimizer exclusions", expanded=False):
+                st.dataframe(active_exclusions, hide_index=True, width="stretch")
+            if restore_exclusions:
+                with get_db_connection() as conn:
+                    restored = clear_optimizer_exclusions(conn)
+                st.session_state["holdings_flash_success"] = (
+                    f"Restored {restored:,} candidates to optimizer eligibility."
+                )
+                st.rerun()
 
     with st.container(border=True):
         st.markdown("**Remove an unsupported listing cluster**")
