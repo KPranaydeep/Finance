@@ -23,7 +23,7 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
         self.assertEqual(len(controls), 1)
         keywords = {item.arg: item.value for item in controls[0].keywords}
         self.assertEqual(ast.literal_eval(keywords["min_value"]), 50)
-        self.assertEqual(ast.literal_eval(keywords["max_value"]), 1000)
+        self.assertNotIn("max_value", keywords)
         self.assertEqual(ast.literal_eval(keywords["step"]), 50)
 
     def test_selected_cap_is_passed_to_candidate_extension(self):
@@ -34,12 +34,33 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
             and isinstance(node.func, ast.Name)
             and node.func.id == "extend_allocation_with_universal_candidates"
         ]
-        self.assertEqual(len(calls), 1)
-        keywords = {item.arg: item.value for item in calls[0].keywords}
-        self.assertEqual(
-            ast.unparse(keywords["maximum_candidates"]),
-            "universal_preselection_cap",
+        supplied_caps = {
+            ast.unparse({item.arg: item.value for item in call.keywords}["maximum_candidates"])
+            for call in calls
+        }
+        self.assertEqual(supplied_caps, {"cap", "universal_preselection_cap"})
+
+    def test_advanced_search_uses_adaptive_steps_with_fifty_minimum(self):
+        function = next(
+            node
+            for node in self.tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "search_universal_shortlist_caps"
         )
+        defaults = {
+            argument.arg: default
+            for argument, default in zip(function.args.kwonlyargs, function.args.kw_defaults)
+            if default is not None
+        }
+        self.assertEqual(ast.literal_eval(defaults["minimum_trading_days"]), 252)
+        self.assertEqual(ast.literal_eval(defaults["step"]), 50)
+        self.assertIsNone(ast.literal_eval(defaults["maximum_cap"]))
+        self.assertTrue(ast.literal_eval(defaults["adaptive"]))
+        source = ast.unparse(function)
+        self.assertIn("trading_days < int(minimum_trading_days)", source)
+        self.assertIn("minimum_increment = max(int(step), 50)", source)
+        self.assertIn("next_adaptive_jump", source)
+        self.assertIn("cap = min(cap + current_jump, range_ceiling)", source)
 
 
 if __name__ == "__main__":

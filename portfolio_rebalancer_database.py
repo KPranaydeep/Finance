@@ -3347,6 +3347,13 @@ def _download_recent_market_data_bulk(
     return closes, volumes, diagnostics
 
 
+_download_recent_market_data_bulk = st.cache_data(
+    show_spinner=False,
+    ttl="24h",
+    max_entries=2,
+)(_download_recent_market_data_bulk)
+
+
 @st.cache_data(show_spinner=False, ttl="24h", max_entries=8)
 def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candidates=400):
     """Build an INR-adjusted recent-data shortlist before full-history analysis."""
@@ -4711,6 +4718,161 @@ def calculate_drop_bottom_coverage_preview(drop_bottom_pct, owner):
         "invalid_holding_rows": int(len(invalid_rows)),
     }
 
+
+def search_universal_shortlist_caps(
+    owner,
+    *,
+    starting_cap,
+    max_dd,
+    target_volatility,
+    drop_bottom_pct,
+    history_buffer_days,
+    redundancy_corr_threshold,
+    minimum_trading_days=252,
+    step=50,
+    maximum_cap=None,
+    adaptive=True,
+    prior_results=(),
+    on_result=None,
+):
+    """Explore shortlist capacity with adaptive jumps until history is too short.
+
+    ``step`` is the minimum resolution, not the jump used for every evaluation.
+    The search starts with a larger jump and adjusts it from the common-history
+    headroom. It always evaluates the selected lower endpoint and, when the
+    history floor is never breached, the eligible-universe upper endpoint.
+    """
+    portfolio_df, invalid_rows = build_current_allocation_from_db(owner)
+    if portfolio_df.empty:
+        raise ValueError("No usable holdings are available for shortlist-cap search.")
+
+    minimum_increment = max(int(step), 50)
+    cap = max(int(starting_cap), minimum_increment)
+    rows = [dict(item) for item in prior_results]
+    if rows:
+        last_row = rows[-1]
+        last_cap = int(last_row.get("Shortlist cap") or 0)
+        last_eligible = int(last_row.get("Eligible universe") or 0)
+        if (
+            int(last_row.get("Trading days") or 0) < int(minimum_trading_days)
+            or (last_eligible and last_cap >= last_eligible)
+            or (maximum_cap is not None and last_cap >= int(maximum_cap))
+        ):
+            return rows, invalid_rows
+        previous_jump = max(
+            int(last_row.get("Next adaptive jump") or minimum_increment),
+            minimum_increment,
+        )
+        cap = max(cap, last_cap + previous_jump)
+        if last_eligible:
+            cap = min(cap, last_eligible)
+        if maximum_cap is not None:
+            cap = min(cap, int(maximum_cap))
+
+    def aligned_jump(raw_jump):
+        raw_jump = max(int(raw_jump), minimum_increment)
+        return (
+            (raw_jump + minimum_increment - 1) // minimum_increment
+        ) * minimum_increment
+
+    def next_adaptive_jump(current_jump, trading_days):
+        if not adaptive:
+            return minimum_increment
+        headroom = max(int(trading_days) - int(minimum_trading_days), 0)
+        if headroom >= int(minimum_trading_days):
+            raw_jump = int(current_jump) * 2
+        elif headroom >= int(minimum_trading_days) // 2:
+            raw_jump = int(current_jump) * 3 // 2
+        elif headroom < max(int(minimum_trading_days) // 8, 1):
+            raw_jump = int(current_jump) // 2
+        else:
+            raw_jump = int(current_jump)
+        return aligned_jump(raw_jump)
+
+    current_jump = (
+        max(int(rows[-1].get("Next adaptive jump") or 0), minimum_increment)
+        if rows
+        else aligned_jump(minimum_increment * 4 if adaptive else minimum_increment)
+    )
+
+    while True:
+        cap_started = time.monotonic()
+        extended_df, added_symbols, preselection = (
+            extend_allocation_with_universal_candidates(
+                portfolio_df.copy(),
+                maximum_candidates=cap,
+            )
+        )
+        tickers = extended_df["Yahoo Ticker"].dropna().astype(str).tolist()
+        if not tickers:
+            raise ValueError("The selected shortlist cap produced no analysable tickers.")
+
+        optimal_weights, log_returns, _, optimal_stats, _ = (
+            run_portfolio_analysis_multi(
+                tickers,
+                extended_df.copy(),
+                max_dd=max_dd,
+                target_volatility=target_volatility,
+                drop_bottom_pct=drop_bottom_pct,
+                buffer_days=history_buffer_days,
+                redundancy_corr_threshold=redundancy_corr_threshold,
+            )
+        )
+        if optimal_weights is None or optimal_stats is None or log_returns is None:
+            raise ValueError(f"Optimization returned no usable portfolio at cap {cap:,}.")
+
+        trading_days = int(log_returns.shape[0])
+        eligible = int(preselection.get("eligible") or 0)
+        next_jump = (
+            0
+            if trading_days < int(minimum_trading_days)
+            else next_adaptive_jump(current_jump, trading_days)
+        )
+        row = {
+            "Shortlist cap": int(cap),
+            "Shortlisted": int(preselection.get("shortlisted") or len(added_symbols)),
+            "Assets": int(log_returns.shape[1]),
+            "Trading days": trading_days,
+            "Annual Return": float(optimal_stats.get("Annual Return", np.nan)),
+            "Annual Volatility": float(optimal_stats.get("Annual Volatility", np.nan)),
+            "Historical ES 95% (1 Session)": float(
+                optimal_stats.get("Historical ES 95% (1 Session)", np.nan)
+            ),
+            "Block-Bootstrap ES 95% (20 Sessions)": float(
+                optimal_stats.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
+            ),
+            "Sharpe Ratio": float(optimal_stats.get("Sharpe Ratio", np.nan)),
+            "Elapsed seconds": float(time.monotonic() - cap_started),
+            "Eligible universe": eligible,
+            "Next adaptive jump": int(next_jump),
+            "Status": (
+                f"Below {int(minimum_trading_days)}-session floor"
+                if trading_days < int(minimum_trading_days)
+                else "Feasible"
+            ),
+        }
+        rows.append(row)
+        if on_result is not None:
+            on_result(rows, row)
+
+        if trading_days < int(minimum_trading_days):
+            break
+        range_ceiling = (
+            min(eligible, int(maximum_cap))
+            if eligible and maximum_cap is not None
+            else (eligible or int(maximum_cap or cap))
+        )
+        if cap >= range_ceiling:
+            break
+        current_jump = next_jump
+        cap = min(cap + current_jump, range_ceiling)
+
+    return rows, invalid_rows
+
+
+def _apply_best_shortlist_cap(cap):
+    st.session_state["universal_preselection_cap"] = int(cap)
+
 # =========================================================
 # UI
 # =========================================================
@@ -4966,7 +5128,6 @@ with st.sidebar:
         st.number_input(
             "Universal candidate shortlist cap",
             min_value=50,
-            max_value=1000,
             value=UNIVERSAL_PRESELECTION_CAP,
             step=50,
             key="universal_preselection_cap",
@@ -5083,6 +5244,82 @@ with st.sidebar:
         else None
     )
 
+    advanced_cap_search = st.toggle(
+        "Advanced shortlist-cap search",
+        value=False,
+        key="advanced_shortlist_cap_search",
+        help=(
+            "Starts at the selected cap, uses larger history-aware jumps, and never "
+            "refines below 50 candidates. It stops when common history falls below "
+            "252 trading sessions or the eligible universe is exhausted."
+        ),
+    )
+    if advanced_cap_search:
+        cap_range_col1, cap_range_col2 = st.columns(2)
+        with cap_range_col1:
+            cap_search_from = int(
+                st.number_input(
+                    "Search cap from",
+                    min_value=50,
+                    value=int(universal_preselection_cap),
+                    step=50,
+                    key="shortlist_cap_search_from",
+                )
+            )
+        with cap_range_col2:
+            cap_search_through = int(
+                st.number_input(
+                    "Search cap through",
+                    min_value=50,
+                    value=max(cap_search_from + 2000, cap_search_from),
+                    step=50,
+                    key="shortlist_cap_search_through",
+                    help="No hidden maximum; the eligible universe remains the natural ceiling.",
+                )
+            )
+        cap_search_through = max(cap_search_through, cap_search_from)
+        cap_step_col, cap_spacing_col = st.columns(2)
+        with cap_step_col:
+            cap_search_step = int(
+                st.number_input(
+                    "Minimum search step",
+                    min_value=50,
+                    value=50,
+                    step=50,
+                    key="shortlist_cap_search_step",
+                    help="Use 50 for the finest supported cap resolution.",
+                )
+            )
+        with cap_spacing_col:
+            cap_search_spacing = st.selectbox(
+                "Search spacing",
+                options=["Adaptive (faster)", "Fixed (finer sweep)"],
+                index=0,
+                key="shortlist_cap_search_spacing",
+                help=(
+                    "Adaptive takes larger history-aware jumps. Fixed evaluates every "
+                    "selected step within the range."
+                ),
+            )
+    else:
+        cap_search_from = int(universal_preselection_cap)
+        cap_search_through = int(universal_preselection_cap)
+        cap_search_step = 50
+        cap_search_spacing = "Adaptive (faster)"
+    run_cap_search_btn = st.button(
+        "Run / resume cap search",
+        width="stretch",
+        key="run_shortlist_cap_search_btn",
+        disabled=not advanced_cap_search,
+        help="This is a long-running research search and does not create trades.",
+    )
+    clear_cap_search_btn = st.button(
+        "Clear cap-search results",
+        width="stretch",
+        key="clear_shortlist_cap_search_btn",
+        disabled=not bool(st.session_state.get("shortlist_cap_search_results")),
+    )
+
 st.divider()
 st.subheader("✅ Required steps for every user")
 st.caption(
@@ -5164,6 +5401,198 @@ with step_col3:
                 optimization_timer_placeholder.info(timer_text)
 
 st.divider()
+if clear_cap_search_btn:
+    st.session_state.pop("shortlist_cap_search_results", None)
+    st.session_state.pop("shortlist_cap_search_config", None)
+    st.session_state.pop("shortlist_cap_search_error", None)
+    st.rerun()
+
+cap_search_config = {
+    "starting_cap": int(cap_search_from),
+    "maximum_cap": int(cap_search_through),
+    "step": int(cap_search_step),
+    "adaptive": cap_search_spacing.startswith("Adaptive"),
+    "max_dd": float(max_dd),
+    "target_volatility": (
+        float(target_volatility) if target_volatility is not None else None
+    ),
+    "drop_bottom_pct": float(drop_bottom_pct),
+    "history_buffer_days": int(history_buffer_days),
+    "redundancy_corr_threshold": float(redundancy_corr_threshold),
+    "minimum_trading_days": 252,
+}
+
+if run_cap_search_btn:
+    previous_config = st.session_state.get("shortlist_cap_search_config") or {}
+    prior_results = (
+        st.session_state.get("shortlist_cap_search_results") or []
+        if previous_config == cap_search_config
+        else []
+    )
+    st.session_state["shortlist_cap_search_config"] = dict(cap_search_config)
+    st.session_state.pop("shortlist_cap_search_error", None)
+
+    st.subheader("Advanced shortlist-cap search")
+    search_status = st.status(
+        "Preparing the first shortlist-cap evaluation…",
+        expanded=True,
+    )
+    search_progress = st.progress(0.0)
+    search_detail = st.empty()
+
+    def update_cap_search_progress(rows, latest):
+        st.session_state["shortlist_cap_search_results"] = [dict(row) for row in rows]
+        eligible = max(int(latest.get("Eligible universe") or 0), 1)
+        current_cap = int(latest["Shortlist cap"])
+        progress_value = min(max(current_cap / eligible, 0.0), 1.0)
+        search_progress.progress(progress_value)
+        average_seconds = float(
+            np.mean([float(row.get("Elapsed seconds") or 0.0) for row in rows])
+        )
+        search_detail.info(
+            f"Completed cap **{current_cap:,}** · "
+            f"{int(latest['Trading days']):,} trading sessions · "
+            f"{int(latest['Assets']):,} assets · "
+            f"{float(latest['Annual Return']):.2%} annual return · "
+            f"average **{format_elapsed(average_seconds)} per cap**"
+        )
+        search_status.update(
+            label=(
+                f"Evaluated {len(rows):,} cap values; "
+                + (
+                    f"stop reached at {current_cap:,}"
+                    if latest.get("Status") != "Feasible"
+                    else (
+                        f"next search jump "
+                        f"+{int(latest.get('Next adaptive jump') or 50):,}"
+                    )
+                )
+            ),
+            state="running",
+        )
+
+    try:
+        search_rows, search_invalid_rows = search_universal_shortlist_caps(
+            CURRENT_USER,
+            starting_cap=cap_search_from,
+            max_dd=max_dd,
+            target_volatility=target_volatility,
+            drop_bottom_pct=drop_bottom_pct,
+            history_buffer_days=history_buffer_days,
+            redundancy_corr_threshold=redundancy_corr_threshold,
+            minimum_trading_days=252,
+            step=cap_search_step,
+            maximum_cap=cap_search_through,
+            adaptive=cap_search_spacing.startswith("Adaptive"),
+            prior_results=prior_results,
+            on_result=update_cap_search_progress,
+        )
+        st.session_state["shortlist_cap_search_results"] = search_rows
+        search_progress.progress(1.0)
+        search_status.update(
+            label="Shortlist-cap search completed",
+            state="complete",
+            expanded=False,
+        )
+        if search_invalid_rows:
+            st.warning(
+                "Holdings skipped during the search: " + ", ".join(search_invalid_rows)
+            )
+    except Exception as exc:
+        st.session_state["shortlist_cap_search_error"] = safe_stop_reason(exc)
+        search_status.update(
+            label="Shortlist-cap search stopped",
+            state="error",
+            expanded=True,
+        )
+
+cap_search_error = st.session_state.get("shortlist_cap_search_error")
+if cap_search_error:
+    st.error(f"Cap search stopped: {cap_search_error}")
+
+cap_search_results = st.session_state.get("shortlist_cap_search_results") or []
+if cap_search_results:
+    st.subheader("Shortlist-cap search results")
+    results_df = pd.DataFrame(cap_search_results)
+    feasible_df = results_df.loc[results_df["Status"].eq("Feasible")].copy()
+    if feasible_df.empty:
+        st.warning("No evaluated cap retained at least 252 common trading sessions.")
+    else:
+        best_row = feasible_df.loc[feasible_df["Annual Return"].idxmax()]
+        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+        metric_col1.metric("Best observed cap", f"{int(best_row['Shortlist cap']):,}")
+        metric_col2.metric("Annual return", f"{float(best_row['Annual Return']):.2%}")
+        metric_col3.metric("Trading days", f"{int(best_row['Trading days']):,}")
+        metric_col4.metric("Assets", f"{int(best_row['Assets']):,}")
+        st.button(
+            "Use best observed cap",
+            type="primary",
+            key="apply_best_shortlist_cap_btn",
+            on_click=_apply_best_shortlist_cap,
+            args=(int(best_row["Shortlist cap"]),),
+        )
+
+    chart_df = results_df.set_index("Shortlist cap").sort_index()
+    percentage_columns = [
+        "Annual Return",
+        "Annual Volatility",
+        "Historical ES 95% (1 Session)",
+        "Block-Bootstrap ES 95% (20 Sessions)",
+    ]
+    st.markdown("**Optimized portfolio return and risk by shortlist cap**")
+    st.line_chart(
+        chart_df[percentage_columns] * 100.0,
+        x_label="Universal candidate shortlist cap",
+        y_label="Percent",
+        height=360,
+    )
+    st.markdown("**Sharpe ratio by shortlist cap**")
+    st.line_chart(
+        chart_df[["Sharpe Ratio"]],
+        x_label="Universal candidate shortlist cap",
+        y_label="Sharpe ratio",
+        height=240,
+    )
+    st.markdown("**Analysis coverage by shortlist cap**")
+    st.line_chart(
+        chart_df[["Trading days", "Assets"]],
+        x_label="Universal candidate shortlist cap",
+        y_label="Count",
+        height=280,
+    )
+    display_columns = [
+        "Shortlist cap",
+        "Shortlisted",
+        "Assets",
+        "Trading days",
+        *percentage_columns,
+        "Sharpe Ratio",
+        "Elapsed seconds",
+        "Next adaptive jump",
+        "Status",
+    ]
+    st.dataframe(
+        results_df[display_columns],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            column: st.column_config.NumberColumn(column, format="percent")
+            for column in percentage_columns
+        }
+        | {
+            "Elapsed seconds": st.column_config.NumberColumn(
+                "Run time (seconds)", format="%.1f"
+            )
+        },
+    )
+    st.caption(
+        "The adaptive search compares the selected lower endpoint, increasingly broad "
+        "caps, and the natural eligible-universe endpoint when it remains feasible. "
+        "Its minimum resolution is 50 candidates. Best observed is not a guarantee of "
+        "the global in-sample maximum. The first result below 252 common trading "
+        "sessions stops the search; nothing is published or traded automatically."
+    )
+
 with st.expander("🌐 Universal Portfolio", expanded=False):
     st.caption(
         "One shared list of symbols visible and editable by everyone (quantity is always "
