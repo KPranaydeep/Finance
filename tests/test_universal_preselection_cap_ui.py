@@ -56,10 +56,12 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
         self.assertEqual(ast.literal_eval(defaults["step"]), 50)
         self.assertIsNone(ast.literal_eval(defaults["maximum_cap"]))
         self.assertTrue(ast.literal_eval(defaults["adaptive"]))
+        self.assertEqual(ast.literal_eval(defaults["runtime_brake_seconds"]), 900)
         source = ast.unparse(function)
         self.assertIn("trading_days < int(minimum_trading_days)", source)
         self.assertIn("minimum_increment = max(int(step), 50)", source)
         self.assertIn("next_adaptive_jump", source)
+        self.assertIn("elapsed_seconds >= float(runtime_brake_seconds)", source)
         self.assertIn("cap = min(cap + current_jump, range_ceiling)", source)
 
 

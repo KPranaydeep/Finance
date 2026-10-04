@@ -4732,6 +4732,7 @@ def search_universal_shortlist_caps(
     step=50,
     maximum_cap=None,
     adaptive=True,
+    runtime_brake_seconds=900,
     prior_results=(),
     on_result=None,
 ):
@@ -4823,11 +4824,21 @@ def search_universal_shortlist_caps(
 
         trading_days = int(log_returns.shape[0])
         eligible = int(preselection.get("eligible") or 0)
+        elapsed_seconds = float(time.monotonic() - cap_started)
         next_jump = (
             0
             if trading_days < int(minimum_trading_days)
             else next_adaptive_jump(current_jump, trading_days)
         )
+        runtime_brake_applied = False
+        if (
+            adaptive
+            and next_jump
+            and elapsed_seconds >= float(runtime_brake_seconds)
+        ):
+            reduced_jump = aligned_jump(max(next_jump // 2, minimum_increment))
+            runtime_brake_applied = reduced_jump < next_jump
+            next_jump = reduced_jump
         row = {
             "Shortlist cap": int(cap),
             "Shortlisted": int(preselection.get("shortlisted") or len(added_symbols)),
@@ -4842,9 +4853,10 @@ def search_universal_shortlist_caps(
                 optimal_stats.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
             ),
             "Sharpe Ratio": float(optimal_stats.get("Sharpe Ratio", np.nan)),
-            "Elapsed seconds": float(time.monotonic() - cap_started),
+            "Elapsed seconds": elapsed_seconds,
             "Eligible universe": eligible,
             "Next adaptive jump": int(next_jump),
+            "Runtime brake": "Applied" if runtime_brake_applied else "Not needed",
             "Status": (
                 f"Below {int(minimum_trading_days)}-session floor"
                 if trading_days < int(minimum_trading_days)
@@ -5454,7 +5466,13 @@ if run_cap_search_btn:
             f"{int(latest['Trading days']):,} trading sessions · "
             f"{int(latest['Assets']):,} assets · "
             f"{float(latest['Annual Return']):.2%} annual return · "
+            f"latest **{format_elapsed(float(latest.get('Elapsed seconds') or 0.0))}** · "
             f"average **{format_elapsed(average_seconds)} per cap**"
+            + (
+                " · **15-minute runtime brake applied**"
+                if latest.get("Runtime brake") == "Applied"
+                else ""
+            )
         )
         search_status.update(
             label=(
@@ -5569,6 +5587,7 @@ if cap_search_results:
         "Sharpe Ratio",
         "Elapsed seconds",
         "Next adaptive jump",
+        "Runtime brake",
         "Status",
     ]
     st.dataframe(
@@ -5590,7 +5609,9 @@ if cap_search_results:
         "caps, and the natural eligible-universe endpoint when it remains feasible. "
         "Its minimum resolution is 50 candidates. Best observed is not a guarantee of "
         "the global in-sample maximum. The first result below 252 common trading "
-        "sessions stops the search; nothing is published or traded automatically."
+        "sessions stops the search. In adaptive mode, any cap taking at least 15 "
+        "minutes halves the next jump, without going below the selected step. Nothing "
+        "is published or traded automatically."
     )
 
 with st.expander("🌐 Universal Portfolio", expanded=False):
