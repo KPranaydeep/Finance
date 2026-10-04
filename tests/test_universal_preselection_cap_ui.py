@@ -26,6 +26,23 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
         self.assertNotIn("max_value", keywords)
         self.assertEqual(ast.literal_eval(keywords["step"]), 50)
 
+    def test_exact_optimizer_has_a_separate_adjustable_runtime_cap(self):
+        controls = [
+            node
+            for node in ast.walk(self.tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "number_input"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "Maximum assets in exact optimization"
+        ]
+        self.assertEqual(len(controls), 1)
+        keywords = {item.arg: item.value for item in controls[0].keywords}
+        self.assertEqual(ast.literal_eval(keywords["min_value"]), 100)
+        self.assertEqual(ast.unparse(keywords["value"]), "DEFAULT_EXACT_OPTIMIZER_ASSET_CAP")
+        self.assertEqual(ast.literal_eval(keywords["step"]), 50)
+
     def test_selected_cap_is_passed_to_candidate_extension(self):
         calls = [
             node
@@ -53,6 +70,7 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
             if default is not None
         }
         self.assertEqual(ast.literal_eval(defaults["minimum_trading_days"]), 252)
+        self.assertEqual(ast.literal_eval(defaults["exact_optimizer_asset_cap"]), 300)
         self.assertEqual(ast.literal_eval(defaults["step"]), 50)
         self.assertIsNone(ast.literal_eval(defaults["maximum_cap"]))
         self.assertTrue(ast.literal_eval(defaults["adaptive"]))

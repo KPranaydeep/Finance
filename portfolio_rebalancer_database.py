@@ -96,6 +96,7 @@ OPTIMIZER_CONFIG_VERSION = _optimizer_config.OPTIMIZER_CONFIG_VERSION
 RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
 TRADING_DAYS_PER_YEAR = _optimizer_config.TRADING_DAYS_PER_YEAR
 UNIVERSAL_PRESELECTION_CAP = 400
+DEFAULT_EXACT_OPTIMIZER_ASSET_CAP = 300
 from robust_momentum_filter import apply_robust_momentum_filter
 
 
@@ -3977,6 +3978,76 @@ def shrunk_covariance(log_returns):
     return shrinkage * target + (1.0 - shrinkage) * sample
 
 
+def screen_log_returns_for_exact_optimizer(
+    log_returns,
+    *,
+    maximum_assets=DEFAULT_EXACT_OPTIMIZER_ASSET_CAP,
+    owned_tickers=(),
+):
+    """Reduce solver dimensionality while preserving broad candidate discovery."""
+    cap = max(int(maximum_assets), 1)
+    columns = [str(column) for column in log_returns.columns]
+    owned = {str(ticker).strip().upper() for ticker in owned_tickers}
+    protected = [ticker for ticker in columns if ticker.upper() in owned]
+    if len(columns) <= cap:
+        return log_returns, {
+            "eligible_assets": len(columns),
+            "selected_assets": len(columns),
+            "owned_assets_protected": len(protected),
+            "maximum_assets": cap,
+            "method": "all-assets-fit",
+        }
+
+    numeric = log_returns.apply(pd.to_numeric, errors="coerce")
+    annual_mean = numeric.mean() * TRADING_DAYS_PER_YEAR
+    annual_volatility = numeric.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)
+    downside = numeric.clip(upper=0.0)
+    annual_downside = np.sqrt(downside.pow(2).mean()) * np.sqrt(
+        TRADING_DAYS_PER_YEAR
+    )
+    positive_fraction = (numeric > 0).mean()
+
+    finite_means = annual_mean.replace([np.inf, -np.inf], np.nan).dropna()
+    if finite_means.empty:
+        clipped_mean = annual_mean.fillna(-np.inf)
+    else:
+        clipped_mean = annual_mean.clip(
+            lower=float(finite_means.quantile(0.05)),
+            upper=float(finite_means.quantile(0.95)),
+        )
+    blended_risk = (
+        annual_volatility.fillna(np.inf) * 0.5
+        + annual_downside.fillna(np.inf) * 0.5
+    ).clip(lower=0.05)
+    score = (
+        (clipped_mean - RISK_FREE_RATE_ANNUAL) / blended_risk
+        + 0.10 * (positive_fraction - 0.5)
+    ).replace([np.inf, -np.inf], np.nan)
+
+    candidate_slots = max(cap - len(protected), 0)
+    ranked_candidates = (
+        pd.DataFrame({"Ticker": columns, "Score": score.reindex(columns).to_numpy()})
+        .loc[lambda frame: ~frame["Ticker"].str.upper().isin(owned)]
+        .sort_values(
+            ["Score", "Ticker"],
+            ascending=[False, True],
+            na_position="last",
+            kind="mergesort",
+        )
+    )
+    selected_candidates = ranked_candidates.head(candidate_slots)["Ticker"].tolist()
+    selected_set = set(protected) | set(selected_candidates)
+    selected_columns = [ticker for ticker in columns if ticker in selected_set]
+
+    return log_returns.loc[:, selected_columns], {
+        "eligible_assets": len(columns),
+        "selected_assets": len(selected_columns),
+        "owned_assets_protected": len(protected),
+        "maximum_assets": cap,
+        "method": "winsorized-excess-return-to-blended-downside-v1",
+    }
+
+
 def weight_bounds(num_assets):
     """Per-asset bounds, relaxed when the cap alone could not sum to one."""
     cap = max(MAX_WEIGHT_PER_ASSET, 1.0 / num_assets) if num_assets else 1.0
@@ -4146,6 +4217,7 @@ def run_portfolio_analysis_multi(
     drop_bottom_pct=0.2,
     buffer_days=0,
     redundancy_corr_threshold=0.80,
+    exact_optimizer_asset_cap=300,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -4171,6 +4243,12 @@ def run_portfolio_analysis_multi(
         redundancy_corr_threshold=redundancy_corr_threshold,
         owned_tickers=owned_tickers,
     )
+    log_returns, solver_screen = screen_log_returns_for_exact_optimizer(
+        log_returns,
+        maximum_assets=exact_optimizer_asset_cap,
+        owned_tickers=owned_tickers,
+    )
+    meta["exact_optimizer_screen"] = solver_screen
 
     if target_volatility is not None:
         optimal_weights = optimize_portfolio_target_volatility(
@@ -4814,6 +4892,7 @@ def search_universal_shortlist_caps(
     drop_bottom_pct,
     history_buffer_days,
     redundancy_corr_threshold,
+    exact_optimizer_asset_cap=300,
     minimum_trading_days=252,
     step=50,
     maximum_cap=None,
@@ -4903,6 +4982,7 @@ def search_universal_shortlist_caps(
                 drop_bottom_pct=drop_bottom_pct,
                 buffer_days=history_buffer_days,
                 redundancy_corr_threshold=redundancy_corr_threshold,
+                exact_optimizer_asset_cap=exact_optimizer_asset_cap,
             )
         )
         if optimal_weights is None or optimal_stats is None or log_returns is None:
@@ -5237,6 +5317,22 @@ with st.sidebar:
         )
     )
 
+    exact_optimizer_asset_cap = int(
+        st.number_input(
+            "Maximum assets in exact optimization",
+            min_value=100,
+            value=DEFAULT_EXACT_OPTIMIZER_ASSET_CAP,
+            step=50,
+            key="exact_optimizer_asset_cap",
+            help=(
+                "The broad shortlist still discovers candidates. After all history, "
+                "momentum and duplicate filters, only the strongest risk-adjusted "
+                "candidates plus every owned holding enter the expensive constrained "
+                "solver. Raise this only when you deliberately accept longer runs."
+            ),
+        )
+    )
+
     redundancy_corr_threshold = float(
         st.number_input(
             "Merge assets correlated above",
@@ -5517,6 +5613,7 @@ cap_search_config = {
     "drop_bottom_pct": float(drop_bottom_pct),
     "history_buffer_days": int(history_buffer_days),
     "redundancy_corr_threshold": float(redundancy_corr_threshold),
+    "exact_optimizer_asset_cap": int(exact_optimizer_asset_cap),
     "minimum_trading_days": 252,
 }
 
@@ -5584,6 +5681,7 @@ if run_cap_search_btn:
             drop_bottom_pct=drop_bottom_pct,
             history_buffer_days=history_buffer_days,
             redundancy_corr_threshold=redundancy_corr_threshold,
+            exact_optimizer_asset_cap=exact_optimizer_asset_cap,
             minimum_trading_days=252,
             step=cap_search_step,
             maximum_cap=cap_search_through,
@@ -6778,6 +6876,7 @@ if run_btn:
                 drop_bottom_pct=drop_bottom_pct,
                 buffer_days=history_buffer_days,
                 redundancy_corr_threshold=redundancy_corr_threshold,
+                exact_optimizer_asset_cap=exact_optimizer_asset_cap,
             )
 
         _display_optimization_stage(
@@ -6791,6 +6890,17 @@ if run_btn:
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             st.error("Portfolio optimization did not return a usable allocation.")
             st.stop()
+        solver_screen = meta.get("exact_optimizer_screen") or {}
+        if solver_screen:
+            st.info(
+                "Exact optimization used "
+                f"**{int(solver_screen.get('selected_assets') or log_returns.shape[1]):,}** "
+                "of "
+                f"**{int(solver_screen.get('eligible_assets') or log_returns.shape[1]):,}** "
+                "post-filter assets; "
+                f"**{int(solver_screen.get('owned_assets_protected') or 0):,}** owned "
+                "holdings were protected."
+            )
         missing_owned_returns = meta.get("missing_owned_return_tickers", [])
         if missing_owned_returns:
             st.warning(
@@ -7067,6 +7177,7 @@ if run_btn:
                 "sell_trade_policy": "omit-partial-sells-v1",
                 "history_buffer_days": int(history_buffer_days),
                 "redundancy_corr_threshold": float(redundancy_corr_threshold),
+                "exact_optimizer_asset_cap": int(exact_optimizer_asset_cap),
                 "use_target_volatility": bool(use_target_vol),
                 "target_volatility": (
                     float(target_volatility)
@@ -7079,6 +7190,9 @@ if run_btn:
                 "valid_end": str(meta["valid_end"]),
                 "log_return_rows": int(log_returns.shape[0]),
                 "log_return_columns": int(log_returns.shape[1]),
+                "exact_optimizer_screen": dict(
+                    meta.get("exact_optimizer_screen") or {}
+                ),
                 "minimum_history": (
                     meta["min_len_df"].to_dict(orient="records")
                     if not meta["min_len_df"].empty
