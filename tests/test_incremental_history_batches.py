@@ -40,6 +40,11 @@ class IncrementalHistoryBatchTests(unittest.TestCase):
                 "_chunked": chunked,
                 "_download_close_history_batch": download_batch,
                 "_format_download_failure_message": lambda *_args, **_kwargs: "failed",
+                "apply_price_integrity_gate": lambda prices, owned_tickers=(): (
+                    prices,
+                    pd.DataFrame(),
+                ),
+                "PRICE_INTEGRITY_VERSION": "test-v1",
             },
         )
 

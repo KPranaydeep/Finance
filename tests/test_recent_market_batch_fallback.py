@@ -19,7 +19,12 @@ def _load_download_function():
         for start in range(0, len(values), size):
             yield values[start : start + size]
 
-    namespace = {"pd": pd, "_chunked": chunked}
+    namespace = {
+        "pd": pd,
+        "_chunked": chunked,
+        "apply_price_integrity_gate": lambda prices: (prices, pd.DataFrame()),
+        "PRICE_INTEGRITY_VERSION": "test-v1",
+    }
     exec(compile(ast.Module(body=[node], type_ignores=[]), "<batch-download>", "exec"), namespace)
     return namespace
 
@@ -38,7 +43,7 @@ class RecentMarketBatchFallbackTests(unittest.TestCase):
         namespace["_extract_close_prices_frame"] = extract
         namespace["_extract_volume_frame"] = extract
 
-        closes, volumes, diagnostics = namespace["_download_recent_market_data_bulk"](
+        closes, volumes, diagnostics, native_recent = namespace["_download_recent_market_data_bulk"](
             ["AAA", "BBB", "CCC", "DDD", "EEE"],
             batch_size=5,
             fallback_batch_size=2,
@@ -49,6 +54,7 @@ class RecentMarketBatchFallbackTests(unittest.TestCase):
         self.assertEqual(diagnostics["requests"], 4)
         self.assertEqual(diagnostics["failed_or_empty_requests"], 1)
         self.assertEqual(diagnostics["recovered"], 5)
+        self.assertEqual(set(native_recent), set(closes.columns))
 
 
 if __name__ == "__main__":

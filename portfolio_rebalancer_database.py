@@ -30,6 +30,12 @@ from portfolio_risk_metrics import (
     empirical_expected_shortfall,
     moving_block_bootstrap_expected_shortfall,
 )
+from price_history_integrity import (
+    DEFAULT_EXTREME_RETURN_THRESHOLD,
+    PRICE_INTEGRITY_VERSION,
+    extreme_return_dates,
+    reconcile_price_frame,
+)
 from scalable_universe_preselection import (
     convert_candidate_history_to_inr,
     rank_scalable_candidates,
@@ -3284,13 +3290,163 @@ def _extract_volume_frame(data, expected_tickers):
     return frame
 
 
+def _single_ticker_field(data, field, ticker):
+    """Extract one numeric Yahoo field without depending on column orientation."""
+    if data is None or getattr(data, "empty", True):
+        return pd.Series(dtype=float)
+    frame = data
+    if isinstance(frame.columns, pd.MultiIndex):
+        if field not in frame.columns.get_level_values(0):
+            return pd.Series(dtype=float)
+        value = frame[field]
+        if isinstance(value, pd.DataFrame):
+            if ticker in value.columns:
+                value = value[ticker]
+            elif len(value.columns) == 1:
+                value = value.iloc[:, 0]
+            else:
+                return pd.Series(dtype=float)
+    else:
+        if field not in frame.columns:
+            return pd.Series(dtype=float)
+        value = frame[field]
+    return pd.to_numeric(value, errors="coerce").sort_index()
+
+
+def _download_price_integrity_evidence(
+    ticker, start_date, end_date, integrity_version=PRICE_INTEGRITY_VERSION
+):
+    """Fetch raw corporate-action evidence only for a suspicious price series."""
+    del integrity_version  # Included in the cache key for deterministic invalidation.
+    ticker = str(ticker).strip().upper()
+    data = _yf_download_quiet(
+        ticker,
+        start=start_date,
+        end=end_date,
+        progress=False,
+        auto_adjust=False,
+        actions=True,
+        repair=False,
+        threads=False,
+    )
+    raw_close = _single_ticker_field(data, "Close", ticker)
+    adjusted_close = _single_ticker_field(data, "Adj Close", ticker)
+    if adjusted_close.dropna().empty:
+        adjusted_close = raw_close.copy()
+    if raw_close.dropna().empty:
+        raise ValueError("No raw close history was returned for integrity validation.")
+    return {
+        "raw_close": raw_close,
+        "adjusted_close": adjusted_close,
+        "dividends": _single_ticker_field(data, "Dividends", ticker),
+        "stock_splits": _single_ticker_field(data, "Stock Splits", ticker),
+    }
+
+
+_download_price_integrity_evidence = st.cache_data(
+    show_spinner=False,
+    ttl="24h",
+    max_entries=2048,
+)(_download_price_integrity_evidence)
+
+
+def _download_price_integrity_evidence_batch(
+    tickers, start_date, end_date, integrity_version=PRICE_INTEGRITY_VERSION
+):
+    """Batch corporate-action evidence so integrity checks remain scalable."""
+    del integrity_version  # Included in the cache key for deterministic invalidation.
+    tickers = tuple(str(ticker).strip().upper() for ticker in tickers if str(ticker).strip())
+    if not tickers:
+        return {}
+    data = _yf_download_quiet(
+        list(tickers),
+        start=start_date,
+        end=end_date,
+        progress=False,
+        auto_adjust=False,
+        actions=True,
+        repair=False,
+        threads=True,
+    )
+    evidence = {}
+    for ticker in tickers:
+        raw_close = _single_ticker_field(data, "Close", ticker)
+        if raw_close.dropna().empty:
+            continue
+        adjusted_close = _single_ticker_field(data, "Adj Close", ticker)
+        evidence[ticker] = {
+            "raw_close": raw_close,
+            "adjusted_close": (
+                adjusted_close if not adjusted_close.dropna().empty else raw_close.copy()
+            ),
+            "dividends": _single_ticker_field(data, "Dividends", ticker),
+            "stock_splits": _single_ticker_field(data, "Stock Splits", ticker),
+        }
+    return evidence
+
+
+_download_price_integrity_evidence_batch = st.cache_data(
+    show_spinner=False,
+    ttl="24h",
+    max_entries=4096,
+)(_download_price_integrity_evidence_batch)
+
+
+def apply_price_integrity_gate(prices, owned_tickers=()):
+    """Repair split discontinuities and quarantine unresolved candidate histories."""
+    if prices is None or prices.empty:
+        return prices, pd.DataFrame()
+    flagged = [
+        str(column).strip().upper()
+        for column in prices.columns
+        if extreme_return_dates(
+            prices[column], threshold=DEFAULT_EXTREME_RETURN_THRESHOLD
+        )
+    ]
+    if not flagged:
+        return prices, pd.DataFrame()
+
+    observed_start = pd.Timestamp(prices.index.min()).normalize().strftime("%Y-%m-%d")
+    observed_end = (
+        pd.Timestamp(prices.index.max()).normalize() + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+    evidence = {}
+    for batch in _chunked(flagged, 12):
+        try:
+            evidence.update(_download_price_integrity_evidence_batch(
+                tuple(batch),
+                observed_start,
+                observed_end,
+                integrity_version=PRICE_INTEGRITY_VERSION,
+            ))
+        except Exception:
+            for ticker in batch:
+                try:
+                    evidence[ticker] = _download_price_integrity_evidence(
+                        ticker,
+                        observed_start,
+                        observed_end,
+                        integrity_version=PRICE_INTEGRITY_VERSION,
+                    )
+                except Exception:
+                    evidence[ticker] = None
+    return reconcile_price_frame(
+        prices,
+        evidence,
+        owned_tickers=owned_tickers,
+        threshold=DEFAULT_EXTREME_RETURN_THRESHOLD,
+    )
+
+
 def _download_recent_market_data_bulk(
     tickers,
     period="2y",
     batch_size=120,
     fallback_batch_size=40,
+    integrity_version=PRICE_INTEGRITY_VERSION,
 ):
     """Fetch recent data in fast batches, retrying missing names in smaller batches."""
+    del integrity_version  # Included in the cache key for deterministic invalidation.
     unique_tickers = tuple(
         str(ticker).strip().upper()
         for ticker in dict.fromkeys(tickers)
@@ -3339,11 +3495,18 @@ def _download_recent_market_data_bulk(
         if close_frames
         else pd.DataFrame()
     )
+    native_recent_prices = (
+        closes.ffill().iloc[-1].to_dict() if not closes.empty else {}
+    )
     volumes = (
         pd.concat(volume_frames, axis=1).loc[:, lambda frame: ~frame.columns.duplicated()].sort_index()
         if volume_frames
         else pd.DataFrame()
     )
+    integrity_report = pd.DataFrame()
+    if not closes.empty:
+        closes, integrity_report = apply_price_integrity_gate(closes)
+        volumes = volumes.reindex(columns=closes.columns)
     diagnostics = {
         "requested": len(unique_tickers),
         "recovered": int(len(closes.columns)),
@@ -3351,8 +3514,15 @@ def _download_recent_market_data_bulk(
         "failed_or_empty_requests": int(failed_batches),
         "primary_batch_size": primary_size,
         "fallback_batch_size": retry_size,
+        "price_integrity_version": PRICE_INTEGRITY_VERSION,
+        "price_integrity_flagged": int(len(integrity_report)),
+        "price_integrity_quarantined": int(
+            integrity_report["Status"].astype(str).str.startswith("QUARANTINED_").sum()
+        )
+        if not integrity_report.empty
+        else 0,
     }
-    return closes, volumes, diagnostics
+    return closes, volumes, diagnostics, native_recent_prices
 
 
 _download_recent_market_data_bulk = st.cache_data(
@@ -3392,8 +3562,12 @@ def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candida
             diagnostics,
         )
 
-    local_closes, volumes, diagnostics = _download_recent_market_data_bulk(
-        tickers, period="2y", batch_size=120, fallback_batch_size=40
+    local_closes, volumes, diagnostics, native_recent_prices = _download_recent_market_data_bulk(
+        tickers,
+        period="2y",
+        batch_size=120,
+        fallback_batch_size=40,
+        integrity_version=PRICE_INTEGRITY_VERSION,
     )
     if local_closes.empty:
         diagnostics.update({"ranking_currency": "INR", "inr_adjusted": True})
@@ -3434,14 +3608,13 @@ def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candida
     )
     if closes.empty:
         return [], {}, report, diagnostics
-    recent = local_closes.ffill().iloc[-1]
     price_map = {
-        ticker: float(recent[ticker])
+        ticker: float(native_recent_prices[ticker])
         for ticker in selected
-        if ticker in recent.index
-        and pd.notna(recent[ticker])
-        and np.isfinite(float(recent[ticker]))
-        and float(recent[ticker]) > 0
+        if ticker in native_recent_prices
+        and pd.notna(native_recent_prices[ticker])
+        and np.isfinite(float(native_recent_prices[ticker]))
+        and float(native_recent_prices[ticker]) > 0
     }
     selected = [ticker for ticker in selected if ticker in price_map]
     diagnostics["scored"] = int(len(report))
@@ -3529,6 +3702,7 @@ def download_close_history(
     start_date=DEFAULT_HISTORY_START_DATE,
     end_date=None,
     buffer_days=0,
+    owned_tickers=(),
 ):
     """Download closing-price history once and reuse it during the same analysis."""
     _, effective_end = _resolve_history_window_end(end_date, buffer_days)
@@ -3569,6 +3743,11 @@ def download_close_history(
             )
         )
 
+    prices, integrity_report = apply_price_integrity_gate(
+        prices, owned_tickers=owned_tickers
+    )
+    prices.attrs["price_integrity_report"] = integrity_report.to_dict(orient="records")
+    prices.attrs["price_integrity_version"] = PRICE_INTEGRITY_VERSION
     return prices
 
 
@@ -3844,7 +4023,12 @@ def get_daily_log_returns(
         start_date=start_date,
         end_date=end_date,
         buffer_days=buffer_days,
+        owned_tickers=owned_tickers,
     ).copy()
+
+    price_integrity_report = pd.DataFrame(
+        df.attrs.get("price_integrity_report") or []
+    )
 
     if df.empty:
         raise ValueError("No data available for the given tickers.")
@@ -3943,6 +4127,8 @@ def get_daily_log_returns(
         "momentum_report_df": momentum_report_df,
         "momentum_dropped_df": momentum_dropped_df,
         "momentum_filter_config": dict(MOMENTUM_FILTER_CONFIG),
+        "price_integrity_report": price_integrity_report,
+        "price_integrity_version": PRICE_INTEGRITY_VERSION,
     }
     return log_returns, meta
 
@@ -4048,12 +4234,47 @@ def screen_log_returns_for_exact_optimizer(
     }
 
 
-def weight_bounds(num_assets):
-    """Per-asset bounds, relaxed when the cap alone could not sum to one."""
+def weight_bounds(num_assets, tickers=(), frozen_weights=None):
+    """Per-asset bounds, with quarantined owned holdings frozen in place."""
     cap = max(MAX_WEIGHT_PER_ASSET, 1.0 / num_assets) if num_assets else 1.0
-    return tuple((0.0, min(cap, 1.0)) for _ in range(num_assets))
+    frozen = {str(key).upper(): float(value) for key, value in (frozen_weights or {}).items()}
+    names = list(tickers) if tickers else [str(index) for index in range(num_assets)]
+    bounds = []
+    for ticker in names:
+        fixed = frozen.get(str(ticker).upper())
+        if fixed is None:
+            bounds.append((0.0, min(cap, 1.0)))
+        else:
+            fixed = float(np.clip(fixed, 0.0, 1.0))
+            bounds.append((fixed, fixed))
+    return tuple(bounds)
 
-def enforce_min_weight_postprocess(weights, min_weight=0.01):
+
+def feasible_initial_weights(bounds):
+    """Construct a deterministic feasible starting point for bounded SLSQP."""
+    lower = np.asarray([item[0] for item in bounds], dtype=float)
+    upper = np.asarray([item[1] for item in bounds], dtype=float)
+    if lower.sum() > 1.0 + 1e-9 or upper.sum() < 1.0 - 1e-9:
+        raise ValueError("Optimizer bounds cannot form a fully invested portfolio.")
+    weights = lower.copy()
+    remaining = max(1.0 - float(weights.sum()), 0.0)
+    while remaining > 1e-12:
+        headroom = upper - weights
+        available = np.flatnonzero(headroom > 1e-12)
+        if not len(available):
+            break
+        increment = remaining / len(available)
+        additions = np.minimum(headroom[available], increment)
+        weights[available] += additions
+        used = float(additions.sum())
+        if used <= 1e-15:
+            break
+        remaining -= used
+    if not np.isclose(weights.sum(), 1.0, atol=1e-8):
+        raise ValueError("Unable to construct feasible initial optimizer weights.")
+    return weights
+
+def enforce_min_weight_postprocess(weights, min_weight=0.01, frozen_positions=None):
     """Set tiny weights to zero and renormalize the rest.
 
     This does NOT change the optimization problem itself; it only cleans up
@@ -4061,20 +4282,29 @@ def enforce_min_weight_postprocess(weights, min_weight=0.01):
     """
     w = np.asarray(weights, dtype=float).copy()
 
-    # Zero out micro-weights
-    w[np.abs(w) < min_weight] = 0.0
+    frozen = {
+        int(position): float(value)
+        for position, value in (frozen_positions or {}).items()
+    }
+    for position, value in frozen.items():
+        w[position] = value
+    adjustable = np.ones(len(w), dtype=bool)
+    if frozen:
+        adjustable[list(frozen)] = False
+    w[adjustable & (np.abs(w) < min_weight)] = 0.0
 
-    total = w.sum()
-    if total <= 0:
+    fixed_total = float(sum(frozen.values()))
+    adjustable_total = float(w[adjustable].sum())
+    if fixed_total > 1.0 + 1e-9 or adjustable_total <= 0:
         # If everything got zeroed, just return the original weights unchanged
         # (or you could fall back to the raw optimizer solution).
         return weights
-
-    # Renormalize
-    w /= total
+    w[adjustable] *= max(1.0 - fixed_total, 0.0) / adjustable_total
     return w
 
-def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1):
+def optimize_portfolio_max_return_given_daily_risk(
+    log_returns, max_drawdown=0.1, frozen_weights=None
+):
     from scipy.optimize import minimize
     mean_returns = log_returns.mean()
     cov_matrix = shrunk_covariance(log_returns)
@@ -4100,14 +4330,14 @@ def optimize_portfolio_max_return_given_daily_risk(log_returns, max_drawdown=0.1
         {"type": "eq", "fun": lambda x: np.sum(x) - 1},
         {"type": "ineq", "fun": lambda x: max_drawdown - portfolio_drawdown(x)}
     ]
-    bounds = weight_bounds(num_assets)
-    initial = np.ones(num_assets) / num_assets
+    bounds = weight_bounds(num_assets, log_returns.columns, frozen_weights)
+    initial = feasible_initial_weights(bounds)
 
     result = minimize(negative_sharpe, initial, method="SLSQP", bounds=bounds, constraints=constraints)
     return result.x if result.success else None
 
 
-def optimize_max_sharpe_ratio(log_returns):
+def optimize_max_sharpe_ratio(log_returns, frozen_weights=None):
     from scipy.optimize import minimize
     mean_returns = log_returns.mean()
     cov_matrix = shrunk_covariance(log_returns)
@@ -4121,14 +4351,16 @@ def optimize_max_sharpe_ratio(log_returns):
         return -excess_return / port_volatility if port_volatility != 0 else np.inf
 
     constraints = [{"type": "eq", "fun": lambda x: np.sum(x) - 1}]
-    bounds = weight_bounds(num_assets)
-    initial = np.ones(num_assets) / num_assets
+    bounds = weight_bounds(num_assets, log_returns.columns, frozen_weights)
+    initial = feasible_initial_weights(bounds)
 
     result = minimize(negative_sharpe, initial, method="SLSQP", bounds=bounds, constraints=constraints)
     return result.x if result.success else None
 
 
-def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
+def optimize_portfolio_target_volatility(
+    log_returns, target_volatility=0.1, frozen_weights=None
+):
     from scipy.optimize import minimize
     mean_returns = log_returns.mean()
     cov_matrix = shrunk_covariance(log_returns)
@@ -4148,8 +4380,8 @@ def optimize_portfolio_target_volatility(log_returns, target_volatility=0.1):
         {"type": "eq", "fun": constraint_sum},
         {"type": "ineq", "fun": constraint_volatility}
     ]
-    bounds = weight_bounds(num_assets)
-    initial = np.ones(num_assets) / num_assets
+    bounds = weight_bounds(num_assets, log_returns.columns, frozen_weights)
+    initial = feasible_initial_weights(bounds)
 
     result = minimize(objective, initial, method="SLSQP", bounds=bounds, constraints=constraints)
     return result.x if result.success else None
@@ -4249,25 +4481,62 @@ def run_portfolio_analysis_multi(
         owned_tickers=owned_tickers,
     )
     meta["exact_optimizer_screen"] = solver_screen
+    integrity_report = meta.get("price_integrity_report")
+    quarantined_owned = set()
+    if isinstance(integrity_report, pd.DataFrame) and not integrity_report.empty:
+        quarantined_owned = set(
+            integrity_report.loc[
+                integrity_report["Owned"].astype(bool)
+                & integrity_report["Status"].astype(str).str.startswith("QUARANTINED_"),
+                "Ticker",
+            ].astype(str)
+        )
+    allocation_weights = (
+        current_alloc.assign(
+            _weight=pd.to_numeric(current_alloc["Weight"], errors="coerce").fillna(0.0)
+        )
+        .groupby("Yahoo Ticker", sort=False)["_weight"]
+        .sum()
+    )
+    frozen_weights = {
+        ticker: float(allocation_weights.get(ticker, 0.0))
+        for ticker in log_returns.columns
+        if ticker in quarantined_owned and float(allocation_weights.get(ticker, 0.0)) > 0.0
+    }
+    meta["price_integrity_frozen_owned_weights"] = dict(frozen_weights)
 
     if target_volatility is not None:
         optimal_weights = optimize_portfolio_target_volatility(
-            log_returns, target_volatility=target_volatility
+            log_returns,
+            target_volatility=target_volatility,
+            frozen_weights=frozen_weights,
         )
     else:
         optimal_weights = None
 
     if optimal_weights is None:
         optimal_weights = optimize_portfolio_max_return_given_daily_risk(
-            log_returns, max_drawdown=max_dd
+            log_returns,
+            max_drawdown=max_dd,
+            frozen_weights=frozen_weights,
         )
     if optimal_weights is None:
-        optimal_weights = optimize_max_sharpe_ratio(log_returns)
+        optimal_weights = optimize_max_sharpe_ratio(
+            log_returns, frozen_weights=frozen_weights
+        )
     if optimal_weights is None:
         return None, log_returns, None, None, meta
 
     # Enforce minimum 1% weight on any non-zero position, then renormalize
-    optimal_weights = enforce_min_weight_postprocess(optimal_weights, min_weight=0.01)
+    frozen_positions = {
+        int(log_returns.columns.get_loc(ticker)): weight
+        for ticker, weight in frozen_weights.items()
+    }
+    optimal_weights = enforce_min_weight_postprocess(
+        optimal_weights,
+        min_weight=0.01,
+        frozen_positions=frozen_positions,
+    )
 
     current_stats, optimal_stats = portfolio_stats_comparison(
         current_alloc, log_returns, optimal_weights
@@ -6901,6 +7170,27 @@ if run_btn:
                 f"**{int(solver_screen.get('owned_assets_protected') or 0):,}** owned "
                 "holdings were protected."
             )
+        price_integrity_report = meta.get("price_integrity_report")
+        if isinstance(price_integrity_report, pd.DataFrame) and not price_integrity_report.empty:
+            repaired_count = int(
+                price_integrity_report["Status"].eq("REPAIRED_CORPORATE_ACTION").sum()
+            )
+            quarantined_count = int(
+                price_integrity_report["Status"].astype(str).str.startswith("QUARANTINED_").sum()
+            )
+            if repaired_count:
+                st.info(
+                    f"Price-integrity gate reconciled **{repaired_count:,}** "
+                    "corporate-action histories before calculating returns."
+                )
+            if quarantined_count:
+                st.warning(
+                    f"Price-integrity gate quarantined **{quarantined_count:,}** "
+                    "unresolved histories. New candidates were excluded; owned "
+                    "holdings were frozen at their current weights."
+                )
+            with st.expander("Price-integrity audit", expanded=False):
+                st.dataframe(price_integrity_report, width="stretch", hide_index=True)
         missing_owned_returns = meta.get("missing_owned_return_tickers", [])
         if missing_owned_returns:
             st.warning(
@@ -7192,6 +7482,17 @@ if run_btn:
                 "log_return_columns": int(log_returns.shape[1]),
                 "exact_optimizer_screen": dict(
                     meta.get("exact_optimizer_screen") or {}
+                ),
+                "price_integrity_version": str(
+                    meta.get("price_integrity_version") or PRICE_INTEGRITY_VERSION
+                ),
+                "price_integrity_report": (
+                    meta["price_integrity_report"].to_dict(orient="records")
+                    if isinstance(meta.get("price_integrity_report"), pd.DataFrame)
+                    else []
+                ),
+                "price_integrity_frozen_owned_weights": dict(
+                    meta.get("price_integrity_frozen_owned_weights") or {}
                 ),
                 "minimum_history": (
                     meta["min_len_df"].to_dict(orient="records")
