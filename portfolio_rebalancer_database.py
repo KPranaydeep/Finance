@@ -37,6 +37,8 @@ from price_history_integrity import (
     reconcile_price_frame,
 )
 from scalable_universe_preselection import (
+    RISK_APPETITE_PAIRS,
+    calculate_risk_appetite_regime,
     convert_candidate_history_to_inr,
     filter_candidates_by_market_cap,
     rank_scalable_candidates,
@@ -3582,8 +3584,16 @@ def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candida
             diagnostics,
         )
 
+    regime_tickers = tuple(
+        dict.fromkeys(
+            ticker
+            for numerator, denominator, _ in RISK_APPETITE_PAIRS
+            for ticker in (numerator, denominator)
+        )
+    )
+    download_tickers = tuple(dict.fromkeys((*tickers, *regime_tickers)))
     local_closes, volumes, diagnostics, native_recent_prices = _download_recent_market_data_bulk(
-        tickers,
+        download_tickers,
         period="2y",
         batch_size=120,
         fallback_batch_size=40,
@@ -3592,6 +3602,14 @@ def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candida
     if local_closes.empty:
         diagnostics.update({"ranking_currency": "INR", "inr_adjusted": True})
         return [], {}, pd.DataFrame(), diagnostics
+    benchmark_closes = local_closes.reindex(
+        columns=[ticker for ticker in regime_tickers if ticker in local_closes.columns]
+    )
+    risk_appetite = calculate_risk_appetite_regime(benchmark_closes)
+    local_closes = local_closes.reindex(
+        columns=[ticker for ticker in tickers if ticker in local_closes.columns]
+    )
+    volumes = volumes.reindex(columns=local_closes.columns)
     ticker_currencies = {ticker: currency for ticker, _, currency in rows}
     fx_histories = {}
     fx_download_failures = []
@@ -3617,6 +3635,7 @@ def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candida
             "inr_adjusted": True,
             "fx_currencies_requested": len(set(ticker_currencies.values()) - {"INR"}),
             "fx_currencies_omitted": omitted_currencies,
+            "risk_appetite": risk_appetite,
         }
     )
     selected, report = rank_scalable_candidates(
@@ -3625,6 +3644,7 @@ def preselect_universal_candidates(ticker_cluster_currency_rows, maximum_candida
         {ticker: cluster for ticker, cluster, _ in rows},
         maximum_candidates=int(maximum_candidates),
         minimum_per_cluster=5,
+        risk_appetite_regime=risk_appetite,
     )
     if closes.empty:
         return [], {}, report, diagnostics
@@ -7118,10 +7138,24 @@ if run_btn:
                     f"{int(market_cap_filter.get('unknown_retained', 0)):,} with missing "
                     "market cap retained conservatively."
                 )
+            risk_appetite = (
+                (universal_preselection.get("market_data") or {}).get("risk_appetite")
+                or {}
+            )
+            regime_note = ""
+            if risk_appetite.get("status") == "available":
+                regime_note = (
+                    " Market regime: "
+                    f"{str(risk_appetite.get('regime', 'neutral')).replace('-', ' ')} "
+                    f"from {int(risk_appetite.get('available_pairs', 0))}/3 available "
+                    "relative-strength pairs (IWM/SPY, XLY/XLP, HYG/LQD). "
+                    "It applies only a bounded ranking tilt, not an exclusion."
+                )
             st.info(
                 f"Universal candidate shortlist: {len(universal_candidate_symbols):,} of "
                 f"{universal_preselection['eligible']:,} eligible symbols. The shortlist "
                 + market_cap_note
+                + regime_note
                 + " "
                 "combines stable risk-adjusted momentum with an emerging-winner sleeve "
                 "for price acceleration, breakout proximity and volume confirmation, "

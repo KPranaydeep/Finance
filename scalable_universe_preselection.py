@@ -6,6 +6,98 @@ import numpy as np
 import pandas as pd
 
 
+RISK_APPETITE_PAIRS = (
+    ("IWM", "SPY", "Small caps / large caps"),
+    ("XLY", "XLP", "Cyclicals / defensives"),
+    ("HYG", "LQD", "High yield / investment grade"),
+)
+
+
+def calculate_risk_appetite_regime(
+    benchmark_closes: pd.DataFrame,
+    horizons: tuple[int, ...] = (63, 126),
+) -> dict:
+    """Return a bounded regime tilt from three relative-strength pairs."""
+    neutral = {
+        "status": "unavailable",
+        "regime": "neutral",
+        "score": 0.0,
+        "tilt": 0.0,
+        "positive_pairs": 0,
+        "available_pairs": 0,
+        "components": [],
+    }
+    if benchmark_closes is None or benchmark_closes.empty:
+        return neutral
+
+    closes = benchmark_closes.copy()
+    closes.columns = [str(column).strip().upper() for column in closes.columns]
+    components = []
+    for numerator, denominator, label in RISK_APPETITE_PAIRS:
+        if numerator not in closes or denominator not in closes:
+            continue
+        aligned = pd.concat(
+            [
+                pd.to_numeric(closes[numerator], errors="coerce"),
+                pd.to_numeric(closes[denominator], errors="coerce"),
+            ],
+            axis=1,
+            join="inner",
+        ).dropna()
+        aligned = aligned[(aligned > 0).all(axis=1)]
+        if len(aligned) <= max(horizons):
+            continue
+        log_ratio = np.log(aligned.iloc[:, 0] / aligned.iloc[:, 1])
+        daily_volatility = float(log_ratio.diff().dropna().tail(252).std(ddof=1))
+        horizon_scores = []
+        raw_changes = []
+        for horizon in horizons:
+            if len(log_ratio) <= int(horizon):
+                continue
+            change = float(log_ratio.iloc[-1] - log_ratio.iloc[-1 - int(horizon)])
+            raw_changes.append(change)
+            scale = daily_volatility * np.sqrt(float(horizon))
+            if np.isfinite(scale) and scale > 1e-8:
+                horizon_scores.append(change / scale)
+        if not horizon_scores:
+            continue
+        direction = float(np.mean(raw_changes)) if raw_changes else 0.0
+        components.append(
+            {
+                "pair": f"{numerator}/{denominator}",
+                "label": label,
+                "score": float(np.clip(np.mean(horizon_scores), -3.0, 3.0)),
+                "direction": (
+                    "positive" if direction > 0 else "negative" if direction < 0 else "flat"
+                ),
+            }
+        )
+
+    if len(components) < 2:
+        return {**neutral, "components": components, "available_pairs": len(components)}
+    composite = float(np.mean([item["score"] for item in components]))
+    positive_pairs = sum(item["direction"] == "positive" for item in components)
+    negative_pairs = sum(item["direction"] == "negative" for item in components)
+    if positive_pairs >= 2 and composite > 0:
+        regime = "risk-on"
+        tilt = float(np.tanh(composite / 1.5))
+    elif negative_pairs >= 2 and composite < 0:
+        regime = "risk-off"
+        tilt = float(np.tanh(composite / 1.5))
+    else:
+        regime = "neutral"
+        tilt = 0.0
+    return {
+        "status": "available",
+        "regime": regime,
+        "score": composite,
+        "tilt": float(np.clip(tilt, -1.0, 1.0)),
+        "positive_pairs": int(positive_pairs),
+        "available_pairs": int(len(components)),
+        "components": components,
+    }
+
+
 def filter_candidates_by_market_cap(
     candidates: pd.DataFrame,
     exclusion_fraction: float = 0.20,
@@ -130,6 +222,7 @@ def rank_scalable_candidates(
     ticker_clusters: dict[str, str],
     maximum_candidates: int = 400,
     minimum_per_cluster: int = 5,
+    risk_appetite_regime: dict | None = None,
 ) -> tuple[list[str], pd.DataFrame]:
     """Rank a broad universe using recent momentum, liquidity and data continuity.
 
@@ -225,17 +318,21 @@ def rank_scalable_candidates(
     report["Acceleration rank"] = grouped["Acceleration"].rank(pct=True, method="average")
     report["Breakout rank"] = grouped["Breakout proximity"].rank(pct=True, method="average")
     report["Volume-surge rank"] = grouped["Volume surge"].rank(pct=True, method="average")
+    regime = dict(risk_appetite_regime or {})
+    tilt = float(np.clip(regime.get("tilt", 0.0), -1.0, 1.0))
     report["Preselection score"] = (
-        0.60 * report["Momentum rank"]
-        + 0.30 * report["Liquidity rank"]
-        + 0.10 * report["Continuity rank"]
+        (0.60 + 0.10 * tilt) * report["Momentum rank"]
+        + (0.30 - 0.05 * tilt) * report["Liquidity rank"]
+        + (0.10 - 0.05 * tilt) * report["Continuity rank"]
     )
     report["Emerging-winner score"] = (
-        0.40 * report["Acceleration rank"]
-        + 0.25 * report["Breakout rank"]
+        (0.40 + 0.05 * tilt) * report["Acceleration rank"]
+        + (0.25 + 0.025 * tilt) * report["Breakout rank"]
         + 0.20 * report["Volume-surge rank"]
-        + 0.15 * report["Liquidity rank"]
+        + (0.15 - 0.075 * tilt) * report["Liquidity rank"]
     )
+    report["Risk-appetite regime"] = str(regime.get("regime", "neutral"))
+    report["Risk-appetite tilt"] = tilt
     report["Balanced score"] = np.maximum(
         report["Preselection score"], report["Emerging-winner score"]
     )
@@ -262,8 +359,8 @@ def rank_scalable_candidates(
                     sleeves[ticker] = "Cluster reserve"
 
     remaining_capacity = max(cap - len(selected), 0)
-    core_slots = int(round(remaining_capacity * 0.70))
-    emerging_slots = int(round(remaining_capacity * 0.20))
+    core_slots = int(round(remaining_capacity * (0.70 - 0.025 * tilt)))
+    emerging_slots = int(round(remaining_capacity * (0.20 + 0.05 * tilt)))
 
     core_order = report.sort_values(
         ["Preselection score", "Momentum", "Ticker"],

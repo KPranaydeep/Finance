@@ -2,10 +2,48 @@ import numpy as np
 import pandas as pd
 
 from scalable_universe_preselection import (
+    calculate_risk_appetite_regime,
     convert_candidate_history_to_inr,
     filter_candidates_by_market_cap,
     rank_scalable_candidates,
 )
+
+
+def _risk_benchmark_frame(direction=1.0):
+    rng = np.random.default_rng(42)
+    index = pd.bdate_range("2024-01-01", periods=420)
+    common = np.cumsum(rng.normal(0.0003, 0.006, len(index)))
+    frame = pd.DataFrame(index=index)
+    for numerator, denominator, drift in (
+        ("IWM", "SPY", 0.0007),
+        ("XLY", "XLP", 0.0005),
+        ("HYG", "LQD", 0.0003),
+    ):
+        ratio_noise = np.cumsum(rng.normal(0.0, 0.0015, len(index)))
+        frame[denominator] = 100.0 * np.exp(common)
+        frame[numerator] = frame[denominator] * np.exp(
+            direction * drift * np.arange(len(index)) + ratio_noise
+        )
+    return frame
+
+
+def test_risk_appetite_regime_requires_pair_agreement_and_is_bounded():
+    risk_on = calculate_risk_appetite_regime(_risk_benchmark_frame(1.0))
+    risk_off = calculate_risk_appetite_regime(_risk_benchmark_frame(-1.0))
+
+    assert risk_on["regime"] == "risk-on"
+    assert risk_on["positive_pairs"] >= 2
+    assert 0 < risk_on["tilt"] <= 1
+    assert risk_off["regime"] == "risk-off"
+    assert -1 <= risk_off["tilt"] < 0
+
+
+def test_risk_appetite_missing_history_fails_neutral():
+    result = calculate_risk_appetite_regime(pd.DataFrame({"SPY": [1.0, 2.0]}))
+
+    assert result["status"] == "unavailable"
+    assert result["regime"] == "neutral"
+    assert result["tilt"] == 0.0
 
 
 def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
