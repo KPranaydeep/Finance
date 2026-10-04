@@ -3499,7 +3499,23 @@ def auto_history_buffer_days(now=None):
     return 0, f"The {now:%A} session has closed — today is included."
 
 
-@st.cache_data(show_spinner=False)
+def _download_close_history_batch(symbols, start_date, effective_end):
+    """Download one stable history batch so adjacent shortlist caps can reuse it."""
+    return _download_close_prices_resilient(
+        list(symbols),
+        start=start_date,
+        end=effective_end,
+        batch_size=12,
+    )
+
+
+_download_close_history_batch = st.cache_data(
+    show_spinner=False,
+    ttl="24h",
+    max_entries=4096,
+)(_download_close_history_batch)
+
+
 def download_close_history(
     symbols,
     start_date=DEFAULT_HISTORY_START_DATE,
@@ -3509,11 +3525,29 @@ def download_close_history(
     """Download closing-price history once and reuse it during the same analysis."""
     _, effective_end = _resolve_history_window_end(end_date, buffer_days)
 
-    prices, failures = _download_close_prices_resilient(
-        list(symbols),
-        start=start_date,
-        end=effective_end,
-        batch_size=12,
+    frames = []
+    failures = {}
+    normalized_symbols = tuple(
+        str(symbol).strip().upper()
+        for symbol in dict.fromkeys(symbols)
+        if str(symbol).strip()
+    )
+    for batch in _chunked(normalized_symbols, 12):
+        batch_prices, batch_failures = _download_close_history_batch(
+            tuple(batch),
+            start_date,
+            effective_end,
+        )
+        if batch_prices is not None and not batch_prices.empty:
+            frames.append(batch_prices)
+        failures.update(batch_failures or {})
+
+    prices = (
+        pd.concat(frames, axis=1)
+        .loc[:, lambda frame: ~frame.columns.duplicated()]
+        .sort_index()
+        if frames
+        else pd.DataFrame()
     )
 
     prices = prices.dropna(axis=1, how="all")
@@ -3530,7 +3564,23 @@ def download_close_history(
     return prices
 
 
-@st.cache_data(show_spinner=False)
+def _download_volume_history_batch(symbols, start_date, effective_end):
+    """Download one stable volume batch so adjacent shortlist caps can reuse it."""
+    return _download_volume_history_resilient(
+        list(symbols),
+        start=start_date,
+        end=effective_end,
+        batch_size=12,
+    )
+
+
+_download_volume_history_batch = st.cache_data(
+    show_spinner=False,
+    ttl="24h",
+    max_entries=4096,
+)(_download_volume_history_batch)
+
+
 def download_volume_history(
     symbols,
     start_date=DEFAULT_HISTORY_START_DATE,
@@ -3539,11 +3589,29 @@ def download_volume_history(
 ):
     """Download daily volume history so low-liquidity names can be dropped first."""
     _, effective_end = _resolve_history_window_end(end_date, buffer_days)
-    volumes, failures = _download_volume_history_resilient(
-        list(symbols),
-        start=start_date,
-        end=effective_end,
-        batch_size=12,
+    frames = []
+    failures = {}
+    normalized_symbols = tuple(
+        str(symbol).strip().upper()
+        for symbol in dict.fromkeys(symbols)
+        if str(symbol).strip()
+    )
+    for batch in _chunked(normalized_symbols, 12):
+        batch_volumes, batch_failures = _download_volume_history_batch(
+            tuple(batch),
+            start_date,
+            effective_end,
+        )
+        if batch_volumes is not None and not batch_volumes.empty:
+            frames.append(batch_volumes)
+        failures.update(batch_failures or {})
+
+    volumes = (
+        pd.concat(frames, axis=1)
+        .loc[:, lambda frame: ~frame.columns.duplicated()]
+        .sort_index()
+        if frames
+        else pd.DataFrame()
     )
 
     volumes = volumes.dropna(axis=1, how="all")
@@ -3745,7 +3813,7 @@ def select_redundant_tickers(
     return kept, report
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl="24h", max_entries=2)
 def get_daily_log_returns(
     symbols,
     start_date=None,
