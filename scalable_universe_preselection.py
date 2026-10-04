@@ -6,6 +6,94 @@ import numpy as np
 import pandas as pd
 
 
+def filter_candidates_by_market_cap(
+    candidates: pd.DataFrame,
+    exclusion_fraction: float = 0.20,
+    minimum_known_per_cluster: int = 5,
+    minimum_retained_per_cluster: int = 5,
+) -> tuple[pd.DataFrame, dict]:
+    """Remove at most the bottom market-cap fraction within listing clusters.
+
+    Market-cap units and currencies need not be comparable across exchanges because
+    ranks are calculated independently within ``Exchange · Currency`` clusters.
+    Missing market caps are retained rather than guessed, and small clusters remain
+    intact so the early runtime gate cannot erase a market entirely.
+    """
+    if candidates is None or candidates.empty:
+        empty = pd.DataFrame() if candidates is None else candidates.copy()
+        return empty, {
+            "before": 0,
+            "after": 0,
+            "excluded": 0,
+            "known": 0,
+            "unknown_retained": 0,
+            "fraction": min(max(float(exclusion_fraction), 0.0), 0.20),
+            "clusters": [],
+        }
+
+    frame = candidates.copy()
+    cap_column = "Market Cap Millions"
+    fraction = min(max(float(exclusion_fraction), 0.0), 0.20)
+    if cap_column not in frame.columns:
+        return frame, {
+            "before": int(len(frame)),
+            "after": int(len(frame)),
+            "excluded": 0,
+            "known": 0,
+            "unknown_retained": int(len(frame)),
+            "fraction": fraction,
+            "clusters": [],
+        }
+
+    frame[cap_column] = pd.to_numeric(frame[cap_column], errors="coerce")
+    frame.loc[frame[cap_column] <= 0, cap_column] = np.nan
+    exchange = frame.get("Exchange", pd.Series("Unknown", index=frame.index))
+    currency = frame.get("Currency", pd.Series("Unknown", index=frame.index))
+    frame["_market_cap_cluster"] = (
+        exchange.fillna("Unknown").astype(str).str.strip().replace("", "Unknown")
+        + " · "
+        + currency.fillna("Unknown").astype(str).str.strip().replace("", "Unknown")
+    )
+
+    remove_indices: list[object] = []
+    cluster_report: list[dict] = []
+    ticker_column = "Yahoo Ticker" if "Yahoo Ticker" in frame.columns else "Symbol"
+    for cluster, rows in frame.groupby("_market_cap_cluster", sort=True, dropna=False):
+        known = rows.loc[rows[cap_column].notna()].copy()
+        removable = max(len(known) - max(int(minimum_retained_per_cluster), 1), 0)
+        remove_count = min(int(np.floor(len(known) * fraction)), removable)
+        if len(known) < max(int(minimum_known_per_cluster), 1):
+            remove_count = 0
+        if remove_count:
+            ordered = known.sort_values(
+                [cap_column, ticker_column],
+                ascending=[True, True],
+                kind="mergesort",
+            )
+            remove_indices.extend(ordered.head(remove_count).index.tolist())
+        cluster_report.append(
+            {
+                "cluster": str(cluster),
+                "candidates": int(len(rows)),
+                "known_market_caps": int(len(known)),
+                "excluded": int(remove_count),
+                "unknown_retained": int(rows[cap_column].isna().sum()),
+            }
+        )
+
+    filtered = frame.drop(index=remove_indices).drop(columns="_market_cap_cluster")
+    filtered = filtered.reset_index(drop=True)
+    return filtered, {
+        "before": int(len(frame)),
+        "after": int(len(filtered)),
+        "excluded": int(len(remove_indices)),
+        "known": int(frame[cap_column].notna().sum()),
+        "unknown_retained": int(frame[cap_column].isna().sum()),
+        "fraction": fraction,
+        "clusters": cluster_report,
+    }
+
+
 def convert_candidate_history_to_inr(
     close_history: pd.DataFrame,
     ticker_currencies: dict[str, str],

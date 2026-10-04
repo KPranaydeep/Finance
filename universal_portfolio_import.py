@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 import pandas as pd
 
 
+IMPORT_SCHEMA_VERSION = "universal-import-v2-market-cap"
+
 JOB_DDL = """
 CREATE TABLE IF NOT EXISTS universal_import_jobs (
     job_id TEXT PRIMARY KEY,
@@ -41,6 +43,7 @@ CREATE TABLE IF NOT EXISTS universal_import_items (
     yahoo_ticker TEXT,
     exchange TEXT,
     currency TEXT,
+    market_cap_millions REAL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (job_id, source_symbol),
     FOREIGN KEY (job_id) REFERENCES universal_import_jobs(job_id)
@@ -56,6 +59,7 @@ ITEM_COLUMNS = [
     "Yahoo ticker",
     "Exchange",
     "Currency",
+    "Market cap (millions)",
 ]
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,31}$")
@@ -71,6 +75,14 @@ def ensure_import_schema(conn: sqlite3.Connection) -> None:
     if "mode" not in job_columns:
         conn.execute(
             "ALTER TABLE universal_import_jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'merge'"
+        )
+    item_columns = {
+        str(row[1]).lower()
+        for row in conn.execute("PRAGMA table_info(universal_import_items)").fetchall()
+    }
+    if "market_cap_millions" not in item_columns:
+        conn.execute(
+            "ALTER TABLE universal_import_items ADD COLUMN market_cap_millions REAL"
         )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_universal_import_source "
@@ -129,6 +141,17 @@ def parse_universal_source_csv(content: bytes, max_rows: int = 20_000) -> tuple[
     )
     name_col = _find_column(frame.columns, ("name", "company", "company name"))
     country_col = _find_column(frame.columns, ("country", "listing country"))
+    market_cap_col = _find_column(
+        frame.columns,
+        (
+            "marketCapitalizationMln",
+            "market capitalization mln",
+            "market cap millions",
+            "market capitalization",
+            "market cap",
+            "marketcap",
+        ),
+    )
 
     source_rows = len(frame)
     normalized = pd.DataFrame()
@@ -145,6 +168,20 @@ def parse_universal_source_csv(content: bytes, max_rows: int = 20_000) -> tuple[
         if country_col is not None
         else ""
     )
+    if market_cap_col is not None:
+        cleaned_market_cap = (
+            frame[market_cap_col]
+            .astype(str)
+            .str.replace(r"[^0-9eE+\-.]", "", regex=True)
+        )
+        normalized["market_cap_millions"] = pd.to_numeric(
+            cleaned_market_cap, errors="coerce"
+        )
+        normalized.loc[
+            normalized["market_cap_millions"] <= 0, "market_cap_millions"
+        ] = pd.NA
+    else:
+        normalized["market_cap_millions"] = pd.NA
     normalized = normalized[normalized["source_symbol"].ne("")].copy()
     duplicate_count = int(normalized["source_symbol"].duplicated().sum())
     normalized = normalized.drop_duplicates("source_symbol", keep="first").reset_index(drop=True)
@@ -190,7 +227,9 @@ def prepare_import_job(
     mode = str(mode or "merge").strip().lower()
     if mode not in {"merge", "replace_overseas"}:
         raise ValueError("Unsupported Universal Portfolio import mode.")
-    source_hash = hashlib.sha256(content).hexdigest()
+    source_hash = hashlib.sha256(
+        IMPORT_SCHEMA_VERSION.encode("utf-8") + b"\0" + content
+    ).hexdigest()
     prior = conn.execute(
         """
         SELECT job_id FROM universal_import_jobs
@@ -283,8 +322,8 @@ def prepare_import_job(
                 """
                 INSERT INTO universal_import_items
                     (job_id, input_order, source_symbol, stock_name, country,
-                     status, reason, yahoo_ticker, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, reason, yahoo_ticker, market_cap_millions, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -295,6 +334,11 @@ def prepare_import_job(
                     status,
                     reason,
                     source_symbol,
+                    (
+                        float(row.market_cap_millions)
+                        if pd.notna(row.market_cap_millions)
+                        else None
+                    ),
                     now,
                 ),
             )
@@ -430,7 +474,8 @@ def apply_verified_import(conn: sqlite3.Connection, job_id: str, owner: str) -> 
         raise ValueError("Validation is incomplete. Resume it before applying additions.")
     rows = conn.execute(
         """
-        SELECT source_symbol, stock_name, yahoo_ticker, exchange, currency
+        SELECT source_symbol, stock_name, yahoo_ticker, exchange, currency,
+               market_cap_millions
         FROM universal_import_items
         WHERE job_id = ? AND status = 'verified' ORDER BY input_order
         """,
@@ -447,8 +492,8 @@ def apply_verified_import(conn: sqlite3.Connection, job_id: str, owner: str) -> 
                 """
                 INSERT INTO master_holdings
                     (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
-                     quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+                     quantity, average_price, market_cap_millions, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)
                 ON CONFLICT(owner, symbol) DO NOTHING
                 """,
                 (
@@ -458,6 +503,7 @@ def apply_verified_import(conn: sqlite3.Connection, job_id: str, owner: str) -> 
                     row["yahoo_ticker"],
                     row["exchange"],
                     row["currency"],
+                    row["market_cap_millions"],
                     now,
                     now,
                 ),
@@ -516,7 +562,8 @@ def apply_verified_overseas_replacement(
         )
     verified_rows = conn.execute(
         """
-        SELECT source_symbol, stock_name, yahoo_ticker, exchange, currency
+        SELECT source_symbol, stock_name, yahoo_ticker, exchange, currency,
+               market_cap_millions
         FROM universal_import_items
         WHERE job_id=? AND status='verified' ORDER BY input_order
         """,
@@ -548,8 +595,8 @@ def apply_verified_overseas_replacement(
                 """
                 INSERT INTO master_holdings
                     (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
-                     quantity, average_price, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+                     quantity, average_price, market_cap_millions, added_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)
                 ON CONFLICT(owner, symbol) DO NOTHING
                 """,
                 (
@@ -559,6 +606,7 @@ def apply_verified_overseas_replacement(
                     row["yahoo_ticker"],
                     row["exchange"],
                     row["currency"],
+                    row["market_cap_millions"],
                     now,
                     now,
                 ),
@@ -598,7 +646,8 @@ def import_items_frame(conn: sqlite3.Connection, job_id: str) -> pd.DataFrame:
         """
         SELECT source_symbol AS Symbol, stock_name AS Name, status AS Status,
                attempts AS Attempts, reason AS Reason, yahoo_ticker AS "Yahoo ticker",
-               exchange AS Exchange, currency AS Currency
+               exchange AS Exchange, currency AS Currency,
+               market_cap_millions AS "Market cap (millions)"
         FROM universal_import_items WHERE job_id = ? ORDER BY input_order
         """,
         conn,

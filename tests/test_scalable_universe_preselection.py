@@ -3,8 +3,69 @@ import pandas as pd
 
 from scalable_universe_preselection import (
     convert_candidate_history_to_inr,
+    filter_candidates_by_market_cap,
     rank_scalable_candidates,
 )
+
+
+def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
+    frame = pd.DataFrame(
+        [
+            {
+                "Symbol": f"US{index}",
+                "Yahoo Ticker": f"US{index}",
+                "Exchange": "NMS",
+                "Currency": "USD",
+                "Market Cap Millions": float(index),
+            }
+            for index in range(1, 11)
+        ]
+        + [
+            {
+                "Symbol": f"IN{index}",
+                "Yahoo Ticker": f"IN{index}.NS",
+                "Exchange": "NSI",
+                "Currency": "INR",
+                "Market Cap Millions": float(index * 10),
+            }
+            for index in range(1, 11)
+        ]
+        + [
+            {
+                "Symbol": "UNKNOWN",
+                "Yahoo Ticker": "UNKNOWN",
+                "Exchange": "NMS",
+                "Currency": "USD",
+                "Market Cap Millions": None,
+            }
+        ]
+    )
+
+    filtered, report = filter_candidates_by_market_cap(frame, 0.20)
+
+    assert set(frame["Symbol"]) - set(filtered["Symbol"]) == {
+        "US1", "US2", "IN1", "IN2"
+    }
+    assert "UNKNOWN" in set(filtered["Symbol"])
+    assert report["excluded"] == 4
+    assert report["unknown_retained"] == 1
+
+
+def test_market_cap_filter_preserves_small_clusters_and_caps_exclusion_at_twenty_percent():
+    frame = pd.DataFrame(
+        {
+            "Symbol": [f"S{index}" for index in range(4)],
+            "Yahoo Ticker": [f"S{index}" for index in range(4)],
+            "Exchange": ["ASX"] * 4,
+            "Currency": ["AUD"] * 4,
+            "Market Cap Millions": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+
+    filtered, report = filter_candidates_by_market_cap(frame, 0.90)
+
+    assert filtered["Symbol"].tolist() == frame["Symbol"].tolist()
+    assert report["fraction"] == 0.20
 
 
 def histories():

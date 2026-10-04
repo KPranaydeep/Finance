@@ -26,6 +26,7 @@ CREATE TABLE master_holdings (
     currency TEXT,
     quantity REAL NOT NULL,
     average_price REAL,
+    market_cap_millions REAL,
     added_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (owner, symbol)
@@ -107,7 +108,30 @@ def test_parser_accepts_tickertape_us_screener_columns():
 
     assert frame["source_symbol"].tolist() == ["NVDA", "AAPL"]
     assert frame["stock_name"].tolist() == ["NVIDIA Corporation", "Apple Inc."]
+    assert frame["market_cap_millions"].tolist() == [5514691.8707, 4860153.9543]
     assert stats["unique_symbols"] == 2
+
+
+def test_market_cap_metadata_survives_staging_and_apply():
+    conn = connection()
+    content = (
+        '"name","ticker","marketCapitalizationMln"\n'
+        '"NVIDIA Corporation","NVDA","5514691.8707"\n'
+    ).encode("utf-8")
+    job_id, _, _ = prepare_import_job(conn, content, "tickertape.csv", "__universal__")
+    record_validation_batch(
+        conn,
+        job_id,
+        ["NVDA"],
+        {"NVDA": {"yahoo_ticker": "NVDA", "exchange": "NMS", "currency": "USD"}},
+    )
+
+    apply_verified_import(conn, job_id, "__universal__")
+
+    stored = conn.execute(
+        "SELECT market_cap_millions FROM master_holdings WHERE symbol='NVDA'"
+    ).fetchone()
+    assert stored[0] == pytest.approx(5514691.8707)
 
 
 def test_prepare_is_resumable_and_protects_exchange_collisions():
@@ -115,8 +139,8 @@ def test_prepare_is_resumable_and_protects_exchange_collisions():
     conn.execute(
         """
         INSERT INTO master_holdings VALUES
-        ('__universal__', 'VT', 'Vanguard Total World', 'VT', 'PCX', 'USD', 0, NULL, 'x', 'x'),
-        ('__universal__', 'SBC', 'SBC Exports', 'SBC.NS', 'NSI', 'INR', 0, NULL, 'x', 'x')
+        ('__universal__', 'VT', 'Vanguard Total World', 'VT', 'PCX', 'USD', 0, NULL, NULL, 'x', 'x'),
+        ('__universal__', 'SBC', 'SBC Exports', 'SBC.NS', 'NSI', 'INR', 0, NULL, NULL, 'x', 'x')
         """
     )
     conn.commit()
@@ -196,10 +220,10 @@ def test_overseas_replacement_preserves_india_and_is_atomic():
     conn.execute(
         """
         INSERT INTO master_holdings VALUES
-        ('__universal__', 'INDIA', 'India', 'INDIA.NS', 'NSI', 'INR', 0, NULL, 'x', 'x'),
-        ('__universal__', 'OLD', 'Old US', 'OLD', 'NYQ', 'USD', 0, NULL, 'x', 'x'),
-        ('__universal__', 'KEEP', 'Keep US', 'KEEP', 'NMS', 'USD', 0, NULL, 'x', 'x'),
-        ('alice', 'PERSONAL', 'Personal', 'PERSONAL', 'NYQ', 'USD', 5, 10, 'x', 'x')
+        ('__universal__', 'INDIA', 'India', 'INDIA.NS', 'NSI', 'INR', 0, NULL, NULL, 'x', 'x'),
+        ('__universal__', 'OLD', 'Old US', 'OLD', 'NYQ', 'USD', 0, NULL, NULL, 'x', 'x'),
+        ('__universal__', 'KEEP', 'Keep US', 'KEEP', 'NMS', 'USD', 0, NULL, NULL, 'x', 'x'),
+        ('alice', 'PERSONAL', 'Personal', 'PERSONAL', 'NYQ', 'USD', 5, 10, NULL, 'x', 'x')
         """
     )
     conn.commit()
@@ -246,7 +270,7 @@ def test_overseas_replacement_refuses_low_validation_coverage_without_deleting()
     conn.execute(
         """
         INSERT INTO master_holdings VALUES
-        ('__universal__', 'OLD', 'Old US', 'OLD', 'NYQ', 'USD', 0, NULL, 'x', 'x')
+        ('__universal__', 'OLD', 'Old US', 'OLD', 'NYQ', 'USD', 0, NULL, NULL, 'x', 'x')
         """
     )
     conn.commit()

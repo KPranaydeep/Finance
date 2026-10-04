@@ -38,6 +38,7 @@ from price_history_integrity import (
 )
 from scalable_universe_preselection import (
     convert_candidate_history_to_inr,
+    filter_candidates_by_market_cap,
     rank_scalable_candidates,
 )
 import portfolio_optimizer_config as _optimizer_config
@@ -103,6 +104,7 @@ RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
 TRADING_DAYS_PER_YEAR = _optimizer_config.TRADING_DAYS_PER_YEAR
 UNIVERSAL_PRESELECTION_CAP = 400
 DEFAULT_EXACT_OPTIMIZER_ASSET_CAP = 300
+MARKET_CAP_EXCLUSION_FRACTION = 0.20
 from robust_momentum_filter import apply_robust_momentum_filter
 
 
@@ -683,6 +685,7 @@ CREATE TABLE IF NOT EXISTS master_holdings (
     currency TEXT,
     quantity REAL NOT NULL DEFAULT 1,
     average_price REAL,
+    market_cap_millions REAL,
     added_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (owner, symbol)
@@ -792,6 +795,7 @@ def _ensure_master_holdings_schema(conn):
             "currency": "NULL",
             "quantity": "1",
             "average_price": "NULL",
+            "market_cap_millions": "NULL",
             "added_at": f"'{now}'",
             "updated_at": f"'{now}'",
         }
@@ -803,7 +807,7 @@ def _ensure_master_holdings_schema(conn):
             f"""
             INSERT INTO master_holdings
                 (owner, symbol, stock_name, yahoo_ticker, exchange, currency,
-                 quantity, average_price, added_at, updated_at)
+                 quantity, average_price, market_cap_millions, added_at, updated_at)
             SELECT '', symbol, {", ".join(select_exprs)}
             FROM "{legacy_name}"
             """
@@ -820,6 +824,7 @@ def _ensure_master_holdings_schema(conn):
         "currency": "ALTER TABLE master_holdings ADD COLUMN currency TEXT",
         "quantity": "ALTER TABLE master_holdings ADD COLUMN quantity REAL DEFAULT 1",
         "average_price": "ALTER TABLE master_holdings ADD COLUMN average_price REAL",
+        "market_cap_millions": "ALTER TABLE master_holdings ADD COLUMN market_cap_millions REAL",
         "added_at": "ALTER TABLE master_holdings ADD COLUMN added_at TEXT",
         "updated_at": "ALTER TABLE master_holdings ADD COLUMN updated_at TEXT",
     }
@@ -934,6 +939,7 @@ def load_master_holdings(owner):
                 currency AS Currency,
                 quantity AS Quantity,
                 average_price AS "Average Price",
+                market_cap_millions AS "Market Cap Millions",
                 added_at AS "Added At",
                 updated_at AS "Updated At"
             FROM master_holdings
@@ -3042,6 +3048,7 @@ def build_current_allocation_from_db(owner):
 def extend_allocation_with_universal_candidates(
     portfolio_df,
     maximum_candidates=UNIVERSAL_PRESELECTION_CAP,
+    market_cap_exclusion_fraction=MARKET_CAP_EXCLUSION_FRACTION,
 ):
     """Add zero-quantity rows for Universal Portfolio symbols not already held.
 
@@ -3083,6 +3090,17 @@ def extend_allocation_with_universal_candidates(
         return portfolio_df, [], {
             "method": "scalable-preselection-v1", "eligible": 0,
             "shortlisted": 0, "cap": candidate_cap,
+        }
+
+    candidates, market_cap_report = filter_candidates_by_market_cap(
+        candidates,
+        exclusion_fraction=market_cap_exclusion_fraction,
+    )
+    if candidates.empty:
+        return portfolio_df, [], {
+            "method": "scalable-preselection-v1", "eligible": 0,
+            "shortlisted": 0, "cap": candidate_cap,
+            "market_cap_filter": market_cap_report,
         }
 
     eligible_count = len(candidates)
@@ -3156,6 +3174,7 @@ def extend_allocation_with_universal_candidates(
             "eligible": eligible_count,
             "shortlisted": 0,
             "cap": candidate_cap,
+            "market_cap_filter": market_cap_report,
         }
 
     extended_df = pd.concat([portfolio_df, pd.DataFrame(rows)], ignore_index=True)
@@ -3166,6 +3185,7 @@ def extend_allocation_with_universal_candidates(
         "cap": candidate_cap,
         "scored": int(len(shortlist_report)),
         "market_data": dict(shortlist_diagnostics),
+        "market_cap_filter": market_cap_report,
     }
 
 # =========================================================
@@ -7087,9 +7107,22 @@ if run_btn:
             estimated_total_seconds=refined_estimate,
         )
         if universal_candidate_symbols:
+            market_cap_filter = universal_preselection.get("market_cap_filter") or {}
+            market_cap_note = ""
+            if market_cap_filter:
+                market_cap_note = (
+                    f" Before price-history downloads, the bottom "
+                    f"{float(market_cap_filter.get('fraction', 0.0)):.0%} by market cap "
+                    f"was removed within each sufficiently populated listing cluster: "
+                    f"{int(market_cap_filter.get('excluded', 0)):,} excluded; "
+                    f"{int(market_cap_filter.get('unknown_retained', 0)):,} with missing "
+                    "market cap retained conservatively."
+                )
             st.info(
                 f"Universal candidate shortlist: {len(universal_candidate_symbols):,} of "
                 f"{universal_preselection['eligible']:,} eligible symbols. The shortlist "
+                + market_cap_note
+                + " "
                 "combines stable risk-adjusted momentum with an emerging-winner sleeve "
                 "for price acceleration, breakout proximity and volume confirmation, "
                 "plus minimum representation for each listing cluster. All shortlisted "
