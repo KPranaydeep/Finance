@@ -4278,7 +4278,12 @@ def weight_bounds(num_assets, tickers=(), frozen_weights=None):
     """Per-asset bounds, with quarantined owned holdings frozen in place."""
     cap = max(MAX_WEIGHT_PER_ASSET, 1.0 / num_assets) if num_assets else 1.0
     frozen = {str(key).upper(): float(value) for key, value in (frozen_weights or {}).items()}
-    names = list(tickers) if tickers else [str(index) for index in range(num_assets)]
+    # ``log_returns.columns`` is a pandas Index. Its truth value is deliberately
+    # undefined, so never use ``if tickers`` here; large runs only reached this
+    # branch after completing their expensive history pipeline.
+    names = list(tickers) if tickers is not None else []
+    if not names:
+        names = [str(index) for index in range(num_assets)]
     bounds = []
     for ticker in names:
         fixed = frozen.get(str(ticker).upper())

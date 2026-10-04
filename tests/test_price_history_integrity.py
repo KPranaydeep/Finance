@@ -92,3 +92,13 @@ def test_quarantined_owned_weight_remains_fixed_through_postprocessing():
     assert np.isclose(initial.sum(), 1.0)
     assert np.isclose(cleaned[0], 0.20)
     assert np.isclose(cleaned.sum(), 1.0)
+
+
+def test_optimizer_weight_bounds_accepts_dataframe_column_index():
+    import portfolio_optimizer_core as core
+
+    tickers = pd.Index(["A", "B", "C"])
+    bounds = core.weight_bounds(3, tickers)
+
+    assert len(bounds) == 3
+    assert all(lower == 0.0 for lower, _ in bounds)
