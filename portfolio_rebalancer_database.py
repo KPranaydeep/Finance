@@ -135,7 +135,14 @@ def _select_drop_bottom_tickers_fallback(history, drop_bottom_pct=0.2, min_ticke
     if not isinstance(volume_history, pd.DataFrame):
         raise TypeError("volume_history must be a pandas DataFrame")
 
-    avg_volume = volume_history.mean().sort_values(ascending=True, kind="mergesort")
+    # Price and volume downloads can recover different symbols. Restrict volume
+    # evidence to the price-history universe before using its index; otherwise a
+    # volume-only symbol can trigger ``not in index`` after an hour-long run.
+    avg_volume = (
+        volume_history.reindex(columns=valid_days.index)
+        .mean()
+        .sort_values(ascending=True, kind="mergesort")
+    )
     liquidity_drop_count = _percent_drop_count(len(avg_volume), drop_bottom_pct, min_tickers_to_keep)
     liquidity_dropped = avg_volume.head(liquidity_drop_count)
     liquidity_kept = valid_days.loc[avg_volume.index[liquidity_drop_count:]]
@@ -4107,19 +4114,27 @@ def portfolio_stats(weights, log_returns):
 
 
 def portfolio_stats_comparison(current_alloc, log_returns, optimal_weights):
-    aligned = (
-        current_alloc.set_index("Yahoo Ticker")
-        .reindex(log_returns.columns)
-        .dropna(subset=["Weight"])
+    allocation_weights = (
+        current_alloc.assign(
+            _weight=pd.to_numeric(current_alloc["Weight"], errors="coerce").fillna(0.0)
+        )
+        .groupby("Yahoo Ticker", sort=False)["_weight"]
+        .sum()
     )
-    if aligned.empty:
-        raise ValueError("No holdings align with the return matrix.")
+    aligned_tickers = [
+        ticker
+        for ticker in log_returns.columns
+        if ticker in allocation_weights.index and allocation_weights[ticker] > 0
+    ]
+    current_stats = None
+    if aligned_tickers:
+        current_weights = allocation_weights.reindex(aligned_tickers).to_numpy(dtype=float)
+        current_weight_total = float(current_weights.sum())
+        if current_weight_total > 0:
+            current_weights = current_weights / current_weight_total
+            current_log_returns = log_returns.loc[:, aligned_tickers]
+            current_stats = portfolio_stats(current_weights, current_log_returns)
 
-    current_weights = aligned["Weight"].values
-    current_weights = current_weights / current_weights.sum()
-    current_log_returns = log_returns[list(aligned.index)]
-
-    current_stats = portfolio_stats(current_weights, current_log_returns)
     optimal_stats = portfolio_stats(optimal_weights, log_returns)
     return current_stats, optimal_stats
 
@@ -4178,6 +4193,9 @@ def run_portfolio_analysis_multi(
 
     current_stats, optimal_stats = portfolio_stats_comparison(
         current_alloc, log_returns, optimal_weights
+    )
+    meta["missing_owned_return_tickers"] = sorted(
+        set(owned_tickers) - {str(ticker).strip().upper() for ticker in log_returns.columns}
     )
     return optimal_weights, log_returns, current_stats, optimal_stats, meta
 
@@ -6773,6 +6791,13 @@ if run_btn:
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             st.error("Portfolio optimization did not return a usable allocation.")
             st.stop()
+        missing_owned_returns = meta.get("missing_owned_return_tickers", [])
+        if missing_owned_returns:
+            st.warning(
+                "Current-portfolio comparison excluded holdings without usable final "
+                "return history: " + ", ".join(missing_owned_returns) + ". The optimized "
+                "portfolio remains valid for the securities in its return matrix."
+            )
         # Show optimal portfolio weights table
         st.subheader("Optimal Portfolio (Weights)")
         optimal_portfolio_df = pd.DataFrame({
@@ -7106,6 +7131,9 @@ if run_btn:
                 "invalid_holding_rows": invalid_holding_rows,
                 "unresolved_yahoo_tickers": unresolved,
                 "missing_history_tickers": meta.get("missing_history_tickers", []),
+                "missing_owned_return_tickers": meta.get(
+                    "missing_owned_return_tickers", []
+                ),
                 "missing_latest_prices": missing_prices,
                 "missing_allocation": missing_alloc,
             },
