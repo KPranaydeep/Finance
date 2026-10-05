@@ -101,13 +101,8 @@ class IncrementalHistoryBatchTests(unittest.TestCase):
         self.assertEqual(recovered_owned, ["OWNED"])
         self.assertEqual(set(result.columns), {"AAA", "OWNED", "CANDIDATE"})
 
-    def test_full_return_cache_is_bounded(self):
+    def test_history_batch_cache_is_bounded(self):
         source = Path("portfolio_rebalancer_database.py").read_text(encoding="utf-8")
-        self.assertIn(
-            '@st.cache_data(show_spinner=False, ttl="24h", max_entries=2)\n'
-            "def get_daily_log_returns",
-            source,
-        )
         self.assertIn(
             '_download_close_history_batch = st.cache_data(\n'
             '    show_spinner=False,\n'

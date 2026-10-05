@@ -55,6 +55,7 @@ from optimization_run_timer import (
     update_run_stage,
 )
 from universal_portfolio_summary import summarize_universal_portfolio
+from market_history_cache import sync_market_history
 from universal_portfolio_import import (
     apply_verified_overseas_replacement,
     ensure_import_schema,
@@ -115,6 +116,12 @@ MARKET_CAP_EXCLUSION_FRACTION = 0.20
 # overhead by an order of magnitude.
 FULL_HISTORY_BATCH_SIZE = 120
 FULL_HISTORY_REQUEST_TIMEOUT_SECONDS = 20
+MARKET_HISTORY_CACHE_PATH = Path(
+    os.getenv(
+        "PORTFOLIO_MARKET_HISTORY_CACHE",
+        str(Path(__file__).resolve().parent / ".cache" / "market_history.duckdb"),
+    )
+)
 from robust_momentum_filter import apply_robust_momentum_filter
 
 
@@ -3321,6 +3328,40 @@ def _extract_volume_frame(data, expected_tickers):
     return frame
 
 
+def _fetch_combined_daily_history(tickers, start, end):
+    """Fetch close and volume together for one persistent-cache batch."""
+    normalized = [
+        str(ticker).strip().upper()
+        for ticker in dict.fromkeys(tickers)
+        if str(ticker).strip()
+    ]
+    if not normalized:
+        return pd.DataFrame(), pd.DataFrame(), {}
+    try:
+        downloaded = _yf_download_quiet(
+            normalized,
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True,
+            threads=True,
+        )
+        closes = _extract_close_prices_frame(downloaded, normalized)
+        volumes = _extract_volume_frame(downloaded, normalized)
+    except Exception as exc:
+        message = str(exc) or exc.__class__.__name__
+        return pd.DataFrame(), pd.DataFrame(), {
+            ticker: message for ticker in normalized
+        }
+    recovered = set(closes.columns) | set(volumes.columns)
+    failures = {
+        ticker: "No usable daily history returned by Yahoo Finance."
+        for ticker in normalized
+        if ticker not in recovered
+    }
+    return closes, volumes, failures
+
+
 def _single_ticker_field(data, field, ticker):
     """Extract one numeric Yahoo field without depending on column orientation."""
     if data is None or getattr(data, "empty", True):
@@ -4085,7 +4126,6 @@ def select_redundant_tickers(
     return kept, report
 
 
-@st.cache_data(show_spinner=False, ttl="24h", max_entries=2)
 def get_daily_log_returns(
     symbols,
     start_date=None,
@@ -4095,25 +4135,45 @@ def get_daily_log_returns(
     ticker_currency_pairs=(),
     redundancy_corr_threshold=0.80,
     owned_tickers=(),
+    progress_callback=None,
 ):
-    end_date, _ = _resolve_history_window_end(end_date, buffer_days)
+    pipeline_started = time.perf_counter()
+    stage_timings = {}
+    _, effective_end = _resolve_history_window_end(end_date, buffer_days)
 
     if start_date is None:
         start_date = DEFAULT_HISTORY_START_DATE
 
     requested_tickers = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
 
-    df = download_close_history(
+    history_started = time.perf_counter()
+    df, volume_df, history_cache = sync_market_history(
+        MARKET_HISTORY_CACHE_PATH,
         tuple(symbols),
-        start_date=start_date,
-        end_date=end_date,
-        buffer_days=buffer_days,
-        owned_tickers=owned_tickers,
-    ).copy()
-
-    price_integrity_report = pd.DataFrame(
-        df.attrs.get("price_integrity_report") or []
+        start_date,
+        effective_end,
+        _fetch_combined_daily_history,
+        batch_size=FULL_HISTORY_BATCH_SIZE,
+        retry_after_hours=20,
+        on_progress=progress_callback,
     )
+    df = df.copy()
+    volume_df = volume_df.copy()
+    stage_timings["history_cache"] = time.perf_counter() - history_started
+
+    if progress_callback is not None:
+        progress_callback(
+            "Checking price integrity",
+            0.80,
+            {"symbols": int(len(df.columns))},
+        )
+    integrity_started = time.perf_counter()
+    df, price_integrity_report = apply_price_integrity_gate(
+        df, owned_tickers=owned_tickers
+    )
+    stage_timings["price_integrity"] = time.perf_counter() - integrity_started
+
+    price_integrity_report = pd.DataFrame(price_integrity_report)
 
     if df.empty:
         raise ValueError("No data available for the given tickers.")
@@ -4121,11 +4181,17 @@ def get_daily_log_returns(
     missing_history_tickers = sorted(set(requested_tickers) - available_tickers)
 
     # Convert foreign-market price histories into INR before calculating returns.
+    filter_started = time.perf_counter()
+    if progress_callback is not None:
+        progress_callback(
+            "Converting currencies and applying quality filters",
+            0.84,
+            {"symbols": int(len(df.columns))},
+        )
     if ticker_currency_pairs:
         df = convert_price_history_to_inr(df, ticker_currency_pairs)
 
     lengths = df.count().sort_values(ascending=False)
-    volume_df = download_volume_history(tuple(symbols), start_date=start_date, end_date=end_date, buffer_days=buffer_days)
     kept, dropped, num_to_drop = select_drop_bottom_tickers(
         df,
         drop_bottom_pct=drop_bottom_pct,
@@ -4166,7 +4232,17 @@ def get_daily_log_returns(
         raise ValueError("The robust momentum filter removed every ticker.")
     df = df[momentum_kept]
     kept = df.count().sort_values(ascending=False, kind="mergesort")
+    stage_timings["quality_and_momentum_filters"] = (
+        time.perf_counter() - filter_started
+    )
 
+    if progress_callback is not None:
+        progress_callback(
+            "Aligning common history",
+            0.90,
+            {"surviving_symbols": int(len(kept))},
+        )
+    alignment_started = time.perf_counter()
     valid_start = df[kept.index].apply(lambda x: x.first_valid_index()).max()
     valid_end = df[kept.index].apply(lambda x: x.last_valid_index()).min()
 
@@ -4175,7 +4251,17 @@ def get_daily_log_returns(
 
     df_aligned = df.loc[valid_start:valid_end].ffill().dropna(axis=0, how="any")
     log_returns = np.log(df_aligned / df_aligned.shift(1)).dropna()
+    stage_timings["common_period_alignment"] = (
+        time.perf_counter() - alignment_started
+    )
 
+    if progress_callback is not None:
+        progress_callback(
+            "Removing near-duplicate exposures",
+            0.94,
+            {"aligned_assets": int(log_returns.shape[1])},
+        )
+    redundancy_started = time.perf_counter()
     kept_tickers, redundant_df = select_redundant_tickers(
         log_returns,
         volume_df.mean() if not volume_df.empty else None,
@@ -4183,6 +4269,9 @@ def get_daily_log_returns(
         owned_tickers=owned_tickers,
     )
     log_returns = log_returns[kept_tickers]
+    stage_timings["near_duplicate_filter"] = (
+        time.perf_counter() - redundancy_started
+    )
 
     lengths = df[kept.index].count()
     min_len_ticker = lengths.idxmin()
@@ -4214,6 +4303,13 @@ def get_daily_log_returns(
         "momentum_filter_config": dict(MOMENTUM_FILTER_CONFIG),
         "price_integrity_report": price_integrity_report,
         "price_integrity_version": PRICE_INTEGRITY_VERSION,
+        "market_history_cache": history_cache,
+        "pipeline_timings_seconds": {
+            key: round(float(value), 3) for key, value in stage_timings.items()
+        },
+        "pipeline_total_seconds": round(
+            float(time.perf_counter() - pipeline_started), 3
+        ),
     }
     return log_returns, meta
 
@@ -4540,6 +4636,7 @@ def run_portfolio_analysis_multi(
     buffer_days=0,
     redundancy_corr_threshold=0.80,
     exact_optimizer_asset_cap=300,
+    progress_callback=None,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -4564,12 +4661,23 @@ def run_portfolio_analysis_multi(
         ticker_currency_pairs=ticker_currency_pairs,
         redundancy_corr_threshold=redundancy_corr_threshold,
         owned_tickers=owned_tickers,
+        progress_callback=progress_callback,
     )
+    screen_started = time.perf_counter()
+    if progress_callback is not None:
+        progress_callback(
+            "Selecting the exact optimizer universe",
+            0.96,
+            {"eligible_assets": int(log_returns.shape[1])},
+        )
     log_returns, solver_screen = screen_log_returns_for_exact_optimizer(
         log_returns,
         maximum_assets=exact_optimizer_asset_cap,
         owned_tickers=owned_tickers,
     )
+    meta.setdefault("pipeline_timings_seconds", {})[
+        "exact_universe_screen"
+    ] = round(float(time.perf_counter() - screen_started), 3)
     meta["exact_optimizer_screen"] = solver_screen
     integrity_report = meta.get("price_integrity_report")
     quarantined_owned = set()
@@ -4595,6 +4703,13 @@ def run_portfolio_analysis_multi(
     }
     meta["price_integrity_frozen_owned_weights"] = dict(frozen_weights)
 
+    if progress_callback is not None:
+        progress_callback(
+            "Solving the constrained portfolio",
+            0.98,
+            {"assets": int(log_returns.shape[1])},
+        )
+    solver_started = time.perf_counter()
     if target_volatility is not None:
         optimal_weights = optimize_portfolio_target_volatility(
             log_returns,
@@ -4616,6 +4731,9 @@ def run_portfolio_analysis_multi(
         )
     if optimal_weights is None:
         return None, log_returns, None, None, meta
+    meta.setdefault("pipeline_timings_seconds", {})["optimizer_solver"] = round(
+        float(time.perf_counter() - solver_started), 3
+    )
 
     # Enforce minimum 1% weight on any non-zero position, then renormalize
     frozen_positions = {
@@ -4630,6 +4748,9 @@ def run_portfolio_analysis_multi(
 
     current_stats, optimal_stats = portfolio_stats_comparison(
         current_alloc, log_returns, optimal_weights
+    )
+    meta["analysis_total_seconds"] = round(
+        float(sum(meta.get("pipeline_timings_seconds", {}).values())), 3
     )
     meta["missing_owned_return_tickers"] = sorted(
         set(owned_tickers) - {str(ticker).strip().upper() for ticker in log_returns.columns}
@@ -7253,6 +7374,34 @@ if run_btn:
             "Downloading full history and optimizing risk/return",
             0.42,
         )
+
+        def report_analysis_progress(stage, fraction, details=None):
+            details = details or {}
+            suffix = ""
+            if details.get("batches"):
+                current_batch = int(details.get("batch") or 0)
+                total_batches = int(details["batches"])
+                suffix = (
+                    f" · batch {current_batch:,}/{total_batches:,}"
+                    if current_batch
+                    else f" · {total_batches:,} batches planned"
+                )
+            elif details.get("surviving_symbols") is not None:
+                suffix = f" · {int(details['surviving_symbols']):,} symbols"
+            elif details.get("aligned_assets") is not None:
+                suffix = f" · {int(details['aligned_assets']):,} assets"
+            elif details.get("eligible_assets") is not None:
+                suffix = f" · {int(details['eligible_assets']):,} eligible"
+            elif details.get("assets") is not None:
+                suffix = f" · {int(details['assets']):,} assets"
+            overall_progress = 0.42 + 0.43 * float(np.clip(fraction, 0.0, 1.0))
+            _display_optimization_stage(
+                optimization_timer_placeholder,
+                f"{stage}{suffix}",
+                overall_progress,
+                estimated_total_seconds=refined_estimate,
+            )
+
         with st.spinner("Running optimization..."):
             optimal_weights, log_returns, current_stats, optimal_stats, meta = run_portfolio_analysis_multi(
                 yahoo_tickers,
@@ -7263,6 +7412,7 @@ if run_btn:
                 buffer_days=history_buffer_days,
                 redundancy_corr_threshold=redundancy_corr_threshold,
                 exact_optimizer_asset_cap=exact_optimizer_asset_cap,
+                progress_callback=report_analysis_progress,
             )
 
         _display_optimization_stage(
@@ -7277,6 +7427,30 @@ if run_btn:
             st.error("Portfolio optimization did not return a usable allocation.")
             st.stop()
         solver_screen = meta.get("exact_optimizer_screen") or {}
+        history_cache = meta.get("market_history_cache") or {}
+        pipeline_timings = meta.get("pipeline_timings_seconds") or {}
+        if history_cache:
+            timing_parts = [
+                ("Yahoo", (history_cache.get("timings_seconds") or {}).get("yahoo_download")),
+                ("cache", (history_cache.get("timings_seconds") or {}).get("cache_read")),
+                ("filters", pipeline_timings.get("quality_and_momentum_filters")),
+                ("alignment", pipeline_timings.get("common_period_alignment")),
+                ("deduplication", pipeline_timings.get("near_duplicate_filter")),
+                ("solver", pipeline_timings.get("optimizer_solver")),
+            ]
+            timing_text = " · ".join(
+                f"{label} {float(seconds):.1f}s"
+                for label, seconds in timing_parts
+                if seconds is not None
+            )
+            st.caption(
+                "History cache · "
+                f"{int(history_cache.get('symbols_reused') or 0):,} reused · "
+                f"{int(history_cache.get('symbols_refreshed') or 0):,} refreshed · "
+                f"{int(history_cache.get('rows_written') or 0):,} rows written · "
+                f"{int(history_cache.get('symbols_unavailable') or 0):,} unavailable"
+                + (f"  |  {timing_text}" if timing_text else "")
+            )
         if solver_screen:
             st.info(
                 "Exact optimization used "

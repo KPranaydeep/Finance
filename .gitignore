@@ -16,6 +16,8 @@ universal_portfolio_backup.csv
 *.sqlite
 *.sqlite3
 *.db
+*.duckdb
+*.duckdb.wal
 *.log
 
 .DS_Store
