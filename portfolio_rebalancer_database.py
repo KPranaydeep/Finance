@@ -107,6 +107,14 @@ TRADING_DAYS_PER_YEAR = _optimizer_config.TRADING_DAYS_PER_YEAR
 UNIVERSAL_PRESELECTION_CAP = 400
 DEFAULT_EXACT_OPTIMIZER_ASSET_CAP = 300
 MARKET_CAP_EXCLUSION_FRACTION = 0.20
+# Full-history downloads are the expensive part of a broad-universe run.  Twelve
+# symbols per request made a 4,200-name shortlist issue roughly 700 sequential
+# Yahoo requests for close and volume data, before any missing-symbol retries.
+# Yahoo/yfinance already partitions work internally when ``threads=True``; a
+# bounded 120-name request keeps the run recoverable while reducing request
+# overhead by an order of magnitude.
+FULL_HISTORY_BATCH_SIZE = 120
+FULL_HISTORY_REQUEST_TIMEOUT_SECONDS = 20
 from robust_momentum_filter import apply_robust_momentum_filter
 
 
@@ -378,6 +386,7 @@ def _yf_download_quiet(*args, max_retries=2, retry_backoff_seconds=3, **kwargs):
     """Call yf.download with console noise suppressed and rate-limit retries."""
     import yfinance as yf
 
+    kwargs.setdefault("timeout", FULL_HISTORY_REQUEST_TIMEOUT_SECONDS)
     last_exc = None
     for attempt in range(max_retries + 1):
         try:
@@ -3726,14 +3735,19 @@ def _download_close_history_batch(symbols, start_date, effective_end):
         list(symbols),
         start=start_date,
         end=effective_end,
-        batch_size=12,
+        batch_size=max(len(symbols), 1),
+        threads=True,
+        # A broad candidate universe must not fan a partially empty bulk response
+        # out into hundreds of serial per-ticker requests. Owned holdings receive
+        # a small, explicit recovery pass in ``download_close_history`` below.
+        fallback_missing=False,
     )
 
 
 _download_close_history_batch = st.cache_data(
     show_spinner=False,
     ttl="24h",
-    max_entries=4096,
+    max_entries=256,
 )(_download_close_history_batch)
 
 
@@ -3754,7 +3768,7 @@ def download_close_history(
         for symbol in dict.fromkeys(symbols)
         if str(symbol).strip()
     )
-    for batch in _chunked(normalized_symbols, 12):
+    for batch in _chunked(normalized_symbols, FULL_HISTORY_BATCH_SIZE):
         batch_prices, batch_failures = _download_close_history_batch(
             tuple(batch),
             start_date,
@@ -3763,6 +3777,32 @@ def download_close_history(
         if batch_prices is not None and not batch_prices.empty:
             frames.append(batch_prices)
         failures.update(batch_failures or {})
+
+    recovered = {
+        str(column).strip().upper()
+        for frame in frames
+        for column in frame.columns
+    }
+    owned_missing = [
+        str(ticker).strip().upper()
+        for ticker in dict.fromkeys(owned_tickers)
+        if str(ticker).strip() and str(ticker).strip().upper() not in recovered
+    ]
+    # Protect real holdings from a partial broad-market response. This recovery
+    # pass is deliberately limited to owned symbols; unavailable zero-quantity
+    # candidates are safely omitted and can be reconsidered on the next run.
+    for batch in _chunked(owned_missing, 12):
+        owned_prices, owned_failures = _download_close_prices_resilient(
+            list(batch),
+            start=start_date,
+            end=effective_end,
+            batch_size=max(len(batch), 1),
+            threads=True,
+            fallback_missing=True,
+        )
+        if owned_prices is not None and not owned_prices.empty:
+            frames.append(owned_prices)
+        failures.update(owned_failures or {})
 
     prices = (
         pd.concat(frames, axis=1)
@@ -3797,14 +3837,19 @@ def _download_volume_history_batch(symbols, start_date, effective_end):
         list(symbols),
         start=start_date,
         end=effective_end,
-        batch_size=12,
+        batch_size=max(len(symbols), 1),
+        threads=True,
+        # Volume is ranking evidence, not a reason to retry thousands of
+        # candidates one by one. Missing volume remains NaN and is handled by the
+        # existing conservative liquidity/history filters.
+        fallback_missing=False,
     )
 
 
 _download_volume_history_batch = st.cache_data(
     show_spinner=False,
     ttl="24h",
-    max_entries=4096,
+    max_entries=256,
 )(_download_volume_history_batch)
 
 
@@ -3823,7 +3868,7 @@ def download_volume_history(
         for symbol in dict.fromkeys(symbols)
         if str(symbol).strip()
     )
-    for batch in _chunked(normalized_symbols, 12):
+    for batch in _chunked(normalized_symbols, FULL_HISTORY_BATCH_SIZE):
         batch_volumes, batch_failures = _download_volume_history_batch(
             tuple(batch),
             start_date,
