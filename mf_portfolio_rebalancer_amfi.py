@@ -731,16 +731,24 @@ def _normalise_scheme_name(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
+def _scheme_name_tokens(value: object) -> set:
+    tokens = _normalise_scheme_name(value).split()
+    expanded = []
+    for token in tokens:
+        expanded.extend(["fund", "of", "fund"] if token == "fof" else [token])
+    return set(expanded)
+
+
 def _scheme_name_match(source_name: str, nav_master: pd.DataFrame):
     """Resolve exports whose plan/option suffix differs from AMFI's name."""
     from difflib import SequenceMatcher
 
-    source_tokens = set(_normalise_scheme_name(source_name).split())
+    source_tokens = _scheme_name_tokens(source_name)
     ignored = {"direct", "growth", "plan", "option", "regular", "reinvestment", "payout"}
     source_core = source_tokens - ignored
     candidates = []
     for _, row in nav_master.iterrows():
-        target_tokens = set(_normalise_scheme_name(row["Scheme Name"]).split())
+        target_tokens = _scheme_name_tokens(row["Scheme Name"])
         target_core = target_tokens - ignored
         if not source_core or not target_core:
             continue
