@@ -33,6 +33,77 @@ def search_grid(
     return tuple((cap, asset_limit) for cap in caps for asset_limit in asset_limits)
 
 
+def coarse_to_fine_values(values: Iterable[int]) -> tuple[int, ...]:
+    """Order a complete integer grid for useful broad coverage as early as possible."""
+    ordered_values = sorted({int(value) for value in values})
+    if not ordered_values:
+        return ()
+    emitted = []
+    seen = set()
+
+    def emit(index):
+        value = ordered_values[index]
+        if value not in seen:
+            seen.add(value)
+            emitted.append(value)
+
+    emit(len(ordered_values) - 1)  # Prepared by the history pass, so expose it first.
+    emit(0)
+    intervals = [(0, len(ordered_values) - 1)]
+    while intervals:
+        intervals.sort(key=lambda pair: pair[1] - pair[0], reverse=True)
+        lower, upper = intervals.pop(0)
+        if upper - lower <= 1:
+            continue
+        midpoint = (lower + upper) // 2
+        emit(midpoint)
+        intervals.extend(((lower, midpoint), (midpoint, upper)))
+    return tuple(emitted)
+
+
+def adaptive_anchor_values(
+    values: Iterable[int],
+    *,
+    target_points: int = 8,
+) -> tuple[int, ...]:
+    """Return broad anchors for a bounded anytime search of one dimension."""
+    ordered_values = sorted({int(value) for value in values})
+    if len(ordered_values) <= max(int(target_points), 2):
+        return coarse_to_fine_values(ordered_values)
+    intervals = max(int(target_points) - 1, 1)
+    indices = {
+        round(index * (len(ordered_values) - 1) / intervals)
+        for index in range(intervals + 1)
+    }
+    anchors = [ordered_values[index] for index in sorted(indices)]
+    return tuple(
+        value for value in coarse_to_fine_values(anchors)
+    )
+
+
+def local_refinement_values(
+    values: Iterable[int],
+    evaluated: Iterable[int],
+    best_value: int,
+    *,
+    radius: int = 2,
+) -> tuple[int, ...]:
+    """Return unevaluated grid neighbors around the current best value."""
+    ordered_values = sorted({int(value) for value in values})
+    if not ordered_values or int(best_value) not in ordered_values:
+        return ()
+    completed = {int(value) for value in evaluated}
+    center = ordered_values.index(int(best_value))
+    candidates = []
+    for distance in range(1, max(int(radius), 1) + 1):
+        for index in (center - distance, center + distance):
+            if 0 <= index < len(ordered_values):
+                value = ordered_values[index]
+                if value not in completed and value not in candidates:
+                    candidates.append(value)
+    return tuple(candidates)
+
+
 def missing_grid_pairs(
     shortlist_caps: Iterable[int],
     maximum_assets_values: Iterable[int],

@@ -1,6 +1,10 @@
 import plotly.graph_objects as go
 
-from search_surface_chart import build_search_surface_figure
+from search_surface_chart import (
+    build_search_heatmap_figure,
+    build_search_slice_figure,
+    build_search_surface_figure,
+)
 
 
 def _rows():
@@ -51,3 +55,20 @@ def test_sparse_results_remain_points_without_inventing_a_surface():
 
 def test_empty_results_render_an_empty_figure():
     assert len(build_search_surface_figure([]).data) == 0
+
+
+def test_heatmap_keeps_decision_markers_and_failed_pair_blank():
+    rows = _rows()
+    figure = build_search_heatmap_figure(
+        rows, raw_peak=rows[3], robust_choice=rows[2]
+    )
+    assert [trace.name for trace in figure.data] == [
+        None, "Raw peak", "Robust choice"
+    ]
+    assert 8600 not in figure.data[0].x
+
+
+def test_cross_section_orders_asset_limits_and_filters_other_caps():
+    figure = build_search_slice_figure(_rows(), 8500)
+    assert list(figure.data[0].x) == [1000, 1050]
+    assert list(figure.data[0].y) == [88.0, 89.0]

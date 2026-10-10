@@ -43,7 +43,11 @@ from scalable_universe_preselection import (
     filter_candidates_by_market_cap,
     rank_scalable_candidates,
 )
-from search_surface_chart import build_search_surface_figure
+from search_surface_chart import (
+    build_search_heatmap_figure,
+    build_search_slice_figure,
+    build_search_surface_figure,
+)
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
@@ -56,8 +60,11 @@ from optimization_run_timer import (
     update_run_stage,
 )
 from two_dimensional_search import (
+    adaptive_anchor_values,
     best_feasible_result,
+    coarse_to_fine_values,
     inclusive_values,
+    local_refinement_values,
     robust_feasible_result,
     search_convergence_summary,
 )
@@ -5470,6 +5477,7 @@ def search_universal_shortlist_caps(
     step=50,
     maximum_cap=None,
     adaptive=True,
+    asset_evaluation_order="ascending",
     runtime_brake_seconds=900,
     prior_results=(),
     on_result=None,
@@ -5614,7 +5622,8 @@ def search_universal_shortlist_caps(
             (analysis_meta or {}).get("exact_optimizer_screen", {}),
         )
         solved_by_effective_limit = {}
-        for asset_limit in pending_asset_limits:
+
+        def evaluate_asset_limit(asset_limit, search_phase):
             pair_started = time.monotonic() if two_dimensional else None
             effective_limit = min(int(asset_limit), int(prepared_log_returns.shape[1]))
             if int(asset_limit) == largest_exact_limit:
@@ -5663,6 +5672,7 @@ def search_universal_shortlist_caps(
             pair_returns = pair_returns if pair_returns is not None else prepared_log_returns
             pair_stats = pair_stats or {}
             row = {
+                "Search phase": search_phase,
                 "Shortlist cap": int(cap),
                 "Maximum assets": int(asset_limit),
                 "Effective maximum assets": int(
@@ -5696,6 +5706,53 @@ def search_universal_shortlist_caps(
             completed_pairs.add((int(cap), int(asset_limit)))
             if on_result is not None:
                 on_result(rows, row)
+            return row
+
+        if adaptive and two_dimensional:
+            initial_limits = [
+                value for value in adaptive_anchor_values(exact_asset_limits)
+                if value in pending_asset_limits
+            ]
+            initial_phase = "Derivative-free anchor"
+        elif str(asset_evaluation_order) == "coarse_to_fine":
+            initial_limits = [
+                value for value in coarse_to_fine_values(exact_asset_limits)
+                if value in pending_asset_limits
+            ]
+            initial_phase = "Complete grid"
+        else:
+            initial_limits = list(pending_asset_limits)
+            initial_phase = "Complete grid"
+
+        for asset_limit in initial_limits:
+            evaluate_asset_limit(asset_limit, initial_phase)
+
+        if adaptive and two_dimensional:
+            for _ in range(6):
+                cap_rows = [
+                    row for row in rows
+                    if int(row.get("Shortlist cap") or -1) == int(cap)
+                    and str(row.get("Status")) == "Feasible"
+                ]
+                current_best = best_feasible_result(cap_rows)
+                if current_best is None:
+                    break
+                evaluated_limits = {
+                    int(row["Maximum assets"])
+                    for row in rows
+                    if int(row.get("Shortlist cap") or -1) == int(cap)
+                    and row.get("Maximum assets") is not None
+                }
+                refinement_limits = local_refinement_values(
+                    exact_asset_limits,
+                    evaluated_limits,
+                    int(current_best["Maximum assets"]),
+                    radius=2,
+                )
+                if not refinement_limits:
+                    break
+                for asset_limit in refinement_limits:
+                    evaluate_asset_limit(asset_limit, "Derivative-free refinement")
 
         if trading_days < int(minimum_trading_days):
             break
@@ -6155,12 +6212,17 @@ with st.sidebar:
         with cap_spacing_col:
             cap_search_spacing = st.selectbox(
                 "Search spacing",
-                options=["Fixed (complete 2D grid)", "Adaptive (faster)"],
+                options=[
+                    "Fixed (complete 2D grid)",
+                    "Adaptive derivative-free (faster)",
+                ],
                 index=0,
                 key="shortlist_cap_search_spacing",
                 help=(
                     "Fixed evaluates every shortlist-cap step and every Maximum-assets "
-                    "value. Adaptive is faster but does not exhaust the full grid."
+                    "value. Adaptive uses broad anchors followed by local hill-climbing; "
+                    "it is derivative-free because this discrete, noisy surface has no "
+                    "reliable mathematical gradient."
                 ),
             )
         asset_col1, asset_col2, asset_col3 = st.columns(3)
@@ -6196,14 +6258,16 @@ with st.sidebar:
             ),
         ))
         st.caption(
-            "History is prepared once per shortlist cap and reused across its "
-            "Maximum-assets solver values."
+            "History is prepared once per shortlist cap. Derivative-free adaptive mode evaluates "
+            "broad Maximum-assets anchors and refines locally around that cap's best "
+            "anchor. Fixed mode evaluates every value in a coarse-to-fine order and is "
+            "the exhaustive confirmation option."
         )
     else:
         cap_search_from = int(universal_preselection_cap)
         cap_search_through = int(universal_preselection_cap)
         cap_search_step = 50
-        cap_search_spacing = "Adaptive (faster)"
+        cap_search_spacing = "Adaptive derivative-free (faster)"
         asset_search_from = int(exact_optimizer_asset_cap)
         asset_search_through = int(exact_optimizer_asset_cap)
         asset_search_step = 50
@@ -6320,6 +6384,7 @@ cap_search_config = {
     "maximum_cap": int(cap_search_through),
     "step": int(cap_search_step),
     "adaptive": cap_search_spacing.startswith("Adaptive"),
+    "asset_evaluation_order": "coarse_to_fine",
     "max_dd": float(max_dd),
     "target_volatility": (
         float(target_volatility) if target_volatility is not None else None
@@ -6412,13 +6477,18 @@ if run_cap_search_btn:
             step=cap_search_step,
             maximum_cap=cap_search_through,
             adaptive=cap_search_spacing.startswith("Adaptive"),
+            asset_evaluation_order="coarse_to_fine",
             prior_results=prior_results,
             on_result=update_cap_search_progress,
         )
         st.session_state["shortlist_cap_search_results"] = search_rows
         search_progress.progress(1.0)
         search_status.update(
-            label="Shortlist-cap search completed",
+            label=(
+                "Derivative-free adaptive scan completed"
+                if cap_search_spacing.startswith("Adaptive")
+                else "Complete shortlist-cap grid search completed"
+            ),
             state="complete",
             expanded=False,
         )
@@ -6524,24 +6594,71 @@ if cap_search_results:
     ]
     feasible_chart = results_df.loc[results_df["Status"].eq("Feasible")].copy()
     if not feasible_chart.empty:
-        search_surface = build_search_surface_figure(
-            results_df.to_dict(orient="records"),
-            raw_peak=(best_row.to_dict() if not feasible_df.empty else None),
-            robust_choice=(robust_row.to_dict() if not feasible_df.empty else None),
+        chart_records = results_df.to_dict(orient="records")
+        raw_marker = best_row.to_dict() if not feasible_df.empty else None
+        robust_marker = robust_row.to_dict() if not feasible_df.empty else None
+        search_view = st.segmented_control(
+            "Search landscape view",
+            options=["Decision heatmap", "Selected-cap curve", "3D landscape"],
+            default="Decision heatmap",
+            key="optimizer_search_landscape_view",
         )
+        chart_config = {
+            "displaylogo": False,
+            "scrollZoom": False,
+            "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
+        }
+        if search_view == "3D landscape":
+            chart_figure = build_search_surface_figure(
+                chart_records,
+                raw_peak=raw_marker,
+                robust_choice=robust_marker,
+            )
+            chart_height = 650
+            chart_key = "optimizer_search_surface_3d"
+        elif search_view == "Selected-cap curve":
+            evaluated_caps = sorted(
+                feasible_chart["Shortlist cap"].astype(int).unique().tolist()
+            )
+            preferred_cap = int(robust_row["Shortlist cap"])
+            default_index = (
+                evaluated_caps.index(preferred_cap)
+                if preferred_cap in evaluated_caps else 0
+            )
+            selected_slice_cap = int(st.selectbox(
+                "Cross-section shortlist cap",
+                evaluated_caps,
+                index=default_index,
+                format_func=lambda value: f"{int(value):,}",
+                key="optimizer_search_slice_cap",
+            ))
+            chart_figure = build_search_slice_figure(
+                chart_records, selected_slice_cap
+            )
+            chart_height = 430
+            chart_key = "optimizer_search_slice"
+        else:
+            chart_figure = build_search_heatmap_figure(
+                chart_records,
+                raw_peak=raw_marker,
+                robust_choice=robust_marker,
+            )
+            chart_height = 520
+            chart_key = "optimizer_search_heatmap"
         st.plotly_chart(
-            search_surface,
+            chart_figure,
             width="stretch",
-            height=650,
+            height=chart_height,
             theme=None,
-            key="optimizer_search_surface_3d",
-            config={
-                "displaylogo": False,
-                "scrollZoom": False,
-                "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
-            },
+            key=chart_key,
+            config=chart_config,
         )
+    if "Search phase" not in results_df.columns:
+        results_df["Search phase"] = "Previous run"
+    else:
+        results_df["Search phase"] = results_df["Search phase"].fillna("Previous run")
     display_columns = [
+        "Search phase",
         "Shortlist cap",
         "Maximum assets",
         "Effective maximum assets",
@@ -6574,12 +6691,11 @@ if cap_search_results:
         },
     )
     st.caption(
-        "Fixed mode evaluates the complete shortlist-cap × Maximum-assets grid. "
-        "History is prepared once per shortlist cap and reused across its solver "
-        "limits. Only feasible solutions with at least 252 common trading sessions "
-        "compete. The raw peak maximizes observed annual return; the robust choice "
-        "treats near-equal returns as a plateau and uses downside risk, volatility, "
-        "complexity and runtime as tie-breakers. Neither is a guaranteed future return."
+        "Adaptive mode samples broad Maximum-assets anchors and follows the strongest "
+        "local neighborhood; blank heatmap cells remain explicitly untested. Fixed mode "
+        "evaluates the complete grid in a coarse-to-fine order. History is prepared once "
+        "per shortlist cap and reused. The raw peak and robust plateau choice remain "
+        "in-sample research results, not guaranteed future returns."
     )
 
 with st.expander("🌐 Universal Portfolio", expanded=False):

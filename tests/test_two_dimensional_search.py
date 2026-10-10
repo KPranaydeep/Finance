@@ -1,8 +1,11 @@
 import pytest
 
 from two_dimensional_search import (
+    adaptive_anchor_values,
     best_feasible_result,
+    coarse_to_fine_values,
     inclusive_values,
+    local_refinement_values,
     missing_grid_pairs,
     robust_feasible_result,
     search_convergence_summary,
@@ -26,6 +29,25 @@ def test_grid_crosses_every_cap_with_every_exact_asset_limit():
         (8550, 350),
         (8550, 400),
     )
+
+
+def test_complete_order_covers_extremes_then_bisects_without_omissions():
+    values = tuple(range(100, 451, 50))
+    ordered = coarse_to_fine_values(values)
+    assert ordered[:3] == (450, 100, 250)
+    assert set(ordered) == set(values)
+    assert len(ordered) == len(values)
+
+
+def test_adaptive_anchors_cover_range_and_refine_around_current_best():
+    values = tuple(range(100, 1801, 50))
+    anchors = adaptive_anchor_values(values, target_points=8)
+    assert anchors[0] == 1800
+    assert 100 in anchors
+    assert len(anchors) == 8
+    neighbors = local_refinement_values(values, anchors, 1100, radius=2)
+    assert all(value not in anchors for value in neighbors)
+    assert set(neighbors).issubset({1000, 1050, 1150, 1200})
 
 
 def test_resume_skips_only_completed_pairs():
