@@ -635,13 +635,32 @@ def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
     if not raw:
         return None
 
+    market_qualifier = None
+    if ":" in raw:
+        qualifier, qualified_ticker = raw.split(":", 1)
+        qualifier_aliases = {
+            "US": "US",
+            "NASDAQ": "NASDAQ",
+            "NMS": "NASDAQ",
+            "NGM": "NASDAQ",
+            "NYSE": "NYSE",
+            "NYQ": "NYSE",
+            "AMEX": "AMEX",
+            "NYSEARCA": "NYSEARCA",
+        }
+        market_qualifier = qualifier_aliases.get(qualifier.strip())
+        if market_qualifier and qualified_ticker.strip():
+            raw = qualified_ticker.strip()
+        else:
+            market_qualifier = None
+
     nse_company_lookup = nse_company_lookup or get_nse_company_lookup()
     base = normalize_portfolio_symbol(raw)
 
     if base.endswith("-BE"):
         base = base[:-3].rstrip("-").strip()
 
-    explicit = (
+    explicit = bool(market_qualifier) or (
         raw.endswith(".NS")
         or raw.endswith(".BO")
         or ("." in raw and not raw.endswith(".NS") and not raw.endswith(".BO"))
@@ -677,7 +696,9 @@ def resolve_yahoo_instrument(symbol, nse_company_lookup=None):
 
         metadata = get_yahoo_metadata(ticker)
         display_symbol = normalize_portfolio_symbol(raw)
-        if ticker.endswith(".NS"):
+        if market_qualifier:
+            display_symbol = f"{market_qualifier}:{base}"
+        elif ticker.endswith(".NS"):
             display_symbol = ticker[:-3]
             metadata["stock_name"] = nse_company_lookup.get(
                 display_symbol, metadata["stock_name"]
@@ -2550,32 +2571,38 @@ def add_symbols_to_universal(symbols):
     lookup = get_nse_company_lookup()
     instruments = []
     invalid_symbols = []
-    seen_symbols = set()
+    seen_tickers = set()
 
     for entered_symbol in symbols:
         instrument = resolve_yahoo_instrument(entered_symbol, lookup)
         if instrument is None:
             invalid_symbols.append(entered_symbol)
             continue
-        symbol = instrument["symbol"]
-        if symbol not in seen_symbols:
+        ticker = instrument["yahoo_ticker"]
+        if ticker not in seen_tickers:
             instruments.append(instrument)
-            seen_symbols.add(symbol)
+            seen_tickers.add(ticker)
 
-    valid_symbols = [item["symbol"] for item in instruments]
+    valid_tickers = [item["yahoo_ticker"] for item in instruments]
     with get_db_connection() as conn:
         existing = {
-            row["symbol"]
+            row["yahoo_ticker"]
             for row in conn.execute(
-                "SELECT symbol FROM master_holdings WHERE owner = ? AND symbol IN ({})".format(
-                    ",".join("?" for _ in valid_symbols)
+                "SELECT yahoo_ticker FROM master_holdings WHERE owner = ? AND yahoo_ticker IN ({})".format(
+                    ",".join("?" for _ in valid_tickers)
                 ),
-                [UNIVERSAL_OWNER, *valid_symbols],
+                [UNIVERSAL_OWNER, *valid_tickers],
             ).fetchall()
-        } if valid_symbols else set()
+        } if valid_tickers else set()
 
-    duplicates = [s for s in valid_symbols if s in existing]
-    new_instruments = [item for item in instruments if item["symbol"] not in existing]
+    duplicates = [
+        item["symbol"]
+        for item in instruments
+        if item["yahoo_ticker"] in existing
+    ]
+    new_instruments = [
+        item for item in instruments if item["yahoo_ticker"] not in existing
+    ]
 
     now = datetime.now().isoformat(timespec="seconds")
     added = []
