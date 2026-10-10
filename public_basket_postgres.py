@@ -132,6 +132,8 @@ def connect_public_basket_db(
         database_url,
         row_factory=dict_row,
         autocommit=True,
+        connect_timeout=10,
+        application_name="finance-public-basket",
     )
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 import math
+import os
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -12,11 +14,37 @@ import streamlit as st
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_nav_snapshots import load_nav_snapshot
 from public_portfolio_publications import load_trust_records
+from public_record_snapshot import load_snapshot
 
 
 IST = ZoneInfo("Asia/Kolkata")
 CARD_FEED_SCHEMA = "public-portfolio-card-feed"
 CARD_FEED_SCHEMA_VERSION = 3
+LOGGER = logging.getLogger(__name__)
+
+
+def load_public_record_from_database(conn, basket_id: str) -> dict[str, Any]:
+    """Load one public record using an already-open writer/admin connection."""
+    basket = conn.execute(
+        "SELECT * FROM public_baskets WHERE basket_id=%s", (basket_id,)
+    ).fetchone()
+    if not basket:
+        return {"basket": None}
+    nav = load_nav_snapshot(conn, basket_id)
+    trust = load_trust_records(conn, basket_id)
+    publication_positions = conn.execute(
+        """SELECT p.publication_id,v.portfolio_version,p.ticker,p.target_weight
+           FROM public_portfolio_positions p
+           JOIN public_portfolio_versions v ON v.publication_id=p.publication_id
+           WHERE v.basket_id=%s ORDER BY v.portfolio_version,p.ticker""",
+        (basket_id,),
+    ).fetchall()
+    return {
+        "basket": dict(basket),
+        "nav": [dict(row) for row in nav],
+        "publication_positions": [dict(row) for row in publication_positions],
+        **trust,
+    }
 
 
 def basket_since_launch_return(nav_rows: list[dict[str, Any]]) -> float | None:
@@ -45,31 +73,30 @@ def basket_since_launch_return(nav_rows: list[dict[str, Any]]) -> float | None:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_public_record(basket_id: str) -> dict[str, Any]:
-    """Load the immutable publication history needed by public read-only pages."""
+    """Load a verified static snapshot without waking the production database.
+
+    Direct database fallback is opt-in for local/operator diagnostics.  Public
+    Streamlit readers therefore cannot keep a free-plan compute endpoint awake.
+    """
+    try:
+        return load_snapshot(
+            basket_id,
+            local_path=os.getenv("PUBLIC_RECORD_SNAPSHOT_PATH") or None,
+        )
+    except Exception:
+        LOGGER.exception("Verified public snapshot load failed")
+
+    allow_database_fallback = os.getenv(
+        "PUBLIC_RECORD_DATABASE_FALLBACK", "false"
+    ).strip().lower() in {"1", "true", "yes"}
+    if not allow_database_fallback:
+        raise RuntimeError("Verified public snapshot is unavailable")
+
     url = get_public_basket_database_url()
     if not url:
         raise RuntimeError("Public record is not configured")
     with connect_public_basket_db(url) as conn:
-        basket = conn.execute(
-            "SELECT * FROM public_baskets WHERE basket_id=%s", (basket_id,)
-        ).fetchone()
-        if not basket:
-            return {"basket": None}
-        nav = load_nav_snapshot(conn, basket_id)
-        trust = load_trust_records(conn, basket_id)
-        publication_positions = conn.execute(
-            """SELECT p.publication_id,v.portfolio_version,p.ticker,p.target_weight
-               FROM public_portfolio_positions p
-               JOIN public_portfolio_versions v ON v.publication_id=p.publication_id
-               WHERE v.basket_id=%s ORDER BY v.portfolio_version,p.ticker""",
-            (basket_id,),
-        ).fetchall()
-    return {
-        "basket": dict(basket),
-        "nav": [dict(row) for row in nav],
-        "publication_positions": [dict(row) for row in publication_positions],
-        **trust,
-    }
+        return load_public_record_from_database(conn, basket_id)
 
 
 def _display_date(value: Any) -> str:

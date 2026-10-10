@@ -6,8 +6,11 @@ from public_review.ui import (
     load_current_review_summary,
     load_indicative_net_return,
     load_review_reference_prices,
+    render_snapshot_review_panel,
+    review_reference_prices_from_events,
     retain_review_card_summary,
     render_live_review_panel,
+    snapshot_review_card_summary,
 )
 from public_card_feed import build_card_feed, load_public_record
 
@@ -399,6 +402,8 @@ basket,current=record["basket"],record.get("current")
 if not current:
     st.info("The basket exists, but no approved portfolio version has been published.")
     st.stop()
+snapshot_mode=record.get("record_source") == "verified_snapshot"
+snapshot_review_events=record.get("review_events") or []
 
 # A forecast belongs to one immutable publication.  Never show an older
 # portfolio version's forecast as though it described the current allocation.
@@ -409,8 +414,12 @@ current_forecasts=[
     and (row.get("forecast_json") or {}).get("method") == METHOD
 ]
 current_forecast=current_forecasts[0] if current_forecasts else None
-planning_review_summary=load_current_review_summary(
-    basket["basket_id"], current["publication_id"]
+planning_review_summary=(
+    snapshot_review_card_summary(
+        snapshot_review_events, current["publication_id"]
+    )
+    if snapshot_mode else
+    load_current_review_summary(basket["basket_id"], current["publication_id"])
 )
 current_forecast_values=(current_forecast.get("forecast_json") or {}) if current_forecast else {}
 if (not current_forecast_values and planning_review_summary
@@ -451,14 +460,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-rendered_review_summary=render_live_review_panel(
-    basket["basket_id"], record.get("active_publications", [])
+rendered_review_summary=(
+    render_snapshot_review_panel(
+        record.get("active_publications", []), snapshot_review_events
+    )
+    if snapshot_mode else
+    render_live_review_panel(
+        basket["basket_id"], record.get("active_publications", [])
+    )
 )
 # The live fragment may establish entry evidence that did not exist during the
 # earlier planning-summary lookup. Read once more after it runs so the share
 # card receives the same review date that the visible review panel displays.
-post_fragment_review_summary=load_current_review_summary(
-    basket["basket_id"], current["publication_id"]
+post_fragment_review_summary=(
+    planning_review_summary
+    if snapshot_mode else
+    load_current_review_summary(basket["basket_id"], current["publication_id"])
 )
 review_card_summary=(
     rendered_review_summary
@@ -489,8 +506,14 @@ st.subheader("Target allocation")
 allocation=pd.DataFrame(record["constituents"])
 price_snapshot=load_latest_prices(tuple(allocation["ticker"].astype(str)))
 try:
-    reference_prices=load_review_reference_prices(
-        basket["basket_id"], str(current["publication_id"])
+    reference_prices=(
+        review_reference_prices_from_events(
+            snapshot_review_events, str(current["publication_id"])
+        )
+        if snapshot_mode else
+        load_review_reference_prices(
+            basket["basket_id"], str(current["publication_id"])
+        )
     )
 except Exception:
     reference_prices={}
@@ -555,14 +578,21 @@ if share_allocation.open:
         # A popover has its own rerun boundary. Resolve the review summary at
         # image-generation time instead of relying on the value captured by
         # the earlier full-page run, which may predate entry-evidence capture.
+        current_review_summary=(
+            planning_review_summary
+            if snapshot_mode else
+            load_current_review_summary(
+                basket["basket_id"], str(current["publication_id"])
+            )
+        )
         allocation_review_summary=retain_review_card_summary(
             st.session_state,
             str(current["publication_id"]),
-            load_current_review_summary(
-                basket["basket_id"], str(current["publication_id"])
-            ),
+            current_review_summary,
         ) or review_card_summary
         try:
+            if snapshot_mode:
+                raise RuntimeError("Static snapshot mode")
             allocation_live_net = load_indicative_net_return(
                 DEFAULT_BASKET_ID, str(current["publication_id"])
             )
@@ -1080,6 +1110,13 @@ export_suffix="simulation-evidence" if is_simulation else "evidence"
 if is_simulation:
     st.caption("This download includes simulated history and is labelled as research evidence.")
 st.download_button(export_label,evidence,f"{DEFAULT_BASKET_ID.lower()}-{export_suffix}.json","application/json",width="stretch")
-st.caption(f"Calculation version {CALCULATION_VERSION} · Data refreshed every five minutes")
+if snapshot_mode:
+    snapshot_time=str(record.get("snapshot_generated_at") or "")
+    st.caption(
+        f"Calculation version {CALCULATION_VERSION} · Verified snapshot "
+        + (f"generated {snapshot_time[:19].replace('T', ' ')} UTC" if snapshot_time else "refresh pending")
+    )
+else:
+    st.caption(f"Calculation version {CALCULATION_VERSION} · Operator database mode")
 st.info("Model performance and statistical scenarios are not investment advice and do not guarantee future results.")
 

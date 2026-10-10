@@ -19,6 +19,7 @@ universal_portfolio_backup.csv
 *.duckdb
 *.duckdb.wal
 *.log
+public_record_snapshot.json
 
 .DS_Store
 Thumbs.db

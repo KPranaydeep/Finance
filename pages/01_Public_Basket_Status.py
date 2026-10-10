@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+from public_card_feed import load_public_record
+
 from public_basket_postgres import (
     DEFAULT_BASKET_ID,
     DEFAULT_BASKET_NAME,
@@ -108,6 +110,45 @@ st.caption(
     "initialization. This page never runs the optimizer, creates portfolio events, "
     "places orders, or executes trades."
 )
+
+live_check = st.button(
+    "Check live database",
+    icon=":material/database:",
+    help=(
+        "Operator diagnostic. This intentionally wakes the database; the "
+        "normal public status view uses the verified static snapshot."
+    ),
+)
+if not live_check:
+    try:
+        snapshot_record = load_public_record(DEFAULT_BASKET_ID)
+        snapshot_current = snapshot_record.get("current") or {}
+        snapshot_generated = snapshot_record.get("snapshot_generated_at")
+        st.success("Verified public snapshot is available. No database was awakened.")
+        summary_1, summary_2, summary_3 = st.columns(3)
+        summary_1.metric(
+            "Portfolio version",
+            f"P{int(snapshot_current.get('portfolio_version') or 0):03d}",
+        )
+        summary_2.metric(
+            "Target holdings", len(snapshot_record.get("constituents") or [])
+        )
+        summary_3.metric(
+            "Snapshot generated",
+            str(snapshot_generated or "Unavailable")[:19].replace("T", " "),
+        )
+        st.caption(
+            "Public pages read this checksum-verified snapshot. Use the live "
+            "check only when diagnosing the durable writer database."
+        )
+    except Exception:
+        LOGGER.exception("Public snapshot status query failed")
+        st.error("The verified public snapshot is temporarily unavailable.")
+        st.caption(
+            "The database is not queried automatically. An operator may use "
+            "the live check after restoring database capacity."
+        )
+    st.stop()
 
 database_url = get_public_basket_database_url()
 

@@ -153,6 +153,23 @@ def load_review_reference_prices(basket_id, publication_id):
     # Read immutable evidence first.  A transient Yahoo/history failure must
     # never hide planning tools when the database already contains prices.
     events = load_events(basket_id)
+    stored = review_reference_prices_from_events(events, publication_id)
+    if stored:
+        return stored
+    try:
+        preview = load_fresh_preview(
+            basket_id, publication_id, REVIEW_WINDOW_MODEL
+        )
+    except Exception:
+        return {}
+    baseline = preview.get("planning_baseline") or {}
+    return _reference_prices_from_lots(
+        baseline.get("lots") or [], baseline.get("entry_date")
+    )
+
+
+def review_reference_prices_from_events(events, publication_id):
+    """Resolve stored chronology-safe prices without a database connection."""
     durable = [
         row for row in events
         if row.get("kind") == "BASELINE"
@@ -171,32 +188,25 @@ def load_review_reference_prices(basket_id, publication_id):
         # If that calculation is temporarily unavailable, retain every
         # immutable per-security entry already captured instead of returning
         # an empty all-or-nothing result.
-        try:
-            preview = load_fresh_preview(
-                basket_id, publication_id, REVIEW_WINDOW_MODEL
-            )
-        except Exception:
-            preview = {}
-        baseline = preview.get("planning_baseline")
-        if baseline and baseline.get("lots"):
-            lots = baseline["lots"]
-            baseline_entry_date = baseline.get("entry_date")
-        else:
-            captured = [
-                row.get("payload", {}) for row in events
-                if row.get("kind") == "SECURITY_ENTRY"
-                and row.get("payload", {}).get("publication_id") == publication_id
-            ]
-            lots = [
-                {
-                    "ticker": row.get("ticker"),
-                    "price": row.get("price_inr"),
-                    "kind": row.get("kind"),
-                    "entry_date": row.get("entry_date"),
-                }
-                for row in captured
-            ]
-            baseline_entry_date = None
+        captured = [
+            row.get("payload", {}) for row in events
+            if row.get("kind") == "SECURITY_ENTRY"
+            and row.get("payload", {}).get("publication_id") == publication_id
+        ]
+        lots = [
+            {
+                "ticker": row.get("ticker"),
+                "price": row.get("price_inr"),
+                "kind": row.get("kind"),
+                "entry_date": row.get("entry_date"),
+            }
+            for row in captured
+        ]
+        baseline_entry_date = None
+    return _reference_prices_from_lots(lots, baseline_entry_date)
+
+
+def _reference_prices_from_lots(lots, baseline_entry_date=None):
     if not lots:
         return {}
     result = {}
@@ -720,6 +730,36 @@ def _durable_review_card_summary(events, publication_id, now=None):
     if age_hours > 30 or age_hours < -1:
         return None
     return review_card_summary(payload)
+
+
+def snapshot_review_card_summary(events, publication_id, now=None):
+    """Public wrapper for a checksum-verified static review event chain."""
+    return _durable_review_card_summary(events, publication_id, now=now)
+
+
+def render_snapshot_review_panel(active_publications, events):
+    """Render stored review evidence without waking the database or providers."""
+    st.subheader("Your next portfolio review")
+    publication_id = (
+        active_publications[0].get("publication_id")
+        if active_publications else None
+    )
+    summary = (
+        _durable_review_card_summary(events, publication_id)
+        if publication_id else None
+    )
+    try:
+        render_events(
+            events,
+            {row["publication_id"] for row in active_publications},
+            latest_publication_id=publication_id,
+        )
+    except Exception:
+        st.warning(
+            "Stored model-review evidence is unavailable. "
+            "No reliable review date can be shown."
+        )
+    return summary
 
 
 def render_operational_window(payload):

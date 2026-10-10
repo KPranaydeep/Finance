@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: public-portfolio-database-writer
+  cancel-in-progress: false
 
 jobs:
   forecast-accountability:
@@ -59,3 +63,9 @@ jobs:
           PUBLIC_CACHE_TTL_SECONDS: "300"
           PUBLIC_REFRESH_POLICY: weekdays-after-market-close
           PUBLIC_MODEL_BACKFILL_TRADING_DAYS: ${{ vars.PUBLIC_MODEL_BACKFILL_TRADING_DAYS || '0' }}
+      - name: Export verified public snapshot
+        run: python export_public_record_snapshot.py
+        env:
+          PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
+      - name: Publish quota-free public snapshot
+        run: bash scripts/publish_public_snapshot.sh public_record_snapshot.json
