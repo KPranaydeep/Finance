@@ -5952,12 +5952,16 @@ def search_universal_shortlist_caps(
             raw_target = center + (1 if slope > 0 else -1) * step_count * minimum_increment
             return min(grid, key=lambda value: (abs(value - raw_target), value))
 
+        accepted_incumbent = best_feasible_result(rows)
+        material_improvement = max(float(gradient_return_scale), 0.0)
+
         def refine_axis(axis, max_iterations=16):
-            added_any = False
+            nonlocal accepted_incumbent
+            improved_any = False
             coordinate_key = "Shortlist cap" if axis == "X" else "Maximum assets"
             grid = cap_grid if axis == "X" else exact_asset_limits
             for _ in range(max_iterations):
-                incumbent = best_feasible_result(rows)
+                incumbent = accepted_incumbent
                 if incumbent is None:
                     break
                 fixed_x = int(incumbent["Shortlist cap"])
@@ -5970,8 +5974,7 @@ def search_universal_shortlist_caps(
                         else int(row.get("Shortlist cap") or -1) == fixed_x
                     )
                 ]
-                line_best = best_feasible_result(line_rows) or incumbent
-                center = int(line_best[coordinate_key])
+                center = int(incumbent[coordinate_key])
                 center_index = grid.index(center)
                 proposals = []
                 for index in (center_index - 1, center_index + 1):
@@ -5981,7 +5984,7 @@ def search_universal_shortlist_caps(
                 if slope_target is not None:
                     proposals.insert(0, int(slope_target))
                 proposals = list(dict.fromkeys(proposals))
-                before = float(line_best["Annual Return"])
+                before = float(incumbent["Annual Return"])
                 added = False
                 for coordinate in proposals:
                     candidate_x = coordinate if axis == "X" else fixed_x
@@ -5989,7 +5992,6 @@ def search_universal_shortlist_caps(
                     added |= evaluate_coordinate(
                         candidate_x, candidate_y, f"Alternating {axis} gradient"
                     )
-                added_any |= added
                 updated_line = [
                     row for row in rows
                     if (
@@ -6001,19 +6003,22 @@ def search_universal_shortlist_caps(
                 updated_best = best_feasible_result(updated_line)
                 if not added or updated_best is None:
                     break
-                if float(updated_best["Annual Return"]) <= before + 1e-12:
+                improvement = float(updated_best["Annual Return"]) - before
+                if improvement <= material_improvement:
                     break
-            return added_any
+                accepted_incumbent = updated_best
+                improved_any = True
+            return improved_any
 
         for _ in range(12):
-            before_pair = best_feasible_result(rows)
+            before_pair = accepted_incumbent
             before_key = (
                 int(before_pair["Shortlist cap"]),
                 int(before_pair["Maximum assets"]),
             ) if before_pair is not None else None
             moved_x = refine_axis("X")
             moved_y = refine_axis("Y")
-            after_pair = best_feasible_result(rows)
+            after_pair = accepted_incumbent
             after_key = (
                 int(after_pair["Shortlist cap"]),
                 int(after_pair["Maximum assets"]),

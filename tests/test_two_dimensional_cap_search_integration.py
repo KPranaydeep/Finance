@@ -193,10 +193,15 @@ def test_explicit_start_pair_is_first_while_fixed_search_keeps_full_range():
 
 
 def test_adaptive_search_alternates_x_then_y_and_converges_on_grid_peak():
-    state = {"cap": None}
+    state = {
+        "cap": None,
+        "surface": lambda cap, assets: (
+            1.0 - ((cap - 150) / 100) ** 2 - ((assets - 150) / 100) ** 2
+        ),
+    }
 
     def stats_for(cap, assets):
-        annual_return = 1.0 - ((cap - 150) / 100) ** 2 - ((assets - 150) / 100) ** 2
+        annual_return = state["surface"](cap, assets)
         return {
             "Annual Return": annual_return,
             "Annual Volatility": 0.15,
@@ -269,3 +274,29 @@ def test_adaptive_search_alternates_x_then_y_and_converges_on_grid_peak():
     assert (best["Shortlist cap"], best["Maximum assets"]) == (150, 150)
     phases = [row["Search phase"] for row in rows]
     assert phases.index("Alternating X gradient") < phases.index("Alternating Y gradient")
+
+    state["surface"] = lambda cap, _assets: 0.50 + (cap - 100) * 0.000002
+    micro_rows, _ = search(
+        "owner",
+        minimum_cap=100,
+        starting_cap=100,
+        maximum_cap=200,
+        starting_asset_limit=100,
+        exact_optimizer_asset_caps=(100, 150, 200),
+        step=50,
+        adaptive=True,
+        alternating_refinement=True,
+        gradient_return_scale=0.001,
+        max_dd=-0.2,
+        target_volatility=None,
+        drop_bottom_pct=0.2,
+        history_buffer_days=30,
+        redundancy_corr_threshold=0.8,
+    )
+
+    micro_pairs = {
+        (row["Shortlist cap"], row["Maximum assets"])
+        for row in micro_rows
+    }
+    assert (150, 100) in micro_pairs
+    assert (200, 100) not in micro_pairs
