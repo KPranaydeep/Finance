@@ -127,6 +127,14 @@ RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
 TRADING_DAYS_PER_YEAR = _optimizer_config.TRADING_DAYS_PER_YEAR
 UNIVERSAL_PRESELECTION_CAP = 400
 DEFAULT_EXACT_OPTIMIZER_ASSET_CAP = 300
+DEFAULT_ADVANCED_CAP_FROM = 7700
+DEFAULT_ADVANCED_CAP_THROUGH = 9400
+DEFAULT_ADVANCED_CAP_STEP = 50
+DEFAULT_ADVANCED_ASSETS_FROM = 600
+DEFAULT_ADVANCED_ASSETS_THROUGH = 3000
+DEFAULT_ADVANCED_ASSETS_STEP = 50
+DEFAULT_ADVANCED_START_X = 8650
+DEFAULT_ADVANCED_START_Y = 1250
 MARKET_CAP_EXCLUSION_FRACTION = 0.20
 # Full-history downloads are the expensive part of a broad-universe run.  Twelve
 # symbols per request made a 4,200-name shortlist issue roughly 700 sequential
@@ -6016,20 +6024,20 @@ if not st.session_state.get(checkpoint_restore_key):
             int(
                 restored_config.get("minimum_cap")
                 or restored_config.get("starting_cap")
-                or 8500
+                or DEFAULT_ADVANCED_CAP_FROM
             ),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_through",
-            int(restored_config.get("maximum_cap") or 9400),
+            int(restored_config.get("maximum_cap") or DEFAULT_ADVANCED_CAP_THROUGH),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_step",
-            int(restored_config.get("step") or 50),
+            int(restored_config.get("step") or DEFAULT_ADVANCED_CAP_STEP),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_start_x",
-            int(restored_config.get("starting_cap") or 8500),
+            int(restored_config.get("starting_cap") or DEFAULT_ADVANCED_START_X),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_spacing",
@@ -6447,7 +6455,7 @@ with st.sidebar:
 
     advanced_cap_search = st.toggle(
         "Advanced shortlist-cap search",
-        value=False,
+        value=True,
         key="advanced_shortlist_cap_search",
         help=(
             "Searches shortlist capacity and the exact optimizer's Maximum-assets "
@@ -6461,8 +6469,8 @@ with st.sidebar:
                 st.number_input(
                     "Search cap from",
                     min_value=50,
-                    value=8500,
-                    step=50,
+                    value=DEFAULT_ADVANCED_CAP_FROM,
+                    step=DEFAULT_ADVANCED_CAP_STEP,
                     key="shortlist_cap_search_from",
                 )
             )
@@ -6471,8 +6479,8 @@ with st.sidebar:
                 st.number_input(
                     "Search cap through",
                     min_value=50,
-                    value=max(9400, cap_search_from),
-                    step=50,
+                    value=max(DEFAULT_ADVANCED_CAP_THROUGH, cap_search_from),
+                    step=DEFAULT_ADVANCED_CAP_STEP,
                     key="shortlist_cap_search_through",
                     help="No hidden maximum; the eligible universe remains the natural ceiling.",
                 )
@@ -6484,8 +6492,8 @@ with st.sidebar:
                 st.number_input(
                     "Minimum search step",
                     min_value=50,
-                    value=50,
-                    step=50,
+                    value=DEFAULT_ADVANCED_CAP_STEP,
+                    step=DEFAULT_ADVANCED_CAP_STEP,
                     key="shortlist_cap_search_step",
                     help="Use 50 for the finest supported cap resolution.",
                 )
@@ -6497,7 +6505,7 @@ with st.sidebar:
                     "Fixed (complete 2D grid)",
                     "Adaptive hill-climb",
                 ],
-                index=0,
+                index=1,
                 key="shortlist_cap_search_spacing",
                 help=(
                     "Fixed evaluates every shortlist-cap step and every Maximum-assets "
@@ -6509,27 +6517,31 @@ with st.sidebar:
         asset_col1, asset_col2, asset_col3 = st.columns(3)
         with asset_col1:
             asset_search_from = int(st.number_input(
-                "Maximum assets from", min_value=50, value=100, step=50,
+                "Maximum assets from", min_value=50,
+                value=DEFAULT_ADVANCED_ASSETS_FROM,
+                step=DEFAULT_ADVANCED_ASSETS_STEP,
                 key="exact_asset_search_from",
             ))
         with asset_col2:
             asset_search_through = int(st.number_input(
                 "Maximum assets through", min_value=50,
-                value=max(int(exact_optimizer_asset_cap), asset_search_from),
-                step=50, key="exact_asset_search_through",
+                value=max(DEFAULT_ADVANCED_ASSETS_THROUGH, asset_search_from),
+                step=DEFAULT_ADVANCED_ASSETS_STEP, key="exact_asset_search_through",
             ))
         asset_search_through = max(asset_search_through, asset_search_from)
         with asset_col3:
             asset_search_step = int(st.number_input(
-                "Maximum-assets step", min_value=50, value=50, step=50,
+                "Maximum-assets step", min_value=50,
+                value=DEFAULT_ADVANCED_ASSETS_STEP,
+                step=DEFAULT_ADVANCED_ASSETS_STEP,
                 key="exact_asset_search_step",
             ))
         start_col1, start_col2 = st.columns(2)
         current_start_x = int(
-            st.session_state.get("shortlist_cap_search_start_x", cap_search_from)
+            st.session_state.get("shortlist_cap_search_start_x", DEFAULT_ADVANCED_START_X)
         )
         current_start_y = int(
-            st.session_state.get("shortlist_cap_search_start_y", asset_search_from)
+            st.session_state.get("shortlist_cap_search_start_y", DEFAULT_ADVANCED_START_Y)
         )
         st.session_state["shortlist_cap_search_start_x"] = min(
             max(current_start_x, cap_search_from), cap_search_through
