@@ -6214,7 +6214,7 @@ with st.sidebar:
                 "Search spacing",
                 options=[
                     "Fixed (complete 2D grid)",
-                    "Adaptive derivative-free (faster)",
+                    "Adaptive hill-climb",
                 ],
                 index=0,
                 key="shortlist_cap_search_spacing",
@@ -6267,7 +6267,7 @@ with st.sidebar:
         cap_search_from = int(universal_preselection_cap)
         cap_search_through = int(universal_preselection_cap)
         cap_search_step = 50
-        cap_search_spacing = "Adaptive derivative-free (faster)"
+        cap_search_spacing = "Adaptive hill-climb"
         asset_search_from = int(exact_optimizer_asset_cap)
         asset_search_through = int(exact_optimizer_asset_cap)
         asset_search_step = 50
