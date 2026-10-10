@@ -4,6 +4,8 @@ from two_dimensional_search import (
     best_feasible_result,
     inclusive_values,
     missing_grid_pairs,
+    robust_feasible_result,
+    search_convergence_summary,
     search_grid,
 )
 
@@ -48,3 +50,72 @@ def test_best_result_uses_return_then_smaller_solver_and_shortlist_on_tie():
 def test_invalid_range_is_rejected():
     with pytest.raises(ValueError):
         inclusive_values(9400, 8500, 50, minimum_step=50)
+
+
+def test_robust_result_uses_downside_risk_inside_return_plateau():
+    rows = [
+        {
+            "Shortlist cap": 8650,
+            "Maximum assets": 1100,
+            "Status": "Feasible",
+            "Annual Return": 0.9231,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.08,
+            "Historical ES 95% (1 Session)": 0.03,
+            "Annual Volatility": 0.16,
+        },
+        {
+            "Shortlist cap": 8650,
+            "Maximum assets": 1250,
+            "Status": "Feasible",
+            "Annual Return": 0.9236,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.09,
+            "Historical ES 95% (1 Session)": 0.03,
+            "Annual Volatility": 0.16,
+        },
+        {
+            "Shortlist cap": 8650,
+            "Maximum assets": 1000,
+            "Status": "Feasible",
+            "Annual Return": 0.9225,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Annual Volatility": 0.15,
+        },
+    ]
+    # 1,000 lies 0.11 percentage points below the raw peak, so the default
+    # plateau excludes it and selects the safer 1,100 result.
+    assert robust_feasible_result(rows) is rows[0]
+    # A wider user-selected tolerance admits 1,000 and lets risk decide.
+    assert robust_feasible_result(rows, return_tolerance=0.0015) is rows[2]
+
+
+def test_convergence_reports_incomplete_then_boundary_then_interior():
+    caps = (8500, 8550, 8600)
+    assets = (1000, 1050, 1100)
+    partial = [
+        {
+            "Shortlist cap": 8500,
+            "Maximum assets": 1000,
+            "Status": "Feasible",
+            "Annual Return": 0.8,
+        }
+    ]
+    assert search_convergence_summary(partial, caps, assets)["state"] == "incomplete"
+
+    full = [
+        {
+            "Shortlist cap": cap,
+            "Maximum assets": asset,
+            "Status": "Feasible",
+            "Annual Return": 0.9 - abs(cap - 8550) / 100_000 - abs(asset - 1050) / 10_000,
+        }
+        for cap, asset in search_grid(caps, assets)
+    ]
+    summary = search_convergence_summary(full, caps, assets)
+    assert summary["state"] == "interior_peak"
+    assert summary["boundary_axes"] == ()
+
+    full[-1]["Annual Return"] = 0.95
+    summary = search_convergence_summary(full, caps, assets)
+    assert summary["state"] == "boundary_limited"
+    assert summary["boundary_axes"] == ("shortlist cap", "Maximum assets")

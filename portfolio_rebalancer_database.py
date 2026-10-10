@@ -54,7 +54,12 @@ from optimization_run_timer import (
     start_run_timer,
     update_run_stage,
 )
-from two_dimensional_search import best_feasible_result, inclusive_values
+from two_dimensional_search import (
+    best_feasible_result,
+    inclusive_values,
+    robust_feasible_result,
+    search_convergence_summary,
+)
 from universal_portfolio_summary import summarize_universal_portfolio
 from market_history_cache import sync_market_history
 from universal_portfolio_import import (
@@ -5679,7 +5684,11 @@ def search_universal_shortlist_caps(
                 "Cap elapsed seconds": cap_elapsed,
                 "Eligible universe": eligible,
                 "Next adaptive jump": int(next_jump),
-                "Runtime brake": "Applied" if runtime_brake_applied else "Not needed",
+                "Runtime brake": (
+                    "Applied"
+                    if adaptive and runtime_brake_applied
+                    else ("Not needed" if adaptive else "Not applicable")
+                ),
                 "Status": status,
             }
             rows.append(row)
@@ -6171,6 +6180,20 @@ with st.sidebar:
                 "Maximum-assets step", min_value=50, value=50, step=50,
                 key="exact_asset_search_step",
             ))
+        return_equivalence_pp = float(st.number_input(
+            "Near-equal return tolerance (percentage points)",
+            min_value=0.0,
+            value=0.10,
+            step=0.05,
+            format="%.2f",
+            key="shortlist_search_return_tolerance_pp",
+            help=(
+                "Pairs within this many annual-return percentage points of the raw "
+                "peak are treated as a plateau. The robust choice then prefers lower "
+                "20-session expected shortfall, lower one-session expected shortfall, "
+                "lower volatility, and fewer assets. This does not stop the search."
+            ),
+        ))
         st.caption(
             "History is prepared once per shortlist cap and reused across its "
             "Maximum-assets solver values."
@@ -6183,6 +6206,7 @@ with st.sidebar:
         asset_search_from = int(exact_optimizer_asset_cap)
         asset_search_through = int(exact_optimizer_asset_cap)
         asset_search_step = 50
+        return_equivalence_pp = 0.10
     run_cap_search_btn = st.button(
         "Run / resume cap search",
         width="stretch",
@@ -6350,8 +6374,9 @@ if run_cap_search_btn:
             f"latest **{format_elapsed(float(latest.get('Elapsed seconds') or 0.0))}** · "
             f"average solver result **{format_elapsed(average_seconds)}**"
             + (
-                " · **15-minute runtime brake applied**"
-                if latest.get("Runtime brake") == "Applied"
+                " · **Adaptive cap-spacing brake applied after the 15-minute cap budget**"
+                if cap_search_spacing.startswith("Adaptive")
+                and latest.get("Runtime brake") == "Applied"
                 else ""
             )
         )
@@ -6361,10 +6386,11 @@ if run_cap_search_btn:
                 + (
                     f"stop reached at {current_cap:,}"
                     if latest.get("Status") != "Feasible"
-                    else (
+                    else ((
                         f"next search jump "
                         f"+{int(latest.get('Next adaptive jump') or 50):,}"
-                    )
+                    ) if cap_search_spacing.startswith("Adaptive") else
+                        "continuing complete grid")
                 )
             ),
             state="running",
@@ -6425,19 +6451,68 @@ if cap_search_results:
     if feasible_df.empty:
         st.warning("No evaluated grid combination produced a feasible solution.")
     else:
-        best_row = pd.Series(best_feasible_result(feasible_df.to_dict(orient="records")))
+        result_records = results_df.to_dict(orient="records")
+        return_tolerance = max(float(return_equivalence_pp), 0.0) / 100.0
+        best_row = pd.Series(best_feasible_result(result_records))
+        robust_row = pd.Series(robust_feasible_result(
+            result_records,
+            return_tolerance=return_tolerance,
+        ))
+        convergence = search_convergence_summary(
+            result_records,
+            cap_search_values,
+            exact_asset_search_values,
+            return_tolerance=return_tolerance,
+        )
         metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
-        metric_col1.metric("Best observed cap", f"{int(best_row['Shortlist cap']):,}")
-        metric_col2.metric("Best Maximum assets", f"{int(best_row['Maximum assets']):,}")
-        metric_col3.metric("Annual return", f"{float(best_row['Annual Return']):.2%}")
+        metric_col1.metric("Raw-peak cap", f"{int(best_row['Shortlist cap']):,}")
+        metric_col2.metric("Raw-peak Maximum assets", f"{int(best_row['Maximum assets']):,}")
+        metric_col3.metric("Raw annual return", f"{float(best_row['Annual Return']):.2%}")
         metric_col4.metric("Trading days", f"{int(best_row['Trading days']):,}")
         metric_col5.metric("Assets solved", f"{int(best_row['Assets']):,}")
-        st.button(
-            "Use best observed pair",
+        robust_return_gap_pp = 100.0 * (
+            float(best_row["Annual Return"]) - float(robust_row["Annual Return"])
+        )
+        st.success(
+            f"Robust plateau choice: **{int(robust_row['Shortlist cap']):,} × "
+            f"{int(robust_row['Maximum assets']):,}** at "
+            f"**{float(robust_row['Annual Return']):.2%}** annual return. It gives up "
+            f"**{robust_return_gap_pp:.2f} percentage points** versus the raw peak "
+            f"within the configured {return_equivalence_pp:.2f}-point tolerance."
+        )
+        convergence_state = str(convergence["state"])
+        if convergence_state == "incomplete":
+            st.info(
+                f"Search is not converged: {int(convergence['completed']):,} of "
+                f"{int(convergence['total']):,} configured pairs have results."
+            )
+        elif convergence_state == "boundary_limited":
+            st.warning(
+                "The completed grid's raw peak lies on the "
+                + " and ".join(convergence["boundary_axes"])
+                + " boundary. It is the best observed point, but the maximum is not "
+                "bounded on that side."
+            )
+        elif convergence_state == "interior_peak":
+            st.success(
+                "The complete grid has an interior raw peak. This is evidence of "
+                "within-grid convergence, not proof of out-of-sample optimality."
+            )
+        apply_col1, apply_col2 = st.columns(2)
+        apply_col1.button(
+            "Use robust plateau pair",
             type="primary",
+            key="apply_robust_shortlist_cap_btn",
+            on_click=_apply_best_search_pair,
+            args=(int(robust_row["Shortlist cap"]), int(robust_row["Maximum assets"])),
+            help="Recommended when near-equal raw returns should not decide the portfolio alone.",
+        )
+        apply_col2.button(
+            "Use raw-return peak",
             key="apply_best_shortlist_cap_btn",
             on_click=_apply_best_search_pair,
             args=(int(best_row["Shortlist cap"]), int(best_row["Maximum assets"])),
+            help="Uses the numerically highest in-sample annual return in the evaluated grid.",
         )
 
     percentage_columns = [
@@ -6498,8 +6573,9 @@ if cap_search_results:
         "Fixed mode evaluates the complete shortlist-cap × Maximum-assets grid. "
         "History is prepared once per shortlist cap and reused across its solver "
         "limits. Only feasible solutions with at least 252 common trading sessions "
-        "compete; the highest observed annual return wins. This remains an in-sample "
-        "research maximum, not a guaranteed future return."
+        "compete. The raw peak maximizes observed annual return; the robust choice "
+        "treats near-equal returns as a plateau and uses downside risk, volatility, "
+        "complexity and runtime as tie-breakers. Neither is a guaranteed future return."
     )
 
 with st.expander("🌐 Universal Portfolio", expanded=False):

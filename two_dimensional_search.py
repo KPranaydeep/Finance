@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Iterable, Mapping, Sequence
 
 
@@ -73,3 +74,110 @@ def best_feasible_result(
             best = row
             best_key = key
     return best
+
+
+def robust_feasible_result(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    return_tolerance: float = 0.001,
+) -> Mapping[str, object] | None:
+    """Choose a lower-risk, simpler result from the near-maximum plateau.
+
+    ``return_tolerance`` is expressed as a decimal annual return. The default
+    0.001 therefore treats results within 0.10 percentage points of the raw
+    maximum as economically equivalent. Missing risk values sort last.
+    """
+    feasible = []
+    for row in rows:
+        if str(row.get("Status")) != "Feasible":
+            continue
+        try:
+            annual_return = float(row["Annual Return"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(annual_return):
+            continue
+        feasible.append((row, annual_return))
+    if not feasible:
+        return None
+
+    peak_return = max(value for _, value in feasible)
+    plateau = [
+        row for row, value in feasible
+        if value >= peak_return - max(float(return_tolerance), 0.0)
+    ]
+
+    def finite_or_infinity(row: Mapping[str, object], key: str) -> float:
+        try:
+            value = float(row.get(key))
+        except (TypeError, ValueError):
+            return math.inf
+        return value if math.isfinite(value) else math.inf
+
+    return min(
+        plateau,
+        key=lambda row: (
+            finite_or_infinity(row, "Block-Bootstrap ES 95% (20 Sessions)"),
+            finite_or_infinity(row, "Historical ES 95% (1 Session)"),
+            finite_or_infinity(row, "Annual Volatility"),
+            int(row.get("Maximum assets") or 0),
+            int(row.get("Shortlist cap") or 0),
+            finite_or_infinity(row, "Elapsed seconds"),
+        ),
+    )
+
+
+def search_convergence_summary(
+    rows: Sequence[Mapping[str, object]],
+    shortlist_caps: Iterable[int],
+    maximum_assets_values: Iterable[int],
+    *,
+    return_tolerance: float = 0.001,
+) -> dict[str, object]:
+    """Describe grid completion and whether the raw peak is boundary-limited."""
+    grid = search_grid(shortlist_caps, maximum_assets_values)
+    completed = {
+        (int(row["Shortlist cap"]), int(row["Maximum assets"]))
+        for row in rows
+        if row.get("Shortlist cap") is not None
+        and row.get("Maximum assets") is not None
+    }
+    peak = best_feasible_result(rows)
+    robust = robust_feasible_result(rows, return_tolerance=return_tolerance)
+    complete = all(pair in completed for pair in grid)
+    if peak is None:
+        return {
+            "state": "no_feasible_result",
+            "complete": complete,
+            "completed": len(completed.intersection(grid)),
+            "total": len(grid),
+            "boundary_axes": (),
+            "raw_peak": None,
+            "robust_choice": robust,
+        }
+
+    caps = sorted({pair[0] for pair in grid})
+    assets = sorted({pair[1] for pair in grid})
+    peak_cap = int(peak["Shortlist cap"])
+    peak_assets = int(peak["Maximum assets"])
+    boundary_axes = []
+    if len(caps) > 1 and peak_cap in {caps[0], caps[-1]}:
+        boundary_axes.append("shortlist cap")
+    if len(assets) > 1 and peak_assets in {assets[0], assets[-1]}:
+        boundary_axes.append("Maximum assets")
+
+    if not complete:
+        state = "incomplete"
+    elif boundary_axes:
+        state = "boundary_limited"
+    else:
+        state = "interior_peak"
+    return {
+        "state": state,
+        "complete": complete,
+        "completed": len(completed.intersection(grid)),
+        "total": len(grid),
+        "boundary_axes": tuple(boundary_axes),
+        "raw_peak": peak,
+        "robust_choice": robust,
+    }
