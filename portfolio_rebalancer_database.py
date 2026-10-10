@@ -43,6 +43,7 @@ from scalable_universe_preselection import (
     filter_candidates_by_market_cap,
     rank_scalable_candidates,
 )
+from search_surface_chart import build_search_surface_figure
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
@@ -6523,19 +6524,22 @@ if cap_search_results:
     ]
     feasible_chart = results_df.loc[results_df["Status"].eq("Feasible")].copy()
     if not feasible_chart.empty:
-        return_surface = feasible_chart.pivot_table(
-            index="Shortlist cap", columns="Maximum assets",
-            values="Annual Return", aggfunc="max",
-        ).sort_index()
-        return_surface.columns = [
-            f"Maximum assets {int(value):,}" for value in return_surface.columns
-        ]
-        st.markdown("**Annual return across the two-dimensional search**")
-        st.line_chart(
-            return_surface * 100.0,
-            x_label="Universal candidate shortlist cap",
-            y_label="Annual return (%)",
-            height=380,
+        search_surface = build_search_surface_figure(
+            results_df.to_dict(orient="records"),
+            raw_peak=(best_row.to_dict() if not feasible_df.empty else None),
+            robust_choice=(robust_row.to_dict() if not feasible_df.empty else None),
+        )
+        st.plotly_chart(
+            search_surface,
+            width="stretch",
+            height=650,
+            theme=None,
+            key="optimizer_search_surface_3d",
+            config={
+                "displaylogo": False,
+                "scrollZoom": False,
+                "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
+            },
         )
     display_columns = [
         "Shortlist cap",
