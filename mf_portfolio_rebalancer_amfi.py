@@ -731,6 +731,28 @@ def _normalise_scheme_name(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
+def _scheme_name_match(source_name: str, nav_master: pd.DataFrame):
+    """Resolve exports whose plan/option suffix differs from AMFI's name."""
+    source_tokens = set(_normalise_scheme_name(source_name).split())
+    ignored = {"direct", "growth", "plan", "option", "regular", "reinvestment", "payout"}
+    source_core = source_tokens - ignored
+    candidates = []
+    for _, row in nav_master.iterrows():
+        target_tokens = set(_normalise_scheme_name(row["Scheme Name"]).split())
+        target_core = target_tokens - ignored
+        if not source_core or not target_core:
+            continue
+        overlap = len(source_core & target_core) / max(len(source_core), len(target_core))
+        if overlap >= 0.72:
+            candidates.append((overlap, row))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if len(candidates) > 1 and candidates[0][0] - candidates[1][0] < 0.05:
+        return None
+    return candidates[0][1]
+
+
 def _read_groww_excel_holdings(uploaded_file, nav_master: pd.DataFrame) -> pd.DataFrame:
     """Convert a Groww holdings export into the app's holdings-backup shape."""
     try:
@@ -758,6 +780,8 @@ def _read_groww_excel_holdings(uploaded_file, nav_master: pd.DataFrame) -> pd.Da
     for _, row in holdings.iterrows():
         source_name = str(row["Scheme Name"]).strip()
         match = lookup.get(_normalise_scheme_name(source_name))
+        if match is None:
+            match = _scheme_name_match(source_name, nav_master)
         if match is None:
             unmatched.append(source_name)
             continue
