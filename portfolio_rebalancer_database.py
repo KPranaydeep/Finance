@@ -5496,6 +5496,7 @@ def search_universal_shortlist_caps(
     adaptive=True,
     asset_evaluation_order="ascending",
     alternating_refinement=True,
+    gradient_return_scale=0.001,
     runtime_brake_seconds=900,
     prior_results=(),
     on_result=None,
@@ -5749,19 +5750,29 @@ def search_universal_shortlist_caps(
             return row
 
         if adaptive and two_dimensional:
-            anchor_limits = [
-                value for value in adaptive_anchor_values(
-                    exact_asset_limits,
-                    target_points=3 if alternating_refinement else 8,
+            if alternating_refinement:
+                initial_limits = (
+                    [preferred_asset_limit]
+                    if preferred_asset_limit in pending_asset_limits
+                    else []
                 )
-                if value in pending_asset_limits
-            ]
-            initial_limits = (
-                [preferred_asset_limit]
-                if preferred_asset_limit in pending_asset_limits
-                else []
-            ) + [value for value in anchor_limits if value != preferred_asset_limit]
-            initial_phase = "Derivative-free anchor"
+            else:
+                anchor_limits = [
+                    value for value in adaptive_anchor_values(
+                        exact_asset_limits, target_points=8,
+                    )
+                    if value in pending_asset_limits
+                ]
+                initial_limits = (
+                    [preferred_asset_limit]
+                    if preferred_asset_limit in pending_asset_limits
+                    else []
+                ) + [value for value in anchor_limits if value != preferred_asset_limit]
+            initial_phase = (
+                "Gradient warm start"
+                if alternating_refinement
+                else "Derivative-free anchor"
+            )
         elif str(asset_evaluation_order) == "coarse_to_fine":
             ordered_limits = [
                 value for value in coarse_to_fine_values(exact_asset_limits)
@@ -5815,6 +5826,8 @@ def search_universal_shortlist_caps(
                     evaluate_asset_limit(asset_limit, "Derivative-free refinement")
 
         if trading_days < int(minimum_trading_days):
+            break
+        if adaptive and two_dimensional and alternating_refinement:
             break
         range_ceiling = (
             min(eligible, int(maximum_cap))
@@ -5879,65 +5892,134 @@ def search_universal_shortlist_caps(
                 if on_result is not None:
                     on_result(rows, merged)
 
-        for _ in range(4):
-            incumbent = best_feasible_result(rows)
-            if incumbent is None:
+        def evaluate_coordinate(candidate_x, candidate_y, phase):
+            pair = (int(candidate_x), int(candidate_y))
+            if pair in completed_pairs:
+                return False
+            refined, _ = search_universal_shortlist_caps(
+                owner,
+                starting_cap=int(candidate_x),
+                minimum_cap=int(candidate_x),
+                maximum_cap=int(candidate_x),
+                starting_asset_limit=int(candidate_y),
+                max_dd=max_dd,
+                target_volatility=target_volatility,
+                drop_bottom_pct=drop_bottom_pct,
+                history_buffer_days=history_buffer_days,
+                redundancy_corr_threshold=redundancy_corr_threshold,
+                exact_optimizer_asset_cap=int(candidate_y),
+                exact_optimizer_asset_caps=(int(candidate_y),),
+                minimum_trading_days=minimum_trading_days,
+                step=step,
+                adaptive=False,
+                asset_evaluation_order="coarse_to_fine",
+                alternating_refinement=False,
+            )
+            merge_refinement(refined, phase)
+            return True
+
+        def gradient_target(line_rows, coordinate_key, grid, center):
+            samples = sorted(
+                (
+                    int(row[coordinate_key]),
+                    float(row["Annual Return"]),
+                )
+                for row in line_rows
+                if str(row.get("Status")) == "Feasible"
+                and np.isfinite(float(row.get("Annual Return", np.nan)))
+            )
+            lower = [sample for sample in samples if sample[0] < center]
+            upper = [sample for sample in samples if sample[0] > center]
+            if lower and upper:
+                left, right = lower[-1], upper[0]
+            elif upper:
+                left = next((sample for sample in samples if sample[0] == center), None)
+                right = upper[0]
+            elif lower:
+                left = lower[-1]
+                right = next((sample for sample in samples if sample[0] == center), None)
+            else:
+                return None
+            if left is None or right is None or right[0] == left[0]:
+                return None
+            slope = (right[1] - left[1]) / (right[0] - left[0])
+            if not np.isfinite(slope) or abs(slope) < 1e-15:
+                return None
+            response_per_step = abs(slope) * minimum_increment
+            scale = max(float(gradient_return_scale), 1e-6)
+            step_count = int(np.clip(round(response_per_step / scale), 1, 8))
+            raw_target = center + (1 if slope > 0 else -1) * step_count * minimum_increment
+            return min(grid, key=lambda value: (abs(value - raw_target), value))
+
+        def refine_axis(axis, max_iterations=16):
+            added_any = False
+            coordinate_key = "Shortlist cap" if axis == "X" else "Maximum assets"
+            grid = cap_grid if axis == "X" else exact_asset_limits
+            for _ in range(max_iterations):
+                incumbent = best_feasible_result(rows)
+                if incumbent is None:
+                    break
+                fixed_x = int(incumbent["Shortlist cap"])
+                fixed_y = int(incumbent["Maximum assets"])
+                line_rows = [
+                    row for row in rows
+                    if (
+                        int(row.get("Maximum assets") or -1) == fixed_y
+                        if axis == "X"
+                        else int(row.get("Shortlist cap") or -1) == fixed_x
+                    )
+                ]
+                line_best = best_feasible_result(line_rows) or incumbent
+                center = int(line_best[coordinate_key])
+                center_index = grid.index(center)
+                proposals = []
+                for index in (center_index - 1, center_index + 1):
+                    if 0 <= index < len(grid):
+                        proposals.append(int(grid[index]))
+                slope_target = gradient_target(line_rows, coordinate_key, grid, center)
+                if slope_target is not None:
+                    proposals.insert(0, int(slope_target))
+                proposals = list(dict.fromkeys(proposals))
+                before = float(line_best["Annual Return"])
+                added = False
+                for coordinate in proposals:
+                    candidate_x = coordinate if axis == "X" else fixed_x
+                    candidate_y = fixed_y if axis == "X" else coordinate
+                    added |= evaluate_coordinate(
+                        candidate_x, candidate_y, f"Alternating {axis} gradient"
+                    )
+                added_any |= added
+                updated_line = [
+                    row for row in rows
+                    if (
+                        int(row.get("Maximum assets") or -1) == fixed_y
+                        if axis == "X"
+                        else int(row.get("Shortlist cap") or -1) == fixed_x
+                    )
+                ]
+                updated_best = best_feasible_result(updated_line)
+                if not added or updated_best is None:
+                    break
+                if float(updated_best["Annual Return"]) <= before + 1e-12:
+                    break
+            return added_any
+
+        for _ in range(12):
+            before_pair = best_feasible_result(rows)
+            before_key = (
+                int(before_pair["Shortlist cap"]),
+                int(before_pair["Maximum assets"]),
+            ) if before_pair is not None else None
+            moved_x = refine_axis("X")
+            moved_y = refine_axis("Y")
+            after_pair = best_feasible_result(rows)
+            after_key = (
+                int(after_pair["Shortlist cap"]),
+                int(after_pair["Maximum assets"]),
+            ) if after_pair is not None else None
+            if not moved_x and not moved_y:
                 break
-            best_cap = int(incumbent["Shortlist cap"])
-            best_assets = int(incumbent["Maximum assets"])
-            moved = False
-
-            evaluated_y = {
-                int(row["Maximum assets"])
-                for row in rows
-                if int(row.get("Shortlist cap") or -1) == best_cap
-            }
-            y_moves = local_refinement_values(
-                exact_asset_limits, evaluated_y, best_assets, radius=1,
-            )
-            if y_moves:
-                refined, _ = search_universal_shortlist_caps(
-                    owner, starting_cap=best_cap, maximum_cap=best_cap,
-                    minimum_cap=best_cap,
-                    starting_asset_limit=best_assets,
-                    max_dd=max_dd, target_volatility=target_volatility,
-                    drop_bottom_pct=drop_bottom_pct,
-                    history_buffer_days=history_buffer_days,
-                    redundancy_corr_threshold=redundancy_corr_threshold,
-                    exact_optimizer_asset_cap=max(y_moves),
-                    exact_optimizer_asset_caps=tuple(y_moves),
-                    minimum_trading_days=minimum_trading_days, step=step,
-                    adaptive=False, asset_evaluation_order="coarse_to_fine",
-                    alternating_refinement=False,
-                )
-                merge_refinement(refined, "Alternating Y refinement")
-                moved = True
-
-            incumbent = best_feasible_result(rows) or incumbent
-            best_cap = int(incumbent["Shortlist cap"])
-            best_assets = int(incumbent["Maximum assets"])
-            evaluated_x = {int(row["Shortlist cap"]) for row in rows}
-            x_moves = local_refinement_values(
-                cap_grid, evaluated_x, best_cap, radius=1,
-            )
-            for candidate_x in x_moves:
-                refined, _ = search_universal_shortlist_caps(
-                    owner, starting_cap=candidate_x, maximum_cap=candidate_x,
-                    minimum_cap=candidate_x,
-                    starting_asset_limit=best_assets,
-                    max_dd=max_dd, target_volatility=target_volatility,
-                    drop_bottom_pct=drop_bottom_pct,
-                    history_buffer_days=history_buffer_days,
-                    redundancy_corr_threshold=redundancy_corr_threshold,
-                    exact_optimizer_asset_cap=best_assets,
-                    exact_optimizer_asset_caps=(best_assets,),
-                    minimum_trading_days=minimum_trading_days, step=step,
-                    adaptive=False, asset_evaluation_order="coarse_to_fine",
-                    alternating_refinement=False,
-                )
-                merge_refinement(refined, "Alternating X refinement")
-                moved = True
-            if not moved:
+            if before_key == after_key:
                 break
 
     return rows, invalid_rows
@@ -6015,6 +6097,7 @@ if not st.session_state.get(checkpoint_restore_key):
         restored_checkpoint = load_latest_checkpoint(checkpoint_conn, CURRENT_USER)
     if restored_checkpoint and restored_checkpoint.get("results"):
         restored_config = dict(restored_checkpoint.get("config") or {})
+        restored_best = best_feasible_result(restored_checkpoint["results"])
         restored_asset_caps = list(
             restored_config.get("exact_optimizer_asset_caps") or []
         )
@@ -6037,7 +6120,11 @@ if not st.session_state.get(checkpoint_restore_key):
         )
         st.session_state.setdefault(
             "shortlist_cap_search_start_x",
-            int(restored_config.get("starting_cap") or DEFAULT_ADVANCED_START_X),
+            int(
+                (restored_best or {}).get("Shortlist cap")
+                or restored_config.get("starting_cap")
+                or DEFAULT_ADVANCED_START_X
+            ),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_spacing",
@@ -6069,7 +6156,8 @@ if not st.session_state.get(checkpoint_restore_key):
             st.session_state.setdefault(
                 "shortlist_cap_search_start_y",
                 int(
-                    restored_config.get("starting_asset_limit")
+                    (restored_best or {}).get("Maximum assets")
+                    or restored_config.get("starting_asset_limit")
                     or restored_config.get("exact_optimizer_asset_cap")
                     or min(restored_asset_caps)
                 ),
@@ -6537,6 +6625,16 @@ with st.sidebar:
                 key="exact_asset_search_step",
             ))
         start_col1, start_col2 = st.columns(2)
+        past_best = best_feasible_result(
+            st.session_state.get("shortlist_cap_search_results") or []
+        )
+        if past_best is not None:
+            best_x = int(past_best["Shortlist cap"])
+            best_y = int(past_best["Maximum assets"])
+            if cap_search_from <= best_x <= cap_search_through:
+                st.session_state["shortlist_cap_search_start_x"] = best_x
+            if asset_search_from <= best_y <= asset_search_through:
+                st.session_state["shortlist_cap_search_start_y"] = best_y
         current_start_x = int(
             st.session_state.get("shortlist_cap_search_start_x", DEFAULT_ADVANCED_START_X)
         )
@@ -6582,10 +6680,10 @@ with st.sidebar:
             ),
         ))
         st.caption(
-            "History is prepared once per shortlist cap. Derivative-free adaptive mode evaluates "
-            "broad Maximum-assets anchors and refines locally around that cap's best "
-            "anchor. Fixed mode evaluates every value in a coarse-to-fine order and is "
-            "the exhaustive confirmation option."
+            "Adaptive mode starts from the best saved X/Y, follows a finite-difference "
+            "slope on the 50-unit grid to find the best X with Y fixed, then the best "
+            "Y with X fixed, and alternates until the pair stops improving. Fixed mode "
+            "remains the exhaustive confirmation option."
         )
     else:
         cap_search_from = int(universal_preselection_cap)
@@ -6825,8 +6923,8 @@ if run_cap_search_btn:
                     f"stop reached at {current_cap:,}"
                     if latest.get("Status") != "Feasible"
                     else (
-                        "sampling Maximum-assets anchors at this cap"
-                        if str(latest.get("Search phase", "")).startswith("Derivative-free")
+                        "alternating X/Y gradient from the warm start"
+                        if "gradient" in str(latest.get("Search phase", "")).lower()
                         else (
                             f"next search jump +{int(latest.get('Next adaptive jump') or 50):,}"
                             if cap_search_spacing.startswith("Adaptive")
@@ -6856,6 +6954,7 @@ if run_cap_search_btn:
             maximum_cap=cap_search_through,
             adaptive=cap_search_spacing.startswith("Adaptive"),
             asset_evaluation_order="coarse_to_fine",
+            gradient_return_scale=max(float(return_equivalence_pp) / 100.0, 1e-6),
             prior_results=prior_results,
             on_result=update_cap_search_progress,
         )

@@ -5,6 +5,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from two_dimensional_search import (
+    best_feasible_result,
+    coarse_to_fine_values,
+    inclusive_values,
+)
+
 
 def load_search(namespace):
     source = Path("portfolio_rebalancer_database.py").read_text(encoding="utf-8")
@@ -184,3 +190,82 @@ def test_explicit_start_pair_is_first_while_fixed_search_keeps_full_range():
         for cap in (8500, 8550, 8600)
         for assets in (300, 350, 400)
     }
+
+
+def test_adaptive_search_alternates_x_then_y_and_converges_on_grid_peak():
+    state = {"cap": None}
+
+    def stats_for(cap, assets):
+        annual_return = 1.0 - ((cap - 150) / 100) ** 2 - ((assets - 150) / 100) ** 2
+        return {
+            "Annual Return": annual_return,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+
+    def build_current_allocation_from_db(_owner):
+        return pd.DataFrame({"Yahoo Ticker": ["OWNED.NS"]}), []
+
+    def extend(frame, *, maximum_candidates, owner=None):
+        state["cap"] = int(maximum_candidates)
+        return frame, [], {"eligible": 200, "shortlisted": int(maximum_candidates)}
+
+    def prepare(*_args, **kwargs):
+        maximum_assets = int(kwargs["exact_optimizer_asset_cap"])
+        returns = pd.DataFrame(
+            np.zeros((300, maximum_assets)),
+            columns=[f"T{index}" for index in range(maximum_assets)],
+        )
+        return (
+            np.ones(maximum_assets) / maximum_assets,
+            returns,
+            None,
+            stats_for(state["cap"], maximum_assets),
+            {"exact_optimizer_screen": {"selected_assets": maximum_assets}},
+        )
+
+    def solve(prepared, _allocation, *, maximum_assets, **_kwargs):
+        selected = prepared.iloc[:, : int(maximum_assets)]
+        return (
+            np.ones(maximum_assets) / maximum_assets,
+            selected,
+            None,
+            stats_for(state["cap"], maximum_assets),
+            {"selected_assets": maximum_assets},
+        )
+
+    search = load_search({
+        "time": time,
+        "np": np,
+        "inclusive_values": inclusive_values,
+        "coarse_to_fine_values": coarse_to_fine_values,
+        "best_feasible_result": best_feasible_result,
+        "build_current_allocation_from_db": build_current_allocation_from_db,
+        "extend_allocation_with_universal_candidates": extend,
+        "run_portfolio_analysis_multi": prepare,
+        "optimize_prepared_return_matrix": solve,
+    })
+    rows, _ = search(
+        "owner",
+        minimum_cap=100,
+        starting_cap=100,
+        maximum_cap=200,
+        starting_asset_limit=100,
+        exact_optimizer_asset_caps=(100, 150, 200),
+        step=50,
+        adaptive=True,
+        alternating_refinement=True,
+        max_dd=-0.2,
+        target_volatility=None,
+        drop_bottom_pct=0.2,
+        history_buffer_days=30,
+        redundancy_corr_threshold=0.8,
+    )
+
+    assert (rows[0]["Shortlist cap"], rows[0]["Maximum assets"]) == (100, 100)
+    best = best_feasible_result(rows)
+    assert (best["Shortlist cap"], best["Maximum assets"]) == (150, 150)
+    phases = [row["Search phase"] for row in rows]
+    assert phases.index("Alternating X gradient") < phases.index("Alternating Y gradient")
