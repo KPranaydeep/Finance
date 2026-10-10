@@ -113,3 +113,74 @@ def test_each_shortlist_prepares_history_once_then_solves_every_asset_limit():
         (8550, 400),
     ]
     assert all(row["Status"] == "Feasible" for row in rows)
+
+
+def test_explicit_start_pair_is_first_while_fixed_search_keeps_full_range():
+    state = {"cap": None}
+
+    def build_current_allocation_from_db(_owner):
+        return pd.DataFrame({"Yahoo Ticker": ["OWNED.NS"]}), []
+
+    def extend(frame, *, maximum_candidates, owner=None):
+        state["cap"] = int(maximum_candidates)
+        return frame, [], {"eligible": 10_000, "shortlisted": int(maximum_candidates)}
+
+    def prepare(*_args, **_kwargs):
+        returns = pd.DataFrame(
+            np.zeros((300, 400)), columns=[f"T{index}" for index in range(400)]
+        )
+        stats = {
+            "Annual Return": state["cap"] / 10_000,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+        return np.ones(400) / 400, returns, None, stats, {
+            "exact_optimizer_screen": {"selected_assets": 400}
+        }
+
+    def solve(prepared, _allocation, *, maximum_assets, **_kwargs):
+        selected = prepared.iloc[:, : int(maximum_assets)]
+        stats = {
+            "Annual Return": state["cap"] / 10_000 + maximum_assets / 100_000,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+        return np.ones(maximum_assets) / maximum_assets, selected, None, stats, {
+            "selected_assets": maximum_assets
+        }
+
+    search = load_search({
+        "time": time,
+        "np": np,
+        "build_current_allocation_from_db": build_current_allocation_from_db,
+        "extend_allocation_with_universal_candidates": extend,
+        "run_portfolio_analysis_multi": prepare,
+        "optimize_prepared_return_matrix": solve,
+    })
+    rows, _ = search(
+        "owner",
+        minimum_cap=8500,
+        starting_cap=8550,
+        maximum_cap=8600,
+        starting_asset_limit=350,
+        exact_optimizer_asset_caps=(300, 350, 400),
+        step=50,
+        adaptive=False,
+        max_dd=-0.2,
+        target_volatility=None,
+        drop_bottom_pct=0.2,
+        history_buffer_days=30,
+        redundancy_corr_threshold=0.8,
+    )
+
+    pairs = [(row["Shortlist cap"], row["Maximum assets"]) for row in rows]
+    assert pairs[0] == (8550, 350)
+    assert set(pairs) == {
+        (cap, assets)
+        for cap in (8500, 8550, 8600)
+        for assets in (300, 350, 400)
+    }

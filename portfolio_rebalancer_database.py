@@ -5473,6 +5473,8 @@ def search_universal_shortlist_caps(
     owner,
     *,
     starting_cap,
+    minimum_cap=None,
+    starting_asset_limit=None,
     max_dd,
     target_volatility,
     drop_bottom_pct,
@@ -5501,7 +5503,13 @@ def search_universal_shortlist_caps(
         raise ValueError("No usable holdings are available for shortlist-cap search.")
 
     minimum_increment = max(int(step), 50)
-    cap = max(int(starting_cap), minimum_increment)
+    lower_cap = max(
+        int(minimum_cap if minimum_cap is not None else starting_cap),
+        minimum_increment,
+    )
+    cap = max(int(starting_cap), lower_cap)
+    if maximum_cap is not None:
+        cap = min(cap, int(maximum_cap))
     rows = [dict(item) for item in prior_results]
     exact_asset_limits = tuple(sorted({
         max(int(value), 1)
@@ -5513,6 +5521,15 @@ def search_universal_shortlist_caps(
     }))
     if not exact_asset_limits:
         raise ValueError("At least one Maximum-assets value is required.")
+    preferred_asset_limit = min(
+        exact_asset_limits,
+        key=lambda value: (
+            abs(int(value) - int(starting_asset_limit))
+            if starting_asset_limit is not None
+            else 0,
+            int(value),
+        ),
+    )
     two_dimensional = len(exact_asset_limits) > 1
     completed_pairs = {
         (int(row["Shortlist cap"]), int(row["Maximum assets"]))
@@ -5724,22 +5741,39 @@ def search_universal_shortlist_caps(
             return row
 
         if adaptive and two_dimensional:
-            initial_limits = [
+            anchor_limits = [
                 value for value in adaptive_anchor_values(
                     exact_asset_limits,
                     target_points=3 if alternating_refinement else 8,
                 )
                 if value in pending_asset_limits
             ]
+            initial_limits = (
+                [preferred_asset_limit]
+                if preferred_asset_limit in pending_asset_limits
+                else []
+            ) + [value for value in anchor_limits if value != preferred_asset_limit]
             initial_phase = "Derivative-free anchor"
         elif str(asset_evaluation_order) == "coarse_to_fine":
-            initial_limits = [
+            ordered_limits = [
                 value for value in coarse_to_fine_values(exact_asset_limits)
                 if value in pending_asset_limits
             ]
+            initial_limits = (
+                [preferred_asset_limit]
+                if preferred_asset_limit in pending_asset_limits
+                else []
+            ) + [value for value in ordered_limits if value != preferred_asset_limit]
             initial_phase = "Complete grid"
         else:
-            initial_limits = list(pending_asset_limits)
+            initial_limits = (
+                [preferred_asset_limit]
+                if preferred_asset_limit in pending_asset_limits
+                else []
+            ) + [
+                value for value in pending_asset_limits
+                if value != preferred_asset_limit
+            ]
             initial_phase = "Complete grid"
 
         for asset_limit in initial_limits:
@@ -5784,6 +5818,36 @@ def search_universal_shortlist_caps(
         current_jump = next_jump
         cap = min(cap + current_jump, range_ceiling)
 
+    if not adaptive and lower_cap < int(starting_cap):
+        for candidate_cap in range(lower_cap, int(starting_cap), minimum_increment):
+            refined, _ = search_universal_shortlist_caps(
+                owner,
+                starting_cap=candidate_cap,
+                minimum_cap=candidate_cap,
+                starting_asset_limit=preferred_asset_limit,
+                maximum_cap=candidate_cap,
+                max_dd=max_dd,
+                target_volatility=target_volatility,
+                drop_bottom_pct=drop_bottom_pct,
+                history_buffer_days=history_buffer_days,
+                redundancy_corr_threshold=redundancy_corr_threshold,
+                exact_optimizer_asset_cap=max(exact_asset_limits),
+                exact_optimizer_asset_caps=exact_asset_limits,
+                minimum_trading_days=minimum_trading_days,
+                step=step,
+                adaptive=False,
+                asset_evaluation_order=asset_evaluation_order,
+                alternating_refinement=False,
+            )
+            for new_row in refined:
+                pair = (int(new_row["Shortlist cap"]), int(new_row["Maximum assets"]))
+                if pair in completed_pairs:
+                    continue
+                rows.append(dict(new_row))
+                completed_pairs.add(pair)
+                if on_result is not None:
+                    on_result(rows, rows[-1])
+
     if (
         adaptive
         and two_dimensional
@@ -5791,7 +5855,7 @@ def search_universal_shortlist_caps(
         and maximum_cap is not None
     ):
         cap_grid = inclusive_values(
-            int(starting_cap), int(maximum_cap), minimum_increment,
+            int(lower_cap), int(maximum_cap), minimum_increment,
             minimum_step=50,
         )
 
@@ -5826,6 +5890,8 @@ def search_universal_shortlist_caps(
             if y_moves:
                 refined, _ = search_universal_shortlist_caps(
                     owner, starting_cap=best_cap, maximum_cap=best_cap,
+                    minimum_cap=best_cap,
+                    starting_asset_limit=best_assets,
                     max_dd=max_dd, target_volatility=target_volatility,
                     drop_bottom_pct=drop_bottom_pct,
                     history_buffer_days=history_buffer_days,
@@ -5849,6 +5915,8 @@ def search_universal_shortlist_caps(
             for candidate_x in x_moves:
                 refined, _ = search_universal_shortlist_caps(
                     owner, starting_cap=candidate_x, maximum_cap=candidate_x,
+                    minimum_cap=candidate_x,
+                    starting_asset_limit=best_assets,
                     max_dd=max_dd, target_volatility=target_volatility,
                     drop_bottom_pct=drop_bottom_pct,
                     history_buffer_days=history_buffer_days,
@@ -5945,7 +6013,11 @@ if not st.session_state.get(checkpoint_restore_key):
         st.session_state.setdefault("advanced_shortlist_cap_search", True)
         st.session_state.setdefault(
             "shortlist_cap_search_from",
-            int(restored_config.get("starting_cap") or 8500),
+            int(
+                restored_config.get("minimum_cap")
+                or restored_config.get("starting_cap")
+                or 8500
+            ),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_through",
@@ -5954,6 +6026,10 @@ if not st.session_state.get(checkpoint_restore_key):
         st.session_state.setdefault(
             "shortlist_cap_search_step",
             int(restored_config.get("step") or 50),
+        )
+        st.session_state.setdefault(
+            "shortlist_cap_search_start_x",
+            int(restored_config.get("starting_cap") or 8500),
         )
         st.session_state.setdefault(
             "shortlist_cap_search_spacing",
@@ -5982,6 +6058,14 @@ if not st.session_state.get(checkpoint_restore_key):
                 st.session_state.setdefault(
                     "exact_asset_search_step", int(min(restored_steps) if restored_steps else 50)
                 )
+            st.session_state.setdefault(
+                "shortlist_cap_search_start_y",
+                int(
+                    restored_config.get("starting_asset_limit")
+                    or restored_config.get("exact_optimizer_asset_cap")
+                    or min(restored_asset_caps)
+                ),
+            )
         st.session_state.setdefault(
             "exact_optimizer_asset_cap",
             int(restored_config.get("exact_optimizer_asset_cap") or 300),
@@ -6440,6 +6524,37 @@ with st.sidebar:
                 "Maximum-assets step", min_value=50, value=50, step=50,
                 key="exact_asset_search_step",
             ))
+        start_col1, start_col2 = st.columns(2)
+        current_start_x = int(
+            st.session_state.get("shortlist_cap_search_start_x", cap_search_from)
+        )
+        current_start_y = int(
+            st.session_state.get("shortlist_cap_search_start_y", asset_search_from)
+        )
+        st.session_state["shortlist_cap_search_start_x"] = min(
+            max(current_start_x, cap_search_from), cap_search_through
+        )
+        st.session_state["shortlist_cap_search_start_y"] = min(
+            max(current_start_y, asset_search_from), asset_search_through
+        )
+        with start_col1:
+            cap_search_start_x = int(st.number_input(
+                "Start at shortlist cap (X)",
+                min_value=int(cap_search_from),
+                max_value=int(cap_search_through),
+                step=int(cap_search_step),
+                key="shortlist_cap_search_start_x",
+                help="The first shortlist-cap coordinate. The configured range remains searchable on both sides.",
+            ))
+        with start_col2:
+            cap_search_start_y = int(st.number_input(
+                "Start at Maximum assets (Y)",
+                min_value=int(asset_search_from),
+                max_value=int(asset_search_through),
+                step=int(asset_search_step),
+                key="shortlist_cap_search_start_y",
+                help="The first exact-optimizer coordinate. Use the previous best Y when warm-starting a new market snapshot.",
+            ))
         return_equivalence_pp = float(st.number_input(
             "Near-equal return tolerance (percentage points)",
             min_value=0.0,
@@ -6469,6 +6584,8 @@ with st.sidebar:
         asset_search_through = int(exact_optimizer_asset_cap)
         asset_search_step = 50
         return_equivalence_pp = 0.10
+        cap_search_start_x = int(cap_search_from)
+        cap_search_start_y = int(asset_search_from)
     run_cap_search_btn = st.button(
         "Run / resume cap search",
         width="stretch",
@@ -6580,7 +6697,8 @@ cap_search_values = inclusive_values(
     cap_search_from, cap_search_through, cap_search_step, minimum_step=50
 )
 cap_search_config = {
-    "starting_cap": int(cap_search_from),
+    "minimum_cap": int(cap_search_from),
+    "starting_cap": int(cap_search_start_x),
     "maximum_cap": int(cap_search_through),
     "step": int(cap_search_step),
     "adaptive": cap_search_spacing.startswith("Adaptive"),
@@ -6594,6 +6712,7 @@ cap_search_config = {
     "redundancy_corr_threshold": float(redundancy_corr_threshold),
     "exact_optimizer_asset_cap": int(exact_optimizer_asset_cap),
     "exact_optimizer_asset_caps": list(exact_asset_search_values),
+    "starting_asset_limit": int(cap_search_start_y),
     "minimum_trading_days": 252,
     "return_equivalence_pp": float(return_equivalence_pp),
     # Same-day restarts resume exactly. A later trading day retains the old record
@@ -6608,6 +6727,10 @@ if advanced_cap_search:
         f"Configured search space: **{len(cap_search_values):,} shortlist caps × "
         f"{len(exact_asset_search_values):,} Maximum-assets values = "
         f"{len(cap_search_values) * len(exact_asset_search_values):,} combinations**."
+    )
+    st.caption(
+        f"Warm start: **X {cap_search_start_x:,} × Y {cap_search_start_y:,}**. "
+        "These are first coordinates, not lower bounds."
     )
     checkpoint_metadata = st.session_state.get("shortlist_cap_checkpoint_metadata")
     if checkpoint_metadata:
@@ -6706,7 +6829,9 @@ if run_cap_search_btn:
     try:
         search_rows, search_invalid_rows = search_universal_shortlist_caps(
             CURRENT_USER,
-            starting_cap=cap_search_from,
+            starting_cap=cap_search_start_x,
+            minimum_cap=cap_search_from,
+            starting_asset_limit=cap_search_start_y,
             max_dd=max_dd,
             target_volatility=target_volatility,
             drop_bottom_pct=drop_bottom_pct,
