@@ -98,12 +98,18 @@ def parse_amfi_nav_text(text: str) -> pd.DataFrame:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", scheme_code):
                 continue
 
-            # AMFI currently publishes: code;ISIN growth;ISIN reinvestment;
-            # scheme name;plan;option;NAV;date. Older exports omit plan/option.
-            if len(parts) >= 8:
-                latest_nav_index, nav_date_index = 6, 7
-            else:
-                latest_nav_index, nav_date_index = 4, 5
+            # AMFI has used both 6-column and 8-column layouts. The NAV is
+            # reliably the numeric field immediately before the date field.
+            nav_date_index = len(parts) - 1
+            latest_nav_index = nav_date_index - 1
+            if latest_nav_index < 4 or not re.fullmatch(
+                r"\d+(?:\.\d+)?", parts[latest_nav_index]
+            ):
+                numeric_fields = [
+                    index for index, value in enumerate(parts)
+                    if re.fullmatch(r"\d+(?:\.\d+)?", value)
+                ]
+                latest_nav_index = numeric_fields[-1] if numeric_fields else -1
 
             rows.append(
                 {
@@ -111,7 +117,7 @@ def parse_amfi_nav_text(text: str) -> pd.DataFrame:
                     "ISIN Growth/Payout": parts[1] if len(parts) > 1 else "",
                     "ISIN Reinvestment": parts[2] if len(parts) > 2 else "",
                     "Scheme Name": parts[3] if len(parts) > 3 else "",
-                    "Latest NAV": parts[latest_nav_index] if len(parts) > latest_nav_index else None,
+                    "Latest NAV": parts[latest_nav_index] if latest_nav_index >= 0 else None,
                     "NAV Date": parts[nav_date_index] if len(parts) > nav_date_index else None,
                     "Scheme Category": current_category,
                     "AMC": current_amc,
