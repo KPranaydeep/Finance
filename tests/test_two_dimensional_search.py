@@ -122,7 +122,7 @@ def test_convergence_reports_incomplete_then_boundary_then_interior():
             "Annual Return": 0.8,
         }
     ]
-    assert search_convergence_summary(partial, caps, assets)["state"] == "incomplete"
+    assert search_convergence_summary(partial, caps, assets)["state"] == "boundary_limited"
 
     full = [
         {
@@ -134,10 +134,29 @@ def test_convergence_reports_incomplete_then_boundary_then_interior():
         for cap, asset in search_grid(caps, assets)
     ]
     summary = search_convergence_summary(full, caps, assets)
-    assert summary["state"] == "interior_peak"
+    assert summary["state"] == "global_verified"
     assert summary["boundary_axes"] == ()
 
     full[-1]["Annual Return"] = 0.95
     summary = search_convergence_summary(full, caps, assets)
-    assert summary["state"] == "boundary_limited"
+    assert summary["state"] == "global_verified"
+    assert summary["boundary_axes"]
     assert summary["boundary_axes"] == ("shortlist cap", "Maximum assets")
+
+
+def test_adaptive_search_reports_local_convergence_after_all_neighbours():
+    caps = (8500, 8550, 8600, 8650, 8700)
+    assets = (1000, 1050, 1100, 1150, 1200)
+    rows = [
+        {
+            "Shortlist cap": cap,
+            "Maximum assets": asset,
+            "Status": "Feasible",
+            "Annual Return": 0.90 if (cap, asset) == (8600, 1100) else 0.89,
+        }
+        for cap in (8550, 8600, 8650)
+        for asset in (1050, 1100, 1150)
+    ]
+    summary = search_convergence_summary(rows, caps, assets)
+    assert summary["state"] == "locally_converged"
+    assert summary["neighbourhood_complete"] is True

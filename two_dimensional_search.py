@@ -237,18 +237,32 @@ def search_convergence_summary(
     if len(assets) > 1 and peak_assets in {assets[0], assets[-1]}:
         boundary_axes.append("Maximum assets")
 
-    if not complete:
-        state = "incomplete"
+    cap_index = caps.index(peak_cap)
+    asset_index = assets.index(peak_assets)
+    neighbours = {
+        (caps[x_index], assets[y_index])
+        for x_index in range(max(0, cap_index - 1), min(len(caps), cap_index + 2))
+        for y_index in range(max(0, asset_index - 1), min(len(assets), asset_index + 2))
+        if (x_index, y_index) != (cap_index, asset_index)
+    }
+    neighbourhood_complete = bool(neighbours) and neighbours.issubset(completed)
+
+    if complete:
+        state = "global_verified"
     elif boundary_axes:
         state = "boundary_limited"
+    elif neighbourhood_complete:
+        state = "locally_converged"
     else:
-        state = "interior_peak"
+        state = "incomplete"
     return {
         "state": state,
         "complete": complete,
         "completed": len(completed.intersection(grid)),
         "total": len(grid),
         "boundary_axes": tuple(boundary_axes),
+        "neighbourhood_complete": neighbourhood_complete,
+        "neighbour_pairs": tuple(sorted(neighbours)),
         "raw_peak": peak,
         "robust_choice": robust,
     }

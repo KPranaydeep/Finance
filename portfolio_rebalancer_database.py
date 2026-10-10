@@ -6633,7 +6633,22 @@ if cap_search_results:
             f"within the configured {return_equivalence_pp:.2f}-point tolerance."
         )
         convergence_state = str(convergence["state"])
-        if convergence_state == "incomplete":
+        if convergence_state == "global_verified":
+            boundary_note = (
+                " The winner is on the " + " and ".join(convergence["boundary_axes"])
+                + " boundary, so it is global only inside the configured bounds."
+                if convergence["boundary_axes"] else ""
+            )
+            st.success(
+                "Bounded global maximum verified: every configured pair was evaluated."
+                + boundary_note
+            )
+        elif convergence_state == "locally_converged":
+            st.success(
+                "Locally converged robust maximum: every minimum-step neighbour around "
+                "the observed leader was evaluated. This is not an exhaustive global proof."
+            )
+        elif convergence_state == "incomplete":
             st.info(
                 f"Search is not converged: {int(convergence['completed']):,} of "
                 f"{int(convergence['total']):,} configured pairs have results."
@@ -6644,11 +6659,6 @@ if cap_search_results:
                 + " and ".join(convergence["boundary_axes"])
                 + " boundary. It is the best observed point, but the maximum is not "
                 "bounded on that side."
-            )
-        elif convergence_state == "interior_peak":
-            st.success(
-                "The complete grid has an interior raw peak. This is evidence of "
-                "within-grid convergence, not proof of out-of-sample optimality."
             )
         apply_col1, apply_col2 = st.columns(2)
         apply_col1.button(
