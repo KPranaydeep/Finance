@@ -105,6 +105,38 @@ def load_latest_checkpoint(conn, owner):
     }
 
 
+def load_best_saved_result(conn, owner):
+    """Return the highest-return feasible pair across all saved searches."""
+    ensure_checkpoint_schema(conn)
+    stored_rows = conn.execute(
+        """
+        SELECT results_json
+        FROM shortlist_search_checkpoints
+        WHERE owner = ?
+        """,
+        (str(owner),),
+    ).fetchall()
+    best = None
+    best_key = None
+    for stored in stored_rows:
+        for result in json.loads(stored["results_json"]):
+            if str(result.get("Status")) != "Feasible":
+                continue
+            try:
+                annual_return = float(result["Annual Return"])
+                cap = int(result["Shortlist cap"])
+                maximum_assets = int(result["Maximum assets"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if annual_return != annual_return:
+                continue
+            key = (annual_return, -maximum_assets, -cap)
+            if best_key is None or key > best_key:
+                best = dict(result)
+                best_key = key
+    return best
+
+
 def delete_checkpoints(conn, owner):
     ensure_checkpoint_schema(conn)
     conn.execute(

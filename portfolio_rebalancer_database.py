@@ -51,6 +51,7 @@ from search_surface_chart import (
 from shortlist_search_checkpoint import (
     delete_checkpoints,
     ensure_checkpoint_schema,
+    load_best_saved_result,
     load_latest_checkpoint,
     save_checkpoint,
 )
@@ -6095,9 +6096,13 @@ checkpoint_restore_key = f"shortlist_checkpoint_restored::{CURRENT_USER}"
 if not st.session_state.get(checkpoint_restore_key):
     with get_db_connection() as checkpoint_conn:
         restored_checkpoint = load_latest_checkpoint(checkpoint_conn, CURRENT_USER)
+        saved_best_result = load_best_saved_result(checkpoint_conn, CURRENT_USER)
     if restored_checkpoint and restored_checkpoint.get("results"):
         restored_config = dict(restored_checkpoint.get("config") or {})
-        restored_best = best_feasible_result(restored_checkpoint["results"])
+        restored_best = (
+            saved_best_result
+            or best_feasible_result(restored_checkpoint["results"])
+        )
         restored_asset_caps = list(
             restored_config.get("exact_optimizer_asset_caps") or []
         )
@@ -6203,6 +6208,7 @@ if not st.session_state.get(checkpoint_restore_key):
             key: restored_checkpoint.get(key)
             for key in ("status", "analysis_cutoff", "updated_at")
         }
+        st.session_state["shortlist_cap_saved_best"] = dict(restored_best or {})
     st.session_state[checkpoint_restore_key] = True
 
 st.caption(f"Signed in as: **{CURRENT_USER}**")
@@ -6625,9 +6631,14 @@ with st.sidebar:
                 key="exact_asset_search_step",
             ))
         start_col1, start_col2 = st.columns(2)
-        past_best = best_feasible_result(
-            st.session_state.get("shortlist_cap_search_results") or []
-        )
+        past_best = best_feasible_result([
+            *(
+                [st.session_state["shortlist_cap_saved_best"]]
+                if st.session_state.get("shortlist_cap_saved_best")
+                else []
+            ),
+            *(st.session_state.get("shortlist_cap_search_results") or []),
+        ])
         if past_best is not None:
             best_x = int(past_best["Shortlist cap"])
             best_y = int(past_best["Maximum assets"])
@@ -6798,6 +6809,7 @@ if clear_cap_search_btn:
     st.session_state.pop("shortlist_cap_search_config", None)
     st.session_state.pop("shortlist_cap_search_error", None)
     st.session_state.pop("shortlist_cap_checkpoint_metadata", None)
+    st.session_state.pop("shortlist_cap_saved_best", None)
     st.rerun()
 
 exact_asset_search_values = inclusive_values(

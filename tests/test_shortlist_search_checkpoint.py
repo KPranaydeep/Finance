@@ -2,6 +2,7 @@ import sqlite3
 
 from shortlist_search_checkpoint import (
     delete_checkpoints,
+    load_best_saved_result,
     load_latest_checkpoint,
     save_checkpoint,
 )
@@ -56,3 +57,43 @@ def test_delete_removes_only_selected_owner():
     delete_checkpoints(conn, "one")
     assert load_latest_checkpoint(conn, "one") is None
     assert load_latest_checkpoint(conn, "two") is not None
+
+
+def test_best_saved_result_spans_checkpoints_and_ignores_infeasible_rows():
+    conn = _connection()
+    save_checkpoint(
+        conn,
+        "owner",
+        {"snapshot_date_ist": "2026-10-09"},
+        [
+            {
+                "Shortlist cap": 8650,
+                "Maximum assets": 1250,
+                "Annual Return": 0.92,
+                "Status": "Feasible",
+            },
+            {
+                "Shortlist cap": 9000,
+                "Maximum assets": 2000,
+                "Annual Return": 0.99,
+                "Status": "Failed",
+            },
+        ],
+        status="complete",
+    )
+    save_checkpoint(
+        conn,
+        "owner",
+        {"snapshot_date_ist": "2026-10-10"},
+        [{
+            "Shortlist cap": 8800,
+            "Maximum assets": 3000,
+            "Annual Return": 0.88,
+            "Status": "Feasible",
+        }],
+        status="running",
+    )
+
+    best = load_best_saved_result(conn, "owner")
+    assert (best["Shortlist cap"], best["Maximum assets"]) == (8650, 1250)
+    assert load_best_saved_result(conn, "another-owner") is None
