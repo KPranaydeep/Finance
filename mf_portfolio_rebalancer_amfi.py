@@ -807,7 +807,15 @@ def _read_groww_excel_holdings(uploaded_file, nav_master: pd.DataFrame) -> pd.Da
     holdings = holdings[holdings["Scheme Name"].notna()].copy()
     holdings["Units"] = pd.to_numeric(holdings["Units"], errors="coerce")
     holdings["Invested Value"] = pd.to_numeric(holdings["Invested Value"], errors="coerce")
-    holdings = holdings[(holdings["Units"] > 0) & (holdings["Invested Value"] > 0)]
+    if "Current Value" in holdings.columns:
+        holdings["Current Value"] = pd.to_numeric(holdings["Current Value"], errors="coerce")
+    else:
+        holdings["Current Value"] = holdings["Invested Value"]
+    holdings = holdings[
+        (holdings["Units"] > 0)
+        & (holdings["Invested Value"] > 0)
+        & (holdings["Current Value"] > 0)
+    ]
     if holdings.empty:
         raise ValueError("The Excel holdings table contains no usable investment rows.")
     lookup = {_normalise_scheme_name(row["Scheme Name"]): row for _, row in nav_master.iterrows()}
@@ -825,7 +833,9 @@ def _read_groww_excel_holdings(uploaded_file, nav_master: pd.DataFrame) -> pd.Da
             "Scheme Name": str(match["Scheme Name"]).strip(),
             "Units": float(row["Units"]),
             "Average NAV": float(row["Invested Value"]) / float(row["Units"]),
-            "Latest NAV": pd.to_numeric(match.get("Latest NAV"), errors="coerce"),
+            # Keep the uploaded portfolio snapshot usable even when AMFI is
+            # unavailable: current value / units is the snapshot's latest NAV.
+            "Latest NAV": float(row["Current Value"]) / float(row["Units"]),
             "NAV Date": match.get("NAV Date"), "Added At": None, "Updated At": None,
         })
     if unmatched:
@@ -837,9 +847,11 @@ def _read_groww_excel_holdings(uploaded_file, nav_master: pd.DataFrame) -> pd.Da
         raise ValueError("Could not match these Excel scheme names to AMFI: " + "; ".join(details))
     result = pd.DataFrame(resolved)
     result["Invested"] = result["Units"] * result["Average NAV"]
+    result["Current"] = result["Units"] * result["Latest NAV"]
     result = result.groupby(["Scheme Code", "Scheme Name"], as_index=False, sort=False).agg(
-        {"Units": "sum", "Invested": "sum", "Latest NAV": "first", "NAV Date": "first"})
+        {"Units": "sum", "Invested": "sum", "Current": "sum", "NAV Date": "first"})
     result["Average NAV"] = result["Invested"] / result["Units"]
+    result["Latest NAV"] = result["Current"] / result["Units"]
     result["Added At"] = None; result["Updated At"] = None
     return result[["Scheme Code", "Scheme Name", "Units", "Average NAV", "Latest NAV", "NAV Date", "Added At", "Updated At"]]
 
