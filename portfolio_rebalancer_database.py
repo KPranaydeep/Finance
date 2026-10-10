@@ -48,6 +48,12 @@ from search_surface_chart import (
     build_search_slice_figure,
     build_search_surface_figure,
 )
+from shortlist_search_checkpoint import (
+    delete_checkpoints,
+    ensure_checkpoint_schema,
+    load_latest_checkpoint,
+    save_checkpoint,
+)
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
@@ -750,6 +756,7 @@ def _ensure_master_holdings_schema(conn):
     """Create the table and repair older compatible schemas in place."""
     conn.execute(MASTER_HOLDINGS_DDL)
     conn.execute(LATEST_ANALYSIS_DDL)
+    ensure_checkpoint_schema(conn)
     ensure_import_schema(conn)
     ensure_cleaner_schema(conn)
     now = datetime.now().isoformat(timespec="seconds")
@@ -5672,6 +5679,12 @@ def search_universal_shortlist_caps(
             )
             pair_returns = pair_returns if pair_returns is not None else prepared_log_returns
             pair_stats = pair_stats or {}
+            last_index_value = pair_returns.index[-1] if len(pair_returns.index) else None
+            analysis_cutoff = (
+                last_index_value.date().isoformat()
+                if hasattr(last_index_value, "date")
+                else None
+            )
             row = {
                 "Search phase": search_phase,
                 "Shortlist cap": int(cap),
@@ -5683,6 +5696,7 @@ def search_universal_shortlist_caps(
                 "Shortlisted": int(preselection.get("shortlisted") or len(added_symbols)),
                 "Assets": int(pair_returns.shape[1]),
                 "Trading days": trading_days,
+                "Analysis cutoff": analysis_cutoff,
                 "Annual Return": float(pair_stats.get("Annual Return", np.nan)),
                 "Annual Volatility": float(pair_stats.get("Annual Volatility", np.nan)),
                 "Historical ES 95% (1 Session)": float(
@@ -5916,6 +5930,101 @@ if CURRENT_USER.lower() == UNIVERSAL_OWNER.lower():
     st.error("That name is reserved for the shared universal portfolio. Please choose another nickname.")
     st.stop()
 
+# Search evaluations can take hours. Restore the latest durable checkpoint before
+# creating the widgets, so a browser/Streamlit/PC restart also restores its bounds,
+# completed pairs, and best point instead of silently returning to defaults.
+checkpoint_restore_key = f"shortlist_checkpoint_restored::{CURRENT_USER}"
+if not st.session_state.get(checkpoint_restore_key):
+    with get_db_connection() as checkpoint_conn:
+        restored_checkpoint = load_latest_checkpoint(checkpoint_conn, CURRENT_USER)
+    if restored_checkpoint and restored_checkpoint.get("results"):
+        restored_config = dict(restored_checkpoint.get("config") or {})
+        restored_asset_caps = list(
+            restored_config.get("exact_optimizer_asset_caps") or []
+        )
+        st.session_state.setdefault("advanced_shortlist_cap_search", True)
+        st.session_state.setdefault(
+            "shortlist_cap_search_from",
+            int(restored_config.get("starting_cap") or 8500),
+        )
+        st.session_state.setdefault(
+            "shortlist_cap_search_through",
+            int(restored_config.get("maximum_cap") or 9400),
+        )
+        st.session_state.setdefault(
+            "shortlist_cap_search_step",
+            int(restored_config.get("step") or 50),
+        )
+        st.session_state.setdefault(
+            "shortlist_cap_search_spacing",
+            (
+                "Adaptive hill-climb"
+                if restored_config.get("adaptive")
+                else "Fixed (complete 2D grid)"
+            ),
+        )
+        if restored_asset_caps:
+            st.session_state.setdefault(
+                "exact_asset_search_from", int(min(restored_asset_caps))
+            )
+            st.session_state.setdefault(
+                "exact_asset_search_through", int(max(restored_asset_caps))
+            )
+            if len(restored_asset_caps) > 1:
+                restored_steps = [
+                    right - left
+                    for left, right in zip(
+                        sorted(restored_asset_caps)[:-1],
+                        sorted(restored_asset_caps)[1:],
+                    )
+                    if right > left
+                ]
+                st.session_state.setdefault(
+                    "exact_asset_search_step", int(min(restored_steps) if restored_steps else 50)
+                )
+        st.session_state.setdefault(
+            "exact_optimizer_asset_cap",
+            int(restored_config.get("exact_optimizer_asset_cap") or 300),
+        )
+        st.session_state.setdefault(
+            "shortlist_search_return_tolerance_pp",
+            float(restored_config.get("return_equivalence_pp") or 0.10),
+        )
+        st.session_state.setdefault(
+            "max_drawdown_input_pct",
+            100.0 * float(restored_config.get("max_dd") or 0.23),
+        )
+        st.session_state.setdefault(
+            "manual_drop_bottom_pct_v8",
+            float(restored_config.get("drop_bottom_pct") or 0.20),
+        )
+        st.session_state.setdefault(
+            "redundancy_corr_threshold",
+            float(restored_config.get("redundancy_corr_threshold") or 0.80),
+        )
+        restored_target_volatility = restored_config.get("target_volatility")
+        st.session_state.setdefault(
+            "use_target_volatility", restored_target_volatility is not None
+        )
+        if restored_target_volatility is not None:
+            st.session_state.setdefault(
+                "target_volatility_input", float(restored_target_volatility)
+            )
+        st.session_state.setdefault("auto_history_end", False)
+        st.session_state.setdefault(
+            "history_buffer_days",
+            int(restored_config.get("history_buffer_days") or 0),
+        )
+        st.session_state["shortlist_cap_search_results"] = [
+            dict(row) for row in restored_checkpoint["results"]
+        ]
+        st.session_state["shortlist_cap_search_config"] = restored_config
+        st.session_state["shortlist_cap_checkpoint_metadata"] = {
+            key: restored_checkpoint.get(key)
+            for key in ("status", "analysis_cutoff", "updated_at")
+        }
+    st.session_state[checkpoint_restore_key] = True
+
 st.caption(f"Signed in as: **{CURRENT_USER}**")
 st.divider()
 
@@ -6054,6 +6163,7 @@ with st.sidebar:
         value=23.00,
         step=0.01,
         format="%.2f",
+        key="max_drawdown_input_pct",
     )
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
@@ -6235,7 +6345,9 @@ with st.sidebar:
     if auto_drop_error:
         st.error(f"Could not calculate the recommendation: {auto_drop_error}")
 
-    use_target_vol = st.checkbox("Use target volatility")
+    use_target_vol = st.checkbox(
+        "Use target volatility", key="use_target_volatility"
+    )
     target_volatility = (
         st.number_input(
             "Target volatility",
@@ -6243,6 +6355,7 @@ with st.sidebar:
             value=0.01455,
             step=0.0001,
             format="%.5f",
+            key="target_volatility_input",
         )
         if use_target_vol
         else None
@@ -6452,9 +6565,12 @@ with step_col3:
 
 st.divider()
 if clear_cap_search_btn:
+    with get_db_connection() as checkpoint_conn:
+        delete_checkpoints(checkpoint_conn, CURRENT_USER)
     st.session_state.pop("shortlist_cap_search_results", None)
     st.session_state.pop("shortlist_cap_search_config", None)
     st.session_state.pop("shortlist_cap_search_error", None)
+    st.session_state.pop("shortlist_cap_checkpoint_metadata", None)
     st.rerun()
 
 exact_asset_search_values = inclusive_values(
@@ -6479,6 +6595,12 @@ cap_search_config = {
     "exact_optimizer_asset_cap": int(exact_optimizer_asset_cap),
     "exact_optimizer_asset_caps": list(exact_asset_search_values),
     "minimum_trading_days": 252,
+    "return_equivalence_pp": float(return_equivalence_pp),
+    # Same-day restarts resume exactly. A later trading day retains the old record
+    # for comparison but starts a clean snapshot rather than mixing market dates.
+    "snapshot_date_ist": datetime.now(
+        timezone(timedelta(hours=5, minutes=30))
+    ).date().isoformat(),
 }
 
 if advanced_cap_search:
@@ -6487,6 +6609,29 @@ if advanced_cap_search:
         f"{len(exact_asset_search_values):,} Maximum-assets values = "
         f"{len(cap_search_values) * len(exact_asset_search_values):,} combinations**."
     )
+    checkpoint_metadata = st.session_state.get("shortlist_cap_checkpoint_metadata")
+    if checkpoint_metadata:
+        restored_rows = st.session_state.get("shortlist_cap_search_results") or []
+        feasible_restored = [
+            row for row in restored_rows if row.get("Status") == "Feasible"
+        ]
+        restored_best = max(
+            feasible_restored,
+            key=lambda row: float(row.get("Annual Return") or -np.inf),
+            default=None,
+        )
+        best_text = (
+            f" Best saved pair: **{int(restored_best['Shortlist cap']):,} × "
+            f"{int(restored_best['Maximum assets']):,}** at "
+            f"**{float(restored_best['Annual Return']):.2%}**."
+            if restored_best is not None
+            else ""
+        )
+        st.info(
+            f"Restored **{len(restored_rows):,} completed X/Y pairs** from disk"
+            f" (saved {checkpoint_metadata.get('updated_at')}).{best_text} "
+            "Run / resume continues only when today's configuration and snapshot match."
+        )
 
 if run_cap_search_btn:
     previous_config = st.session_state.get("shortlist_cap_search_config") or {}
@@ -6508,6 +6653,14 @@ if run_cap_search_btn:
 
     def update_cap_search_progress(rows, latest):
         st.session_state["shortlist_cap_search_results"] = [dict(row) for row in rows]
+        with get_db_connection() as checkpoint_conn:
+            save_checkpoint(
+                checkpoint_conn,
+                CURRENT_USER,
+                cap_search_config,
+                rows,
+                status="running",
+            )
         current_cap = int(latest["Shortlist cap"])
         current_asset_limit = int(latest.get("Maximum assets") or 0)
         completed = len(rows)
@@ -6570,6 +6723,14 @@ if run_cap_search_btn:
             on_result=update_cap_search_progress,
         )
         st.session_state["shortlist_cap_search_results"] = search_rows
+        with get_db_connection() as checkpoint_conn:
+            save_checkpoint(
+                checkpoint_conn,
+                CURRENT_USER,
+                cap_search_config,
+                search_rows,
+                status="complete",
+            )
         search_progress.progress(1.0)
         search_status.update(
             label=(
