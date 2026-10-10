@@ -5711,7 +5711,10 @@ def search_universal_shortlist_caps(
 
         if adaptive and two_dimensional:
             initial_limits = [
-                value for value in adaptive_anchor_values(exact_asset_limits)
+                value for value in adaptive_anchor_values(
+                    exact_asset_limits,
+                    target_points=3 if alternating_refinement else 8,
+                )
                 if value in pending_asset_limits
             ]
             initial_phase = "Derivative-free anchor"
@@ -5728,7 +5731,7 @@ def search_universal_shortlist_caps(
         for asset_limit in initial_limits:
             evaluate_asset_limit(asset_limit, initial_phase)
 
-        if adaptive and two_dimensional:
+        if adaptive and two_dimensional and not alternating_refinement:
             for _ in range(6):
                 cap_rows = [
                     row for row in rows
@@ -6533,11 +6536,15 @@ if run_cap_search_btn:
                 + (
                     f"stop reached at {current_cap:,}"
                     if latest.get("Status") != "Feasible"
-                    else ((
-                        f"next search jump "
-                        f"+{int(latest.get('Next adaptive jump') or 50):,}"
-                    ) if cap_search_spacing.startswith("Adaptive") else
-                        "continuing complete grid")
+                    else (
+                        "sampling Maximum-assets anchors at this cap"
+                        if str(latest.get("Search phase", "")).startswith("Derivative-free")
+                        else (
+                            f"next search jump +{int(latest.get('Next adaptive jump') or 50):,}"
+                            if cap_search_spacing.startswith("Adaptive")
+                            else "continuing complete grid"
+                        )
+                    )
                 )
             ),
             state="running",
