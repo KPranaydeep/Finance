@@ -54,6 +54,7 @@ from optimization_run_timer import (
     start_run_timer,
     update_run_stage,
 )
+from two_dimensional_search import best_feasible_result, inclusive_values
 from universal_portfolio_summary import summarize_universal_portfolio
 from market_history_cache import sync_market_history
 from universal_portfolio_import import (
@@ -4627,6 +4628,91 @@ def portfolio_stats_comparison(current_alloc, log_returns, optimal_weights):
     optimal_stats = portfolio_stats(optimal_weights, log_returns)
     return current_stats, optimal_stats
 
+
+def optimize_prepared_return_matrix(
+    prepared_log_returns,
+    current_alloc,
+    *,
+    maximum_assets,
+    max_dd=0.05,
+    target_volatility=None,
+    integrity_report=None,
+):
+    """Solve one exact-asset limit without rebuilding market history."""
+    owned_tickers = tuple(
+        sorted(
+            str(row["Yahoo Ticker"])
+            for _, row in current_alloc.iterrows()
+            if str(row.get("Yahoo Ticker", "")).strip()
+            and pd.notna(pd.to_numeric(row.get("Quantity", 0), errors="coerce"))
+            and float(pd.to_numeric(row.get("Quantity", 0), errors="coerce")) > 0
+        )
+    )
+    log_returns, solver_screen = screen_log_returns_for_exact_optimizer(
+        prepared_log_returns,
+        maximum_assets=int(maximum_assets),
+        owned_tickers=owned_tickers,
+    )
+    quarantined_owned = set()
+    if isinstance(integrity_report, pd.DataFrame) and not integrity_report.empty:
+        quarantined_owned = set(
+            integrity_report.loc[
+                integrity_report["Owned"].astype(bool)
+                & integrity_report["Status"].astype(str).str.startswith("QUARANTINED_"),
+                "Ticker",
+            ].astype(str)
+        )
+    allocation_weights = (
+        current_alloc.assign(
+            _weight=pd.to_numeric(current_alloc["Weight"], errors="coerce").fillna(0.0)
+        )
+        .groupby("Yahoo Ticker", sort=False)["_weight"]
+        .sum()
+    )
+    frozen_weights = {
+        ticker: float(allocation_weights.get(ticker, 0.0))
+        for ticker in log_returns.columns
+        if ticker in quarantined_owned
+        and float(allocation_weights.get(ticker, 0.0)) > 0.0
+    }
+    optimal_weights = (
+        optimize_portfolio_target_volatility(
+            log_returns,
+            target_volatility=target_volatility,
+            frozen_weights=frozen_weights,
+        )
+        if target_volatility is not None
+        else None
+    )
+    if optimal_weights is None:
+        optimal_weights = optimize_portfolio_max_return_given_daily_risk(
+            log_returns,
+            max_drawdown=max_dd,
+            frozen_weights=frozen_weights,
+        )
+    if optimal_weights is None:
+        optimal_weights = optimize_max_sharpe_ratio(
+            log_returns,
+            frozen_weights=frozen_weights,
+        )
+    if optimal_weights is None:
+        return None, log_returns, None, None, solver_screen
+    frozen_positions = {
+        int(log_returns.columns.get_loc(ticker)): weight
+        for ticker, weight in frozen_weights.items()
+    }
+    optimal_weights = enforce_min_weight_postprocess(
+        optimal_weights,
+        min_weight=0.01,
+        frozen_positions=frozen_positions,
+    )
+    current_stats, optimal_stats = portfolio_stats_comparison(
+        current_alloc,
+        log_returns,
+        optimal_weights,
+    )
+    return optimal_weights, log_returns, current_stats, optimal_stats, solver_screen
+
 def run_portfolio_analysis_multi(
     symbols,
     current_alloc,
@@ -5373,6 +5459,7 @@ def search_universal_shortlist_caps(
     history_buffer_days,
     redundancy_corr_threshold,
     exact_optimizer_asset_cap=300,
+    exact_optimizer_asset_caps=None,
     minimum_trading_days=252,
     step=50,
     maximum_cap=None,
@@ -5381,12 +5468,11 @@ def search_universal_shortlist_caps(
     prior_results=(),
     on_result=None,
 ):
-    """Explore shortlist capacity with adaptive jumps until history is too short.
+    """Search shortlist capacity and exact-solver dimensionality together.
 
-    ``step`` is the minimum resolution, not the jump used for every evaluation.
-    The search starts with a larger jump and adjusts it from the common-history
-    headroom. It always evaluates the selected lower endpoint and, when the
-    history floor is never breached, the eligible-universe upper endpoint.
+    Full history is prepared once for each shortlist cap using the largest
+    requested exact-asset limit. Smaller limits reuse that chronology-identical
+    matrix and repeat only screening and the constrained solver.
     """
     portfolio_df, invalid_rows = build_current_allocation_from_db(owner)
     if portfolio_df.empty:
@@ -5395,7 +5481,24 @@ def search_universal_shortlist_caps(
     minimum_increment = max(int(step), 50)
     cap = max(int(starting_cap), minimum_increment)
     rows = [dict(item) for item in prior_results]
-    if rows:
+    exact_asset_limits = tuple(sorted({
+        max(int(value), 1)
+        for value in (
+            exact_optimizer_asset_caps
+            if exact_optimizer_asset_caps is not None
+            else (exact_optimizer_asset_cap,)
+        )
+    }))
+    if not exact_asset_limits:
+        raise ValueError("At least one Maximum-assets value is required.")
+    two_dimensional = len(exact_asset_limits) > 1
+    completed_pairs = {
+        (int(row["Shortlist cap"]), int(row["Maximum assets"]))
+        for row in rows
+        if row.get("Shortlist cap") is not None
+        and row.get("Maximum assets") is not None
+    }
+    if rows and not two_dimensional:
         last_row = rows[-1]
         last_cap = int(last_row.get("Shortlist cap") or 0)
         last_eligible = int(last_row.get("Eligible universe") or 0)
@@ -5442,6 +5545,18 @@ def search_universal_shortlist_caps(
     )
 
     while True:
+        pending_asset_limits = [
+            value
+            for value in exact_asset_limits
+            if (int(cap), int(value)) not in completed_pairs
+        ]
+        if not pending_asset_limits:
+            if maximum_cap is not None and cap >= int(maximum_cap):
+                break
+            cap += minimum_increment
+            if maximum_cap is not None:
+                cap = min(cap, int(maximum_cap))
+            continue
         cap_started = time.monotonic()
         extended_df, added_symbols, preselection = (
             extend_allocation_with_universal_candidates(
@@ -5453,7 +5568,8 @@ def search_universal_shortlist_caps(
         if not tickers:
             raise ValueError("The selected shortlist cap produced no analysable tickers.")
 
-        optimal_weights, log_returns, _, optimal_stats, _ = (
+        largest_exact_limit = max(exact_asset_limits)
+        optimal_weights, prepared_log_returns, _, optimal_stats, analysis_meta = (
             run_portfolio_analysis_multi(
                 tickers,
                 extended_df.copy(),
@@ -5462,13 +5578,13 @@ def search_universal_shortlist_caps(
                 drop_bottom_pct=drop_bottom_pct,
                 buffer_days=history_buffer_days,
                 redundancy_corr_threshold=redundancy_corr_threshold,
-                exact_optimizer_asset_cap=exact_optimizer_asset_cap,
+                exact_optimizer_asset_cap=largest_exact_limit,
             )
         )
-        if optimal_weights is None or optimal_stats is None or log_returns is None:
-            raise ValueError(f"Optimization returned no usable portfolio at cap {cap:,}.")
+        if prepared_log_returns is None:
+            raise ValueError(f"Optimization returned no usable return matrix at cap {cap:,}.")
 
-        trading_days = int(log_returns.shape[0])
+        trading_days = int(prepared_log_returns.shape[0])
         eligible = int(preselection.get("eligible") or 0)
         elapsed_seconds = float(time.monotonic() - cap_started)
         next_jump = (
@@ -5485,33 +5601,91 @@ def search_universal_shortlist_caps(
             reduced_jump = aligned_jump(max(next_jump // 2, minimum_increment))
             runtime_brake_applied = reduced_jump < next_jump
             next_jump = reduced_jump
-        row = {
-            "Shortlist cap": int(cap),
-            "Shortlisted": int(preselection.get("shortlisted") or len(added_symbols)),
-            "Assets": int(log_returns.shape[1]),
-            "Trading days": trading_days,
-            "Annual Return": float(optimal_stats.get("Annual Return", np.nan)),
-            "Annual Volatility": float(optimal_stats.get("Annual Volatility", np.nan)),
-            "Historical ES 95% (1 Session)": float(
-                optimal_stats.get("Historical ES 95% (1 Session)", np.nan)
-            ),
-            "Block-Bootstrap ES 95% (20 Sessions)": float(
-                optimal_stats.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
-            ),
-            "Sharpe Ratio": float(optimal_stats.get("Sharpe Ratio", np.nan)),
-            "Elapsed seconds": elapsed_seconds,
-            "Eligible universe": eligible,
-            "Next adaptive jump": int(next_jump),
-            "Runtime brake": "Applied" if runtime_brake_applied else "Not needed",
-            "Status": (
+        largest_result = (
+            optimal_weights,
+            prepared_log_returns,
+            optimal_stats,
+            (analysis_meta or {}).get("exact_optimizer_screen", {}),
+        )
+        solved_by_effective_limit = {}
+        for asset_limit in pending_asset_limits:
+            pair_started = time.monotonic() if two_dimensional else None
+            effective_limit = min(int(asset_limit), int(prepared_log_returns.shape[1]))
+            if int(asset_limit) == largest_exact_limit:
+                pair_weights, pair_returns, pair_stats, solver_screen = largest_result
+            elif effective_limit in solved_by_effective_limit:
+                pair_weights, pair_returns, pair_stats, solver_screen = (
+                    solved_by_effective_limit[effective_limit]
+                )
+            else:
+                pair_weights, pair_returns, _, pair_stats, solver_screen = (
+                    optimize_prepared_return_matrix(
+                        prepared_log_returns,
+                        extended_df.copy(),
+                        maximum_assets=int(asset_limit),
+                        max_dd=max_dd,
+                        target_volatility=target_volatility,
+                        integrity_report=(analysis_meta or {}).get("price_integrity_report"),
+                    )
+                )
+                solved_by_effective_limit[effective_limit] = (
+                    pair_weights,
+                    pair_returns,
+                    pair_stats,
+                    solver_screen,
+                )
+            feasible = (
+                trading_days >= int(minimum_trading_days)
+                and pair_weights is not None
+                and pair_stats is not None
+            )
+            status = (
                 f"Below {int(minimum_trading_days)}-session floor"
                 if trading_days < int(minimum_trading_days)
-                else "Feasible"
-            ),
-        }
-        rows.append(row)
-        if on_result is not None:
-            on_result(rows, row)
+                else ("Feasible" if feasible else "Solver failed")
+            )
+            pair_elapsed = (
+                float(time.monotonic() - pair_started)
+                if pair_started is not None
+                else elapsed_seconds
+            )
+            cap_elapsed = (
+                float(time.monotonic() - cap_started)
+                if two_dimensional
+                else elapsed_seconds
+            )
+            pair_returns = pair_returns if pair_returns is not None else prepared_log_returns
+            pair_stats = pair_stats or {}
+            row = {
+                "Shortlist cap": int(cap),
+                "Maximum assets": int(asset_limit),
+                "Effective maximum assets": int(
+                    (solver_screen or {}).get("selected_assets")
+                    or pair_returns.shape[1]
+                ),
+                "Shortlisted": int(preselection.get("shortlisted") or len(added_symbols)),
+                "Assets": int(pair_returns.shape[1]),
+                "Trading days": trading_days,
+                "Annual Return": float(pair_stats.get("Annual Return", np.nan)),
+                "Annual Volatility": float(pair_stats.get("Annual Volatility", np.nan)),
+                "Historical ES 95% (1 Session)": float(
+                    pair_stats.get("Historical ES 95% (1 Session)", np.nan)
+                ),
+                "Block-Bootstrap ES 95% (20 Sessions)": float(
+                    pair_stats.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
+                ),
+                "Sharpe Ratio": float(pair_stats.get("Sharpe Ratio", np.nan)),
+                "Elapsed seconds": pair_elapsed,
+                "Cap elapsed seconds": cap_elapsed,
+                "Eligible universe": eligible,
+                "Next adaptive jump": int(next_jump),
+                "Runtime brake": "Applied" if runtime_brake_applied else "Not needed",
+                "Status": status,
+            }
+            rows.append(row)
+            completed_pairs.add((int(cap), int(asset_limit)))
+            if on_result is not None:
+                on_result(rows, row)
 
         if trading_days < int(minimum_trading_days):
             break
@@ -5530,6 +5704,11 @@ def search_universal_shortlist_caps(
 
 def _apply_best_shortlist_cap(cap):
     st.session_state["universal_preselection_cap"] = int(cap)
+
+
+def _apply_best_search_pair(cap, maximum_assets):
+    st.session_state["universal_preselection_cap"] = int(cap)
+    st.session_state["exact_optimizer_asset_cap"] = int(maximum_assets)
 
 # =========================================================
 # UI
@@ -5923,9 +6102,8 @@ with st.sidebar:
         value=False,
         key="advanced_shortlist_cap_search",
         help=(
-            "Starts at the selected cap, uses larger history-aware jumps, and never "
-            "refines below 50 candidates. It stops when common history falls below "
-            "252 trading sessions or the eligible universe is exhausted."
+            "Searches shortlist capacity and the exact optimizer's Maximum-assets "
+            "limit together. Fixed spacing evaluates the complete Cartesian grid."
         ),
     )
     if advanced_cap_search:
@@ -5935,7 +6113,7 @@ with st.sidebar:
                 st.number_input(
                     "Search cap from",
                     min_value=50,
-                    value=int(universal_preselection_cap),
+                    value=8500,
                     step=50,
                     key="shortlist_cap_search_from",
                 )
@@ -5945,7 +6123,7 @@ with st.sidebar:
                 st.number_input(
                     "Search cap through",
                     min_value=50,
-                    value=max(cap_search_from + 2000, cap_search_from),
+                    value=max(9400, cap_search_from),
                     step=50,
                     key="shortlist_cap_search_through",
                     help="No hidden maximum; the eligible universe remains the natural ceiling.",
@@ -5967,19 +6145,44 @@ with st.sidebar:
         with cap_spacing_col:
             cap_search_spacing = st.selectbox(
                 "Search spacing",
-                options=["Adaptive (faster)", "Fixed (finer sweep)"],
+                options=["Fixed (complete 2D grid)", "Adaptive (faster)"],
                 index=0,
                 key="shortlist_cap_search_spacing",
                 help=(
-                    "Adaptive takes larger history-aware jumps. Fixed evaluates every "
-                    "selected step within the range."
+                    "Fixed evaluates every shortlist-cap step and every Maximum-assets "
+                    "value. Adaptive is faster but does not exhaust the full grid."
                 ),
             )
+        asset_col1, asset_col2, asset_col3 = st.columns(3)
+        with asset_col1:
+            asset_search_from = int(st.number_input(
+                "Maximum assets from", min_value=50, value=100, step=50,
+                key="exact_asset_search_from",
+            ))
+        with asset_col2:
+            asset_search_through = int(st.number_input(
+                "Maximum assets through", min_value=50,
+                value=max(int(exact_optimizer_asset_cap), asset_search_from),
+                step=50, key="exact_asset_search_through",
+            ))
+        asset_search_through = max(asset_search_through, asset_search_from)
+        with asset_col3:
+            asset_search_step = int(st.number_input(
+                "Maximum-assets step", min_value=50, value=50, step=50,
+                key="exact_asset_search_step",
+            ))
+        st.caption(
+            "History is prepared once per shortlist cap and reused across its "
+            "Maximum-assets solver values."
+        )
     else:
         cap_search_from = int(universal_preselection_cap)
         cap_search_through = int(universal_preselection_cap)
         cap_search_step = 50
         cap_search_spacing = "Adaptive (faster)"
+        asset_search_from = int(exact_optimizer_asset_cap)
+        asset_search_through = int(exact_optimizer_asset_cap)
+        asset_search_step = 50
     run_cap_search_btn = st.button(
         "Run / resume cap search",
         width="stretch",
@@ -6081,6 +6284,12 @@ if clear_cap_search_btn:
     st.session_state.pop("shortlist_cap_search_error", None)
     st.rerun()
 
+exact_asset_search_values = inclusive_values(
+    asset_search_from, asset_search_through, asset_search_step, minimum_step=50
+)
+cap_search_values = inclusive_values(
+    cap_search_from, cap_search_through, cap_search_step, minimum_step=50
+)
 cap_search_config = {
     "starting_cap": int(cap_search_from),
     "maximum_cap": int(cap_search_through),
@@ -6094,8 +6303,16 @@ cap_search_config = {
     "history_buffer_days": int(history_buffer_days),
     "redundancy_corr_threshold": float(redundancy_corr_threshold),
     "exact_optimizer_asset_cap": int(exact_optimizer_asset_cap),
+    "exact_optimizer_asset_caps": list(exact_asset_search_values),
     "minimum_trading_days": 252,
 }
+
+if advanced_cap_search:
+    st.caption(
+        f"Configured search space: **{len(cap_search_values):,} shortlist caps × "
+        f"{len(exact_asset_search_values):,} Maximum-assets values = "
+        f"{len(cap_search_values) * len(exact_asset_search_values):,} combinations**."
+    )
 
 if run_cap_search_btn:
     previous_config = st.session_state.get("shortlist_cap_search_config") or {}
@@ -6117,20 +6334,21 @@ if run_cap_search_btn:
 
     def update_cap_search_progress(rows, latest):
         st.session_state["shortlist_cap_search_results"] = [dict(row) for row in rows]
-        eligible = max(int(latest.get("Eligible universe") or 0), 1)
         current_cap = int(latest["Shortlist cap"])
-        progress_value = min(max(current_cap / eligible, 0.0), 1.0)
-        search_progress.progress(progress_value)
+        current_asset_limit = int(latest.get("Maximum assets") or 0)
+        completed = len(rows)
+        total = max(len(cap_search_values) * len(exact_asset_search_values), 1)
+        search_progress.progress(min(completed / total, 1.0))
         average_seconds = float(
             np.mean([float(row.get("Elapsed seconds") or 0.0) for row in rows])
         )
         search_detail.info(
-            f"Completed cap **{current_cap:,}** · "
+            f"Completed pair **{current_cap:,} × {current_asset_limit:,}** · "
             f"{int(latest['Trading days']):,} trading sessions · "
             f"{int(latest['Assets']):,} assets · "
             f"{float(latest['Annual Return']):.2%} annual return · "
             f"latest **{format_elapsed(float(latest.get('Elapsed seconds') or 0.0))}** · "
-            f"average **{format_elapsed(average_seconds)} per cap**"
+            f"average solver result **{format_elapsed(average_seconds)}**"
             + (
                 " · **15-minute runtime brake applied**"
                 if latest.get("Runtime brake") == "Applied"
@@ -6139,7 +6357,7 @@ if run_cap_search_btn:
         )
         search_status.update(
             label=(
-                f"Evaluated {len(rows):,} cap values; "
+                f"Evaluated {len(rows):,}/{total:,} grid combinations; "
                 + (
                     f"stop reached at {current_cap:,}"
                     if latest.get("Status") != "Feasible"
@@ -6162,6 +6380,7 @@ if run_cap_search_btn:
             history_buffer_days=history_buffer_days,
             redundancy_corr_threshold=redundancy_corr_threshold,
             exact_optimizer_asset_cap=exact_optimizer_asset_cap,
+            exact_optimizer_asset_caps=exact_asset_search_values,
             minimum_trading_days=252,
             step=cap_search_step,
             maximum_cap=cap_search_through,
@@ -6196,60 +6415,64 @@ cap_search_results = st.session_state.get("shortlist_cap_search_results") or []
 if cap_search_results:
     st.subheader("Shortlist-cap search results")
     results_df = pd.DataFrame(cap_search_results)
+    if "Maximum assets" not in results_df.columns:
+        results_df["Maximum assets"] = int(exact_optimizer_asset_cap)
+    if "Effective maximum assets" not in results_df.columns:
+        results_df["Effective maximum assets"] = results_df.get("Assets", 0)
+    if "Cap elapsed seconds" not in results_df.columns:
+        results_df["Cap elapsed seconds"] = results_df.get("Elapsed seconds", 0.0)
     feasible_df = results_df.loc[results_df["Status"].eq("Feasible")].copy()
     if feasible_df.empty:
-        st.warning("No evaluated cap retained at least 252 common trading sessions.")
+        st.warning("No evaluated grid combination produced a feasible solution.")
     else:
-        best_row = feasible_df.loc[feasible_df["Annual Return"].idxmax()]
-        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+        best_row = pd.Series(best_feasible_result(feasible_df.to_dict(orient="records")))
+        metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
         metric_col1.metric("Best observed cap", f"{int(best_row['Shortlist cap']):,}")
-        metric_col2.metric("Annual return", f"{float(best_row['Annual Return']):.2%}")
-        metric_col3.metric("Trading days", f"{int(best_row['Trading days']):,}")
-        metric_col4.metric("Assets", f"{int(best_row['Assets']):,}")
+        metric_col2.metric("Best Maximum assets", f"{int(best_row['Maximum assets']):,}")
+        metric_col3.metric("Annual return", f"{float(best_row['Annual Return']):.2%}")
+        metric_col4.metric("Trading days", f"{int(best_row['Trading days']):,}")
+        metric_col5.metric("Assets solved", f"{int(best_row['Assets']):,}")
         st.button(
-            "Use best observed cap",
+            "Use best observed pair",
             type="primary",
             key="apply_best_shortlist_cap_btn",
-            on_click=_apply_best_shortlist_cap,
-            args=(int(best_row["Shortlist cap"]),),
+            on_click=_apply_best_search_pair,
+            args=(int(best_row["Shortlist cap"]), int(best_row["Maximum assets"])),
         )
 
-    chart_df = results_df.set_index("Shortlist cap").sort_index()
     percentage_columns = [
         "Annual Return",
         "Annual Volatility",
         "Historical ES 95% (1 Session)",
         "Block-Bootstrap ES 95% (20 Sessions)",
     ]
-    st.markdown("**Optimized portfolio return and risk by shortlist cap**")
-    st.line_chart(
-        chart_df[percentage_columns] * 100.0,
-        x_label="Universal candidate shortlist cap",
-        y_label="Percent",
-        height=360,
-    )
-    st.markdown("**Sharpe ratio by shortlist cap**")
-    st.line_chart(
-        chart_df[["Sharpe Ratio"]],
-        x_label="Universal candidate shortlist cap",
-        y_label="Sharpe ratio",
-        height=240,
-    )
-    st.markdown("**Analysis coverage by shortlist cap**")
-    st.line_chart(
-        chart_df[["Trading days", "Assets"]],
-        x_label="Universal candidate shortlist cap",
-        y_label="Count",
-        height=280,
-    )
+    feasible_chart = results_df.loc[results_df["Status"].eq("Feasible")].copy()
+    if not feasible_chart.empty:
+        return_surface = feasible_chart.pivot_table(
+            index="Shortlist cap", columns="Maximum assets",
+            values="Annual Return", aggfunc="max",
+        ).sort_index()
+        return_surface.columns = [
+            f"Maximum assets {int(value):,}" for value in return_surface.columns
+        ]
+        st.markdown("**Annual return across the two-dimensional search**")
+        st.line_chart(
+            return_surface * 100.0,
+            x_label="Universal candidate shortlist cap",
+            y_label="Annual return (%)",
+            height=380,
+        )
     display_columns = [
         "Shortlist cap",
+        "Maximum assets",
+        "Effective maximum assets",
         "Shortlisted",
         "Assets",
         "Trading days",
         *percentage_columns,
         "Sharpe Ratio",
         "Elapsed seconds",
+        "Cap elapsed seconds",
         "Next adaptive jump",
         "Runtime brake",
         "Status",
@@ -6264,18 +6487,19 @@ if cap_search_results:
         }
         | {
             "Elapsed seconds": st.column_config.NumberColumn(
-                "Run time (seconds)", format="%.1f"
-            )
+                "Solver time (seconds)", format="%.1f"
+            ),
+            "Cap elapsed seconds": st.column_config.NumberColumn(
+                "Cap elapsed (seconds)", format="%.1f"
+            ),
         },
     )
     st.caption(
-        "The adaptive search compares the selected lower endpoint, increasingly broad "
-        "caps, and the natural eligible-universe endpoint when it remains feasible. "
-        "Its minimum resolution is 50 candidates. Best observed is not a guarantee of "
-        "the global in-sample maximum. The first result below 252 common trading "
-        "sessions stops the search. In adaptive mode, any cap taking at least 15 "
-        "minutes halves the next jump, without going below the selected step. Nothing "
-        "is published or traded automatically."
+        "Fixed mode evaluates the complete shortlist-cap × Maximum-assets grid. "
+        "History is prepared once per shortlist cap and reused across its solver "
+        "limits. Only feasible solutions with at least 252 common trading sessions "
+        "compete; the highest observed annual return wins. This remains an in-sample "
+        "research maximum, not a guaranteed future return."
     )
 
 with st.expander("🌐 Universal Portfolio", expanded=False):
