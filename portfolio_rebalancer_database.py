@@ -6597,12 +6597,32 @@ if cap_search_results:
         chart_records = results_df.to_dict(orient="records")
         raw_marker = best_row.to_dict() if not feasible_df.empty else None
         robust_marker = robust_row.to_dict() if not feasible_df.empty else None
-        search_view = st.segmented_control(
-            "Search landscape view",
-            options=["Decision heatmap", "Selected-cap curve", "3D landscape"],
-            default="Decision heatmap",
-            key="optimizer_search_landscape_view",
+        evaluated_caps = sorted(
+            feasible_chart["Shortlist cap"].astype(int).unique().tolist()
         )
+        evaluated_asset_limits = sorted(
+            feasible_chart["Maximum assets"].astype(int).unique().tolist()
+        )
+        if len(evaluated_caps) < 2:
+            search_view = "Selected-cap curve"
+            st.caption(
+                f"Only shortlist cap {evaluated_caps[0]:,} has results, so a "
+                "Maximum-assets curve is shown. The heatmap unlocks after a second "
+                "shortlist cap completes."
+            )
+        elif len(evaluated_asset_limits) < 2:
+            search_view = "Decision heatmap"
+            st.caption(
+                "Only one Maximum-assets value has results; the heatmap shows the "
+                "observed return across shortlist caps."
+            )
+        else:
+            search_view = st.segmented_control(
+                "Search landscape view",
+                options=["Decision heatmap", "Selected-cap curve", "3D landscape"],
+                default="Decision heatmap",
+                key="optimizer_search_landscape_view",
+            )
         chart_config = {
             "displaylogo": False,
             "scrollZoom": False,
@@ -6617,21 +6637,21 @@ if cap_search_results:
             chart_height = 650
             chart_key = "optimizer_search_surface_3d"
         elif search_view == "Selected-cap curve":
-            evaluated_caps = sorted(
-                feasible_chart["Shortlist cap"].astype(int).unique().tolist()
-            )
             preferred_cap = int(robust_row["Shortlist cap"])
             default_index = (
                 evaluated_caps.index(preferred_cap)
                 if preferred_cap in evaluated_caps else 0
             )
-            selected_slice_cap = int(st.selectbox(
-                "Cross-section shortlist cap",
-                evaluated_caps,
-                index=default_index,
-                format_func=lambda value: f"{int(value):,}",
-                key="optimizer_search_slice_cap",
-            ))
+            if len(evaluated_caps) == 1:
+                selected_slice_cap = evaluated_caps[0]
+            else:
+                selected_slice_cap = int(st.selectbox(
+                    "Cross-section shortlist cap",
+                    evaluated_caps,
+                    index=default_index,
+                    format_func=lambda value: f"{int(value):,}",
+                    key="optimizer_search_slice_cap",
+                ))
             chart_figure = build_search_slice_figure(
                 chart_records, selected_slice_cap
             )

@@ -203,13 +203,15 @@ def build_search_heatmap_figure(
         return figure
     caps = sorted(frame["Shortlist cap"].astype(int).unique())
     asset_limits = sorted(frame["Maximum assets"].astype(int).unique())
+    cap_labels = [f"{value:,}" for value in caps]
+    asset_labels = [f"{value:,}" for value in asset_limits]
     pivot = frame.pivot_table(
         index="Maximum assets", columns="Shortlist cap",
         values="Annual Return", aggfunc="max",
     ).reindex(index=asset_limits, columns=caps)
     figure.add_trace(go.Heatmap(
-        x=caps,
-        y=asset_limits,
+        x=cap_labels,
+        y=asset_labels,
         z=pivot.to_numpy(dtype=float) * 100.0,
         colorscale=SEARCH_COLORSCALE,
         colorbar={"title": "Return (%)", "thickness": 14},
@@ -217,7 +219,7 @@ def build_search_heatmap_figure(
         xgap=2,
         ygap=2,
         hovertemplate=(
-            "Shortlist cap %{x:,}<br>Maximum assets %{y:,}<br>"
+            "Shortlist cap %{x}<br>Maximum assets %{y}<br>"
             "Annual return %{z:.2f}%<extra></extra>"
         ),
     ))
@@ -226,25 +228,25 @@ def build_search_heatmap_figure(
         if not row:
             return
         try:
-            cap = int(row["Shortlist cap"])
-            assets = int(row["Maximum assets"])
+            cap = f"{int(row['Shortlist cap']):,}"
+            assets = f"{int(row['Maximum assets']):,}"
         except (KeyError, TypeError, ValueError):
             return
         figure.add_trace(go.Scatter(
             x=[cap], y=[assets], mode="markers", name=name,
             marker={"size": 15, "color": color, "symbol": symbol,
                     "line": {"color": "#f7f9ff", "width": 2}},
-            hovertemplate=f"<b>{name}</b><br>%{{x:,}} × %{{y:,}}<extra></extra>",
+            hovertemplate=f"<b>{name}</b><br>%{{x}} × %{{y}}<extra></extra>",
         ))
 
     add_decision_marker(raw_peak, "Raw peak", "#f4d35e", "diamond")
     add_decision_marker(robust_choice, "Robust choice", "#ff6b9a", "square")
     figure.update_layout(
         height=520,
-        margin={"l": 20, "r": 20, "t": 60, "b": 40},
+        margin={"l": 70, "r": 20, "t": 60, "b": 55},
         title={"text": "Decision heatmap", "x": 0.02, "xanchor": "left"},
-        xaxis={"title": "Shortlist cap", "tickformat": ",d"},
-        yaxis={"title": "Maximum assets", "tickformat": ",d"},
+        xaxis={"title": "Shortlist cap", "type": "category", "automargin": True},
+        yaxis={"title": "Maximum assets", "type": "category", "automargin": True},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#090d18",
         font={"color": "#d7deeb"},

@@ -65,7 +65,8 @@ def test_heatmap_keeps_decision_markers_and_failed_pair_blank():
     assert [trace.name for trace in figure.data] == [
         None, "Raw peak", "Robust choice"
     ]
-    assert 8600 not in figure.data[0].x
+    assert list(figure.data[0].x) == ["8,500", "8,550"]
+    assert list(figure.data[0].y) == ["1,000", "1,050"]
 
 
 def test_cross_section_orders_asset_limits_and_filters_other_caps():
