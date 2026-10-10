@@ -5478,6 +5478,7 @@ def search_universal_shortlist_caps(
     maximum_cap=None,
     adaptive=True,
     asset_evaluation_order="ascending",
+    alternating_refinement=True,
     runtime_brake_seconds=900,
     prior_results=(),
     on_result=None,
@@ -5765,6 +5766,86 @@ def search_universal_shortlist_caps(
             break
         current_jump = next_jump
         cap = min(cap + current_jump, range_ceiling)
+
+    if (
+        adaptive
+        and two_dimensional
+        and alternating_refinement
+        and maximum_cap is not None
+    ):
+        cap_grid = inclusive_values(
+            int(starting_cap), int(maximum_cap), minimum_increment,
+            minimum_step=50,
+        )
+
+        def merge_refinement(new_rows, phase):
+            for new_row in new_rows:
+                pair = (int(new_row["Shortlist cap"]), int(new_row["Maximum assets"]))
+                if pair in completed_pairs:
+                    continue
+                merged = dict(new_row)
+                merged["Search phase"] = phase
+                rows.append(merged)
+                completed_pairs.add(pair)
+                if on_result is not None:
+                    on_result(rows, merged)
+
+        for _ in range(4):
+            incumbent = best_feasible_result(rows)
+            if incumbent is None:
+                break
+            best_cap = int(incumbent["Shortlist cap"])
+            best_assets = int(incumbent["Maximum assets"])
+            moved = False
+
+            evaluated_y = {
+                int(row["Maximum assets"])
+                for row in rows
+                if int(row.get("Shortlist cap") or -1) == best_cap
+            }
+            y_moves = local_refinement_values(
+                exact_asset_limits, evaluated_y, best_assets, radius=1,
+            )
+            if y_moves:
+                refined, _ = search_universal_shortlist_caps(
+                    owner, starting_cap=best_cap, maximum_cap=best_cap,
+                    max_dd=max_dd, target_volatility=target_volatility,
+                    drop_bottom_pct=drop_bottom_pct,
+                    history_buffer_days=history_buffer_days,
+                    redundancy_corr_threshold=redundancy_corr_threshold,
+                    exact_optimizer_asset_cap=max(y_moves),
+                    exact_optimizer_asset_caps=tuple(y_moves),
+                    minimum_trading_days=minimum_trading_days, step=step,
+                    adaptive=False, asset_evaluation_order="coarse_to_fine",
+                    alternating_refinement=False,
+                )
+                merge_refinement(refined, "Alternating Y refinement")
+                moved = True
+
+            incumbent = best_feasible_result(rows) or incumbent
+            best_cap = int(incumbent["Shortlist cap"])
+            best_assets = int(incumbent["Maximum assets"])
+            evaluated_x = {int(row["Shortlist cap"]) for row in rows}
+            x_moves = local_refinement_values(
+                cap_grid, evaluated_x, best_cap, radius=1,
+            )
+            for candidate_x in x_moves:
+                refined, _ = search_universal_shortlist_caps(
+                    owner, starting_cap=candidate_x, maximum_cap=candidate_x,
+                    max_dd=max_dd, target_volatility=target_volatility,
+                    drop_bottom_pct=drop_bottom_pct,
+                    history_buffer_days=history_buffer_days,
+                    redundancy_corr_threshold=redundancy_corr_threshold,
+                    exact_optimizer_asset_cap=best_assets,
+                    exact_optimizer_asset_caps=(best_assets,),
+                    minimum_trading_days=minimum_trading_days, step=step,
+                    adaptive=False, asset_evaluation_order="coarse_to_fine",
+                    alternating_refinement=False,
+                )
+                merge_refinement(refined, "Alternating X refinement")
+                moved = True
+            if not moved:
+                break
 
     return rows, invalid_rows
 
