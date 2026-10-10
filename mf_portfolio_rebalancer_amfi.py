@@ -5,6 +5,7 @@ import re
 import sqlite3
 import threading
 import warnings
+from difflib import get_close_matches
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -726,10 +727,73 @@ def holdings_backup_bytes() -> bytes:
     return load_master_holdings().to_csv(index=False).encode("utf-8-sig")
 
 
-def _read_holdings_backup(uploaded_file) -> pd.DataFrame:
+def _normalise_scheme_name(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _read_groww_excel_holdings(uploaded_file, nav_master: pd.DataFrame) -> pd.DataFrame:
+    """Convert a Groww holdings export into the app's holdings-backup shape."""
+    try:
+        raw = uploaded_file.getvalue()
+        workbook = pd.ExcelFile(io.BytesIO(raw))
+        sheet_df = pd.read_excel(io.BytesIO(raw), sheet_name=workbook.sheet_names[0], header=None)
+    except Exception as exc:
+        raise ValueError(f"Could not read the MF holdings Excel file: {exc}") from exc
+    header_row = next((i for i, row in sheet_df.iterrows() if
+        {str(v).strip().lower() for v in row.tolist()} >= {"scheme name", "units", "invested value"}), None)
+    if header_row is None:
+        raise ValueError("The Excel file does not contain Scheme Name, Units and Invested Value columns.")
+    headers = [str(v).strip() for v in sheet_df.iloc[header_row].tolist()]
+    holdings = sheet_df.iloc[header_row + 1:].copy()
+    holdings.columns = headers
+    holdings = holdings.loc[:, ~pd.Index(holdings.columns).duplicated()]
+    holdings = holdings[holdings["Scheme Name"].notna()].copy()
+    holdings["Units"] = pd.to_numeric(holdings["Units"], errors="coerce")
+    holdings["Invested Value"] = pd.to_numeric(holdings["Invested Value"], errors="coerce")
+    holdings = holdings[(holdings["Units"] > 0) & (holdings["Invested Value"] > 0)]
+    if holdings.empty:
+        raise ValueError("The Excel holdings table contains no usable investment rows.")
+    lookup = {_normalise_scheme_name(row["Scheme Name"]): row for _, row in nav_master.iterrows()}
+    resolved, unmatched = [], []
+    for _, row in holdings.iterrows():
+        source_name = str(row["Scheme Name"]).strip()
+        match = lookup.get(_normalise_scheme_name(source_name))
+        if match is None:
+            unmatched.append(source_name)
+            continue
+        resolved.append({
+            "Scheme Code": normalize_scheme_code(match["Scheme Code"]),
+            "Scheme Name": str(match["Scheme Name"]).strip(),
+            "Units": float(row["Units"]),
+            "Average NAV": float(row["Invested Value"]) / float(row["Units"]),
+            "Latest NAV": pd.to_numeric(match.get("Latest NAV"), errors="coerce"),
+            "NAV Date": match.get("NAV Date"), "Added At": None, "Updated At": None,
+        })
+    if unmatched:
+        known = list(lookup)
+        details = []
+        for name in unmatched[:5]:
+            close = get_close_matches(_normalise_scheme_name(name), known, n=1, cutoff=0.82)
+            details.append(name + (f" (possible AMFI match: {close[0]})" if close else ""))
+        raise ValueError("Could not match these Excel scheme names to AMFI: " + "; ".join(details))
+    result = pd.DataFrame(resolved)
+    result["Invested"] = result["Units"] * result["Average NAV"]
+    result = result.groupby(["Scheme Code", "Scheme Name"], as_index=False, sort=False).agg(
+        {"Units": "sum", "Invested": "sum", "Latest NAV": "first", "NAV Date": "first"})
+    result["Average NAV"] = result["Invested"] / result["Units"]
+    result["Added At"] = None; result["Updated At"] = None
+    return result[["Scheme Code", "Scheme Name", "Units", "Average NAV", "Latest NAV", "NAV Date", "Added At", "Updated At"]]
+
+
+def _read_holdings_backup(uploaded_file, nav_master: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     if uploaded_file is None:
         raise ValueError("Choose a mutual-fund holdings backup CSV first.")
     raw = uploaded_file.getvalue()
+    filename = str(getattr(uploaded_file, "name", "")).lower()
+    if filename.endswith((".xlsx", ".xls")):
+        if nav_master is None:
+            raise ValueError("AMFI scheme data is required to import an Excel holdings export.")
+        return _read_groww_excel_holdings(uploaded_file, nav_master)
     if not raw:
         raise ValueError("The selected holdings backup is empty.")
 
@@ -818,8 +882,8 @@ def _read_holdings_backup(uploaded_file) -> pd.DataFrame:
     return cleaned
 
 
-def restore_holdings_backup(uploaded_file, mode: str = "merge") -> int:
-    cleaned = _read_holdings_backup(uploaded_file)
+def restore_holdings_backup(uploaded_file, mode: str = "merge", nav_master: Optional[pd.DataFrame] = None) -> int:
+    cleaned = _read_holdings_backup(uploaded_file, nav_master=nav_master)
     normalized_mode = str(mode or "merge").strip().lower()
     if normalized_mode not in {"replace", "merge"}:
         raise ValueError("Restore mode must be either 'replace' or 'merge'.")
@@ -1818,9 +1882,10 @@ with st.sidebar:
         disabled=get_unique_holdings_count() == 0,
     )
     holdings_backup_upload = st.file_uploader(
-        "Upload MF holdings backup CSV",
-        type=["csv"],
+        "Upload MF holdings (Groww Excel or app backup CSV)",
+        type=["xlsx", "xls", "csv"],
         key="mf_holdings_backup_upload",
+        help="Upload the Groww Mutual Funds Excel export or a CSV downloaded from this app.",
     )
     holdings_restore_choice = st.radio(
         "Restore behaviour",
@@ -1966,7 +2031,7 @@ with st.sidebar:
 if restore_holdings_btn:
     try:
         mode = "replace" if holdings_restore_choice == "Replace current holdings" else "merge"
-        restored = restore_holdings_backup(holdings_backup_upload, mode=mode)
+        restored = restore_holdings_backup(holdings_backup_upload, mode=mode, nav_master=amfi_nav_master)
         refresh_holdings_latest_nav(amfi_nav_master)
         st.session_state["holdings_editor_version"] += 1
         st.session_state["holdings_flash_success"] = (
