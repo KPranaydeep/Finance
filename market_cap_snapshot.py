@@ -19,7 +19,7 @@ def refresh_market_cap_sample(
     rows: pd.DataFrame,
     *,
     owner: str,
-    sample_fraction: float = 0.05,
+    sample_fraction: float = 0.01,
     max_age_days: int = 90,
     as_of: date | str | None = None,
     progress_callback=None,
@@ -98,14 +98,15 @@ def refresh_market_cap_until_stalled(
     rows: pd.DataFrame,
     *,
     owner: str,
-    sample_fraction: float = 0.05,
+    sample_fraction: float = 0.01,
     max_age_days: int = 90,
     max_rounds: int = 20,
+    max_failure_fraction: float = 0.20,
     progress_callback=None,
     checkpoint_path: str | Path | None = None,
     random_seed: int | None = None,
 ) -> dict:
-    """Run bounded 5% refresh batches until no new values can be obtained."""
+    """Run bounded 1% refresh batches until no new values can be obtained."""
     checkpoint = Path(checkpoint_path or (Path.home() / ".portfolio_rebalancer" / "market_cap_refresh_checkpoint.json"))
     if random_seed is None:
         random_seed = time.time_ns() % (2**31 - 1)
@@ -139,6 +140,11 @@ def refresh_market_cap_until_stalled(
         completed_tickers.update(result.get("attempted_tickers") or [])
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
         checkpoint.write_text(json.dumps({"attempted_tickers": sorted(completed_tickers), "updated_at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+        batch_attempted = int(result.get("attempted", 0) or 0)
+        batch_failed = int(result.get("failed", 0) or 0)
+        if batch_attempted and (batch_failed / batch_attempted) > float(max_failure_fraction):
+            aggregate["stopped_reason"] = "failure_threshold"
+            break
         if not result.get("updated"):
             aggregate["stopped_reason"] = "no_new_values"
             break

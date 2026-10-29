@@ -3822,7 +3822,7 @@ def extend_allocation_with_universal_candidates(
             conn,
             candidates,
             owner=UNIVERSAL_OWNER,
-            sample_fraction=0.05,
+            sample_fraction=0.01,
             max_age_days=MARKET_CAP_MAX_AGE_DAYS,
         )
     if market_cap_refresh.get("updated"):
@@ -10079,12 +10079,12 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
         refresh_market_cap_btn = st.button(
             "Refresh market-cap snapshot",
             key="refresh_market_cap_snapshot_btn",
-            help="Fetch up to 5% of missing or stale market caps from Yahoo Finance and save dated metadata.",
+            help="Fetch up to 1% of the remaining missing or stale market caps from Yahoo Finance and save dated metadata.",
         )
         refresh_until_stalled_btn = st.button(
             "Refresh repeatedly until no new market caps",
             key="refresh_market_cap_until_stalled_btn",
-            help="Run bounded 5% batches until a batch adds no values (maximum 20 batches).",
+            help="Run bounded 1% batches until a batch adds no values or exceeds 20% failures (maximum 20 batches).",
         )
         if refresh_market_cap_btn:
             refresh_progress = st.progress(0.0, text="Preparing market-cap refresh…")
@@ -10098,13 +10098,13 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 )
                 refresh_detail.caption(f"Latest symbol: {ticker}")
 
-            with st.spinner("Refreshing a bounded 5% sample of missing/stale market caps…"):
+            with st.spinner("Refreshing a bounded 1% sample of missing/stale market caps…"):
                 with get_db_connection() as conn:
                     refresh_result = refresh_market_cap_sample(
                         conn,
                         universal_df,
                         owner=UNIVERSAL_OWNER,
-                        sample_fraction=0.05,
+                        sample_fraction=0.01,
                         max_age_days=MARKET_CAP_MAX_AGE_DAYS,
                         progress_callback=_market_cap_refresh_progress,
                     )
@@ -10130,13 +10130,14 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 )
                 refresh_detail.caption(f"Latest symbol: {ticker}")
 
-            with st.spinner("Refreshing 5% batches until no new values are available…"):
+            with st.spinner("Refreshing 1% batches until no new values are available or failures exceed 20%…"):
                 with get_db_connection() as conn:
                     refresh_result = refresh_market_cap_until_stalled(
                         conn,
                         universal_df,
                         owner=UNIVERSAL_OWNER,
-                        sample_fraction=0.05,
+                        sample_fraction=0.01,
+                        max_failure_fraction=0.20,
                         max_age_days=MARKET_CAP_MAX_AGE_DAYS,
                         max_rounds=20,
                         progress_callback=_market_cap_loop_progress,
@@ -10146,7 +10147,8 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             st.success(
                 f"Repeated refresh finished after {refresh_result.get('rounds', 0):,} batches: "
                 f"{refresh_result.get('updated', 0):,} updated, "
-                f"{refresh_result.get('failed', 0):,} failed."
+                f"{refresh_result.get('failed', 0):,} failed "
+                f"(stop: {refresh_result.get('stopped_reason', 'completed')})."
             )
             st.rerun()
         previous_refresh = st.session_state.get("market_cap_refresh_result")
