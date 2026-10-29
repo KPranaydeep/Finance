@@ -7,6 +7,69 @@ import sqlite3
 from datetime import date, datetime, timezone
 
 import pandas as pd
+import numpy as np
+
+
+def refresh_market_cap_sample(
+    conn: sqlite3.Connection,
+    rows: pd.DataFrame,
+    *,
+    owner: str,
+    sample_fraction: float = 0.05,
+    max_age_days: int = 90,
+    as_of: date | str | None = None,
+) -> dict:
+    """Refresh a bounded sample of missing/stale caps from Yahoo fast_info.
+
+    This is deliberately a small opportunistic repair, not a replacement for
+    the quarterly verified snapshot. Existing fresh values are never touched;
+    failures are returned as diagnostics and do not stop optimization.
+    """
+    if rows is None or rows.empty or not 0 < float(sample_fraction) <= 1:
+        return {"eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": []}
+    frame = rows.copy()
+    ticker_col = "Yahoo Ticker" if "Yahoo Ticker" in frame.columns else "yahoo_ticker"
+    if ticker_col not in frame.columns:
+        return {"eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": []}
+    cap_col = "Market Cap Millions" if "Market Cap Millions" in frame.columns else "market_cap_millions"
+    asof_col = "Market Cap As Of" if "Market Cap As Of" in frame.columns else "market_cap_as_of"
+    caps = pd.to_numeric(frame.get(cap_col), errors="coerce") if cap_col in frame else pd.Series(index=frame.index, dtype=float)
+    dates = pd.to_datetime(frame.get(asof_col), errors="coerce", utc=True) if asof_col in frame else pd.Series(index=frame.index, dtype="datetime64[ns, UTC]")
+    today = pd.Timestamp(as_of or pd.Timestamp.now(tz="Asia/Kolkata").date(), tz="UTC").normalize()
+    cutoff = today - pd.Timedelta(days=max(int(max_age_days), 0))
+    needs_refresh = caps.le(0) | dates.isna() | dates.lt(cutoff) | dates.gt(today)
+    candidates = frame.loc[needs_refresh].copy()
+    candidates["_ticker"] = candidates[ticker_col].astype(str).str.strip().str.upper()
+    candidates = candidates[candidates["_ticker"].ne("")].drop_duplicates("_ticker")
+    eligible = int(len(candidates))
+    limit = max(1, int(np.ceil(eligible * float(sample_fraction)))) if eligible else 0
+    selected = candidates.sort_values("_ticker", kind="mergesort").head(limit)
+    failures = []
+    updates = []
+    try:
+        import yfinance as yf
+    except Exception as exc:
+        return {"eligible": eligible, "attempted": 0, "updated": 0, "failed": 0, "failures": [type(exc).__name__]}
+    for ticker in selected["_ticker"].tolist():
+        try:
+            fast_info = yf.Ticker(ticker).fast_info
+            value = fast_info.get("market_cap") if hasattr(fast_info, "get") else None
+            value = float(value) / 1_000_000 if value is not None else 0.0
+            if value <= 0:
+                raise ValueError("no usable market cap")
+            updates.append((value, "Yahoo Finance fast_info", today.date().isoformat(), datetime.now(timezone.utc).isoformat(timespec="seconds"), owner, ticker))
+        except Exception as exc:
+            failures.append(f"{ticker}:{type(exc).__name__}")
+    ensure_market_cap_metadata_schema(conn)
+    for row in updates:
+        conn.execute(
+            """UPDATE master_holdings
+               SET market_cap_millions=?, market_cap_source=?, market_cap_as_of=?, market_cap_imported_at=?
+               WHERE owner=? AND UPPER(TRIM(yahoo_ticker))=?""",
+            row,
+        )
+    conn.commit()
+    return {"eligible": eligible, "attempted": int(len(selected)), "updated": int(len(updates)), "failed": int(len(failures)), "failures": failures[:10], "source": "Yahoo Finance fast_info", "as_of": today.date().isoformat()}
 
 
 def ensure_market_cap_metadata_schema(conn: sqlite3.Connection) -> None:

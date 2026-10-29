@@ -119,6 +119,7 @@ from market_cap_snapshot import (
     apply_market_cap_snapshot,
     ensure_market_cap_metadata_schema,
     prepare_market_cap_snapshot,
+    refresh_market_cap_sample,
     summarize_market_cap_coverage,
 )
 from universal_portfolio_cleaner import (
@@ -3815,10 +3816,29 @@ def extend_allocation_with_universal_candidates(
             "shortlisted": 0, "cap": candidate_cap,
         }
 
+    with get_db_connection() as conn:
+        market_cap_refresh = refresh_market_cap_sample(
+            conn,
+            candidates,
+            owner=UNIVERSAL_OWNER,
+            sample_fraction=0.05,
+            max_age_days=MARKET_CAP_MAX_AGE_DAYS,
+        )
+    if market_cap_refresh.get("updated"):
+        refreshed_universal = load_master_holdings(UNIVERSAL_OWNER)
+        refreshed_universal = filter_optimizer_candidates(refreshed_universal, exclusions)
+        refreshed_universal, _ = exclude_deferred_candidates(refreshed_universal, quarterly_deferrals)
+        candidates = refreshed_universal[~refreshed_universal["Symbol"].isin(held_symbols)].copy()
+        candidates["Symbol"] = candidates["Symbol"].map(normalize_portfolio_symbol)
+        candidates["Yahoo Ticker"] = candidates["Yahoo Ticker"].fillna("").astype(str).str.strip().str.upper()
+        candidates["Currency"] = candidates["Currency"].fillna("").map(_normalize_currency_code)
+        candidates = candidates[candidates["Yahoo Ticker"] != ""]
+
     candidates, market_cap_report = filter_candidates_by_market_cap(
         candidates,
         exclusion_fraction=market_cap_exclusion_fraction,
     )
+    market_cap_report["auto_refresh"] = market_cap_refresh
     if candidates.empty:
         return portfolio_df, [], {
             "method": "scalable-preselection-v1", "eligible": 0,
@@ -11911,6 +11931,9 @@ if run_btn:
             market_cap_fresh_known=int(market_cap_filter.get("fresh_known", market_cap_filter.get("known", 0)) or 0),
             market_cap_stale_retained=int(market_cap_filter.get("stale_retained", 0) or 0),
             market_cap_missing=int(market_cap_filter.get("unknown_retained", market_cap_filter.get("missing", 0)) or 0),
+            market_cap_refresh_attempted=int((market_cap_filter.get("auto_refresh") or {}).get("attempted", 0) or 0),
+            market_cap_refresh_updated=int((market_cap_filter.get("auto_refresh") or {}).get("updated", 0) or 0),
+            market_cap_refresh_failed=int((market_cap_filter.get("auto_refresh") or {}).get("failed", 0) or 0),
             reserve_fraction=reserve_fraction_log,
             leverage_debt_ratio=(
                 float((leverage_assessment or {}).get("recommended_debt_ratio_of_portfolio_base"))
