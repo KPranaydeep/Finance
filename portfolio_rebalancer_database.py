@@ -10075,6 +10075,52 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 key="market_cap_snapshot_as_of",
                 help="Use the date stated by the data provider, not the upload date.",
             )
+        refresh_market_cap_btn = st.button(
+            "Refresh market-cap snapshot",
+            key="refresh_market_cap_snapshot_btn",
+            help="Fetch up to 5% of missing or stale market caps from Yahoo Finance and save dated metadata.",
+        )
+        if refresh_market_cap_btn:
+            refresh_progress = st.progress(0.0, text="Preparing market-cap refresh…")
+            refresh_detail = st.empty()
+
+            def _market_cap_refresh_progress(done, total, ticker):
+                fraction = done / total if total else 1.0
+                refresh_progress.progress(
+                    fraction,
+                    text=f"Refreshing market caps: {done}/{total} · {ticker}",
+                )
+                refresh_detail.caption(f"Latest symbol: {ticker}")
+
+            with st.spinner("Refreshing a bounded 5% sample of missing/stale market caps…"):
+                with get_db_connection() as conn:
+                    refresh_result = refresh_market_cap_sample(
+                        conn,
+                        universal_df,
+                        owner=UNIVERSAL_OWNER,
+                        sample_fraction=0.05,
+                        max_age_days=MARKET_CAP_MAX_AGE_DAYS,
+                        progress_callback=_market_cap_refresh_progress,
+                    )
+            refresh_progress.progress(1.0, text="Market-cap refresh finished")
+            st.session_state["market_cap_refresh_result"] = refresh_result
+            st.success(
+                f"Market-cap refresh finished: {refresh_result.get('updated', 0):,} updated, "
+                f"{refresh_result.get('failed', 0):,} failed out of "
+                f"{refresh_result.get('attempted', 0):,} attempted."
+            )
+            if refresh_result.get("failures"):
+                st.warning("Some symbols could not be refreshed: " + ", ".join(refresh_result["failures"]))
+            st.rerun()
+        previous_refresh = st.session_state.get("market_cap_refresh_result")
+        if previous_refresh:
+            st.caption(
+                f"Last refresh: {previous_refresh.get('as_of', 'unknown')} · "
+                f"eligible {previous_refresh.get('eligible', 0):,} · "
+                f"attempted {previous_refresh.get('attempted', 0):,} · "
+                f"updated {previous_refresh.get('updated', 0):,} · "
+                f"failed {previous_refresh.get('failed', 0):,}."
+            )
         if market_cap_upload is not None:
             market_cap_preview = None
             market_cap_counts = {}

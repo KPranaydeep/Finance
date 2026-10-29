@@ -18,6 +18,7 @@ def refresh_market_cap_sample(
     sample_fraction: float = 0.05,
     max_age_days: int = 90,
     as_of: date | str | None = None,
+    progress_callback=None,
 ) -> dict:
     """Refresh a bounded sample of missing/stale caps from Yahoo fast_info.
 
@@ -50,7 +51,8 @@ def refresh_market_cap_sample(
         import yfinance as yf
     except Exception as exc:
         return {"eligible": eligible, "attempted": 0, "updated": 0, "failed": 0, "failures": [type(exc).__name__]}
-    for ticker in selected["_ticker"].tolist():
+    selected_tickers = selected["_ticker"].tolist()
+    for index, ticker in enumerate(selected_tickers, start=1):
         try:
             fast_info = yf.Ticker(ticker).fast_info
             value = fast_info.get("market_cap") if hasattr(fast_info, "get") else None
@@ -60,6 +62,11 @@ def refresh_market_cap_sample(
             updates.append((value, "Yahoo Finance fast_info", today.date().isoformat(), datetime.now(timezone.utc).isoformat(timespec="seconds"), owner, ticker))
         except Exception as exc:
             failures.append(f"{ticker}:{type(exc).__name__}")
+        if progress_callback is not None:
+            try:
+                progress_callback(index, len(selected_tickers), ticker)
+            except Exception:
+                pass
     ensure_market_cap_metadata_schema(conn)
     for row in updates:
         conn.execute(
