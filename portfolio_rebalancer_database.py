@@ -11,6 +11,7 @@ import sqlite3
 import time
 import uuid
 import warnings
+import threading
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, time as clock_time, timedelta, timezone
 from difflib import SequenceMatcher
@@ -315,6 +316,47 @@ st.markdown(
 
 APP_BUILD = "2026-10-02-run-to-plan-timer-v2"
 OPTIMIZATION_TIMER_KEY = "optimization_run_to_plan_timer_v2"
+
+# Lightweight, append-only diagnostics are kept outside the repository so a
+# restart/redeploy does not erase the evidence needed to review a run.  The
+# log deliberately records lifecycle/stage information only (never holdings,
+# credentials, or downloaded price data).
+APP_RUN_LOG_PATH = Path(
+    os.getenv(
+        "PORTFOLIO_APP_RUN_LOG",
+        str(Path.home() / ".portfolio_rebalancer" / "app_run.log.jsonl"),
+    )
+)
+_APP_RUN_LOG_LOCK = threading.Lock()
+
+
+def _app_run_log(event, **details):
+    """Append one JSONL diagnostic event; logging must never break the app."""
+    payload = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "event": str(event),
+        "app_build": APP_BUILD,
+        "pid": os.getpid(),
+    }
+    for key, value in details.items():
+        if value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            payload[str(key)] = value
+        else:
+            payload[str(key)] = str(value)
+    try:
+        APP_RUN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _APP_RUN_LOG_LOCK, APP_RUN_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        # Diagnostics are best-effort and must never affect user-facing work.
+        pass
+
+
+if not st.session_state.get("_app_run_log_started"):
+    _app_run_log("app_session_started", streamlit_session=True)
+    st.session_state["_app_run_log_started"] = True
 
 # =========================================================
 # HELPERS
@@ -1416,9 +1458,12 @@ def _set_optimization_plan_stage(stage, progress, estimated_total_seconds=None):
 
 
 def _display_optimization_stage(placeholder, stage, progress, estimated_total_seconds=None):
+    previous_stage = (st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}).get("stage")
     timer = _set_optimization_plan_stage(
         stage, progress, estimated_total_seconds=estimated_total_seconds
     )
+    if previous_stage != stage:
+        _app_run_log("optimization_stage", stage=str(stage), progress=float(progress))
     summary = _timer_summary(timer)
     if summary:
         placeholder.info(summary[1])
@@ -7952,6 +7997,24 @@ st.title("📊 Portfolio Rebalancer")
 st.caption("Holdings are stored in a local SQLite master table with multi-market ticker and currency metadata.")
 st.caption(f"Active SQLite file: `{DB_PATH}`")
 st.caption(f"App build: `{APP_BUILD}`")
+with st.expander("🧾 Run diagnostics", expanded=False):
+    st.caption(
+        "The app records lifecycle, stage, timing, and error-type events only. "
+        "It does not record holdings, credentials, or downloaded price data."
+    )
+    st.caption(f"Log file: `{APP_RUN_LOG_PATH}`")
+    if APP_RUN_LOG_PATH.exists():
+        log_bytes = APP_RUN_LOG_PATH.read_bytes()
+        st.download_button(
+            "Download run log",
+            data=log_bytes,
+            file_name="portfolio_rebalancer_run.log.jsonl",
+            mime="application/x-ndjson",
+            key="download_app_run_log",
+        )
+        st.caption(f"Recorded events: {len(log_bytes.splitlines()):,}")
+    else:
+        st.info("No run events have been recorded yet.")
 
 if recovered_db_path is not None:
     st.warning(
@@ -8809,6 +8872,18 @@ if advanced_cap_search:
 
 automatic_prepared_analysis = None
 if run_cap_search_btn:
+    _app_run_log(
+        "search_started",
+        user=bool(CURRENT_USER),
+        cap_from=int(cap_search_from),
+        cap_through=int(cap_search_through),
+        cap_step=int(cap_search_step),
+        assets_from=int(asset_search_from),
+        assets_through=int(asset_search_through),
+        assets_step=int(asset_search_step),
+        spacing=str(cap_search_spacing),
+        skip_recent_best=bool(skip_recent_best_search),
+    )
     previous_config = st.session_state.get("shortlist_cap_search_config") or {}
     existing_results = st.session_state.get("shortlist_cap_search_results") or []
     prior_results = (
@@ -9278,8 +9353,15 @@ if run_cap_search_btn:
                 f"pair **{universal_preselection_cap:,} × "
                 f"{exact_optimizer_asset_cap:,}**."
             )
+        _app_run_log(
+            "search_finished",
+            status="completed",
+            result_count=len(st.session_state.get("shortlist_cap_search_results") or []),
+            skipped=bool(skipper_reused_pair),
+        )
     except Exception as exc:
         st.session_state["shortlist_cap_search_error"] = safe_stop_reason(exc)
+        _app_run_log("search_finished", status="error", error_type=type(exc).__name__)
         search_status.update(
             label="Shortlist-cap search stopped",
             state="error",
@@ -10974,6 +11056,7 @@ else:
 
 
 if run_btn:
+    _app_run_log("optimization_started", user=bool(CURRENT_USER))
     try:
         _display_optimization_stage(
             optimization_timer_placeholder, "Loading holdings", 0.03
@@ -11793,10 +11876,12 @@ if run_btn:
             "Analysis completed and saved. You can now download the complete "
             "analysis backup as JSON."
         )
+        _app_run_log("optimization_finished", status="completed")
 
         st.session_state["approved_publication_candidate"] = analysis_payload["publication_candidate"]
 
     except Exception as e:
+        _app_run_log("optimization_finished", status="error", error_type=type(e).__name__)
         stopped_timer = _abort_optimization_plan_timer(str(e))
         timer_summary = _timer_summary(stopped_timer)
         if timer_summary:
