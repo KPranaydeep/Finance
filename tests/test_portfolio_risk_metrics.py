@@ -3,8 +3,10 @@ import unittest
 import numpy as np
 
 from portfolio_risk_metrics import (
+    bootstrap_tail_summary,
     empirical_expected_shortfall,
     moving_block_bootstrap_expected_shortfall,
+    moving_block_bootstrap_return_distribution,
 )
 
 
@@ -30,6 +32,21 @@ class PortfolioRiskMetricsTests(unittest.TestCase):
         second = moving_block_bootstrap_expected_shortfall(log_returns)
         self.assertEqual(first, second)
         self.assertGreaterEqual(first, 0.0)
+
+    def test_bootstrap_distribution_summary_matches_es_and_reports_tail_sd(self):
+        log_returns = np.log1p(
+            np.array([0.01, -0.02, 0.015, -0.03, 0.005] * 80)
+        )
+        scenarios = moving_block_bootstrap_return_distribution(log_returns)
+        summary = bootstrap_tail_summary(scenarios)
+
+        self.assertAlmostEqual(
+            summary["expected_shortfall"],
+            moving_block_bootstrap_expected_shortfall(log_returns),
+        )
+        self.assertTrue(np.isfinite(summary["median_return"]))
+        self.assertTrue(np.isfinite(summary["tail_loss_sd"]))
+        self.assertGreaterEqual(summary["tail_loss_sd"], 0.0)
 
     def test_invalid_confidence_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "confidence"):

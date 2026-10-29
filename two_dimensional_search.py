@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Iterable, Mapping, Sequence
 
 
@@ -30,6 +31,110 @@ def search_grid(
     if caps[0] < 1 or asset_limits[0] < 1:
         raise ValueError("Search values must be positive integers.")
     return tuple((cap, asset_limit) for cap in caps for asset_limit in asset_limits)
+
+
+def neighbouring_grid_values(
+    values: Iterable[int],
+    center: int,
+) -> tuple[int, ...]:
+    """Return the adjacent grid points, bracketing an off-grid center safely.
+
+    Saved search leaders can stop aligning with the active grid after a user
+    changes its step (for example, 8,350 after switching from 50 to 100).  The
+    leader remains useful evidence, so bracket it with the nearest configured
+    value on either side instead of requiring it to be a grid member.
+    """
+    ordered_values = sorted({int(value) for value in values})
+    if not ordered_values:
+        return ()
+    center = int(center)
+    if center in ordered_values:
+        center_index = ordered_values.index(center)
+        return tuple(
+            ordered_values[index]
+            for index in (center_index - 1, center_index + 1)
+            if 0 <= index < len(ordered_values)
+        )
+
+    lower = [value for value in ordered_values if value < center]
+    upper = [value for value in ordered_values if value > center]
+    neighbours = []
+    if lower:
+        neighbours.append(lower[-1])
+    if upper:
+        neighbours.append(upper[0])
+    return tuple(neighbours)
+
+
+def coarse_to_fine_values(values: Iterable[int]) -> tuple[int, ...]:
+    """Order a complete integer grid for useful broad coverage as early as possible."""
+    ordered_values = sorted({int(value) for value in values})
+    if not ordered_values:
+        return ()
+    emitted = []
+    seen = set()
+
+    def emit(index):
+        value = ordered_values[index]
+        if value not in seen:
+            seen.add(value)
+            emitted.append(value)
+
+    emit(len(ordered_values) - 1)  # Prepared by the history pass, so expose it first.
+    emit(0)
+    intervals = [(0, len(ordered_values) - 1)]
+    while intervals:
+        intervals.sort(key=lambda pair: pair[1] - pair[0], reverse=True)
+        lower, upper = intervals.pop(0)
+        if upper - lower <= 1:
+            continue
+        midpoint = (lower + upper) // 2
+        emit(midpoint)
+        intervals.extend(((lower, midpoint), (midpoint, upper)))
+    return tuple(emitted)
+
+
+def adaptive_anchor_values(
+    values: Iterable[int],
+    *,
+    target_points: int = 8,
+) -> tuple[int, ...]:
+    """Return broad anchors for a bounded anytime search of one dimension."""
+    ordered_values = sorted({int(value) for value in values})
+    if len(ordered_values) <= max(int(target_points), 2):
+        return coarse_to_fine_values(ordered_values)
+    intervals = max(int(target_points) - 1, 1)
+    indices = {
+        round(index * (len(ordered_values) - 1) / intervals)
+        for index in range(intervals + 1)
+    }
+    anchors = [ordered_values[index] for index in sorted(indices)]
+    return tuple(
+        value for value in coarse_to_fine_values(anchors)
+    )
+
+
+def local_refinement_values(
+    values: Iterable[int],
+    evaluated: Iterable[int],
+    best_value: int,
+    *,
+    radius: int = 2,
+) -> tuple[int, ...]:
+    """Return unevaluated grid neighbors around the current best value."""
+    ordered_values = sorted({int(value) for value in values})
+    if not ordered_values or int(best_value) not in ordered_values:
+        return ()
+    completed = {int(value) for value in evaluated}
+    center = ordered_values.index(int(best_value))
+    candidates = []
+    for distance in range(1, max(int(radius), 1) + 1):
+        for index in (center - distance, center + distance):
+            if 0 <= index < len(ordered_values):
+                value = ordered_values[index]
+                if value not in completed and value not in candidates:
+                    candidates.append(value)
+    return tuple(candidates)
 
 
 def missing_grid_pairs(
@@ -73,3 +178,126 @@ def best_feasible_result(
             best = row
             best_key = key
     return best
+
+
+def robust_feasible_result(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    return_tolerance: float = 0.001,
+) -> Mapping[str, object] | None:
+    """Choose a lower-risk, simpler result from the near-maximum plateau."""
+    feasible = []
+    for row in rows:
+        if str(row.get("Status")) != "Feasible":
+            continue
+        try:
+            annual_return = float(row["Annual Return"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(annual_return):
+            feasible.append((row, annual_return))
+    if not feasible:
+        return None
+
+    peak_return = max(value for _, value in feasible)
+    plateau = [
+        row for row, value in feasible
+        if value >= peak_return - max(float(return_tolerance), 0.0)
+    ]
+
+    def finite_or_infinity(row: Mapping[str, object], key: str) -> float:
+        try:
+            value = float(row.get(key))
+        except (TypeError, ValueError):
+            return math.inf
+        return value if math.isfinite(value) else math.inf
+
+    return min(
+        plateau,
+        key=lambda row: (
+            finite_or_infinity(row, "Block-Bootstrap ES 95% (20 Sessions)"),
+            finite_or_infinity(row, "Historical ES 95% (1 Session)"),
+            finite_or_infinity(row, "Annual Volatility"),
+            int(row.get("Maximum assets") or 0),
+            int(row.get("Shortlist cap") or 0),
+            finite_or_infinity(row, "Elapsed seconds"),
+        ),
+    )
+
+
+def search_convergence_summary(
+    rows: Sequence[Mapping[str, object]],
+    shortlist_caps: Iterable[int],
+    maximum_assets_values: Iterable[int],
+    *,
+    return_tolerance: float = 0.001,
+) -> dict[str, object]:
+    """Describe grid completion and whether the raw peak is boundary-limited."""
+    grid = search_grid(shortlist_caps, maximum_assets_values)
+    grid_set = set(grid)
+    completed = {
+        (int(row["Shortlist cap"]), int(row["Maximum assets"]))
+        for row in rows
+        if row.get("Shortlist cap") is not None
+        and row.get("Maximum assets") is not None
+    }
+    # Results from an earlier 50-unit search remain valuable when the user changes
+    # the active step to 100, but an off-grid winner cannot be indexed into the new
+    # grid. Keep those rows in storage and charts; convergence is assessed only over
+    # the currently configured Cartesian grid.
+    active_rows = [
+        row
+        for row in rows
+        if row.get("Shortlist cap") is not None
+        and row.get("Maximum assets") is not None
+        and (int(row["Shortlist cap"]), int(row["Maximum assets"])) in grid_set
+    ]
+    peak = best_feasible_result(active_rows)
+    robust = robust_feasible_result(
+        active_rows, return_tolerance=return_tolerance
+    )
+    complete = all(pair in completed for pair in grid)
+    off_grid_completed = len(completed - grid_set)
+    if peak is None:
+        return {
+            "state": "no_feasible_result", "complete": complete,
+            "completed": len(completed.intersection(grid)), "total": len(grid),
+            "off_grid_completed": off_grid_completed,
+            "boundary_axes": (), "raw_peak": None, "robust_choice": robust,
+        }
+
+    caps = sorted({pair[0] for pair in grid})
+    assets = sorted({pair[1] for pair in grid})
+    peak_cap = int(peak["Shortlist cap"])
+    peak_assets = int(peak["Maximum assets"])
+    boundary_axes = []
+    if len(caps) > 1 and peak_cap in {caps[0], caps[-1]}:
+        boundary_axes.append("shortlist cap")
+    if len(assets) > 1 and peak_assets in {assets[0], assets[-1]}:
+        boundary_axes.append("Maximum assets")
+    cap_index = caps.index(peak_cap)
+    asset_index = assets.index(peak_assets)
+    neighbours = {
+        (caps[x_index], assets[y_index])
+        for x_index in range(max(0, cap_index - 1), min(len(caps), cap_index + 2))
+        for y_index in range(max(0, asset_index - 1), min(len(assets), asset_index + 2))
+        if (x_index, y_index) != (cap_index, asset_index)
+    }
+    neighbourhood_complete = bool(neighbours) and neighbours.issubset(completed)
+    if complete:
+        state = "global_verified"
+    elif boundary_axes:
+        state = "boundary_limited"
+    elif neighbourhood_complete:
+        state = "locally_converged"
+    else:
+        state = "incomplete"
+    return {
+        "state": state, "complete": complete,
+        "completed": len(completed.intersection(grid)), "total": len(grid),
+        "off_grid_completed": off_grid_completed,
+        "boundary_axes": tuple(boundary_axes),
+        "neighbourhood_complete": neighbourhood_complete,
+        "neighbour_pairs": tuple(sorted(neighbours)), "raw_peak": peak,
+        "robust_choice": robust,
+    }

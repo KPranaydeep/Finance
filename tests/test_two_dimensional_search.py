@@ -4,6 +4,8 @@ from two_dimensional_search import (
     best_feasible_result,
     inclusive_values,
     missing_grid_pairs,
+    neighbouring_grid_values,
+    search_convergence_summary,
     search_grid,
 )
 
@@ -48,3 +50,43 @@ def test_best_result_uses_return_then_smaller_solver_and_shortlist_on_tie():
 def test_invalid_range_is_rejected():
     with pytest.raises(ValueError):
         inclusive_values(9400, 8500, 50, minimum_step=50)
+
+
+def test_neighbours_bracket_a_saved_leader_that_is_off_the_current_grid():
+    assert neighbouring_grid_values((8300, 8400, 8500), 8350) == (8300, 8400)
+
+
+def test_neighbours_remain_adjacent_when_the_leader_is_on_the_grid():
+    assert neighbouring_grid_values((8300, 8400, 8500), 8400) == (8300, 8500)
+
+
+def test_neighbours_use_the_nearest_boundary_for_an_outside_leader():
+    assert neighbouring_grid_values((8300, 8400, 8500), 8200) == (8300,)
+    assert neighbouring_grid_values((8300, 8400, 8500), 8600) == (8500,)
+
+
+def test_convergence_preserves_but_ignores_saved_points_off_current_grid():
+    rows = [
+        {
+            "Shortlist cap": 8350,
+            "Maximum assets": 550,
+            "Status": "Feasible",
+            "Annual Return": 0.70,
+        },
+        {
+            "Shortlist cap": 8300,
+            "Maximum assets": 550,
+            "Status": "Feasible",
+            "Annual Return": 0.68,
+        },
+    ]
+
+    summary = search_convergence_summary(
+        rows,
+        shortlist_caps=(8300, 8400),
+        maximum_assets_values=(550, 600),
+    )
+
+    assert summary["raw_peak"] is rows[1]
+    assert summary["off_grid_completed"] == 1
+    assert summary["completed"] == 1

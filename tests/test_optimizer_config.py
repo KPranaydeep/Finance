@@ -8,7 +8,7 @@ from portfolio_optimizer_config import load_optimizer_config
 def valid_config():
     return {
         "config_version": "test-config-v1",
-        "risk_free_rate_annual": 0.112,
+        "risk_free_rate_annual": 0.08225,
         "trading_days_per_year": 250,
         "max_weight_per_asset": 0.5,
         "history_start_date": "2000-01-01",
@@ -36,7 +36,7 @@ def write(tmp_path, payload):
 
 def test_loads_and_normalizes_valid_configuration(tmp_path):
     result = load_optimizer_config(write(tmp_path, valid_config()))
-    assert result["risk_free_rate_annual"] == 0.112
+    assert result["risk_free_rate_annual"] == 0.08225
     assert result["max_weight_per_asset"] == 0.5
     assert result["history_start_date"] == "2000-01-01"
     assert result["momentum_filter"]["maximum_exclusion_fraction"] == 0.20
@@ -84,7 +84,7 @@ def test_requires_owned_holding_protection(tmp_path):
 def test_ui_free_optimizer_uses_the_shared_configuration():
     import portfolio_optimizer_core as core
 
-    assert core._CORE["RISK_FREE_RATE_ANNUAL"] == 0.112
+    assert core._CORE["RISK_FREE_RATE_ANNUAL"] == 0.08225
     assert core._CORE["TRADING_DAYS_PER_YEAR"] == 250
     assert core._CORE["MAX_WEIGHT_PER_ASSET"] == 0.5
     assert core._CORE["DEFAULT_HISTORY_START_DATE"] == "2000-01-01"

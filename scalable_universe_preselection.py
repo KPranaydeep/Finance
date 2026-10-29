@@ -6,6 +6,9 @@ import numpy as np
 import pandas as pd
 
 
+MARKET_CAP_MAX_AGE_DAYS = 90
+
+
 RISK_APPETITE_PAIRS = (
     ("IWM", "SPY", "Small caps / large caps"),
     ("XLY", "XLP", "Cyclicals / defensives"),
@@ -26,6 +29,7 @@ def calculate_risk_appetite_regime(
         "positive_pairs": 0,
         "available_pairs": 0,
         "components": [],
+        "lookback_sessions": [int(value) for value in horizons],
     }
     if benchmark_closes is None or benchmark_closes.empty:
         return neutral
@@ -70,6 +74,11 @@ def calculate_risk_appetite_regime(
                 "direction": (
                     "positive" if direction > 0 else "negative" if direction < 0 else "flat"
                 ),
+                "as_of": (
+                    pd.to_datetime(aligned.index[-1], errors="coerce").date().isoformat()
+                    if pd.notna(pd.to_datetime(aligned.index[-1], errors="coerce"))
+                    else None
+                ),
             }
         )
 
@@ -95,6 +104,165 @@ def calculate_risk_appetite_regime(
         "positive_pairs": int(positive_pairs),
         "available_pairs": int(len(components)),
         "components": components,
+        "lookback_sessions": [int(value) for value in horizons],
+    }
+
+
+def interpret_risk_appetite_regime(risk_appetite: dict | None) -> dict:
+    """Translate the relative-strength read into bounded, evidence-matched guidance."""
+    risk = dict(risk_appetite or {})
+    if risk.get("status") != "available":
+        return {
+            "headline": "Market read unavailable",
+            "spectrum_position_pct": 50,
+            "spectrum_score": 0.0,
+            "evidence": "Too few valid benchmark pairs; the regime is treated as neutral.",
+            "inference": "This run cannot make a cross-market risk-appetite inference.",
+            "components": [],
+            "action": (
+                "Do not treat missing benchmark data as risk-on or risk-off. Use the "
+                "optimizer's trade list and your independently confirmed cash limits."
+            ),
+        }
+
+    descriptions = {
+        "IWM/SPY": {
+            "negative": (
+                "small caps lagged large caps",
+                "Could reflect greater sensitivity to financing costs, tighter credit, "
+                "domestic-growth uncertainty, or preference for larger/liquid companies.",
+            ),
+            "positive": (
+                "small caps led large caps",
+                "Could reflect broader risk appetite, improving domestic-growth expectations, "
+                "or easier financing conditions.",
+            ),
+            "flat": (
+                "small caps and large caps were broadly even",
+                "No clear size-leadership signal in this pair.",
+            ),
+        },
+        "XLY/XLP": {
+            "negative": (
+                "defensives led cyclicals",
+                "Could reflect caution about discretionary demand or earnings, or preference "
+                "for steadier revenues.",
+            ),
+            "positive": (
+                "cyclicals led defensives",
+                "Could reflect improving growth or consumer-demand expectations, though it "
+                "does not confirm them.",
+            ),
+            "flat": (
+                "cyclicals and defensives were broadly even",
+                "No clear cyclical-versus-defensive leadership signal in this pair.",
+            ),
+        },
+        "HYG/LQD": {
+            "negative": (
+                "high-yield credit lagged investment-grade credit",
+                "Could reflect greater concern about credit quality, refinancing, or liquidity; "
+                "ETF duration and rate moves can also affect this ratio.",
+            ),
+            "positive": (
+                "high-yield credit led investment-grade credit",
+                "Could reflect greater demand for credit risk or confidence in borrowers; ETF "
+                "duration, rates, and composition can also move this ratio.",
+            ),
+            "flat": (
+                "high-yield and investment-grade credit were broadly even",
+                "No clear credit-risk leadership signal in this pair; rates and ETF composition "
+                "remain confounders.",
+            ),
+        },
+    }
+    components = list(risk.get("components") or [])
+    evidence_parts = []
+    interpreted_components = []
+    dates = []
+    for component in components:
+        pair = str(component.get("pair", ""))
+        direction = str(component.get("direction", "flat"))
+        description = descriptions.get(pair, {}).get(
+            direction, (f"{pair} was {direction}", "No pair-specific interpretation available.")
+        )
+        phrase, plausible_causes = description
+        as_of = component.get("as_of")
+        evidence_parts.append(f"{phrase} ({pair})" + (f" through {as_of}" if as_of else ""))
+        interpreted_components.append(
+            {
+                "pair": pair,
+                "label": str(component.get("label", "Relative strength")),
+                "reading": phrase,
+                "plausible_causes": plausible_causes,
+                "direction": direction,
+                "as_of": as_of,
+            }
+        )
+        if as_of:
+            dates.append(str(as_of))
+
+    regime = str(risk.get("regime", "neutral"))
+    negative = int(risk.get("negative_pairs", sum(
+        str(component.get("direction", "")) == "negative" for component in components
+    )))
+    positive = int(risk.get("positive_pairs", sum(
+        str(component.get("direction", "")) == "positive" for component in components
+    )))
+    available = int(risk.get("available_pairs", len(components)))
+    horizons = [int(value) for value in risk.get("lookback_sessions", [])]
+    horizon_text = (
+        f" over {', '.join(str(value) for value in horizons)}-session comparisons"
+        if horizons else ""
+    )
+    if regime == "risk-off":
+        inference = (
+            f"Risk appetite is defensive in the measured relative comparisons{horizon_text} "
+            f"({negative}/{available} pairs negative). This is not proof that broad "
+            "markets are falling, that sellers are exhausted, or that a bottom or top is in."
+        )
+        action = (
+            "Decision lens: this reading may justify asking whether a proposed buy is "
+            "already in the rebalance plan, whether it fits genuinely deployable cash, "
+            "and what would trigger a sell or a pause. It does not itself say to sell, "
+            "hold cash, or avoid every buy. Borrowing would add a separate risk that this "
+            "indicator does not measure."
+        )
+    elif regime == "risk-on":
+        inference = (
+            f"Risk appetite is constructive in the measured relative comparisons{horizon_text} "
+            f"({available - negative}/{available} pairs positive). This is not a "
+            "forecast of continued gains or a security-specific buy signal."
+        )
+        action = (
+            "Decision lens: relative leadership is more supportive, but ask whether a "
+            "buy still fits your risk limit, whether a trim follows your sell rules, and "
+            "how much cash you want available if conditions reverse. It does not mean "
+            "markets are at a bottom or that all capital should be deployed."
+        )
+    else:
+        inference = (
+            "The relative indicators are mixed; there is no clear consensus risk-appetite "
+            "signal in this snapshot."
+        )
+        action = (
+            "Decision lens: mixed leadership offers little regime confirmation. Compare "
+            "each proposed buy or sell with your rebalance plan, available-cash needs, "
+            "and security-level evidence rather than forcing a market-wide call."
+        )
+
+    return {
+        "headline": (
+            f"{regime.replace('-', ' ').title()} | {negative} negative, "
+            f"{positive} positive ({available} measured)"
+        ),
+        "spectrum_position_pct": int(round((float(risk.get("tilt", 0.0)) + 1.0) * 50.0)),
+        "spectrum_score": float(risk.get("tilt", 0.0)),
+        "evidence": "; ".join(evidence_parts) + ("." if evidence_parts else "No pair details available."),
+        "components": interpreted_components,
+        "inference": inference,
+        "action": action,
+        "as_of": max(dates) if dates else None,
     }
 
 
@@ -103,6 +271,8 @@ def filter_candidates_by_market_cap(
     exclusion_fraction: float = 0.20,
     minimum_known_per_cluster: int = 5,
     minimum_retained_per_cluster: int = 5,
+    max_age_days: int = MARKET_CAP_MAX_AGE_DAYS,
+    reference_date=None,
 ) -> tuple[pd.DataFrame, dict]:
     """Remove at most the bottom market-cap fraction within listing clusters.
 
@@ -118,8 +288,13 @@ def filter_candidates_by_market_cap(
             "after": 0,
             "excluded": 0,
             "known": 0,
+            "fresh_known": 0,
+            "stale_retained": 0,
+            "missing": 0,
             "unknown_retained": 0,
             "fraction": min(max(float(exclusion_fraction), 0.0), 0.20),
+            "max_age_days": max(int(max_age_days), 0),
+            "active": False,
             "clusters": [],
         }
 
@@ -132,13 +307,31 @@ def filter_candidates_by_market_cap(
             "after": int(len(frame)),
             "excluded": 0,
             "known": 0,
+            "fresh_known": 0,
+            "stale_retained": 0,
+            "missing": int(len(frame)),
             "unknown_retained": int(len(frame)),
             "fraction": fraction,
+            "max_age_days": max(int(max_age_days), 0),
+            "active": False,
             "clusters": [],
         }
 
     frame[cap_column] = pd.to_numeric(frame[cap_column], errors="coerce")
     frame.loc[frame[cap_column] <= 0, cap_column] = np.nan
+    cap_as_of = pd.to_datetime(
+        frame.get("Market Cap As Of", pd.Series(pd.NaT, index=frame.index)),
+        errors="coerce",
+        utc=True,
+    )
+    today = pd.Timestamp(
+        reference_date or pd.Timestamp.now(tz="Asia/Kolkata").date(), tz="UTC"
+    ).normalize()
+    cutoff = today - pd.Timedelta(days=max(int(max_age_days), 0))
+    frame["_market_cap_current"] = (
+        frame[cap_column].gt(0) & cap_as_of.ge(cutoff) & cap_as_of.le(today)
+    )
+    frame["_market_cap_stale"] = frame[cap_column].gt(0) & ~frame["_market_cap_current"]
     exchange = frame.get("Exchange", pd.Series("Unknown", index=frame.index))
     currency = frame.get("Currency", pd.Series("Unknown", index=frame.index))
     frame["_market_cap_cluster"] = (
@@ -151,7 +344,7 @@ def filter_candidates_by_market_cap(
     cluster_report: list[dict] = []
     ticker_column = "Yahoo Ticker" if "Yahoo Ticker" in frame.columns else "Symbol"
     for cluster, rows in frame.groupby("_market_cap_cluster", sort=True, dropna=False):
-        known = rows.loc[rows[cap_column].notna()].copy()
+        known = rows.loc[rows["_market_cap_current"]].copy()
         removable = max(len(known) - max(int(minimum_retained_per_cluster), 1), 0)
         remove_count = min(int(np.floor(len(known) * fraction)), removable)
         if len(known) < max(int(minimum_known_per_cluster), 1):
@@ -168,20 +361,36 @@ def filter_candidates_by_market_cap(
                 "cluster": str(cluster),
                 "candidates": int(len(rows)),
                 "known_market_caps": int(len(known)),
+                "stale_market_caps": int(rows["_market_cap_stale"].sum()),
+                "missing_market_caps": int(rows[cap_column].isna().sum()),
                 "excluded": int(remove_count),
-                "unknown_retained": int(rows[cap_column].isna().sum()),
+                "unknown_retained": int((~rows["_market_cap_current"]).sum()),
             }
         )
 
-    filtered = frame.drop(index=remove_indices).drop(columns="_market_cap_cluster")
+    filtered = frame.drop(index=remove_indices).drop(
+        columns=["_market_cap_cluster", "_market_cap_current", "_market_cap_stale"]
+    )
     filtered = filtered.reset_index(drop=True)
+    fresh_count = int(frame["_market_cap_current"].sum())
+    stale_count = int(frame["_market_cap_stale"].sum())
+    missing_count = int(frame[cap_column].isna().sum())
     return filtered, {
         "before": int(len(frame)),
         "after": int(len(filtered)),
         "excluded": int(len(remove_indices)),
-        "known": int(frame[cap_column].notna().sum()),
-        "unknown_retained": int(frame[cap_column].isna().sum()),
+        "known": fresh_count,
+        "fresh_known": fresh_count,
+        "stale_retained": stale_count,
+        "missing": missing_count,
+        "unknown_retained": stale_count + missing_count,
         "fraction": fraction,
+        "max_age_days": max(int(max_age_days), 0),
+        "active": fresh_count > 0,
+        "oldest_current_as_of": cap_as_of.loc[frame["_market_cap_current"]].min().date().isoformat()
+        if fresh_count else None,
+        "newest_current_as_of": cap_as_of.loc[frame["_market_cap_current"]].max().date().isoformat()
+        if fresh_count else None,
         "clusters": cluster_report,
     }
 

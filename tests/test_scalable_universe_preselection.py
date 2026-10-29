@@ -5,6 +5,7 @@ from scalable_universe_preselection import (
     calculate_risk_appetite_regime,
     convert_candidate_history_to_inr,
     filter_candidates_by_market_cap,
+    interpret_risk_appetite_regime,
     rank_scalable_candidates,
 )
 
@@ -38,6 +39,28 @@ def test_risk_appetite_regime_requires_pair_agreement_and_is_bounded():
     assert -1 <= risk_off["tilt"] < 0
 
 
+def test_risk_off_interpretation_is_actionable_without_claiming_a_bottom():
+    risk_off = calculate_risk_appetite_regime(_risk_benchmark_frame(-1.0))
+    # Match the mixed-direction snapshot shown in the saved-analysis UI.
+    risk_off["components"][2]["direction"] = "positive"
+    risk_off["negative_pairs"] = 2
+    risk_off["positive_pairs"] = 1
+    interpretation = interpret_risk_appetite_regime(risk_off)
+
+    assert "Risk Off" in interpretation["headline"]
+    assert "2 negative, 1 positive (3 measured)" in interpretation["headline"]
+    assert "small caps lagged large caps" in interpretation["evidence"]
+    assert "defensives led cyclicals" in interpretation["evidence"]
+    assert "high-yield credit led investment-grade credit" in interpretation["evidence"]
+    assert "not proof" in interpretation["inference"]
+    assert "decision lens" in interpretation["action"].lower()
+    assert "deployable cash" in interpretation["action"]
+    assert "financing costs" in interpretation["components"][0]["plausible_causes"]
+    assert "ETF duration" in interpretation["components"][2]["plausible_causes"]
+    assert 0 <= interpretation["spectrum_position_pct"] <= 100
+    assert interpretation["spectrum_score"] == risk_off["tilt"]
+
+
 def test_risk_appetite_missing_history_fails_neutral():
     result = calculate_risk_appetite_regime(pd.DataFrame({"SPY": [1.0, 2.0]}))
 
@@ -47,6 +70,7 @@ def test_risk_appetite_missing_history_fails_neutral():
 
 
 def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
+    cap_as_of = pd.Timestamp.now(tz="UTC").date().isoformat()
     frame = pd.DataFrame(
         [
             {
@@ -55,6 +79,7 @@ def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
                 "Exchange": "NMS",
                 "Currency": "USD",
                 "Market Cap Millions": float(index),
+                "Market Cap As Of": cap_as_of,
             }
             for index in range(1, 11)
         ]
@@ -65,6 +90,7 @@ def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
                 "Exchange": "NSI",
                 "Currency": "INR",
                 "Market Cap Millions": float(index * 10),
+                "Market Cap As Of": cap_as_of,
             }
             for index in range(1, 11)
         ]
@@ -75,6 +101,7 @@ def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
                 "Exchange": "NMS",
                 "Currency": "USD",
                 "Market Cap Millions": None,
+                "Market Cap As Of": None,
             }
         ]
     )
@@ -87,9 +114,12 @@ def test_market_cap_filter_removes_bottom_twenty_percent_per_cluster():
     assert "UNKNOWN" in set(filtered["Symbol"])
     assert report["excluded"] == 4
     assert report["unknown_retained"] == 1
+    assert report["fresh_known"] == 20
+    assert report["missing"] == 1
 
 
 def test_market_cap_filter_preserves_small_clusters_and_caps_exclusion_at_twenty_percent():
+    cap_as_of = pd.Timestamp.now(tz="UTC").date().isoformat()
     frame = pd.DataFrame(
         {
             "Symbol": [f"S{index}" for index in range(4)],
@@ -97,6 +127,7 @@ def test_market_cap_filter_preserves_small_clusters_and_caps_exclusion_at_twenty
             "Exchange": ["ASX"] * 4,
             "Currency": ["AUD"] * 4,
             "Market Cap Millions": [1.0, 2.0, 3.0, 4.0],
+            "Market Cap As Of": [cap_as_of] * 4,
         }
     )
 
@@ -104,6 +135,24 @@ def test_market_cap_filter_preserves_small_clusters_and_caps_exclusion_at_twenty
 
     assert filtered["Symbol"].tolist() == frame["Symbol"].tolist()
     assert report["fraction"] == 0.20
+
+
+def test_market_cap_filter_retains_missing_or_undated_caps_and_reports_inactive():
+    frame = pd.DataFrame({
+        "Symbol": [f"S{index}" for index in range(10)],
+        "Yahoo Ticker": [f"S{index}" for index in range(10)],
+        "Exchange": ["NMS"] * 10,
+        "Currency": ["USD"] * 10,
+        "Market Cap Millions": [float(index + 1) for index in range(10)],
+    })
+
+    filtered, report = filter_candidates_by_market_cap(frame, 0.20)
+
+    assert len(filtered) == len(frame)
+    assert report["excluded"] == 0
+    assert report["fresh_known"] == 0
+    assert report["stale_retained"] == 10
+    assert report["active"] is False
 
 
 def histories():

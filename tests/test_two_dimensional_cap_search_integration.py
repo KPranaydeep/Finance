@@ -5,8 +5,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from two_dimensional_search import (
+    adaptive_anchor_values,
+    best_feasible_result,
+    coarse_to_fine_values,
+    inclusive_values,
+    local_refinement_values,
+    neighbouring_grid_values,
+)
+
 
 def load_search(namespace):
+    namespace.setdefault("neighbouring_grid_values", neighbouring_grid_values)
     source = Path("portfolio_rebalancer_database.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     function = next(
@@ -113,3 +123,183 @@ def test_each_shortlist_prepares_history_once_then_solves_every_asset_limit():
         (8550, 400),
     ]
     assert all(row["Status"] == "Feasible" for row in rows)
+
+
+def test_adaptive_search_prepares_broad_matrix_without_hidden_largest_solve():
+    state = {"solve_flags": [], "cap": None}
+
+    def build_current_allocation_from_db(_owner):
+        return pd.DataFrame(
+            {"Yahoo Ticker": ["OWNED.NS"], "Quantity": [1.0], "Weight": [1.0]}
+        ), []
+
+    def extend(frame, *, maximum_candidates, owner=None):
+        state["cap"] = int(maximum_candidates)
+        return frame, [], {"eligible": 400, "shortlisted": int(maximum_candidates)}
+
+    def prepare(*_args, **kwargs):
+        solve = bool(kwargs.get("solve_portfolio", True))
+        state["solve_flags"].append(solve)
+        returns = pd.DataFrame(
+            np.zeros((300, 150)), columns=[f"T{index}" for index in range(150)]
+        )
+        stats = {
+            "Annual Return": 0.50,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+        return (
+            (np.ones(150) / 150 if solve else None),
+            returns,
+            None,
+            (stats if solve else None),
+            {"exact_optimizer_screen": {"selected_assets": 150}},
+        )
+
+    def solve(prepared, _allocation, *, maximum_assets, **_kwargs):
+        selected = prepared.iloc[:, : int(maximum_assets)]
+        stats = {
+            "Annual Return": 0.50,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+        return (
+            np.ones(maximum_assets) / maximum_assets,
+            selected,
+            None,
+            stats,
+            {"selected_assets": maximum_assets},
+        )
+
+    search = load_search(
+        {
+            "time": time,
+            "np": np,
+            "build_current_allocation_from_db": build_current_allocation_from_db,
+            "extend_allocation_with_universal_candidates": extend,
+            "run_portfolio_analysis_multi": prepare,
+            "optimize_prepared_return_matrix": solve,
+            "inclusive_values": inclusive_values,
+            "adaptive_anchor_values": adaptive_anchor_values,
+            "best_feasible_result": best_feasible_result,
+            "coarse_to_fine_values": coarse_to_fine_values,
+            "local_refinement_values": local_refinement_values,
+        }
+    )
+
+    rows, _ = search(
+        "owner",
+        starting_cap=400,
+        minimum_cap=400,
+        maximum_cap=400,
+        starting_asset_limit=100,
+        exact_optimizer_asset_caps=(100, 150),
+        adaptive=True,
+        step=50,
+        max_dd=0.05,
+        target_volatility=None,
+        drop_bottom_pct=0.2,
+        history_buffer_days=0,
+        redundancy_corr_threshold=0.8,
+    )
+
+    assert state["solve_flags"][0] is False
+    assert any(state["solve_flags"][1:])
+    assert {(row["Shortlist cap"], row["Maximum assets"]) for row in rows} == {
+        (400, 100),
+        (400, 150),
+    }
+    assert rows[-1]["Search saturated"] is True
+    assert "no material improvement" in rows[-1]["Saturation reason"]
+
+
+def test_gradient_cap_matrices_remain_available_for_final_auto_run():
+    state = {"cap": None}
+
+    def build_current_allocation_from_db(_owner):
+        return pd.DataFrame(
+            {"Yahoo Ticker": ["OWNED.NS"], "Quantity": [1.0], "Weight": [1.0]}
+        ), []
+
+    def extend(frame, *, maximum_candidates, owner=None):
+        state["cap"] = int(maximum_candidates)
+        return frame, [], {"eligible": 1000, "shortlisted": int(maximum_candidates)}
+
+    def prepare(*_args, **kwargs):
+        returns = pd.DataFrame(
+            np.zeros((300, 150)), columns=[f"T{i}" for i in range(150)]
+        )
+        stats = {
+            "Annual Return": 0.5,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+        solve = kwargs.get("solve_portfolio", True)
+        return (
+            (np.ones(150) / 150 if solve else None),
+            returns,
+            None,
+            (stats if solve else None),
+            {"exact_optimizer_screen": {"selected_assets": 150}},
+        )
+
+    def solve(prepared, _allocation, *, maximum_assets, **_kwargs):
+        selected = prepared.iloc[:, : int(maximum_assets)]
+        stats = {
+            "Annual Return": 0.5,
+            "Annual Volatility": 0.15,
+            "Historical ES 95% (1 Session)": 0.02,
+            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Sharpe Ratio": 1.0,
+        }
+        return (
+            np.ones(maximum_assets) / maximum_assets,
+            selected,
+            None,
+            stats,
+            {"selected_assets": maximum_assets},
+        )
+
+    search = load_search(
+        {
+            "time": time,
+            "np": np,
+            "build_current_allocation_from_db": build_current_allocation_from_db,
+            "extend_allocation_with_universal_candidates": extend,
+            "run_portfolio_analysis_multi": prepare,
+            "optimize_prepared_return_matrix": solve,
+            "inclusive_values": inclusive_values,
+            "adaptive_anchor_values": adaptive_anchor_values,
+            "best_feasible_result": best_feasible_result,
+            "coarse_to_fine_values": coarse_to_fine_values,
+            "local_refinement_values": local_refinement_values,
+        }
+    )
+    matrix_cache = {}
+
+    rows, _ = search(
+        "owner",
+        starting_cap=450,
+        minimum_cap=400,
+        maximum_cap=500,
+        starting_asset_limit=100,
+        exact_optimizer_asset_caps=(100, 150),
+        adaptive=True,
+        alternating_refinement=True,
+        step=50,
+        max_dd=0.05,
+        target_volatility=None,
+        drop_bottom_pct=0.2,
+        history_buffer_days=0,
+        redundancy_corr_threshold=0.8,
+        prepared_matrix_store=matrix_cache,
+    )
+
+    assert rows[-1]["Search saturated"] is True
+    assert {400, 450, 500}.issubset(matrix_cache)

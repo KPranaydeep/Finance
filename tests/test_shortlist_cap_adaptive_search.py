@@ -25,11 +25,13 @@ def _load_search_function(namespace):
 class AdaptiveShortlistCapSearchTests(unittest.TestCase):
     def test_search_uses_big_jumps_and_reaches_natural_upper_endpoint(self):
         state = {"cap": None}
+        progress_events = []
 
         def build_current_allocation_from_db(_owner):
             return pd.DataFrame({"Yahoo Ticker": ["OWNED.NS"]}), []
 
-        def extend_allocation_with_universal_candidates(frame, *, maximum_candidates):
+        def extend_allocation_with_universal_candidates(frame, *, maximum_candidates, owner=None):
+            self.assertEqual(owner, "owner")
             state["cap"] = int(maximum_candidates)
             return frame, ["CANDIDATE"], {
                 "eligible": 1100,
@@ -38,6 +40,11 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
 
         def run_portfolio_analysis_multi(*_args, **_kwargs):
             cap = state["cap"]
+            _kwargs["progress_callback"](
+                "Downloading full history",
+                0.50,
+                {"batch": 1, "batches": 2},
+            )
             trading_days = {400: 700, 800: 400, 1100: 200}[cap]
             returns = pd.DataFrame(
                 np.zeros((trading_days, 2)), columns=["OWNED.NS", "CANDIDATE"]
@@ -71,6 +78,9 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
             drop_bottom_pct=0.2,
             history_buffer_days=30,
             redundancy_corr_threshold=0.8,
+            on_progress=lambda stage, fraction, details: progress_events.append(
+                (stage, fraction, details)
+            ),
         )
 
         self.assertEqual(invalid_rows, [])
@@ -79,6 +89,15 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
         self.assertEqual(rows[1]["Next adaptive jump"], 600)
         self.assertEqual(rows[-1]["Status"], "Below 252-session floor")
         self.assertEqual(rows[-1]["Next adaptive jump"], 0)
+        self.assertEqual(progress_events[0][0], "Loading current holdings")
+        self.assertTrue(
+            any(
+                stage == "Downloading full history"
+                and details.get("cap") == 400
+                and fraction > 0.50
+                for stage, fraction, details in progress_events
+            )
+        )
 
     def test_fifteen_minute_runtime_brake_halves_next_adaptive_jump(self):
         state = {"cap": None}
@@ -93,7 +112,8 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
         def build_current_allocation_from_db(_owner):
             return pd.DataFrame({"Yahoo Ticker": ["OWNED.NS"]}), []
 
-        def extend_allocation_with_universal_candidates(frame, *, maximum_candidates):
+        def extend_allocation_with_universal_candidates(frame, *, maximum_candidates, owner=None):
+            self.assertEqual(owner, "owner")
             state["cap"] = int(maximum_candidates)
             return frame, [], {"eligible": 600, "shortlisted": int(maximum_candidates)}
 
@@ -143,7 +163,8 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
         def build_current_allocation_from_db(_owner):
             return pd.DataFrame({"Yahoo Ticker": ["OWNED.NS"]}), []
 
-        def extend_allocation_with_universal_candidates(frame, *, maximum_candidates):
+        def extend_allocation_with_universal_candidates(frame, *, maximum_candidates, owner=None):
+            self.assertEqual(owner, "owner")
             state["cap"] = int(maximum_candidates)
             return frame, [], {"eligible": 5000, "shortlisted": int(maximum_candidates)}
 
