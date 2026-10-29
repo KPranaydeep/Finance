@@ -11905,8 +11905,8 @@ if run_btn:
         _app_run_log(
             "optimization_finished",
             status="completed",
-            trading_days=int(analysis_payload.get("trading_days") or 0),
-            holdings_count=int(len(portfolio_df)),
+            trading_days=int(len(log_returns)),
+            holdings_count=int((portfolio_df["Quantity"] > 0).sum()) if "Quantity" in portfolio_df.columns else int(len(portfolio_df)),
             executable_trades=int(len(rebal_df)),
             market_cap_fresh_known=int(market_cap_filter.get("fresh_known", market_cap_filter.get("known", 0)) or 0),
             market_cap_stale_retained=int(market_cap_filter.get("stale_retained", 0) or 0),
