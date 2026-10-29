@@ -101,7 +101,7 @@ def refresh_market_cap_until_stalled(
     sample_fraction: float = 0.01,
     max_age_days: int = 90,
     max_rounds: int = 20,
-    max_failure_fraction: float = 0.40,
+    max_failure_fraction: float = 2 / 3,
     progress_callback=None,
     checkpoint_path: str | Path | None = None,
     random_seed: int | None = None,

@@ -10084,7 +10084,7 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
         refresh_until_stalled_btn = st.button(
             "Refresh repeatedly until no new market caps",
             key="refresh_market_cap_until_stalled_btn",
-            help="Run bounded 1% batches until a batch adds no values or exceeds 40% failures (maximum 20 batches).",
+            help="Run bounded 1% batches until a batch adds no values or exceeds two-thirds failures (maximum 20 batches).",
         )
         if refresh_market_cap_btn:
             refresh_progress = st.progress(0.0, text="Preparing market-cap refresh…")
@@ -10130,14 +10130,14 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
                 )
                 refresh_detail.caption(f"Latest symbol: {ticker}")
 
-            with st.spinner("Refreshing 1% batches until no new values are available or failures exceed 40%…"):
+            with st.spinner("Refreshing 1% batches until no new values are available or failures exceed two-thirds…"):
                 with get_db_connection() as conn:
                     refresh_result = refresh_market_cap_until_stalled(
                         conn,
                         universal_df,
                         owner=UNIVERSAL_OWNER,
                         sample_fraction=0.01,
-                        max_failure_fraction=0.40,
+                        max_failure_fraction=2 / 3,
                         max_age_days=MARKET_CAP_MAX_AGE_DAYS,
                         max_rounds=20,
                         progress_callback=_market_cap_loop_progress,
