@@ -25,6 +25,7 @@ def refresh_market_cap_sample(
     progress_callback=None,
     random_seed: int | None = None,
     excluded_tickers: set[str] | None = None,
+    retry_attempts: int = 2,
 ) -> dict:
     """Refresh a bounded sample of missing/stale caps from Yahoo fast_info.
 
@@ -61,21 +62,32 @@ def refresh_market_cap_sample(
     except Exception as exc:
         return {"eligible": eligible, "attempted": 0, "attempted_tickers": [], "updated": 0, "failed": 0, "failures": [type(exc).__name__]}
     selected_tickers = selected["_ticker"].tolist()
+    failure_details = []
     for index, ticker in enumerate(selected_tickers, start=1):
-        try:
-            fast_info = yf.Ticker(ticker).fast_info
-            value = None
-            if hasattr(fast_info, "get"):
-                # yfinance exposes this field as camelCase in FastInfo.
-                value = fast_info.get("marketCap")
+        last_error = None
+        for attempt in range(max(int(retry_attempts), 0) + 1):
+            try:
+                value = None
+                fast_info = yf.Ticker(ticker).fast_info
+                if hasattr(fast_info, "get"):
+                    value = fast_info.get("marketCap") or fast_info.get("market_cap")
                 if value is None:
-                    value = fast_info.get("market_cap")
-            value = float(value) / 1_000_000 if value is not None else 0.0
-            if value <= 0:
-                raise ValueError("no usable market cap")
-            updates.append((value, "Yahoo Finance fast_info", today.date().isoformat(), datetime.now(timezone.utc).isoformat(timespec="seconds"), owner, ticker))
-        except Exception as exc:
-            failures.append(f"{ticker}:{type(exc).__name__}")
+                    info = yf.Ticker(ticker).info or {}
+                    value = info.get("marketCap")
+                value = float(value) / 1_000_000 if value is not None else 0.0
+                if value <= 0:
+                    raise ValueError("no usable market cap")
+                updates.append((value, "Yahoo Finance fast_info", today.date().isoformat(), datetime.now(timezone.utc).isoformat(timespec="seconds"), owner, ticker))
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < max(int(retry_attempts), 0):
+                    time.sleep(min(0.75, 0.2 * (2 ** attempt)))
+        if last_error is not None:
+            reason = "rate_limited" if any(token in str(last_error).lower() for token in ("429", "too many", "rate limit")) else type(last_error).__name__
+            failures.append(f"{ticker}:{reason}")
+            failure_details.append({"ticker": ticker, "reason": reason})
         if progress_callback is not None:
             try:
                 progress_callback(index, len(selected_tickers), ticker)
@@ -90,7 +102,7 @@ def refresh_market_cap_sample(
             row,
         )
     conn.commit()
-    return {"eligible": eligible, "attempted": int(len(selected)), "attempted_tickers": selected_tickers, "updated": int(len(updates)), "failed": int(len(failures)), "failures": failures[:10], "source": "Yahoo Finance fast_info", "as_of": today.date().isoformat()}
+    return {"eligible": eligible, "attempted": int(len(selected)), "attempted_tickers": selected_tickers, "updated": int(len(updates)), "failed": int(len(failures)), "failures": failures[:10], "failure_details": failure_details[:20], "source": "Yahoo Finance fast_info", "as_of": today.date().isoformat()}
 
 
 def refresh_market_cap_until_stalled(
@@ -117,7 +129,7 @@ def refresh_market_cap_until_stalled(
             completed_tickers = {str(value).upper() for value in saved.get("attempted_tickers", [])}
         except Exception:
             completed_tickers = set()
-    aggregate = {"rounds": 0, "eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": [], "resumed": bool(completed_tickers)}
+    aggregate = {"rounds": 0, "eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": [], "failure_details": [], "resumed": bool(completed_tickers)}
     current_rows = rows
     for round_number in range(1, max(int(max_rounds), 1) + 1):
         result = refresh_market_cap_sample(
@@ -137,6 +149,7 @@ def refresh_market_cap_until_stalled(
         for key in ("eligible", "attempted", "updated", "failed"):
             aggregate[key] += int(result.get(key, 0) or 0)
         aggregate["failures"].extend(result.get("failures") or [])
+        aggregate["failure_details"].extend(result.get("failure_details") or [])
         completed_tickers.update(result.get("attempted_tickers") or [])
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
         checkpoint.write_text(json.dumps({"attempted_tickers": sorted(completed_tickers), "updated_at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
@@ -156,6 +169,7 @@ def refresh_market_cap_until_stalled(
     else:
         aggregate["stopped_reason"] = "round_limit"
     aggregate["failures"] = aggregate["failures"][:20]
+    aggregate["failure_details"] = aggregate["failure_details"][:20]
     if aggregate.get("stopped_reason") == "no_new_values":
         try:
             checkpoint.unlink(missing_ok=True)

@@ -10117,6 +10117,10 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             )
             if refresh_result.get("failures"):
                 st.warning("Some symbols could not be refreshed: " + ", ".join(refresh_result["failures"]))
+            if refresh_result.get("failure_details"):
+                st.caption("Failure details: " + ", ".join(
+                    f"{item['ticker']} ({item['reason']})" for item in refresh_result["failure_details"][:10]
+                ))
             st.rerun()
         if refresh_until_stalled_btn:
             refresh_progress = st.progress(0.0, text="Preparing repeated market-cap refresh…")
