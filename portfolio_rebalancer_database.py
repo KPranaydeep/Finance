@@ -7233,8 +7233,10 @@ def search_universal_shortlist_caps(
                 prepared_log_returns.copy(),
                 dict(analysis_meta or {}),
             )
-            # Keep only matrices attached to the strongest completed caps so
-            # walk-forward scoring stays bounded in memory on broader scans.
+            # Keep all matrices for a small configured cap range so a completed
+            # local search can hand every prepared cap to the final optimizer.
+            # On broad scans retain only the strongest completed caps to bound
+            # memory use during walk-forward scoring.
             cap_scores = {}
             for result_row in rows:
                 if result_row.get("Status") != "Feasible":
@@ -7250,7 +7252,14 @@ def search_universal_shortlist_caps(
             # same three-cap memory bound.
             for cached_cap in prepared_matrix_store:
                 cap_scores.setdefault(int(cached_cap), -np.inf)
-            retained_caps = {
+            configured_cap_count = (
+                len(inclusive_values(
+                    int(lower_cap), int(maximum_cap), minimum_increment,
+                    minimum_step=50,
+                ))
+                if maximum_cap is not None else len(cap_scores)
+            )
+            retained_caps = set(cap_scores) if configured_cap_count <= 3 else {
                 result_cap for result_cap, _ in sorted(
                     cap_scores.items(), key=lambda item: item[1], reverse=True
                 )[:3]
@@ -7739,6 +7748,50 @@ def search_universal_shortlist_caps(
                 saturation_reason = "The alternating X/Y pass returned to the same best pair."
                 break
 
+        if (
+            rows
+            and isinstance(prepared_matrix_store, dict)
+            and maximum_cap is not None
+            and adaptive
+            and two_dimensional
+            and len(cap_grid) <= 3
+        ):
+            # Tiny configured searches are cheap enough to retain a prepared
+            # history for every cap, even when the LR converges early. This
+            # keeps final auto-run and resume consumers fully reusable.
+            for missing_cap in cap_grid:
+                if int(missing_cap) in prepared_matrix_store:
+                    continue
+                prepared_df, missing_symbols, missing_preselection = (
+                    extend_allocation_with_universal_candidates(
+                        portfolio_df.copy(),
+                        maximum_candidates=int(missing_cap),
+                        owner=owner,
+                    )
+                )
+                missing_tickers = prepared_df["Yahoo Ticker"].dropna().astype(str).tolist()
+                if not missing_tickers:
+                    continue
+                _, missing_log_returns, _, _, missing_meta = run_portfolio_analysis_multi(
+                    missing_tickers,
+                    prepared_df.copy(),
+                    max_dd=max_dd,
+                    target_volatility=target_volatility,
+                    drop_bottom_pct=drop_bottom_pct,
+                    buffer_days=history_buffer_days,
+                    redundancy_corr_threshold=redundancy_corr_threshold,
+                    exact_optimizer_asset_cap=max(exact_asset_limits),
+                    solve_portfolio=False,
+                    optimizer_timeout_seconds=solver_timeout_seconds,
+                )
+                if missing_log_returns is not None:
+                    missing_snapshot = dict(missing_preselection or {})
+                    missing_snapshot["cap"] = int(missing_cap)
+                    missing_meta = dict(missing_meta or {})
+                    missing_meta["universal_preselection"] = missing_snapshot
+                    prepared_matrix_store[int(missing_cap)] = (
+                        prepared_df.copy(), missing_log_returns.copy(), missing_meta
+                    )
         if rows:
             rows[-1]["Search saturated"] = bool(adaptive_saturated)
             rows[-1]["Saturation reason"] = saturation_reason
