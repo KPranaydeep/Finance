@@ -55,7 +55,12 @@ def refresh_market_cap_sample(
     for index, ticker in enumerate(selected_tickers, start=1):
         try:
             fast_info = yf.Ticker(ticker).fast_info
-            value = fast_info.get("market_cap") if hasattr(fast_info, "get") else None
+            value = None
+            if hasattr(fast_info, "get"):
+                # yfinance exposes this field as camelCase in FastInfo.
+                value = fast_info.get("marketCap")
+                if value is None:
+                    value = fast_info.get("market_cap")
             value = float(value) / 1_000_000 if value is not None else 0.0
             if value <= 0:
                 raise ValueError("no usable market cap")
