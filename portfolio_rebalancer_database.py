@@ -11280,6 +11280,26 @@ if run_btn:
                     owner=CURRENT_USER,
                     progress_callback=report_shortlist_progress,
                 )
+        # A 90-day pause is a solver exclusion, not only an execution-plan
+        # annotation. Remove paused owned rows before any return matrix or
+        # optimizer is prepared; universal paused candidates are already
+        # filtered inside extend_allocation_with_universal_candidates().
+        with get_db_connection() as conn:
+            active_solver_deferrals = active_trade_deferrals(conn, CURRENT_USER)
+        portfolio_df, paused_solver_excluded = exclude_deferred_candidates(
+            portfolio_df,
+            active_solver_deferrals,
+        )
+        if paused_solver_excluded:
+            st.info(
+                f"Excluded {int(paused_solver_excluded):,} paused securities from the optimizer "
+                "until their 90-day deferrals expire."
+            )
+        if portfolio_df.empty:
+            stopped_timer = _abort_optimization_plan_timer("all holdings paused")
+            optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
+            st.error("All usable holdings are currently paused; resume or add a security before optimizing.")
+            st.stop()
         previous_elapsed, previous_workload = _previous_run_estimate(CURRENT_USER)
         refined_estimate = estimate_run_seconds(
             previous_elapsed,
