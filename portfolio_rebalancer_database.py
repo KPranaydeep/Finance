@@ -9358,6 +9358,22 @@ if run_cap_search_btn:
             status="completed",
             result_count=len(st.session_state.get("shortlist_cap_search_results") or []),
             skipped=bool(skipper_reused_pair),
+            checkpoint_count=len(st.session_state.get("shortlist_cap_search_results") or []),
+            convergence_status=(
+                "converged"
+                if len(st.session_state.get("shortlist_cap_search_results") or [])
+                else "no_results"
+            ),
+            selected_x=(
+                int((st.session_state.get("shortlist_cap_saved_best") or {}).get("Shortlist cap"))
+                if (st.session_state.get("shortlist_cap_saved_best") or {}).get("Shortlist cap") is not None
+                else None
+            ),
+            selected_y=(
+                int((st.session_state.get("shortlist_cap_saved_best") or {}).get("Maximum assets"))
+                if (st.session_state.get("shortlist_cap_saved_best") or {}).get("Maximum assets") is not None
+                else None
+            ),
         )
     except Exception as exc:
         st.session_state["shortlist_cap_search_error"] = safe_stop_reason(exc)
@@ -11876,7 +11892,35 @@ if run_btn:
             "Analysis completed and saved. You can now download the complete "
             "analysis backup as JSON."
         )
-        _app_run_log("optimization_finished", status="completed")
+        market_cap_filter = ((analysis_payload.get("settings") or {}).get("universe_preselection") or {}).get("market_cap_filter") or {}
+        leading_buy = scenario_ranking.iloc[0] if not scenario_ranking.empty else None
+        try:
+            reserve_log = calculate_portfolio_reserve_target(
+                analysis_payload.get("optimal_stats") or {},
+                invested_base=float(analysis_payload.get("current_portfolio_value") or analysis_payload.get("total_invested") or 0.0),
+            )
+            reserve_fraction_log = float(reserve_log.get("reserve_fraction"))
+        except (TypeError, ValueError, FloatingPointError):
+            reserve_fraction_log = None
+        _app_run_log(
+            "optimization_finished",
+            status="completed",
+            trading_days=int(analysis_payload.get("trading_days") or 0),
+            holdings_count=int(len(portfolio_df)),
+            executable_trades=int(len(rebal_df)),
+            market_cap_fresh_known=int(market_cap_filter.get("fresh_known", market_cap_filter.get("known", 0)) or 0),
+            market_cap_stale_retained=int(market_cap_filter.get("stale_retained", 0) or 0),
+            market_cap_missing=int(market_cap_filter.get("unknown_retained", market_cap_filter.get("missing", 0)) or 0),
+            reserve_fraction=reserve_fraction_log,
+            leverage_debt_ratio=(
+                float((leverage_assessment or {}).get("recommended_debt_ratio_of_portfolio_base"))
+                if (leverage_assessment or {}).get("recommended_debt_ratio_of_portfolio_base") is not None
+                else None
+            ),
+            top_buy_symbol=(str(leading_buy.get("Security")) if leading_buy is not None and leading_buy.get("Security") else None),
+            top_buy_score=(float(leading_buy.get("Return × positive-probability score (%)")) if leading_buy is not None and leading_buy.get("Return × positive-probability score (%)") is not None else None),
+            warning_count=len((analysis_payload.get("warnings") or {})),
+        )
 
         st.session_state["approved_publication_candidate"] = analysis_payload["publication_candidate"]
 
