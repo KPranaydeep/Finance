@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import io
+import json
+import random
 import sqlite3
+import time
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -19,6 +23,8 @@ def refresh_market_cap_sample(
     max_age_days: int = 90,
     as_of: date | str | None = None,
     progress_callback=None,
+    random_seed: int | None = None,
+    excluded_tickers: set[str] | None = None,
 ) -> dict:
     """Refresh a bounded sample of missing/stale caps from Yahoo fast_info.
 
@@ -44,13 +50,16 @@ def refresh_market_cap_sample(
     candidates = candidates[candidates["_ticker"].ne("")].drop_duplicates("_ticker")
     eligible = int(len(candidates))
     limit = max(1, int(np.ceil(eligible * float(sample_fraction)))) if eligible else 0
-    selected = candidates.sort_values("_ticker", kind="mergesort").head(limit)
+    excluded = {str(value).upper() for value in (excluded_tickers or set())}
+    candidates = candidates[~candidates["_ticker"].isin(excluded)]
+    sampler = random.Random(random_seed)
+    selected = candidates.iloc[sampler.sample(range(len(candidates)), min(limit, len(candidates)))] if len(candidates) else candidates
     failures = []
     updates = []
     try:
         import yfinance as yf
     except Exception as exc:
-        return {"eligible": eligible, "attempted": 0, "updated": 0, "failed": 0, "failures": [type(exc).__name__]}
+        return {"eligible": eligible, "attempted": 0, "attempted_tickers": [], "updated": 0, "failed": 0, "failures": [type(exc).__name__]}
     selected_tickers = selected["_ticker"].tolist()
     for index, ticker in enumerate(selected_tickers, start=1):
         try:
@@ -81,7 +90,7 @@ def refresh_market_cap_sample(
             row,
         )
     conn.commit()
-    return {"eligible": eligible, "attempted": int(len(selected)), "updated": int(len(updates)), "failed": int(len(failures)), "failures": failures[:10], "source": "Yahoo Finance fast_info", "as_of": today.date().isoformat()}
+    return {"eligible": eligible, "attempted": int(len(selected)), "attempted_tickers": selected_tickers, "updated": int(len(updates)), "failed": int(len(failures)), "failures": failures[:10], "source": "Yahoo Finance fast_info", "as_of": today.date().isoformat()}
 
 
 def refresh_market_cap_until_stalled(
@@ -93,9 +102,21 @@ def refresh_market_cap_until_stalled(
     max_age_days: int = 90,
     max_rounds: int = 20,
     progress_callback=None,
+    checkpoint_path: str | Path | None = None,
+    random_seed: int | None = None,
 ) -> dict:
     """Run bounded 5% refresh batches until no new values can be obtained."""
-    aggregate = {"rounds": 0, "eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": []}
+    checkpoint = Path(checkpoint_path or (Path.home() / ".portfolio_rebalancer" / "market_cap_refresh_checkpoint.json"))
+    if random_seed is None:
+        random_seed = time.time_ns() % (2**31 - 1)
+    completed_tickers: set[str] = set()
+    if checkpoint.exists():
+        try:
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            completed_tickers = {str(value).upper() for value in saved.get("attempted_tickers", [])}
+        except Exception:
+            completed_tickers = set()
+    aggregate = {"rounds": 0, "eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": [], "resumed": bool(completed_tickers)}
     current_rows = rows
     for round_number in range(1, max(int(max_rounds), 1) + 1):
         result = refresh_market_cap_sample(
@@ -108,11 +129,16 @@ def refresh_market_cap_until_stalled(
                 (lambda done, total, ticker, r=round_number: progress_callback(r, max_rounds, done, total, ticker))
                 if progress_callback is not None else None
             ),
+            random_seed=(int(random_seed or 0) + round_number),
+            excluded_tickers=completed_tickers,
         )
         aggregate["rounds"] = round_number
         for key in ("eligible", "attempted", "updated", "failed"):
             aggregate[key] += int(result.get(key, 0) or 0)
         aggregate["failures"].extend(result.get("failures") or [])
+        completed_tickers.update(result.get("attempted_tickers") or [])
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint.write_text(json.dumps({"attempted_tickers": sorted(completed_tickers), "updated_at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
         if not result.get("updated"):
             aggregate["stopped_reason"] = "no_new_values"
             break
@@ -124,6 +150,11 @@ def refresh_market_cap_until_stalled(
     else:
         aggregate["stopped_reason"] = "round_limit"
     aggregate["failures"] = aggregate["failures"][:20]
+    if aggregate.get("stopped_reason") == "no_new_values":
+        try:
+            checkpoint.unlink(missing_ok=True)
+        except Exception:
+            pass
     aggregate["as_of"] = pd.Timestamp.now(tz="Asia/Kolkata").date().isoformat()
     return aggregate
 
