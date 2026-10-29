@@ -120,6 +120,7 @@ from market_cap_snapshot import (
     ensure_market_cap_metadata_schema,
     prepare_market_cap_snapshot,
     refresh_market_cap_sample,
+    refresh_market_cap_until_stalled,
     summarize_market_cap_coverage,
 )
 from universal_portfolio_cleaner import (
@@ -10080,6 +10081,11 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             key="refresh_market_cap_snapshot_btn",
             help="Fetch up to 5% of missing or stale market caps from Yahoo Finance and save dated metadata.",
         )
+        refresh_until_stalled_btn = st.button(
+            "Refresh repeatedly until no new market caps",
+            key="refresh_market_cap_until_stalled_btn",
+            help="Run bounded 5% batches until a batch adds no values (maximum 20 batches).",
+        )
         if refresh_market_cap_btn:
             refresh_progress = st.progress(0.0, text="Preparing market-cap refresh…")
             refresh_detail = st.empty()
@@ -10111,6 +10117,37 @@ with st.expander("🌐 Universal Portfolio", expanded=False):
             )
             if refresh_result.get("failures"):
                 st.warning("Some symbols could not be refreshed: " + ", ".join(refresh_result["failures"]))
+            st.rerun()
+        if refresh_until_stalled_btn:
+            refresh_progress = st.progress(0.0, text="Preparing repeated market-cap refresh…")
+            refresh_detail = st.empty()
+
+            def _market_cap_loop_progress(round_number, max_rounds, done, total, ticker):
+                fraction = ((round_number - 1) + (done / total if total else 1.0)) / max_rounds
+                refresh_progress.progress(
+                    min(fraction, 1.0),
+                    text=f"Batch {round_number}/{max_rounds}: {done}/{total} · {ticker}",
+                )
+                refresh_detail.caption(f"Latest symbol: {ticker}")
+
+            with st.spinner("Refreshing 5% batches until no new values are available…"):
+                with get_db_connection() as conn:
+                    refresh_result = refresh_market_cap_until_stalled(
+                        conn,
+                        universal_df,
+                        owner=UNIVERSAL_OWNER,
+                        sample_fraction=0.05,
+                        max_age_days=MARKET_CAP_MAX_AGE_DAYS,
+                        max_rounds=20,
+                        progress_callback=_market_cap_loop_progress,
+                    )
+            refresh_progress.progress(1.0, text="Repeated market-cap refresh finished")
+            st.session_state["market_cap_refresh_result"] = refresh_result
+            st.success(
+                f"Repeated refresh finished after {refresh_result.get('rounds', 0):,} batches: "
+                f"{refresh_result.get('updated', 0):,} updated, "
+                f"{refresh_result.get('failed', 0):,} failed."
+            )
             st.rerun()
         previous_refresh = st.session_state.get("market_cap_refresh_result")
         if previous_refresh:

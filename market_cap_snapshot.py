@@ -84,6 +84,50 @@ def refresh_market_cap_sample(
     return {"eligible": eligible, "attempted": int(len(selected)), "updated": int(len(updates)), "failed": int(len(failures)), "failures": failures[:10], "source": "Yahoo Finance fast_info", "as_of": today.date().isoformat()}
 
 
+def refresh_market_cap_until_stalled(
+    conn: sqlite3.Connection,
+    rows: pd.DataFrame,
+    *,
+    owner: str,
+    sample_fraction: float = 0.05,
+    max_age_days: int = 90,
+    max_rounds: int = 20,
+    progress_callback=None,
+) -> dict:
+    """Run bounded 5% refresh batches until no new values can be obtained."""
+    aggregate = {"rounds": 0, "eligible": 0, "attempted": 0, "updated": 0, "failed": 0, "failures": []}
+    current_rows = rows
+    for round_number in range(1, max(int(max_rounds), 1) + 1):
+        result = refresh_market_cap_sample(
+            conn,
+            current_rows,
+            owner=owner,
+            sample_fraction=sample_fraction,
+            max_age_days=max_age_days,
+            progress_callback=(
+                (lambda done, total, ticker, r=round_number: progress_callback(r, max_rounds, done, total, ticker))
+                if progress_callback is not None else None
+            ),
+        )
+        aggregate["rounds"] = round_number
+        for key in ("eligible", "attempted", "updated", "failed"):
+            aggregate[key] += int(result.get(key, 0) or 0)
+        aggregate["failures"].extend(result.get("failures") or [])
+        if not result.get("updated"):
+            aggregate["stopped_reason"] = "no_new_values"
+            break
+        current_rows = pd.read_sql_query(
+            "SELECT symbol AS Symbol, yahoo_ticker AS \"Yahoo Ticker\", market_cap_millions AS \"Market Cap Millions\", market_cap_as_of AS \"Market Cap As Of\" FROM master_holdings WHERE owner=?",
+            conn,
+            params=(owner,),
+        )
+    else:
+        aggregate["stopped_reason"] = "round_limit"
+    aggregate["failures"] = aggregate["failures"][:20]
+    aggregate["as_of"] = pd.Timestamp.now(tz="Asia/Kolkata").date().isoformat()
+    return aggregate
+
+
 def ensure_market_cap_metadata_schema(conn: sqlite3.Connection) -> None:
     """Add nullable provenance columns without changing existing holdings."""
     columns = {
