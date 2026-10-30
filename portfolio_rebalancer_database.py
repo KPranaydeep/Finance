@@ -2732,6 +2732,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     "Sell score": float(lowest["Return × positive-probability score (%)"]),
                     "Price data through": buy_date if buy_date == sell_date else f"Buy {buy_date} / sell {sell_date}",
                 })
+            overall = shortlist[0]
+            currency_picks = shortlist[1:]
+            if any(pick["Top buy"] == overall["Top buy"] and pick["Top sell"] == overall["Top sell"] for pick in currency_picks):
+                shortlist = currency_picks
             for offset in range(0, len(shortlist), 3):
                 row = shortlist[offset:offset + 3]
                 cards = st.columns(len(row), gap="small")
