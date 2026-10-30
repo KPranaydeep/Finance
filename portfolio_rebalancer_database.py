@@ -2727,6 +2727,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         saved_exit_df = pd.DataFrame(payload.get("security_exit_ranking") or [])
         if not saved_exit_df.empty:
+            if "Current Weight (%)" in saved_exit_df.columns:
+                saved_exit_df = saved_exit_df.loc[
+                    pd.to_numeric(saved_exit_df["Current Weight (%)"], errors="coerce").fillna(0).gt(0)
+                ]
             saved_exit_df = saved_exit_df.sort_values(
                 ["Return × positive-probability score (%)", "Expected net scenario return (%)"],
                 ascending=[True, True], kind="stable", na_position="last",
@@ -2954,6 +2958,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     saved_exit_review["Yahoo Ticker"].astype(str).str.upper().isin(saved_owned)
                 ].copy()
             if not saved_exit_review.empty:
+                if "Current Weight (%)" in saved_exit_review.columns:
+                    saved_exit_review = saved_exit_review.loc[
+                        pd.to_numeric(saved_exit_review["Current Weight (%)"], errors="coerce").fillna(0).gt(0)
+                    ].copy()
+            if not saved_exit_review.empty:
                 saved_exit_review["_score_sort"] = pd.to_numeric(
                     saved_exit_review.get("Return × positive-probability score (%)", 0),
                     errors="coerce",
@@ -2980,7 +2989,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                         "Return × positive-probability score (%)": st.column_config.NumberColumn(format="%+.2f%%"),
                     },
                 )
-            elif payload.get("security_exit_ranking_error"):
+            elif payload.get("security_exit_ranking_error") or saved_exit_records:
                 # Older saved payloads may contain the pre-feature error and no
                 # return matrix. Keep the independent review useful by falling
                 # back to the saved action table rather than forcing a rerun.
