@@ -5,7 +5,49 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 from market_regime_watch import detect_market_changes
-from election_watch import monthly_snapshot, upcoming_terms, representation_context, market_context, SOURCE, PARLIAMENT_SOURCE, REPRESENTATION_VERIFIED_AT, _atomic_save
+from election_watch import monthly_snapshot, representation_context, market_context, SOURCE, PARLIAMENT_SOURCE, REPRESENTATION_VERIFIED_AT, _atomic_save
+
+
+def render_state_timing(context, snapshot, scope):
+    """Compact cards: timing and representation, without inferred impact scores."""
+    rows = context["rows"]
+    if not rows:
+        st.caption("No term ends in the next 18 months in this snapshot.")
+        return
+    share = f"{context['assembly_share']:.1%}" if context['assembly_share'] is not None else "Unknown"
+    with st.container(horizontal=True):
+        st.metric("Assembly footprint", share)
+        st.metric("Lok Sabha footprint", f"{context['lok_share']:.1%}")
+        st.metric("Rajya Sabha footprint", f"{context['rajya_share']:.1%}")
+    nearest = min(rows, key=lambda row: row["Days to term end"])
+    largest = max(rows, key=lambda row: row["Assembly seats"])
+    st.markdown(
+        f"**Soonest:** {nearest['State']} · {nearest['Days to term end']} days"
+        f" · **Largest assembly:** {largest['State']} · {largest['Assembly seats']} seats"
+    )
+    st.caption("Term ends, not polling dates. Percentages show national geographic representation—not confirmed contests or predicted market impact.")
+    order = st.radio("Order states by", ["Soonest", "Largest assembly"], horizontal=True,
+                     key=f"state_timing_order_{scope}")
+    ordered = sorted(rows, key=(lambda row: (-row["Assembly seats"], row["Term ends"]))
+                     if order == "Largest assembly" else (lambda row: row["Term ends"]))
+    for offset in range(0, len(ordered), 3):
+        cards = st.columns(3, gap="small")
+        for card, row in zip(cards, ordered[offset:offset + 3]):
+            with card.container(border=True):
+                st.markdown(f"**{row['State']}**")
+                date_label = pd.Timestamp(row["Term ends"]).strftime("%d %b %Y")
+                st.markdown(f"{date_label} · **{row['Days to term end']} days**")
+                assembly_share = row["Share of all assembly seats (%)"]
+                assembly_label = f"{assembly_share:.1f}%" if assembly_share is not None else "Unknown"
+                st.caption(f"{row['Assembly seats']} MLAs · majority {row['Full-house majority']}")
+                st.markdown(f"Assembly **{assembly_label}** · LS **{row['Lok Sabha footprint (%)']:.1f}%** · RS **{row['Rajya Sabha footprint (%)']:.1f}%**")
+    with st.expander("Definitions, data quality & sources", expanded=False):
+        st.caption(f"Denominators: assembly {context['assembly_total'] or 'incomplete snapshot'} · LS 543 · RS 233 elected seats. Watch covers {len(rows)} states over 18 months; allocations verified {REPRESENTATION_VERIFIED_AT}.")
+        st.caption("Majority = full-house majority; vacancies/absences may change confidence-vote arithmetic. MLAs form state governments and elect RS members as vacancies arise. Assembly polls directly change no LS seats; RS seats due and coalition effects are unquantified.")
+        st.caption(f"Terms verified: {snapshot.get('verified_at', 'Unknown')} · refresh monthly while app is used. Polling/counting schedule unverified.")
+        if snapshot.get("refresh_error"):
+            st.caption(f"ECI refresh failed; retained verified snapshot. {snapshot['refresh_error']}")
+        st.markdown(f"[ECI terms & seats]({SOURCE}) · [ECI announcements](https://www.eci.gov.in/) · [Rajya Sabha representation]({PARLIAMENT_SOURCE})")
 
 
 @st.cache_data(ttl=900, max_entries=4, show_spinner=False)
@@ -99,32 +141,8 @@ def render_election_watch(scope):
             st.markdown(f"**Election timing:** nearest tracked term end is **{nearest['State']} in {nearest['Days to term end']} days**. Polling/counting dates remain unverified.")
             share = f"{context['assembly_share']:.1%}" if context['assembly_share'] is not None else "unknown"
             st.caption(f"18-month watch: {len(upcoming)} states · {share} of assembly seats geographically covered; not confirmed seats at stake or a market-impact probability.")
-        with st.expander("Election dates, seat exposure & sources", expanded=False):
-            st.caption(f"Official terms verified: {snapshot.get('verified_at', 'Unknown')} · checked once per calendar month while the app is used. {snapshot.get('coverage', '')}")
-            if snapshot.get("refresh_error"):
-                st.caption(f"ECI refresh unavailable; previous verified snapshot retained. {snapshot['refresh_error']}")
-            context = representation_context(snapshot, today)
-            upcoming = context["rows"]
-            if upcoming:
-                nearest = upcoming[0]
-                st.markdown(f"**Calendar watch · {len(upcoming)} states over 18 months** · nearest term end: **{nearest['State']}**, {nearest['Days to term end']} calendar days away.")
-                left, right = st.columns(2)
-                left.metric("Direct Lok Sabha seat changes from these assembly polls", "0.0%", border=True)
-                right.metric("Confirmed assembly seats at stake", "Awaiting schedule", border=True)
-                share = f"{context['assembly_share']:.1%}" if context['assembly_share'] is not None else "Unknown"
-                st.caption(f"Geographic footprint, not seats confirmed at stake: assembly {share} ({context['assembly_count']:,}/{context['assembly_total'] or 'unknown'}); Lok Sabha {context['lok_share']:.1%} ({context['lok_count']}/543 elected seats); Rajya Sabha {context['rajya_share']:.1%} ({context['rajya_count']}/233 elected seats).")
-                st.caption("Rajya Sabha seats actually up in the relevant cycle: unknown. Coalition-majority impact: unquantified. These are not zero-impact assumptions or market-impact probabilities.")
-                st.caption(f"National denominators verified {REPRESENTATION_VERIFIED_AT}; seat allocations, not currently occupied seats.")
-                with st.expander("States, denominators and timing", expanded=False):
-                    for row in upcoming:
-                        assembly_share = f"{row['Share of all assembly seats (%)']:.1f}%" if row['Share of all assembly seats (%)'] is not None else "unknown"
-                        st.markdown(f"**{row['State']}** · term ends **{row['Term ends']}** ({row['Days to term end']} days) · {row['Assembly seats']} MLAs, {assembly_share} of all assembly seats · full-house majority {row['Full-house majority']}.")
-                        st.caption(f"National geographic footprint: LS {row['Lok Sabha allocation']}/543 ({row['Lok Sabha footprint (%)']:.1f}%) · RS {row['Rajya Sabha allocation']}/233 ({row['Rajya Sabha footprint (%)']:.1f}%). Verified contested percentage: unknown. An announced full-state general election would ordinarily contest 100% of that assembly; that assumption is not treated as a verified schedule.")
-                st.caption("Term end is not polling/counting day. A distant term end is calendar context; a confirmed event date is needed to rank near-term timing. Refresh portfolio evidence if market stress changes; seat percentages alone do not set reserve or borrowing allocations.")
-            else:
-                st.caption("No upcoming terms in the retained watchlist window. This does not establish that no elections are scheduled.")
-            st.markdown(f"[ECI terms & seat allocations]({SOURCE}) · [ECI announcements](https://www.eci.gov.in/) · [How Rajya Sabha representation works]({PARLIAMENT_SOURCE})")
-            st.caption("MLAs determine state governments and elect Rajya Sabha members as vacancies arise. Lok Sabha confidence determines the Union government's survival; state results alone do not change that majority. Assembly majorities here assume all seats filled; actual confidence votes can differ with vacancies and absences.")
+        with st.expander("States · timing & seat footprint", expanded=False):
+            render_state_timing(context, snapshot, scope)
 
         if market.get("refresh_errors"):
             st.caption("Market refresh incomplete; retained values may be stale: " + str(market["refresh_errors"]))
