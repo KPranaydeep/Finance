@@ -109,8 +109,48 @@ def test_leverage_assessment_includes_rate_specific_drawdown_scenarios():
     )
     base = result["scenarios"][0]["drawdown_conditioned"]
 
-    assert base["estimated_debt_amount"] == pytest.approx(
-        100_000 * base["recommended_debt_ratio_of_portfolio_base"]
-    )
+    assert base["estimated_debt_amount"] is None
+    assert base["borrowing_amount_established"] is False
     assert base["current_drawdown"] <= 0
     assert base["analog_count"] > 0
+
+
+def test_drawdown_forward_windows_exclude_state_day_return():
+    logs = np.random.default_rng(91).normal(.001,.015,100)
+    result = estimate_drawdown_conditioned_debt(logs, horizon_sessions=3,
+        drawdown_lookback_sessions=5, minimum_analogs=4, analog_fraction=1,
+        grid_step=.25, bootstrap_paths=100)
+    states = np.arange(4, len(logs)-3)
+    expected = np.quantile(logs[states[:,None]+1+np.arange(3)].sum(axis=1), .05)
+    assert result["candidate_rows"][0]["lower_tail_log_growth"] == pytest.approx(expected)
+    assert result["forward_windows_start_after_state"]
+    indices = result["independent_state_indices"]
+    assert all(b-a >= 3 for a,b in zip(indices,indices[1:]))
+
+
+def test_overlap_and_boundary_do_not_establish_borrowing_capacity():
+    result = estimate_drawdown_conditioned_debt([.001]*644, grid_step=.25)
+    assert result["raw_historical_optimum_debt_ratio"] == 1
+    assert result["at_search_boundary"]
+    assert result["independent_window_count"] < result["analog_count"]
+    assert result["evidence_status"] == "insufficient_independent_windows"
+    assert result["validated_research_debt_ratio"] is None
+    assert result["estimated_debt_amount"] is None
+
+
+def test_boundary_is_blocked_even_with_sufficient_disjoint_history():
+    result = estimate_drawdown_conditioned_debt([.002]*400, horizon_sessions=3,
+        drawdown_lookback_sessions=5, minimum_analogs=4, analog_fraction=1,
+        minimum_independent_windows=30, bootstrap_paths=100, grid_step=.25)
+    assert result["uncertainty_checks"]
+    assert result["evidence_status"] == "search_boundary_unresolved"
+    assert result["validated_research_debt_ratio"] is None
+
+
+def test_rate_stress_can_reject_an_apparent_base_rate_advantage():
+    result = estimate_drawdown_conditioned_debt([.0005]*400, horizon_sessions=3,
+        drawdown_lookback_sessions=5, minimum_analogs=4, analog_fraction=1,
+        minimum_independent_windows=30, bootstrap_paths=100, grid_step=.25)
+    assert result["raw_historical_optimum_debt_ratio"] > 0
+    assert all(row["worst_adjusted_lower_bound"] < 0 for row in result["uncertainty_checks"])
+    assert result["validated_research_debt_ratio"] is None

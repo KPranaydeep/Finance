@@ -22,6 +22,9 @@ def estimate_drawdown_conditioned_debt(
     grid_step: float = 0.025,
     analog_fraction: float = 0.20,
     minimum_analogs: int = 30,
+    minimum_independent_windows: int = 60,
+    bootstrap_paths: int = 5000,
+    seed: int = 432,
 ) -> dict[str, object]:
     """Estimate a drawdown-state-conditioned debt scenario from the saved mix.
 
@@ -34,7 +37,7 @@ def estimate_drawdown_conditioned_debt(
     logs = np.asarray(portfolio_log_returns, dtype=float).reshape(-1)
     rate = float(borrowing_rate)
     required_history = (
-        drawdown_lookback_sessions + horizon_sessions + minimum_analogs - 1
+        drawdown_lookback_sessions + horizon_sessions + minimum_analogs
     )
     if len(logs) < max(required_history, 60):
         raise ValueError("not enough saved returns for drawdown-conditioned analogs")
@@ -48,6 +51,8 @@ def estimate_drawdown_conditioned_debt(
         raise ValueError("analog selection settings are invalid")
     if maximum_debt_ratio < 0 or grid_step <= 0:
         raise ValueError("debt search settings are invalid")
+    if minimum_independent_windows < 3 or bootstrap_paths < 100:
+        raise ValueError("evidence settings are invalid")
 
     wealth = np.exp(np.cumsum(logs))
     drawdowns = np.full(len(wealth), np.nan, dtype=float)
@@ -58,15 +63,17 @@ def estimate_drawdown_conditioned_debt(
     simple_returns = np.expm1(logs)
     starts = np.arange(
         drawdown_lookback_sessions - 1,
-        len(logs) - horizon_sessions + 1,
+        len(logs) - horizon_sessions,
     )
     if len(starts) < minimum_analogs:
         raise ValueError("not enough forward windows for drawdown-conditioned analogs")
     distances = np.abs(drawdowns[starts] - current_drawdown)
     requested = max(minimum_analogs, int(math.ceil(len(starts) * analog_fraction)))
     analog_count = min(len(starts), requested)
-    analog_starts = starts[np.argpartition(distances, analog_count - 1)[:analog_count]]
-    matched = simple_returns[analog_starts[:, None] + np.arange(horizon_sessions)]
+    analog_starts = starts[np.argsort(distances, kind="stable")[:analog_count]]
+    # The drawdown at t already includes return t. Forward outcomes start at
+    # t+1, and the last matched observation must remain inside saved history.
+    matched = simple_returns[analog_starts[:, None] + 1 + np.arange(horizon_sessions)]
 
     levels = np.arange(0.0, maximum_debt_ratio + grid_step / 2.0, grid_step)
     levels = np.unique(np.append(levels, maximum_debt_ratio))
@@ -93,7 +100,60 @@ def estimate_drawdown_conditioned_debt(
     baseline = float(tail_growth[0])
     if tail_growth[best_index] <= baseline + 1e-10:
         best_index = 0
-    debt_ratio = float(levels[best_index])
+    raw_best_index = best_index
+    raw_debt_ratio = float(levels[raw_best_index])
+    at_boundary = bool(raw_best_index == len(levels) - 1 and raw_debt_ratio > 0)
+    # Remove shared return observations before any uncertainty claim. Choose
+    # closest states first, then sort them chronologically for stability tests.
+    independent_starts = []
+    for start in analog_starts:
+        if all(abs(int(start) - prior) >= horizon_sessions for prior in independent_starts):
+            independent_starts.append(int(start))
+    independent_starts.sort()
+    independent = simple_returns[np.array(independent_starts)[:, None] + 1 + np.arange(horizon_sessions)]
+    evidence_status = "insufficient_independent_windows"
+    validated_ratio = None
+    bounds = []
+    if len(independent_starts) >= minimum_independent_windows:
+        rng = np.random.default_rng(seed)
+        slices = np.array_split(np.arange(len(independent)), 3)
+        resamples = []
+        for segment in slices:
+            count = len(segment)
+            block = max(2, int(math.ceil(count ** (1/3))))
+            starts_b = rng.integers(count, size=(bootstrap_paths, math.ceil(count / block)))
+            resamples.append(((starts_b[..., None] + np.arange(block)) % count).reshape(bootstrap_paths, -1)[:, :count])
+        alpha = .05 / max(1, (len(levels)-1) * 3 * 3)
+        for index, ratio in enumerate(levels):
+            if ratio <= 0:
+                continue
+            lower_bounds = []
+            for funding_rate in (rate, rate + .02, rate + .04):
+                net = (1 + ratio) * independent - ratio * funding_rate / sessions_per_year
+                if np.any(net <= -1):
+                    lower_bounds.append(float("-inf"))
+                    continue
+                outcomes = np.log1p(net).sum(axis=1)
+                baseline_outcomes = np.log1p(independent).sum(axis=1)
+                for segment, sample in zip(slices, resamples):
+                    paired_gain = np.quantile(outcomes[segment][sample], .05, axis=1) - np.quantile(baseline_outcomes[segment][sample], .05, axis=1)
+                    lower_bounds.append(float(np.quantile(paired_gain, alpha)))
+            bounds.append({"debt_ratio": float(ratio), "worst_adjusted_lower_bound": min(lower_bounds)})
+        eligible = [row for row in bounds if row["worst_adjusted_lower_bound"] > 1e-10 and row["debt_ratio"] < maximum_debt_ratio - 1e-10]
+        if raw_debt_ratio == 0:
+            evidence_status = "no_historical_advantage"
+        elif at_boundary:
+            evidence_status = "search_boundary_unresolved"
+        elif eligible:
+            # Conservative stable ratio, rather than maximizing another noisy
+            # objective over the same validation observations.
+            validated_ratio = min(row["debt_ratio"] for row in eligible)
+            evidence_status = "historical_stability_supported"
+        else:
+            evidence_status = "uncertain_or_rate_stress_failed"
+    # Compatibility field is a screened research ratio, never lender capacity.
+    debt_ratio = float(validated_ratio or 0.0)
+    best_index = int(np.argmin(abs(levels - debt_ratio)))
     return {
         "method": "nearest historical portfolio-drawdown states; 30-session 5% net log-growth maximum",
         "current_drawdown": current_drawdown,
@@ -105,11 +165,21 @@ def estimate_drawdown_conditioned_debt(
         "recommended_debt_ratio_of_portfolio_base": debt_ratio,
         "recommended_gross_exposure": 1.0 + debt_ratio,
         "estimated_debt_amount": None,
+        "schema_version": 2,
+        "raw_historical_optimum_debt_ratio": raw_debt_ratio,
+        "validated_research_debt_ratio": validated_ratio,
+        "borrowing_amount_established": False,
+        "evidence_status": evidence_status,
+        "independent_window_count": len(independent_starts),
+        "minimum_independent_windows": minimum_independent_windows,
+        "independent_state_indices": independent_starts,
+        "forward_windows_start_after_state": True,
+        "uncertainty_checks": bounds,
         "lower_tail_log_growth": float(tail_growth[best_index]),
         "unlevered_lower_tail_log_growth": baseline,
         "improvement_vs_unlevered": float(tail_growth[best_index] - baseline),
         "candidate_rows": candidate_rows,
-        "at_search_boundary": bool(best_index == len(levels) - 1 and debt_ratio > 0),
+        "at_search_boundary": at_boundary,
         "maximum_tested_debt_ratio": float(maximum_debt_ratio),
         "warning": (
             "Historical analogs are overlapping and use the saved full-history optimized mix; "
@@ -399,11 +469,8 @@ def build_portfolio_leverage_assessment(
         drawdown_debt_ratio = float(
             drawdown_scenario["recommended_debt_ratio_of_portfolio_base"]
         )
-        drawdown_scenario["estimated_debt_amount"] = (
-            float(invested_base) * drawdown_debt_ratio
-            if invested_base is not None and math.isfinite(float(invested_base))
-            else None
-        )
+        # No mutual-fund collateral/lender capacity exists in this dataset.
+        drawdown_scenario["estimated_debt_amount"] = None
         scenarios.append(
             {
                 "rate": float(rate),

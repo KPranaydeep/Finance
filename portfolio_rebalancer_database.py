@@ -2272,9 +2272,10 @@ def _render_saved_reserve_study(payload):
                     else "the latest saved portfolio data"
                 )
                 st.markdown(
-                    f"**Leverage reference:** at 9.99% p.a., the drawdown-conditioned "
-                    f"model indicates {debt_pct:.1%} additional debt/base "
-                    f"(about ₹{debt_amount:,.0f}), with the portfolio "
+                    f"**Borrowing amount not established.** At 9.99% p.a., the historical "
+                    f"optimum is {leverage['raw_historical_optimum_debt_ratio']:.1%} debt/base; "
+                    f"evidence: {leverage['evidence_status'].replace('_', ' ')} "
+                    f"({leverage['independent_window_count']} non-overlapping windows). Portfolio "
                     f"{abs(float(leverage['current_drawdown'])):.2%} below its trailing "
                     f"252-session high as of {leverage_as_of}; this is a historical "
                     "scenario, not a safe limit or lender-approved credit amount."
@@ -2447,7 +2448,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                         debt_ratio = float(
                             drawdown["recommended_debt_ratio_of_portfolio_base"]
                         )
-                        drawdown["estimated_debt_amount"] = base_value * debt_ratio
+                        drawdown["estimated_debt_amount"] = None
                         drawdown_recommendations.append(drawdown)
                     current_dd = float(drawdown_recommendations[0]["current_drawdown"])
                     dates = return_history.get("dates") or []
@@ -2458,83 +2459,32 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                             float(item["borrowing_rate"]) - LAMF_ADVERTISED_START_RATE
                         ),
                     )
-                    recommended_debt = float(
-                        base_drawdown["recommended_debt_ratio_of_portfolio_base"]
-                    )
-                    recommended_amount = float(
-                        base_drawdown["estimated_debt_amount"]
-                    )
                     with st.container(border=True):
-                        st.markdown("**Drawdown-conditioned borrowing scenario**")
-                        st.markdown(
-                            f"As of **{as_of}**, the saved optimal portfolio is "
-                            f"**{abs(current_dd):.2%} below its trailing 252-session high**. "
-                            f"Among historical periods with similar portfolio drawdowns, "
-                            f"the 30-session lower-tail model indicates **{recommended_debt:.1%} "
-                            f"additional debt/base (about ₹{recommended_amount:,.0f}** on this "
-                            f"saved portfolio value) at **{LAMF_ADVERTISED_START_RATE:.2%} p.a.**"
-                        )
-                        dd_rows = [
+                        st.markdown("**Drawdown-conditioned evidence check**")
+                        st.markdown(f"Borrowing amount **not established**. Data through **{as_of}**; portfolio **{abs(current_dd):.2%}** below its trailing 252-session high.")
+                        st.dataframe(pd.DataFrame([
                             {
                                 "Funding rate": f"{float(item['borrowing_rate']):.2%}",
-                                "Debt / base": f"{float(item['recommended_debt_ratio_of_portfolio_base']):.1%}",
-                                "Illustrative debt": f"₹{float(item['estimated_debt_amount']):,.0f}",
-                                "Comparable windows": int(item["analog_count"]),
-                                "30-session 5% tail log growth": f"{float(item['lower_tail_log_growth']):.2%}",
+                                "Historical optimum": f"{float(item['raw_historical_optimum_debt_ratio']):.1%}",
+                                "At search boundary": item["at_search_boundary"],
+                                "Overlapping matches": item["analog_count"],
+                                "Non-overlapping windows": item["independent_window_count"],
+                                "Evidence": item["evidence_status"].replace("_", " "),
+                                "Screened research ratio": "Not established" if item["validated_research_debt_ratio"] is None else f"{float(item['validated_research_debt_ratio']):.1%}",
                             }
                             for item in drawdown_recommendations
-                        ]
-                        st.dataframe(pd.DataFrame(dd_rows), hide_index=True)
+                        ]), hide_index=True)
                         st.caption(
-                            f"Uses the latest return date saved by optimization ({as_of}), not a live broker "
-                            "mark. It matches historical windows by drawdown depth and chooses the tested "
-                            "debt ratio with the best empirical 5% lower-tail 30-session log growth; it "
-                            "returns 0% unless that beats the unlevered case. Historical analogs overlap, "
-                            "and the saved mix was optimized on its full history. This is a model scenario, "
-                            "not a safe/allowed limit or Tickertape credit approval; actual LAMF capacity "
-                            "depends on eligible mutual-fund collateral and live lender terms."
+                            "Forward returns start strictly after the drawdown observation. "
+                            "Uncertainty checks use non-overlapping forward windows, three chronological segments, "
+                            "and funding rates stressed by +2 and +4 percentage points. Positive research ratios "
+                            "require an interior optimum and a positive paired lower bound after adjustment for "
+                            "tested debt levels, segments and rates. The minimum independent-window count is "
+                            "an explicit evidence floor, not a guarantee of sufficient tail data. "
+                            "Full-history selection bias remains. No lender-approved borrowing capacity is inferred."
                         )
-                        st.caption(
-                            "Why this may differ from the large 2× annualized return above: this decision "
-                            "compares financing-adjusted 5th-percentile outcomes over the next 30 sessions "
-                            "after historical periods at a similar one-year drawdown. It does not maximize "
-                            "the full-history average return."
-                        )
-                        candidate_rows = base_drawdown.get("candidate_rows") or []
-                        if candidate_rows:
-                            candidate_frame = pd.DataFrame(
-                                [
-                                    {
-                                        "Additional debt / base": f"{float(row['debt_ratio']):.0%}",
-                                        "Gross exposure": f"{float(row['gross_exposure']):.2f}×",
-                                        "Matched 30-session 5% tail return": (
-                                            f"{float(row['lower_tail_30_session_return']):+.2%}"
-                                            if np.isfinite(float(row["lower_tail_30_session_return"]))
-                                            else "Equity exhausted in sampled paths"
-                                        ),
-                                        "Change vs no debt": f"{float(row['change_vs_unlevered']):+.4%} log growth",
-                                    }
-                                    for row in candidate_rows
-                                    if int(round(float(row["debt_ratio"]) * 100))
-                                    in {0, 10, 25, 50, 75, 100}
-                                ]
-                            )
-                            st.dataframe(candidate_frame, hide_index=True)
-                            if recommended_debt <= 0:
-                                baseline_candidate = candidate_rows[0]
-                                best_candidate = max(
-                                    candidate_rows,
-                                    key=lambda row: float(row["lower_tail_log_growth"]),
-                                )
-                                st.info(
-                                    f"The model shows 0% additional debt because the best tested debt "
-                                    f"level ({float(best_candidate['debt_ratio']):.1%}) did not improve "
-                                    f"matched 5% tail log-growth over no debt. The sampled 30-session "
-                                    f"tail returns were {float(baseline_candidate['lower_tail_30_session_return']):+.2%} "
-                                    f"without debt and {float(best_candidate['lower_tail_30_session_return']):+.2%} "
-                                    "at that debt level. This is a conservative model comparison, not a "
-                                    "claim that borrowing is categorically impossible."
-                                )
+                        if base_drawdown.get("uncertainty_checks"):
+                            st.dataframe(pd.DataFrame(base_drawdown["uncertainty_checks"]), hide_index=True)
                 except (TypeError, ValueError, KeyError, IndexError) as exc:
                     st.warning(f"Drawdown-conditioned borrowing scenario unavailable: {exc}")
             for scenario in saved_scenarios:
@@ -2792,8 +2742,19 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         try:
             debt_summary = estimate_drawdown_conditioned_debt(saved_returns, borrowing_rate=LAMF_ADVERTISED_START_RATE)
             debt_ratio = float(debt_summary["recommended_debt_ratio_of_portfolio_base"])
-            debt_card.metric("Additional debt / invested base", f"{debt_ratio:.1%}")
-            debt_card.caption(f"₹{base_value * debt_ratio:,.0f} · drawdown-conditioned model")
+            debt_card.metric("Additional debt / invested base", "Not established")
+            debt_card.caption(
+                f"Historical optimum: {debt_summary['raw_historical_optimum_debt_ratio']:.1%}"
+                f" · {debt_summary['independent_window_count']} non-overlapping windows"
+                f" · {debt_summary['evidence_status'].replace('_', ' ')}."
+            )
+            if debt_summary.get("at_search_boundary"):
+                debt_card.caption("Historical optimum hits the maximum tested debt; no borrowing amount is established.")
+            saved_debt_dates = (payload.get("leverage_return_history") or {}).get("dates") or []
+            if saved_debt_dates:
+                debt_card.caption(f"Borrowing-model data through: {str(saved_debt_dates[-1])[:10]}")
+            if debt_summary.get("validated_research_debt_ratio") is not None:
+                debt_card.caption(f"Stability-screened research ratio: {debt_summary['validated_research_debt_ratio']:.1%}; eligible collateral and lender capacity are unverified.")
         except (TypeError, ValueError, KeyError, IndexError):
             debt_card.metric("Additional debt / invested base", "Unavailable")
 
