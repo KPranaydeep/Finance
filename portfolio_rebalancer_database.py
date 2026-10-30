@@ -2725,6 +2725,20 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                         f" · Positive paths {float(candidate['Probability of positive net return (%)']):.1f}%"
                     )
                     st.caption(f"Price data through: {candidate.get('Price data through', 'not recorded in this saved analysis')}")
+        if not saved_scenario_df.empty:
+            currency_by_ticker = {
+                str(row.get("Yahoo Ticker", "")).strip().upper(): str(row.get("Currency", "")).strip()
+                for row in payload.get("current_allocation") or []
+                if row.get("Currency")
+            }
+            currency_ranking = saved_scenario_df.copy()
+            currency_ranking["Currency"] = currency_ranking["Yahoo Ticker"].astype(str).str.strip().str.upper().map(currency_by_ticker).fillna("Unknown")
+            for currency, group in currency_ranking.groupby("Currency", sort=True):
+                highest, lowest = group.iloc[0], group.iloc[-1]
+                st.markdown(
+                    f"**{currency}** · Buy **{highest['Security']}** ({float(highest['Return × positive-probability score (%)']):+.2f}%)"
+                    f" · Sell **{lowest['Security']}** ({float(lowest['Return × positive-probability score (%)']):+.2f}%)"
+                )
         forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
         st.caption(
             f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 30)} sessions"
