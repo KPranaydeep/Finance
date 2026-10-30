@@ -58,7 +58,7 @@ def test_each_shortlist_prepares_history_once_then_solves_every_asset_limit():
             "Annual Return": state["cap"] / 10_000,
             "Annual Volatility": 0.15,
             "Historical ES 95% (1 Session)": 0.02,
-            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
             "Sharpe Ratio": 1.0,
         }
         return np.ones(400) / 400, returns, None, stats, {
@@ -72,7 +72,7 @@ def test_each_shortlist_prepares_history_once_then_solves_every_asset_limit():
             "Annual Return": state["cap"] / 10_000 + maximum_assets / 100_000,
             "Annual Volatility": 0.15,
             "Historical ES 95% (1 Session)": 0.02,
-            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
             "Sharpe Ratio": 1.0,
         }
         return (
@@ -147,7 +147,7 @@ def test_adaptive_search_prepares_broad_matrix_without_hidden_largest_solve():
             "Annual Return": 0.50,
             "Annual Volatility": 0.15,
             "Historical ES 95% (1 Session)": 0.02,
-            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
             "Sharpe Ratio": 1.0,
         }
         return (
@@ -164,7 +164,7 @@ def test_adaptive_search_prepares_broad_matrix_without_hidden_largest_solve():
             "Annual Return": 0.50,
             "Annual Volatility": 0.15,
             "Historical ES 95% (1 Session)": 0.02,
-            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
             "Sharpe Ratio": 1.0,
         }
         return (
@@ -237,7 +237,7 @@ def test_gradient_cap_matrices_remain_available_for_final_auto_run():
             "Annual Return": 0.5,
             "Annual Volatility": 0.15,
             "Historical ES 95% (1 Session)": 0.02,
-            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
             "Sharpe Ratio": 1.0,
         }
         solve = kwargs.get("solve_portfolio", True)
@@ -255,7 +255,7 @@ def test_gradient_cap_matrices_remain_available_for_final_auto_run():
             "Annual Return": 0.5,
             "Annual Volatility": 0.15,
             "Historical ES 95% (1 Session)": 0.02,
-            "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+            "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
             "Sharpe Ratio": 1.0,
         }
         return (

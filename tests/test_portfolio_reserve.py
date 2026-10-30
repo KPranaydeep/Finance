@@ -9,8 +9,8 @@ from portfolio_reserve import (
 def test_reserve_uses_bootstrap_median_plus_downside_tail_sd():
     result = calculate_portfolio_reserve_target(
         {
-            "Block-Bootstrap Median Return (20 Sessions)": 0.02,
-            "Block-Bootstrap Tail Loss SD 95% (20 Sessions)": 0.03,
+            "Block-Bootstrap Median Return (30 Sessions)": 0.02,
+            "Block-Bootstrap Tail Loss SD 95% (30 Sessions)": 0.03,
         },
         invested_base=100_000,
     )
@@ -25,8 +25,8 @@ def test_reserve_uses_bootstrap_median_plus_downside_tail_sd():
 def test_negative_central_path_increases_reserve_reference():
     result = calculate_portfolio_reserve_target(
         {
-            "Block-Bootstrap Median Return (20 Sessions)": -0.01,
-            "Block-Bootstrap Tail Loss SD 95% (20 Sessions)": 0.03,
+            "Block-Bootstrap Median Return (30 Sessions)": -0.01,
+            "Block-Bootstrap Tail Loss SD 95% (30 Sessions)": 0.03,
         },
         invested_base=100_000,
     )
@@ -61,7 +61,7 @@ def test_leverage_ceiling_respects_user_loss_budget():
 
     assert result["historical_return_minus_borrowing_rate"] == pytest.approx(0.12)
     assert result["modeled_horizon_loss_fraction"] == pytest.approx(0.10)
-    assert result["debt_amount"] == pytest.approx(100_000 * (0.05 / (0.05 + 0.08 * 20 / 252)))
+    assert result["debt_amount"] == pytest.approx(100_000 * (0.05 / (0.05 + 0.08 * 30 / 252)))
 
 
 def test_leverage_ceiling_respects_maintenance_equity_requirement():

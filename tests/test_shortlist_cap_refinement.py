@@ -24,7 +24,7 @@ def row(cap, annual_return, es=0.06, status="Feasible"):
     return {
         "Shortlist cap": cap,
         "Annual Return": annual_return,
-        "Block-Bootstrap ES 95% (20 Sessions)": es,
+        "Block-Bootstrap ES 95% (30 Sessions)": es,
         "Status": status,
     }
 

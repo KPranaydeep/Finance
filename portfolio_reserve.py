@@ -13,7 +13,7 @@ def calculate_leverage_stress_check(
     borrowing_rate: float,
     loss_budget: float,
     maintenance_equity_ratio: float,
-    horizon_sessions: int = 20,
+    horizon_sessions: int = 30,
     sessions_per_year: int = 252,
 ) -> dict[str, float]:
     """Estimate a leverage ceiling under explicitly supplied stress assumptions.
@@ -103,7 +103,7 @@ def calculate_portfolio_reserve_target(
     optimal_stats: Mapping[str, object],
     *,
     invested_base: float,
-    horizon_sessions: int = 20,
+    horizon_sessions: int = 30,
     confidence: float = 0.95,
     sessions_per_year: int = 252,
 ) -> dict[str, float | str]:
@@ -132,8 +132,8 @@ def calculate_portfolio_reserve_target(
             return None
         return value if math.isfinite(value) else None
 
-    median_return = finite_stat("Block-Bootstrap Median Return (20 Sessions)")
-    tail_sd = finite_stat("Block-Bootstrap Tail Loss SD 95% (20 Sessions)")
+    median_return = finite_stat("Block-Bootstrap Median Return (30 Sessions)")
+    tail_sd = finite_stat("Block-Bootstrap Tail Loss SD 95% (30 Sessions)")
     if median_return is not None and tail_sd is not None and tail_sd >= 0:
         method = "moving-block bootstrap"
     else:

@@ -2190,7 +2190,7 @@ def _render_market_read_panel(market_read, *, title):
 
 def _render_saved_downside_tradeoff(current_stats, optimal_stats):
     """Show the optimizer's existing tail-loss context without implying insurance."""
-    metric = "Block-Bootstrap ES 95% (20 Sessions)"
+    metric = "Block-Bootstrap ES 95% (30 Sessions)"
     current_es = (current_stats or {}).get(metric)
     proposed_es = (optimal_stats or {}).get(metric)
     current_return = (current_stats or {}).get("Annual Return")
@@ -2209,7 +2209,7 @@ def _render_saved_downside_tradeoff(current_stats, optimal_stats):
         st.markdown("**Return / tail-loss check · current → proposed**")
         st.caption(
             f"Expected annual return: {pct(current_return)} → {pct(proposed_return)}  ·  "
-            f"20-session 95% expected shortfall: {pct(current_es)} → {pct(proposed_es)}"
+            f"30-session 95% expected shortfall: {pct(current_es)} → {pct(proposed_es)}"
         )
         st.caption(
             "This bootstrap estimate is not a drawdown limit or hedge. Cash can soften "
@@ -2250,7 +2250,7 @@ def _render_saved_reserve_study(payload):
             f"**Portfolio-derived reserve reference:** hold **{reserve_pct:.2%}** "
             f"(₹{reserve_amount:,.2f}) as additional reserve while keeping the "
             f"optimized portfolio 100% invested; it uses the {reserve['method']}’s "
-            "central 20-session outcome plus one downside-tail standard deviation, "
+            "central 30-session outcome plus one downside-tail standard deviation, "
             "as a deployment buffer—not insurance."
         )
         return_history = payload.get("leverage_return_history") or {}
@@ -2292,13 +2292,13 @@ def _render_saved_reserve_study(payload):
     with st.expander("How this reserve percentage is derived", expanded=False):
         st.caption(
             f"Sizing base: ₹{base_value:,.2f} ({base_source}). The reserve rule is "
-            "x = max(0, −median 20-session portfolio return) + one standard deviation "
+            "x = max(0, −median 30-session portfolio return) + one standard deviation "
             "of losses in the worst 5% of simulated outcomes. This combines the typical "
             "central path with a pragmatic tail-dispersion buffer; it is not an optimizer "
             "or a guaranteed/optimal reserve amount."
         )
         st.caption(
-            f"Central 20-session return: {reserve['median_return']:+.2%} · "
+            f"Central 30-session return: {reserve['median_return']:+.2%} · "
             f"95% downside-tail SD: {reserve['tail_loss_sd']:.2%} · "
             f"reserve x: {reserve_pct:.2%}. {reserve['method']} is based on the "
             "optimized portfolio’s saved history; it cannot bound future gaps or losses. "
@@ -2311,7 +2311,7 @@ def _render_saved_reserve_study(payload):
 def _render_saved_leverage_check(payload, *, owner, widget_scope):
     """Show portfolio-specific financing and downside scenarios without claiming safety."""
     optimal_stats = payload.get("optimal_stats") or {}
-    tail_loss = optimal_stats.get("Block-Bootstrap ES 95% (20 Sessions)")
+    tail_loss = optimal_stats.get("Block-Bootstrap ES 95% (30 Sessions)")
     annual_return = optimal_stats.get("Annual Return")
     try:
         base_value = float(
@@ -2412,7 +2412,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                         f"Return* ({funding_rates[2]:.2%} rate stress)": f"{rate_rows[funding_rates[2]][row['leverage_multiple']]['annualized_net_return']:.2%}",
                         "Positive segments (base rate)": f"{row['positive_folds']}/{assessment['fold_count']}",
                         "Segments beating 1.00× (base rate)": f"{row['folds_beating_unlevered']}/{assessment['fold_count']}",
-                        "20-session 95% ES loss": f"{row['tail_expected_shortfall']:.2%}",
+                        "30-session 95% ES loss": f"{row['tail_expected_shortfall']:.2%}",
                         "Historical max drawdown*": f"{row['historical_max_drawdown']:.2%}",
                         "Interest / ₹1L base / year": f"₹{row['annual_interest_per_100k']:,.0f}",
                     }
@@ -2430,7 +2430,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                     "Large annualized returns extrapolate the saved mix's in-sample average and do not "
                     "show outcomes specifically after drawdowns like the latest one. "
                     f"{assessment['selection_bias_warning']} "
-                    "The 20-session expected shortfall is estimated from overlapping historical windows; "
+                    "The 30-session expected shortfall is estimated from overlapping historical windows; "
                     "it is not a maximum-loss bound. Exposure is held constant by a simplified "
                     "daily-reset calculation. The +2/+4 percentage-point funding-rate changes are "
                     "stress assumptions, not Tickertape quotes; fees, changing collateral values, "
@@ -2470,7 +2470,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                             f"As of **{as_of}**, the saved optimal portfolio is "
                             f"**{abs(current_dd):.2%} below its trailing 252-session high**. "
                             f"Among historical periods with similar portfolio drawdowns, "
-                            f"the 20-session lower-tail model indicates **{recommended_debt:.1%} "
+                            f"the 30-session lower-tail model indicates **{recommended_debt:.1%} "
                             f"additional debt/base (about ₹{recommended_amount:,.0f}** on this "
                             f"saved portfolio value) at **{LAMF_ADVERTISED_START_RATE:.2%} p.a.**"
                         )
@@ -2480,7 +2480,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                                 "Debt / base": f"{float(item['recommended_debt_ratio_of_portfolio_base']):.1%}",
                                 "Illustrative debt": f"₹{float(item['estimated_debt_amount']):,.0f}",
                                 "Comparable windows": int(item["analog_count"]),
-                                "20-session 5% tail log growth": f"{float(item['lower_tail_log_growth']):.2%}",
+                                "30-session 5% tail log growth": f"{float(item['lower_tail_log_growth']):.2%}",
                             }
                             for item in drawdown_recommendations
                         ]
@@ -2488,7 +2488,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                         st.caption(
                             f"Uses the latest return date saved by optimization ({as_of}), not a live broker "
                             "mark. It matches historical windows by drawdown depth and chooses the tested "
-                            "debt ratio with the best empirical 5% lower-tail 20-session log growth; it "
+                            "debt ratio with the best empirical 5% lower-tail 30-session log growth; it "
                             "returns 0% unless that beats the unlevered case. Historical analogs overlap, "
                             "and the saved mix was optimized on its full history. This is a model scenario, "
                             "not a safe/allowed limit or Tickertape credit approval; actual LAMF capacity "
@@ -2496,7 +2496,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                         )
                         st.caption(
                             "Why this may differ from the large 2× annualized return above: this decision "
-                            "compares financing-adjusted 5th-percentile outcomes over the next 20 sessions "
+                            "compares financing-adjusted 5th-percentile outcomes over the next 30 sessions "
                             "after historical periods at a similar one-year drawdown. It does not maximize "
                             "the full-history average return."
                         )
@@ -2507,9 +2507,9 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                                     {
                                         "Additional debt / base": f"{float(row['debt_ratio']):.0%}",
                                         "Gross exposure": f"{float(row['gross_exposure']):.2f}×",
-                                        "Matched 20-session 5% tail return": (
-                                            f"{float(row['lower_tail_20_session_return']):+.2%}"
-                                            if np.isfinite(float(row["lower_tail_20_session_return"]))
+                                        "Matched 30-session 5% tail return": (
+                                            f"{float(row['lower_tail_30_session_return']):+.2%}"
+                                            if np.isfinite(float(row["lower_tail_30_session_return"]))
                                             else "Equity exhausted in sampled paths"
                                         ),
                                         "Change vs no debt": f"{float(row['change_vs_unlevered']):+.4%} log growth",
@@ -2529,9 +2529,9 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
                                 st.info(
                                     f"The model shows 0% additional debt because the best tested debt "
                                     f"level ({float(best_candidate['debt_ratio']):.1%}) did not improve "
-                                    f"matched 5% tail log-growth over no debt. The sampled 20-session "
-                                    f"tail returns were {float(baseline_candidate['lower_tail_20_session_return']):+.2%} "
-                                    f"without debt and {float(best_candidate['lower_tail_20_session_return']):+.2%} "
+                                    f"matched 5% tail log-growth over no debt. The sampled 30-session "
+                                    f"tail returns were {float(baseline_candidate['lower_tail_30_session_return']):+.2%} "
+                                    f"without debt and {float(best_candidate['lower_tail_30_session_return']):+.2%} "
                                     "at that debt level. This is a conservative model comparison, not a "
                                     "claim that borrowing is categorically impossible."
                                 )
@@ -2697,6 +2697,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        if any("(20 Sessions)" in str(key) for key in optimal_stats):
+            st.info("This saved portfolio contains historical 20-session risk metrics. Refresh scenarios for 30-session probabilities; a full optimization recalculates portfolio risk at 30 sessions. Existing 20-session values have not been relabeled.")
         if st.button("Refresh buy / sell scenarios", key=f"refresh_scenarios_{widget_scope}", help="Refresh daily histories and recompute scenarios for saved owned and optimal securities."):
             try:
                 review = pd.DataFrame(payload.get("current_allocation") or [])
@@ -2706,10 +2708,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 review["Executable Quantity"] = 1.0
                 config = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
                 history_start = str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10]
-                refreshed = refresh_security_scenarios(review, history_start, int(config.get("horizon_sessions") or 20), float(config.get("one_way_cost_bps", 22)))
+                refreshed = refresh_security_scenarios(review, history_start, 30, float(config.get("one_way_cost_bps", 22)))
                 if refreshed.empty:
                     raise ValueError("No usable scenario histories returned; previous results retained.")
                 payload["security_scenario_ranking"] = refreshed.to_dict(orient="records")
+                payload.setdefault("settings", {}).setdefault("security_scenario_forecast", {})["horizon_sessions"] = 30
                 payload["security_exit_ranking"] = refreshed.iloc[::-1].to_dict(orient="records")
                 payload["security_scenario_ranking_error"] = None
                 payload["security_exit_ranking_error"] = None
@@ -2774,7 +2777,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     st.caption(f"Price data through: {candidate.get('Price data through', 'not recorded in this saved analysis')}")
         forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
         st.caption(
-            f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 20)} sessions"
+            f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 30)} sessions"
             " · score = expected net return × positive-path frequency."
         )
         reserve_card, debt_card = st.columns(2, gap="medium")
@@ -2856,7 +2859,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     review_universe["Executable Quantity"] = 1.0
                     _, refreshed_returns, marks = refresh_security_scenarios(
                         review_universe, str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10],
-                        20, review_cost_bps, include_history=True,
+                        30, review_cost_bps, include_history=True,
                     )
                     owned = {str(row["Yahoo Ticker"]): float(row["Quantity"]) * marks.get(str(row["Yahoo Ticker"]), float("nan")) for _, row in review_universe.iterrows() if float(row.get("Quantity", 0) or 0) > 0}
                     marked_orders = [dict(t, **{"Executable Value": abs(float(t["Executable Quantity"])) * marks.get(str(t["Yahoo Ticker"]), float("nan"))}) for t in rebalancing_plan]
@@ -2868,10 +2871,14 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 except Exception as exc:
                     st.warning(f"Decision update could not finish; saved assessment retained: {exc}")
             executable_review = payload.get("executable_rebalance_review") or {}
+            if executable_review and executable_review.get("horizon_sessions", 20) != 30:
+                executable_review = {"decision": "Update rebalance decision to replace the saved 20-session assessment with 30 sessions"}
             st.info(executable_review.get("decision", "Hold / review — executable-portfolio uncertainty check unavailable for this saved run"))
             if executable_review.get("as_of"):
                 st.caption(f"Paired history through {executable_review['as_of']} · {executable_review.get('observations', 0)} observations · saved whole-share order quantities repriced for this comparison.")
             review_estimate = payload.get("next_review_estimate") or {}
+            if review_estimate and review_estimate.get("horizon_sessions", 20) != 30:
+                review_estimate = {}
             if review_estimate:
                 calendar = review_market_date(review_estimate.get("as_of") or str(pd.Timestamp.now(tz="Asia/Kolkata").date()), review_estimate.get("sessions", 0), pd.Timestamp.now(tz="Asia/Kolkata").date())
                 if calendar.get("date"):
@@ -2885,7 +2892,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     st.caption(f"Review window: {review_estimate.get('sessions', 0)} sessions from the data date. {calendar.get('calendar_error', '')}")
                 with st.expander("How the next review date is estimated", expanded=False):
                     st.caption(review_estimate.get("method", ""))
-                    st.caption("All seven current/target metrics are checked. The first simulated metric deterioration that the target improves and whose median gain clears doubled costs triggers review. Otherwise review is due at the end of the existing 20-session evidence window. This is a bounded model schedule, not an optimized or guaranteed safe waiting period. Dates use the verified NSE calendar; US and other markets can have different holidays.")
+                    st.caption("All seven current/target metrics are checked. The first simulated metric deterioration that the target improves and whose median gain clears doubled costs triggers review. Otherwise review is due at the end of the existing 30-session evidence window. This is a bounded model schedule, not an optimized or guaranteed safe waiting period. Dates use the verified NSE calendar; US and other markets can have different holidays.")
                     if review_estimate.get("timeline"):
                         st.dataframe(pd.DataFrame(review_estimate["timeline"]), hide_index=True, width="stretch", column_config={"Target median gain after 2× costs": st.column_config.NumberColumn(format="percent")})
             else:
@@ -2906,7 +2913,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                         for name in ("Gross traded / base", "Cost / base", "Net mean gain", "Worst segment lower bound (log wealth)", "Hold ES95", "Post-trade ES95 (2× costs)")
                     })
                     st.caption(executable_review.get("confidence_note", ""))
-                    st.caption("Costs are stressed at 2× the configured assumption. Cash is assumed zero unless recorded; unfunded orders cannot pass. The lowest-turnover passing whole-order subset is preferred. Scenarios hold the resulting mix for 20 sessions. The tested subset family is bounded, not an exhaustive trade search.")
+                    st.caption("Costs are stressed at 2× the configured assumption. Cash is assumed zero unless recorded; unfunded orders cannot pass. The lowest-turnover passing whole-order subset is preferred. Scenarios hold the resulting mix for 30 sessions. The tested subset family is bounded, not an exhaustive trade search.")
                     if executable_review.get("selected_orders"):
                         st.markdown("**Lower-turnover subset for review**")
                         st.dataframe(pd.DataFrame(executable_review["selected_orders"]), hide_index=True, width="stretch")
@@ -2920,7 +2927,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     metric_rows.append(row)
                 st.dataframe(pd.DataFrame(metric_rows), hide_index=True, width="stretch")
                 st.caption(
-                    "Compares saved current and full-target point estimates over 20 sessions. "
+                    "Compares saved current and full-target point estimates over 30 sessions. "
                     "Trading drag uses saved executable values and the configured per-side cost assumption; "
                     "spread, slippage and fees must fit inside that estimate; taxes are excluded. "
                     "Suppressed partial trades and rounded shares can leave the executable mix short of the full target. "
@@ -5781,16 +5788,16 @@ def portfolio_stats(weights, log_returns):
         simple_returns,
         confidence=0.95,
     )
-    bootstrap_scenarios_20 = moving_block_bootstrap_return_distribution(
+    bootstrap_scenarios_30 = moving_block_bootstrap_return_distribution(
         np.asarray(portfolio_returns, dtype=float),
-        horizon_sessions=20,
+        horizon_sessions=30,
     )
-    bootstrap_summary_20 = bootstrap_tail_summary(
-        bootstrap_scenarios_20,
+    bootstrap_summary_30 = bootstrap_tail_summary(
+        bootstrap_scenarios_30,
         confidence=0.95,
     )
-    expected_shortfall_20 = empirical_expected_shortfall(
-        bootstrap_scenarios_20,
+    expected_shortfall_30 = empirical_expected_shortfall(
+        bootstrap_scenarios_30,
         confidence=0.95,
     )
 
@@ -5801,11 +5808,11 @@ def portfolio_stats(weights, log_returns):
         "Annual Return": annualized_return,
         "Annual Volatility": annualized_vol,
         "Historical ES 95% (1 Session)": expected_shortfall_1,
-        "Block-Bootstrap ES 95% (20 Sessions)": expected_shortfall_20,
-        "Block-Bootstrap Median Return (20 Sessions)": bootstrap_summary_20[
+        "Block-Bootstrap ES 95% (30 Sessions)": expected_shortfall_30,
+        "Block-Bootstrap Median Return (30 Sessions)": bootstrap_summary_30[
             "median_return"
         ],
-        "Block-Bootstrap Tail Loss SD 95% (20 Sessions)": bootstrap_summary_20[
+        "Block-Bootstrap Tail Loss SD 95% (30 Sessions)": bootstrap_summary_30[
             "tail_loss_sd"
         ],
         "Sharpe Ratio": sharpe,
@@ -7441,8 +7448,8 @@ def search_universal_shortlist_caps(
                 "Historical ES 95% (1 Session)": float(
                     pair_stats.get("Historical ES 95% (1 Session)", np.nan)
                 ),
-                "Block-Bootstrap ES 95% (20 Sessions)": float(
-                    pair_stats.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
+                "Block-Bootstrap ES 95% (30 Sessions)": float(
+                    pair_stats.get("Block-Bootstrap ES 95% (30 Sessions)", np.nan)
                 ),
                 "Sharpe Ratio": float(pair_stats.get("Sharpe Ratio", np.nan)),
                 "Elapsed seconds": pair_elapsed,
@@ -8178,12 +8185,12 @@ def refinement_is_material(
     minimum_return_improvement=0.01,
     maximum_es_worsening=0.005,
 ):
-    """Require a useful return gain without materially worse 20-session ES."""
+    """Require a useful return gain without materially worse 30-session ES."""
     if not baseline or not candidates:
         return False
     baseline_return = float(baseline.get("Annual Return", np.nan))
     baseline_es = float(
-        baseline.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
+        baseline.get("Block-Bootstrap ES 95% (30 Sessions)", np.nan)
     )
     if not np.isfinite(baseline_return):
         return False
@@ -8192,7 +8199,7 @@ def refinement_is_material(
             continue
         candidate_return = float(row.get("Annual Return", np.nan))
         candidate_es = float(
-            row.get("Block-Bootstrap ES 95% (20 Sessions)", np.nan)
+            row.get("Block-Bootstrap ES 95% (30 Sessions)", np.nan)
         )
         return_improved = (
             np.isfinite(candidate_return)
@@ -8532,9 +8539,9 @@ with st.sidebar:
         "Security scenario horizon (trading sessions)",
         min_value=1,
         max_value=252,
-        value=20,
+        value=30,
         step=1,
-        key="security_scenario_horizon_sessions",
+        key="security_scenario_horizon_sessions_v30",
         help=(
             "User-selected horizon for the historical scenario table only; it does not "
             "set an automatic rebalance date or promise a holding period."
@@ -9413,7 +9420,7 @@ if run_cap_search_btn:
                     f"The saved X/Y search is {decision['age_hours']:.1f} hours old. "
                     f"Skipping search and pair re-scoring; the normal rebalance run "
                     f"will optimize **{decision['best_x']:,} × {decision['best_y']:,}** "
-                    "once using current data and refresh the 20-session analysis."
+                    "once using current data and refresh the 30-session analysis."
                 )
                 search_rows = [
                     dict(row)
@@ -9622,7 +9629,7 @@ if run_cap_search_btn:
             run_btn = True
             st.success(
                 "Skipped redundant X/Y discovery and pair re-scoring. Starting the "
-                "normal current-data rebalance and 20-session analysis at the saved "
+                "normal current-data rebalance and 30-session analysis at the saved "
                 f"pair **{universal_preselection_cap:,} × "
                 f"{exact_optimizer_asset_cap:,}**."
             )
@@ -9885,7 +9892,7 @@ if cap_search_results:
                 "Optional local refinement tests the untried interval on both sides of "
                 "the best cap. It evaluates at most four additional caps, will not start "
                 "another cap after 60 minutes, and stops after a pair unless annual return "
-                "improves by at least 1 percentage point without 20-session expected "
+                "improves by at least 1 percentage point without 30-session expected "
                 "shortfall worsening by more than 0.5 percentage point."
             )
             refine_cap_search_btn = st.button(
@@ -10068,7 +10075,7 @@ if cap_search_results:
             "Annual Return",
             "Annual Volatility",
             "Historical ES 95% (1 Session)",
-            "Block-Bootstrap ES 95% (20 Sessions)",
+            "Block-Bootstrap ES 95% (30 Sessions)",
             "Linear fit predicted return",
             "Deviation from linear fit",
         ]

@@ -10,9 +10,9 @@ METRICS = {
     "Annual Return": 1,
     "Annual Volatility": -1,
     "Historical ES 95% (1 Session)": -1,
-    "Block-Bootstrap ES 95% (20 Sessions)": -1,
-    "Block-Bootstrap Median Return (20 Sessions)": 1,
-    "Block-Bootstrap Tail Loss SD 95% (20 Sessions)": -1,
+    "Block-Bootstrap ES 95% (30 Sessions)": -1,
+    "Block-Bootstrap Median Return (30 Sessions)": 1,
+    "Block-Bootstrap Tail Loss SD 95% (30 Sessions)": -1,
     "Sharpe Ratio": 1,
 }
 
@@ -26,7 +26,7 @@ def _finite(value):
 
 
 def assess_rebalance(current, optimal, trades, base, cost_bps=22):
-    """Compare all target metrics, with an explicit 20-session cost hurdle.
+    """Compare all target metrics, with an explicit 30-session cost hurdle.
 
     The fee assumption includes spread/slippage only to the extent covered by
     cost_bps. No independent statistical confidence is inferred from point metrics.
@@ -59,7 +59,7 @@ def assess_rebalance(current, optimal, trades, base, cost_bps=22):
         buys += abs(value) if action == "buy" else 0
         sells += abs(value) if action == "sell" else 0
     drag = gross / base * cost_bps / 10000 if valid_cost else None
-    median_key = "Block-Bootstrap Median Return (20 Sessions)"
+    median_key = "Block-Bootstrap Median Return (30 Sessions)"
     before, after = _finite(current.get(median_key)), _finite(optimal.get(median_key))
     gain = after - before if before is not None and after is not None else None
     net_gain = gain - drag if gain is not None and drag is not None else None
@@ -89,13 +89,13 @@ def assess_rebalance(current, optimal, trades, base, cost_bps=22):
 def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22, cash=0.0, seed=430):
     """Paired historical review of feasible whole-order subsets against holding.
 
-    Evaluate identical buy-and-hold 20-session windows for both alternatives.
+    Evaluate identical buy-and-hold 30-session windows for both alternatives.
     Block-bootstrap confidence bounds test average log-wealth improvement in
     each chronological third, with a family-wise candidate/segment correction.
     Orders and asset selection were chosen on full history: this is a stability
     check, not an independent out-of-sample backtest.
     """
-    result = {"decision": "Hold / review — insufficient executable-history evidence", "candidates": [], "selected_orders": []}
+    result = {"decision": "Hold / review — insufficient executable-history evidence", "candidates": [], "selected_orders": [], "horizon_sessions": 30}
     lr = pd.DataFrame(log_returns).replace([np.inf, -np.inf], np.nan)
     values = {str(k): _finite(v) for k, v in current_values.items()}
     if not values or any(v is None or v < 0 for v in values.values()):
@@ -130,7 +130,7 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
         if key not in seen:
             unique.append(subset)
             seen.add(key)
-    horizon, repeats = 20, 1000
+    horizon, repeats = 30, 1000
     alpha = .05 / max(1, len(unique) * 3)
     initial = np.array([values.get(t, 0) for t in symbols]) / base
     # No forward filling or synthetic flat prices; all alternatives share dates.
@@ -141,7 +141,7 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
     bootstrap_indices = []
     for segment in segments:
         n = len(segment)
-        block = max(20, int(math.ceil(n ** (1 / 3))))
+        block = max(30, int(math.ceil(n ** (1 / 3))))
         starts = rng.integers(0, n, size=(repeats, math.ceil(n / block)))
         bootstrap_indices.append(((starts[..., None] + np.arange(block)) % n).reshape(repeats, -1)[:, :n])
     for subset in unique:
@@ -192,7 +192,7 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
 
 
 def estimate_review_window(log_returns, current_values, target_weights, cost_bps=22,
-                           risk_free_rate=.08225, horizon=20, seed=431):
+                           risk_free_rate=.08225, horizon=30, seed=431):
     """Estimate a bounded review window from all seven portfolio metrics.
 
     Joint stationary bootstrap paths preserve cross-asset dependence. Compare
@@ -273,7 +273,7 @@ def estimate_review_window(log_returns, current_values, target_weights, cost_bps
         if trigger and chosen is None:
             chosen = {"sessions": wait, "reason": "projected deterioration: " + ", ".join(breaches)}
     result = chosen or {"sessions": horizon, "reason": "scenario evidence window expires; no earlier joint metric/cost trigger"}
-    result.update({"as_of": str(matrix.index.max())[:10], "metrics": names, "timeline": timeline,
+    result.update({"as_of": str(matrix.index.max())[:10], "metrics": names, "timeline": timeline, "horizon_sessions": horizon,
                    "method": "Joint historical bootstrap review window; fixed target, 32 simulation groups × 128 paths. Simulation bands are not calibrated forecast confidence intervals."})
     return result
 

@@ -16,7 +16,7 @@ def estimate_drawdown_conditioned_debt(
     *,
     borrowing_rate: float = LAMF_ADVERTISED_START_RATE,
     sessions_per_year: int = 252,
-    horizon_sessions: int = 20,
+    horizon_sessions: int = 30,
     drawdown_lookback_sessions: int = 252,
     maximum_debt_ratio: float = 1.0,
     grid_step: float = 0.025,
@@ -84,7 +84,7 @@ def estimate_drawdown_conditioned_debt(
             "debt_ratio": float(level),
             "gross_exposure": 1.0 + float(level),
             "lower_tail_log_growth": float(score),
-            "lower_tail_20_session_return": float(np.expm1(score)),
+            "lower_tail_30_session_return": float(np.expm1(score)),
             "change_vs_unlevered": float(score - tail_growth[0]),
         }
         for level, score in zip(levels, tail_growth)
@@ -95,7 +95,7 @@ def estimate_drawdown_conditioned_debt(
         best_index = 0
     debt_ratio = float(levels[best_index])
     return {
-        "method": "nearest historical portfolio-drawdown states; 20-session 5% net log-growth maximum",
+        "method": "nearest historical portfolio-drawdown states; 30-session 5% net log-growth maximum",
         "current_drawdown": current_drawdown,
         "analog_count": int(analog_count),
         "analog_fraction": float(analog_count / len(starts)),
@@ -126,7 +126,7 @@ def assess_leverage_scenarios(
     leverage_levels: Sequence[float] = (1.0, 1.1, 1.25, 1.5, 1.75, 2.0),
     fold_count: int = 3,
     tail_confidence: float = 0.95,
-    stress_horizon_sessions: int = 20,
+    stress_horizon_sessions: int = 30,
 ) -> dict[str, object]:
     """Calculate financing-adjusted fixed-mix scenarios across chronological folds.
 

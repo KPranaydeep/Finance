@@ -53,7 +53,7 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
                 "Annual Return": cap / 10000.0,
                 "Annual Volatility": 0.15,
                 "Historical ES 95% (1 Session)": 0.02,
-                "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+                "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
                 "Sharpe Ratio": 1.2,
             }
             return np.array([0.5, 0.5]), returns, None, stats, None
@@ -123,7 +123,7 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
                 "Annual Return": 0.30,
                 "Annual Volatility": 0.15,
                 "Historical ES 95% (1 Session)": 0.02,
-                "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+                "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
                 "Sharpe Ratio": 1.2,
             }
             return np.array([1.0]), returns, None, stats, None
@@ -174,7 +174,7 @@ class AdaptiveShortlistCapSearchTests(unittest.TestCase):
                 "Annual Return": state["cap"] / 10000.0,
                 "Annual Volatility": 0.15,
                 "Historical ES 95% (1 Session)": 0.02,
-                "Block-Bootstrap ES 95% (20 Sessions)": 0.06,
+                "Block-Bootstrap ES 95% (30 Sessions)": 0.06,
                 "Sharpe Ratio": 1.2,
             }
             return np.array([1.0]), returns, None, stats, None

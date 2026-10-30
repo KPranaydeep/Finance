@@ -215,7 +215,7 @@ def robust_feasible_result(
     return min(
         plateau,
         key=lambda row: (
-            finite_or_infinity(row, "Block-Bootstrap ES 95% (20 Sessions)"),
+            finite_or_infinity(row, "Block-Bootstrap ES 95% (30 Sessions)"),
             finite_or_infinity(row, "Historical ES 95% (1 Session)"),
             finite_or_infinity(row, "Annual Volatility"),
             int(row.get("Maximum assets") or 0),

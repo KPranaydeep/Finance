@@ -30,7 +30,7 @@ def empirical_expected_shortfall(
 def moving_block_bootstrap_expected_shortfall(
     daily_log_returns,
     *,
-    horizon_sessions: int = 20,
+    horizon_sessions: int = 30,
     confidence: float = 0.95,
     block_sessions: int = 5,
     simulation_paths: int = 10_000,
@@ -57,7 +57,7 @@ def moving_block_bootstrap_expected_shortfall(
 def moving_block_bootstrap_return_distribution(
     daily_log_returns,
     *,
-    horizon_sessions: int = 20,
+    horizon_sessions: int = 30,
     block_sessions: int = 5,
     simulation_paths: int = 10_000,
     random_seed: int = 20_261_004,

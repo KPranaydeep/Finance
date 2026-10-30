@@ -7,9 +7,9 @@ from rebalance_review import METRICS, estimate_review_window, review_market_date
 def test_identical_portfolios_expire_at_model_horizon_and_check_all_metrics():
     lr = pd.DataFrame({"A": np.linspace(-.01,.012,300)}, index=pd.bdate_range("2025-01-01",periods=300))
     result = estimate_review_window(lr, {"A":100}, {"A":1})
-    assert result["sessions"] == 20
+    assert result["sessions"] == 30
     assert set(result["metrics"]) == set(METRICS)
-    assert len(result["timeline"]) == 20
+    assert len(result["timeline"]) == 30
 
 
 def test_missing_inputs_require_review_now():
