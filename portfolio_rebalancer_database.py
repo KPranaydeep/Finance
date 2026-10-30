@@ -2745,6 +2745,28 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     f"{float(saved_exit.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
                     f"current weight {float(saved_exit.get('Current Weight (%)', 0.0)):.2f}%."
                 )
+        else:
+            # Existing saved analyses may lack the new exit-ranking payload;
+            # surface the weakest owned action as the persistent top-sell proxy.
+            fallback_sell = pd.DataFrame(payload.get("holdings_action_summary") or [])
+            if not fallback_sell.empty and "Quantity" in fallback_sell.columns:
+                fallback_sell = fallback_sell.loc[
+                    pd.to_numeric(fallback_sell["Quantity"], errors="coerce").fillna(0).gt(0)
+                ]
+            if not fallback_sell.empty and "Expected Annual Return Lift (%)" in fallback_sell.columns:
+                fallback_sell["_lift"] = pd.to_numeric(
+                    fallback_sell["Expected Annual Return Lift (%)"], errors="coerce"
+                )
+                fallback_sell = fallback_sell.loc[fallback_sell["_lift"].notna()].sort_values(
+                    "_lift", ascending=True, kind="stable"
+                )
+                if not fallback_sell.empty:
+                    row = fallback_sell.iloc[0]
+                    st.warning(
+                        f"Top single-sell candidate (saved holding proxy): {row.get('Symbol', '—')} · "
+                        f"weakest holding-to-target return lift {float(row['_lift']):+.2f}% · "
+                        f"current weight {float(row.get('Current Weight', 0.0)) * 100:.2f}%."
+                    )
 
         # Compact information-only summary of the market data used for the
         # saved analysis. This does not expose or restore analysis settings.
