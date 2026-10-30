@@ -2881,7 +2881,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         scenario_config = (payload.get("settings") or {}).get(
             "security_scenario_forecast", {}
         )
-        with st.expander("Saved buy scenario ranking", expanded=False):
+        with st.expander(
+            "Saved buy / sell scenario rankings",
+            expanded=bool(st.session_state.pop("open_saved_scenario_review", False)),
+        ):
             if not saved_scenario_df.empty:
                 saved_scenario_error = payload.get("security_scenario_ranking_error")
                 if saved_scenario_error:
@@ -2911,6 +2914,20 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 )
             else:
                 st.caption("No scenario ranking is present in this saved analysis.")
+            saved_exit_records = payload.get("security_exit_ranking") or []
+            saved_exit_review = pd.DataFrame(saved_exit_records)
+            if not saved_exit_review.empty:
+                st.markdown("**Saved sell review ranking (weakest first)**")
+                st.dataframe(
+                    saved_exit_review.drop(columns=["Scenario method"], errors="ignore"),
+                    width="stretch",
+                    hide_index=True,
+                )
+            elif payload.get("security_exit_ranking_error"):
+                st.warning(
+                    "Sell review ranking reported an issue: "
+                    + str(payload["security_exit_ranking_error"])
+                )
 
 
 def _normalize_currency_code(currency):
@@ -8810,6 +8827,12 @@ with step_col3:
             on_click=_start_optimization_plan_timer,
             args=(CURRENT_USER,),
         )
+        scenario_review_btn = st.button(
+            "Review saved buy / sell candidates",
+            width="stretch",
+            key="review_saved_buy_sell_btn",
+            help="Opens the most recent saved buy and sell scenario rankings without running the optimizer.",
+        )
         optimization_timer_placeholder = st.empty()
         timer_summary = _timer_summary(
             st.session_state.get(OPTIMIZATION_TIMER_KEY)
@@ -8824,6 +8847,8 @@ with step_col3:
                 optimization_timer_placeholder.info(timer_text)
 
 st.divider()
+if scenario_review_btn:
+    st.session_state["open_saved_scenario_review"] = True
 if clear_cap_search_btn:
     with get_db_connection() as checkpoint_conn:
         delete_checkpoints(checkpoint_conn, CURRENT_USER)
