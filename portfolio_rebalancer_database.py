@@ -2647,7 +2647,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         current_stats = payload.get("current_stats") or {}
         optimal_stats = payload.get("optimal_stats") or {}
 
-        st.subheader("💾 Last Saved Analysis")
+        st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
         with st.expander("Market backdrop and risk details", expanded=False):
             saved_preselection = (payload.get("settings") or {}).get(
@@ -8261,6 +8261,10 @@ if pending_automatic_best_pair:
     st.session_state["shortlist_cap_search_start_y"] = automatic_assets
 
 with st.sidebar:
+    st.markdown(
+        "[Saved decisions](#saved-analysis) · [Run analysis](#run-analysis) · "
+        "[Holdings](#master-holdings)"
+    )
     st.header("Holdings database")
     sidebar_count_placeholder = st.empty()
 
@@ -8795,7 +8799,7 @@ with st.sidebar:
     )
 
 st.divider()
-st.subheader("✅ Required steps for every user")
+st.subheader("Run analysis", anchor="run-analysis")
 st.caption(
     "Upload your own broker holdings, then run optimization — it automatically "
     "considers both your holdings and the shared Universal Portfolio as candidates."
@@ -8804,8 +8808,7 @@ st.caption(
 step_col1, step_col2, step_col3 = st.columns(3, gap="medium")
 
 with step_col1:
-    with st.container(border=True):
-        st.markdown("**1️⃣ Upload your broker holdings**")
+    with st.expander("Upload / update holdings", expanded=False):
         broker_holdings_upload = st.file_uploader(
             "Upload Groww/Indian or Tickertape US holdings",
             type=["xlsx", "xls", "csv"],
@@ -8835,8 +8838,7 @@ with step_col1:
         )
 
 with step_col2:
-    with st.container(border=True):
-        st.markdown("**2️⃣ Enter lumpsum (optional)**")
+    with st.expander("Lumpsum allocation (optional)", expanded=False):
         lumpsum_inr = st.number_input(
             "Lumpsum to allocate (INR)",
             min_value=0.0,
@@ -11076,7 +11078,7 @@ render_saved_analysis(
     instance_key="page_load",
 )
 
-st.subheader("Master Holdings")
+st.subheader("Master Holdings", anchor="master-holdings")
 master_df = load_master_holdings(CURRENT_USER)
 
 with st.expander("Manage holdings", expanded=False):
