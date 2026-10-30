@@ -2649,36 +2649,37 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis")
         st.caption(f"Saved at: {saved_at}")
-        saved_preselection = (payload.get("settings") or {}).get(
-            "universe_preselection", {}
-        )
-        if saved_preselection:
-            saved_risk_appetite = (
-                (saved_preselection.get("market_data") or {}).get("risk_appetite")
-                or {}
+        with st.expander("Market backdrop and risk details", expanded=False):
+            saved_preselection = (payload.get("settings") or {}).get(
+                "universe_preselection", {}
             )
-            saved_market_read = interpret_risk_appetite_regime(saved_risk_appetite)
-            saved_market_cap = saved_preselection.get("market_cap_filter") or {}
-            _render_market_read_panel(saved_market_read, title="Saved market backdrop")
-            _render_saved_downside_tradeoff(current_stats, optimal_stats)
-            if not int(saved_market_cap.get("fresh_known", saved_market_cap.get("known", 0))):
-                st.warning(
-                    "Market-cap screen was inactive for this saved run: no fresh "
-                    "dated snapshot was available, so it excluded no symbols. "
-                    f"{int(saved_market_cap.get('missing', saved_preselection.get('eligible', 0))):,} "
-                    "market-cap values were missing."
+            if saved_preselection:
+                saved_risk_appetite = (
+                    (saved_preselection.get("market_data") or {}).get("risk_appetite")
+                    or {}
                 )
+                saved_market_read = interpret_risk_appetite_regime(saved_risk_appetite)
+                saved_market_cap = saved_preselection.get("market_cap_filter") or {}
+                _render_market_read_panel(saved_market_read, title="Saved market backdrop")
+                _render_saved_downside_tradeoff(current_stats, optimal_stats)
+                if not int(saved_market_cap.get("fresh_known", saved_market_cap.get("known", 0))):
+                    st.warning(
+                        "Market-cap screen was inactive for this saved run: no fresh "
+                        "dated snapshot was available, so it excluded no symbols. "
+                        f"{int(saved_market_cap.get('missing', saved_preselection.get('eligible', 0))):,} "
+                        "market-cap values were missing."
+                    )
+                else:
+                    st.caption(
+                        "Market-cap coverage was present for some eligible symbols; "
+                        f"{int(saved_market_cap.get('excluded', 0)):,} were excluded and "
+                        f"{int(saved_market_cap.get('missing', 0)):,} missing values were retained."
+                    )
             else:
-                st.caption(
-                    "Market-cap coverage was present for some eligible symbols; "
-                    f"{int(saved_market_cap.get('excluded', 0)):,} were excluded and "
-                    f"{int(saved_market_cap.get('missing', 0)):,} missing values were retained."
+                st.info(
+                    "No saved universe-regime interpretation is available for this older "
+                    "analysis. It will be included with the next completed optimization."
                 )
-        else:
-            st.info(
-                "No saved universe-regime interpretation is available for this older "
-                "analysis. It will be included with the next completed optimization."
-            )
         _render_saved_reserve_study(payload)
         _render_saved_leverage_check(payload, owner=owner, widget_scope=widget_scope)
         saved_scenarios = payload.get("security_scenario_ranking") or []
@@ -2766,14 +2767,14 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             if assets_in_analysis is not None:
                 analysis_parts.append(f"**Assets in return matrix:** {int(assets_in_analysis):,}")
 
-            st.info("  |  ".join(analysis_parts))
+            st.caption("  |  ".join(analysis_parts))
         elif trading_days is not None or assets_in_analysis is not None:
             analysis_parts = []
             if trading_days is not None:
                 analysis_parts.append(f"**Trading days analysed:** {int(trading_days):,}")
             if assets_in_analysis is not None:
                 analysis_parts.append(f"**Assets in return matrix:** {int(assets_in_analysis):,}")
-            st.info("  |  ".join(analysis_parts))
+            st.caption("  |  ".join(analysis_parts))
 
         summary_col1, summary_col2, summary_col3 = st.columns(3)
         summary_col1.metric("Holdings analysed", holdings_analyzed)
@@ -2782,7 +2783,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         run_timing = payload.get("run_to_rebalancing_plan_timing") or {}
         if run_timing.get("status") == "finished":
-            st.info(
+            st.caption(
                 "**Run-to-plan time:** "
                 + format_elapsed(run_timing.get("elapsed_seconds"))
                 + " · Finished when the rebalancing plan was generated."
@@ -9486,564 +9487,565 @@ if cap_search_error:
 
 cap_search_results = st.session_state.get("shortlist_cap_search_results") or []
 if cap_search_results:
-    st.subheader("Shortlist-cap search results")
-    skipper_note = next(
-        (
-            row.get("Search skipper status")
-            for row in reversed(cap_search_results)
-            if row.get("Search skipper status")
-        ),
-        None,
-    )
-    if skipper_note:
-        st.info(
-            skipper_note
-            + " The pair was re-evaluated on the latest history; older search rows "
-            "remain labeled as previous-run research. This heuristic does not prove "
-            "that the saved pair is the global maximum."
+    with st.expander("Search results and landscape", expanded=False):
+        st.subheader("Shortlist-cap search results")
+        skipper_note = next(
+            (
+                row.get("Search skipper status")
+                for row in reversed(cap_search_results)
+                if row.get("Search skipper status")
+            ),
+            None,
         )
-    walk_forward_result = st.session_state.get(
-        "shortlist_cap_walk_forward_validation"
-    )
-    if walk_forward_result:
-        st.markdown("**Chronological finalist check**")
-        if walk_forward_result.get("error"):
-            st.error(f"Validation stopped: {walk_forward_result['error']}")
-        elif walk_forward_result.get("finalists"):
-            st.caption(
-                "Up to two finalists are scored across three expanding training windows. "
-                "Each fold is scored on the immediately following sessions. Net annual "
-                f"{float(walk_forward_result.get('transaction_cost_bps', 22.0)):.0f} bp "
-                "per one-way turnover. This is a finalist stability check, not an "
-                "unbiased point-in-time backtest: finalists and the exact optimizer "
-                "screen were formed using full-history data, and the current candidate "
-                "universe is reused."
-            )
-            if int(walk_forward_result.get("pairs_without_reusable_matrix", 0)):
-                st.caption(
-                    f"Skipped {int(walk_forward_result['pairs_without_reusable_matrix']):,} "
-                    "older feasible pair(s) without a prepared matrix; validating them "
-                    "would repeat the expensive broad-history scan."
-                )
-            validation_view = []
-            for validation_row in walk_forward_result["finalists"]:
-                fold_text = " · ".join(
-                    f"{value:.1%}"
-                    for value in validation_row.get("Fold net annual returns", [])
-                )
-                validation_view.append({
-                    "Pair (X × Y)": (
-                        f"{int(validation_row['Shortlist cap']):,} × "
-                        f"{int(validation_row['Maximum assets']):,}"
-                    ),
-                    "Full-history return": (
-                        f"{validation_row['Full-history annual return']:.2%}"
-                        if pd.notna(validation_row.get("Full-history annual return")) else "—"
-                    ),
-                    "Fold net annual returns": fold_text or "—",
-                    "Median net": (
-                        f"{validation_row['Median net annual return']:.2%}"
-                        if pd.notna(validation_row.get("Median net annual return")) else "—"
-                    ),
-                    "Worst fold": (
-                        f"{validation_row['Worst fold net annual return']:.2%}"
-                        if pd.notna(validation_row.get("Worst fold net annual return")) else "—"
-                    ),
-                    "Positive folds": validation_row.get("Positive folds", 0),
-                    "Gate": validation_row.get("Status"),
-                })
-            st.dataframe(pd.DataFrame(validation_view), width="stretch", hide_index=True)
-            if walk_forward_result.get("winner"):
-                winner = walk_forward_result["winner"]
-                st.success(
-                    "Selected after chronological validation: **"
-                    f"{int(winner['Shortlist cap']):,} × "
-                    f"{int(winner['Maximum assets']):,}**, median net annual "
-                    f"return **{float(winner['Median net annual return']):.2%}**."
-                )
-            elif walk_forward_result.get("status") == "no_finalist_passed":
-                st.warning(
-                    "No finalist met the gate (three usable folds and at least two "
-                    "positive net-return folds). No automatic pair was selected."
-                )
-            elif walk_forward_result.get("status") == "no_reusable_matrices":
-                st.warning(
-                    "No matrix from the completed search was available for validation. "
-                    "To avoid re-downloading the broad universe, validation did not "
-                    "start. Run a fresh search evaluation to validate its finalist."
-                )
-    results_df = pd.DataFrame(cap_search_results)
-    if "Maximum assets" not in results_df.columns:
-        results_df["Maximum assets"] = int(exact_optimizer_asset_cap)
-    if "Effective maximum assets" not in results_df.columns:
-        results_df["Effective maximum assets"] = results_df.get(
-            "Assets", int(exact_optimizer_asset_cap)
-        )
-    if "Cap elapsed seconds" not in results_df.columns:
-        results_df["Cap elapsed seconds"] = results_df.get("Elapsed seconds", 0.0)
-    feasible_df = results_df.loc[results_df["Status"].eq("Feasible")].copy()
-    if feasible_df.empty:
-        st.warning("No evaluated grid combination produced a feasible solution.")
-    else:
-        result_records = results_df.to_dict(orient="records")
-        return_tolerance = max(float(return_equivalence_pp), 0.0) / 100.0
-        best_record = best_feasible_result(result_records)
-        best_row = pd.Series(best_record)
-        robust_row = pd.Series(
-            robust_feasible_result(
-                result_records,
-                return_tolerance=return_tolerance,
-            )
-        )
-        convergence = search_convergence_summary(
-            result_records,
-            cap_search_values,
-            exact_asset_search_values,
-            return_tolerance=return_tolerance,
-        )
-        off_grid_completed = int(convergence.get("off_grid_completed") or 0)
-        if off_grid_completed:
-            st.caption(
-                f"Preserved {off_grid_completed:,} completed pair(s) from an earlier "
-                "grid. They remain visible and eligible as saved research, while "
-                "convergence is measured only against the current step and bounds."
-            )
-        metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
-        metric_col1.metric("Raw-peak cap", f"{int(best_row['Shortlist cap']):,}")
-        metric_col2.metric(
-            "Raw-peak Maximum assets", f"{int(best_row['Maximum assets']):,}"
-        )
-        metric_col3.metric(
-            "Raw annual return", f"{float(best_row['Annual Return']):.2%}"
-        )
-        metric_col4.metric("Trading days", f"{int(best_row['Trading days']):,}")
-        metric_col5.metric("Assets solved", f"{int(best_row['Assets']):,}")
-        robust_return_gap_pp = 100.0 * (
-            float(best_row["Annual Return"]) - float(robust_row["Annual Return"])
-        )
-        st.success(
-            f"Robust plateau choice: **{int(robust_row['Shortlist cap']):,} × "
-            f"{int(robust_row['Maximum assets']):,}** at "
-            f"**{float(robust_row['Annual Return']):.2%}** annual return. It gives up "
-            f"**{robust_return_gap_pp:.2f} percentage points** versus the raw peak "
-            f"within the configured {return_equivalence_pp:.2f}-point tolerance."
-        )
-        convergence_state = str(convergence["state"])
         if skipper_note:
             st.info(
-                "X/Y rediscovery was intentionally skipped under the recent-search "
-                "reuse rule. The displayed pair results are retained research, not "
-                "a fresh full-grid convergence check; global optimality is unknown."
+                skipper_note
+                + " The pair was re-evaluated on the latest history; older search rows "
+                "remain labeled as previous-run research. This heuristic does not prove "
+                "that the saved pair is the global maximum."
             )
-        elif convergence_state == "global_verified":
-            boundary_note = (
-                " The winner is on the " + " and ".join(convergence["boundary_axes"])
-                + " boundary, so it is global only inside the configured bounds."
-                if convergence["boundary_axes"] else ""
-            )
-            st.success(
-                "Bounded global maximum verified: every configured pair was evaluated."
-                + boundary_note
-            )
-        elif convergence_state == "locally_converged":
-            st.success(
-                "Locally converged robust maximum: every minimum-step neighbour around "
-                "the observed leader was evaluated. This is not an exhaustive global proof."
-            )
-        elif convergence_state == "incomplete":
-            st.info(
-                f"Search is not converged: {int(convergence['completed']):,} of "
-                f"{int(convergence['total']):,} configured pairs have results."
-            )
-        elif convergence_state == "boundary_limited":
-            st.warning(
-                "The completed grid's raw peak lies on the "
-                + " and ".join(convergence["boundary_axes"])
-                + " boundary. It is the best observed point, but the maximum is not "
-                "bounded on that side."
-            )
-        elif convergence_state == "no_feasible_result":
-            st.info(
-                "Saved results are preserved, but none of the completed pairs lies "
-                "on the currently configured X/Y grid yet. Run/resume will evaluate "
-                "the current grid without deleting the earlier research."
-            )
-        apply_col1, apply_col2 = st.columns(2)
-        apply_col1.button(
-            "Use robust plateau pair",
-            type="primary",
-            key="apply_robust_shortlist_cap_btn",
-            on_click=_apply_best_search_pair,
-            args=(
-                int(robust_row["Shortlist cap"]),
-                int(robust_row["Maximum assets"]),
-            ),
+        walk_forward_result = st.session_state.get(
+            "shortlist_cap_walk_forward_validation"
         )
-        apply_col2.button(
-            "Use raw-return peak",
-            key="apply_best_shortlist_cap_btn",
-            on_click=_apply_best_search_pair,
-            args=(
-                int(best_row["Shortlist cap"]),
-                int(best_row["Maximum assets"]),
-            ),
-        )
-
-        saved_search_config = (
-            st.session_state.get("shortlist_cap_search_config") or cap_search_config
-        )
-        refinement_minimum = int(saved_search_config.get("starting_cap", 50))
-        refinement_maximum = int(
-            saved_search_config.get("maximum_cap", refinement_minimum)
-        )
-        refinement_step = max(int(saved_search_config.get("step", 50)), 50)
-        next_refinement_pair = local_refinement_cap_pair(
-            cap_search_results,
-            minimum_cap=refinement_minimum,
-            maximum_cap=refinement_maximum,
-            minimum_step=refinement_step,
-        )
-        st.caption(
-            "Optional local refinement tests the untried interval on both sides of "
-            "the best cap. It evaluates at most four additional caps, will not start "
-            "another cap after 60 minutes, and stops after a pair unless annual return "
-            "improves by at least 1 percentage point without 20-session expected "
-            "shortfall worsening by more than 0.5 percentage point."
-        )
-        refine_cap_search_btn = st.button(
-            "Refine around best cap",
-            key="refine_best_shortlist_cap_btn",
-            disabled=not bool(next_refinement_pair),
-            help=(
-                "Uses cached market history where available. Disabled when every "
-                "neighboring interval is already resolved at the selected minimum step."
-            ),
-        )
-
-        if refine_cap_search_btn:
-            refinement_started = time.monotonic()
-            refinement_budget_seconds = 60 * 60
-            maximum_new_caps = 4
-            combined_rows = [dict(row) for row in cap_search_results]
-            for row in combined_rows:
-                row.setdefault("Search phase", "Broad")
-            baseline_row = dict(best_row)
-            evaluated_rows = []
-            stop_reason = "Neighboring intervals resolved at the minimum step"
-            refinement_status = st.status(
-                "Preparing bounded local refinement…",
-                expanded=True,
-            )
-            refinement_progress = st.progress(0.0)
-            refinement_detail = st.empty()
-
-            try:
-                while len(evaluated_rows) < maximum_new_caps:
-                    pair = local_refinement_cap_pair(
-                        combined_rows,
-                        minimum_cap=refinement_minimum,
-                        maximum_cap=refinement_maximum,
-                        minimum_step=refinement_step,
-                    )
-                    remaining_slots = maximum_new_caps - len(evaluated_rows)
-                    pair = pair[:remaining_slots]
-                    if not pair:
-                        break
-
-                    pair_rows = []
-                    for candidate_cap in pair:
-                        elapsed = time.monotonic() - refinement_started
-                        if elapsed >= refinement_budget_seconds:
-                            stop_reason = "60-minute budget reached before another cap began"
-                            break
-                        evaluation_number = len(evaluated_rows) + 1
-
-                        def update_refinement_stage(stage, fraction, details=None):
-                            details = details or {}
-                            total_fraction = (
-                                len(evaluated_rows) + float(np.clip(fraction, 0.0, 1.0))
-                            ) / maximum_new_caps
-                            refinement_progress.progress(min(total_fraction, 1.0))
-                            suffix = ""
-                            if details.get("batches"):
-                                current_batch = int(details.get("batch") or 0)
-                                total_batches = int(details["batches"])
-                                suffix = (
-                                    f" · batch {current_batch:,}/{total_batches:,}"
-                                    if current_batch
-                                    else f" · {total_batches:,} batches planned"
-                                )
-                            refinement_status.update(
-                                label=(
-                                    f"Refinement {evaluation_number}/{maximum_new_caps} · "
-                                    f"cap {candidate_cap:,} · {stage}{suffix}"
-                                ),
-                                state="running",
-                                expanded=True,
-                            )
-                            refinement_detail.caption(
-                                "Refinement elapsed "
-                                + format_elapsed(time.monotonic() - refinement_started)
-                            )
-
-                        single_rows, _ = search_universal_shortlist_caps(
-                            CURRENT_USER,
-                            starting_cap=int(candidate_cap),
-                            maximum_cap=int(candidate_cap),
-                            adaptive=False,
-                            step=refinement_step,
-                            max_dd=float(saved_search_config["max_dd"]),
-                            target_volatility=saved_search_config.get(
-                                "target_volatility"
-                            ),
-                            drop_bottom_pct=float(
-                                saved_search_config["drop_bottom_pct"]
-                            ),
-                            history_buffer_days=int(
-                                saved_search_config["history_buffer_days"]
-                            ),
-                            redundancy_corr_threshold=float(
-                                saved_search_config["redundancy_corr_threshold"]
-                            ),
-                            exact_optimizer_asset_cap=int(
-                                saved_search_config["exact_optimizer_asset_cap"]
-                            ),
-                            exact_optimizer_asset_caps=tuple(
-                                saved_search_config.get("exact_optimizer_asset_caps")
-                                or [saved_search_config["exact_optimizer_asset_cap"]]
-                            ),
-                            minimum_trading_days=int(
-                                saved_search_config.get("minimum_trading_days", 252)
-                            ),
-                            on_progress=update_refinement_stage,
-                        )
-                        candidate_row = dict(
-                            best_feasible_result(single_rows) or single_rows[-1]
-                        )
-                        candidate_row["Search phase"] = "Refinement"
-                        combined_rows = [
-                            row
-                            for row in combined_rows
-                            if int(row["Shortlist cap"]) != int(candidate_cap)
-                        ]
-                        combined_rows.append(candidate_row)
-                        combined_rows.sort(key=lambda row: int(row["Shortlist cap"]))
-                        evaluated_rows.append(candidate_row)
-                        pair_rows.append(candidate_row)
-                        st.session_state["shortlist_cap_search_results"] = [
-                            dict(row) for row in combined_rows
-                        ]
-
-                    if not pair_rows:
-                        break
-                    if not refinement_is_material(baseline_row, pair_rows):
-                        stop_reason = (
-                            "No material return improvement in the latest left/right pair"
-                        )
-                        break
-                    feasible_combined = [
-                        row for row in combined_rows if row.get("Status") == "Feasible"
-                    ]
-                    baseline_row = max(
-                        feasible_combined,
-                        key=lambda row: float(row.get("Annual Return", -np.inf)),
-                    )
-                    stop_reason = "Four-cap refinement limit reached"
-
-                elapsed = time.monotonic() - refinement_started
-                st.session_state["shortlist_cap_refinement_summary"] = {
-                    "evaluated": len(evaluated_rows),
-                    "elapsed_seconds": elapsed,
-                    "stop_reason": stop_reason,
-                }
-                st.session_state.pop("shortlist_cap_refinement_error", None)
-                refinement_progress.progress(1.0)
-                refinement_status.update(
-                    label="Bounded local refinement completed",
-                    state="complete",
-                    expanded=False,
+        if walk_forward_result:
+            st.markdown("**Chronological finalist check**")
+            if walk_forward_result.get("error"):
+                st.error(f"Validation stopped: {walk_forward_result['error']}")
+            elif walk_forward_result.get("finalists"):
+                st.caption(
+                    "Up to two finalists are scored across three expanding training windows. "
+                    "Each fold is scored on the immediately following sessions. Net annual "
+                    f"{float(walk_forward_result.get('transaction_cost_bps', 22.0)):.0f} bp "
+                    "per one-way turnover. This is a finalist stability check, not an "
+                    "unbiased point-in-time backtest: finalists and the exact optimizer "
+                    "screen were formed using full-history data, and the current candidate "
+                    "universe is reused."
                 )
-                st.rerun()
-            except Exception as exc:
-                st.session_state["shortlist_cap_refinement_error"] = safe_stop_reason(exc)
-                refinement_status.update(
-                    label="Local refinement stopped",
-                    state="error",
+                if int(walk_forward_result.get("pairs_without_reusable_matrix", 0)):
+                    st.caption(
+                        f"Skipped {int(walk_forward_result['pairs_without_reusable_matrix']):,} "
+                        "older feasible pair(s) without a prepared matrix; validating them "
+                        "would repeat the expensive broad-history scan."
+                    )
+                validation_view = []
+                for validation_row in walk_forward_result["finalists"]:
+                    fold_text = " · ".join(
+                        f"{value:.1%}"
+                        for value in validation_row.get("Fold net annual returns", [])
+                    )
+                    validation_view.append({
+                        "Pair (X × Y)": (
+                            f"{int(validation_row['Shortlist cap']):,} × "
+                            f"{int(validation_row['Maximum assets']):,}"
+                        ),
+                        "Full-history return": (
+                            f"{validation_row['Full-history annual return']:.2%}"
+                            if pd.notna(validation_row.get("Full-history annual return")) else "—"
+                        ),
+                        "Fold net annual returns": fold_text or "—",
+                        "Median net": (
+                            f"{validation_row['Median net annual return']:.2%}"
+                            if pd.notna(validation_row.get("Median net annual return")) else "—"
+                        ),
+                        "Worst fold": (
+                            f"{validation_row['Worst fold net annual return']:.2%}"
+                            if pd.notna(validation_row.get("Worst fold net annual return")) else "—"
+                        ),
+                        "Positive folds": validation_row.get("Positive folds", 0),
+                        "Gate": validation_row.get("Status"),
+                    })
+                st.dataframe(pd.DataFrame(validation_view), width="stretch", hide_index=True)
+                if walk_forward_result.get("winner"):
+                    winner = walk_forward_result["winner"]
+                    st.success(
+                        "Selected after chronological validation: **"
+                        f"{int(winner['Shortlist cap']):,} × "
+                        f"{int(winner['Maximum assets']):,}**, median net annual "
+                        f"return **{float(winner['Median net annual return']):.2%}**."
+                    )
+                elif walk_forward_result.get("status") == "no_finalist_passed":
+                    st.warning(
+                        "No finalist met the gate (three usable folds and at least two "
+                        "positive net-return folds). No automatic pair was selected."
+                    )
+                elif walk_forward_result.get("status") == "no_reusable_matrices":
+                    st.warning(
+                        "No matrix from the completed search was available for validation. "
+                        "To avoid re-downloading the broad universe, validation did not "
+                        "start. Run a fresh search evaluation to validate its finalist."
+                    )
+        results_df = pd.DataFrame(cap_search_results)
+        if "Maximum assets" not in results_df.columns:
+            results_df["Maximum assets"] = int(exact_optimizer_asset_cap)
+        if "Effective maximum assets" not in results_df.columns:
+            results_df["Effective maximum assets"] = results_df.get(
+                "Assets", int(exact_optimizer_asset_cap)
+            )
+        if "Cap elapsed seconds" not in results_df.columns:
+            results_df["Cap elapsed seconds"] = results_df.get("Elapsed seconds", 0.0)
+        feasible_df = results_df.loc[results_df["Status"].eq("Feasible")].copy()
+        if feasible_df.empty:
+            st.warning("No evaluated grid combination produced a feasible solution.")
+        else:
+            result_records = results_df.to_dict(orient="records")
+            return_tolerance = max(float(return_equivalence_pp), 0.0) / 100.0
+            best_record = best_feasible_result(result_records)
+            best_row = pd.Series(best_record)
+            robust_row = pd.Series(
+                robust_feasible_result(
+                    result_records,
+                    return_tolerance=return_tolerance,
+                )
+            )
+            convergence = search_convergence_summary(
+                result_records,
+                cap_search_values,
+                exact_asset_search_values,
+                return_tolerance=return_tolerance,
+            )
+            off_grid_completed = int(convergence.get("off_grid_completed") or 0)
+            if off_grid_completed:
+                st.caption(
+                    f"Preserved {off_grid_completed:,} completed pair(s) from an earlier "
+                    "grid. They remain visible and eligible as saved research, while "
+                    "convergence is measured only against the current step and bounds."
+                )
+            metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
+            metric_col1.metric("Raw-peak cap", f"{int(best_row['Shortlist cap']):,}")
+            metric_col2.metric(
+                "Raw-peak Maximum assets", f"{int(best_row['Maximum assets']):,}"
+            )
+            metric_col3.metric(
+                "Raw annual return", f"{float(best_row['Annual Return']):.2%}"
+            )
+            metric_col4.metric("Trading days", f"{int(best_row['Trading days']):,}")
+            metric_col5.metric("Assets solved", f"{int(best_row['Assets']):,}")
+            robust_return_gap_pp = 100.0 * (
+                float(best_row["Annual Return"]) - float(robust_row["Annual Return"])
+            )
+            st.success(
+                f"Robust plateau choice: **{int(robust_row['Shortlist cap']):,} × "
+                f"{int(robust_row['Maximum assets']):,}** at "
+                f"**{float(robust_row['Annual Return']):.2%}** annual return. It gives up "
+                f"**{robust_return_gap_pp:.2f} percentage points** versus the raw peak "
+                f"within the configured {return_equivalence_pp:.2f}-point tolerance."
+            )
+            convergence_state = str(convergence["state"])
+            if skipper_note:
+                st.info(
+                    "X/Y rediscovery was intentionally skipped under the recent-search "
+                    "reuse rule. The displayed pair results are retained research, not "
+                    "a fresh full-grid convergence check; global optimality is unknown."
+                )
+            elif convergence_state == "global_verified":
+                boundary_note = (
+                    " The winner is on the " + " and ".join(convergence["boundary_axes"])
+                    + " boundary, so it is global only inside the configured bounds."
+                    if convergence["boundary_axes"] else ""
+                )
+                st.success(
+                    "Bounded global maximum verified: every configured pair was evaluated."
+                    + boundary_note
+                )
+            elif convergence_state == "locally_converged":
+                st.success(
+                    "Locally converged robust maximum: every minimum-step neighbour around "
+                    "the observed leader was evaluated. This is not an exhaustive global proof."
+                )
+            elif convergence_state == "incomplete":
+                st.info(
+                    f"Search is not converged: {int(convergence['completed']):,} of "
+                    f"{int(convergence['total']):,} configured pairs have results."
+                )
+            elif convergence_state == "boundary_limited":
+                st.warning(
+                    "The completed grid's raw peak lies on the "
+                    + " and ".join(convergence["boundary_axes"])
+                    + " boundary. It is the best observed point, but the maximum is not "
+                    "bounded on that side."
+                )
+            elif convergence_state == "no_feasible_result":
+                st.info(
+                    "Saved results are preserved, but none of the completed pairs lies "
+                    "on the currently configured X/Y grid yet. Run/resume will evaluate "
+                    "the current grid without deleting the earlier research."
+                )
+            apply_col1, apply_col2 = st.columns(2)
+            apply_col1.button(
+                "Use robust plateau pair",
+                type="primary",
+                key="apply_robust_shortlist_cap_btn",
+                on_click=_apply_best_search_pair,
+                args=(
+                    int(robust_row["Shortlist cap"]),
+                    int(robust_row["Maximum assets"]),
+                ),
+            )
+            apply_col2.button(
+                "Use raw-return peak",
+                key="apply_best_shortlist_cap_btn",
+                on_click=_apply_best_search_pair,
+                args=(
+                    int(best_row["Shortlist cap"]),
+                    int(best_row["Maximum assets"]),
+                ),
+            )
+    
+            saved_search_config = (
+                st.session_state.get("shortlist_cap_search_config") or cap_search_config
+            )
+            refinement_minimum = int(saved_search_config.get("starting_cap", 50))
+            refinement_maximum = int(
+                saved_search_config.get("maximum_cap", refinement_minimum)
+            )
+            refinement_step = max(int(saved_search_config.get("step", 50)), 50)
+            next_refinement_pair = local_refinement_cap_pair(
+                cap_search_results,
+                minimum_cap=refinement_minimum,
+                maximum_cap=refinement_maximum,
+                minimum_step=refinement_step,
+            )
+            st.caption(
+                "Optional local refinement tests the untried interval on both sides of "
+                "the best cap. It evaluates at most four additional caps, will not start "
+                "another cap after 60 minutes, and stops after a pair unless annual return "
+                "improves by at least 1 percentage point without 20-session expected "
+                "shortfall worsening by more than 0.5 percentage point."
+            )
+            refine_cap_search_btn = st.button(
+                "Refine around best cap",
+                key="refine_best_shortlist_cap_btn",
+                disabled=not bool(next_refinement_pair),
+                help=(
+                    "Uses cached market history where available. Disabled when every "
+                    "neighboring interval is already resolved at the selected minimum step."
+                ),
+            )
+    
+            if refine_cap_search_btn:
+                refinement_started = time.monotonic()
+                refinement_budget_seconds = 60 * 60
+                maximum_new_caps = 4
+                combined_rows = [dict(row) for row in cap_search_results]
+                for row in combined_rows:
+                    row.setdefault("Search phase", "Broad")
+                baseline_row = dict(best_row)
+                evaluated_rows = []
+                stop_reason = "Neighboring intervals resolved at the minimum step"
+                refinement_status = st.status(
+                    "Preparing bounded local refinement…",
                     expanded=True,
                 )
-
-        refinement_summary = st.session_state.get(
-            "shortlist_cap_refinement_summary"
-        )
-        if refinement_summary:
-            st.info(
-                f"Local refinement evaluated "
-                f"{int(refinement_summary.get('evaluated', 0))} additional cap(s) in "
-                f"{format_elapsed(float(refinement_summary.get('elapsed_seconds', 0.0)))}. "
-                f"Stopped because: {refinement_summary.get('stop_reason', 'completed')}."
+                refinement_progress = st.progress(0.0)
+                refinement_detail = st.empty()
+    
+                try:
+                    while len(evaluated_rows) < maximum_new_caps:
+                        pair = local_refinement_cap_pair(
+                            combined_rows,
+                            minimum_cap=refinement_minimum,
+                            maximum_cap=refinement_maximum,
+                            minimum_step=refinement_step,
+                        )
+                        remaining_slots = maximum_new_caps - len(evaluated_rows)
+                        pair = pair[:remaining_slots]
+                        if not pair:
+                            break
+    
+                        pair_rows = []
+                        for candidate_cap in pair:
+                            elapsed = time.monotonic() - refinement_started
+                            if elapsed >= refinement_budget_seconds:
+                                stop_reason = "60-minute budget reached before another cap began"
+                                break
+                            evaluation_number = len(evaluated_rows) + 1
+    
+                            def update_refinement_stage(stage, fraction, details=None):
+                                details = details or {}
+                                total_fraction = (
+                                    len(evaluated_rows) + float(np.clip(fraction, 0.0, 1.0))
+                                ) / maximum_new_caps
+                                refinement_progress.progress(min(total_fraction, 1.0))
+                                suffix = ""
+                                if details.get("batches"):
+                                    current_batch = int(details.get("batch") or 0)
+                                    total_batches = int(details["batches"])
+                                    suffix = (
+                                        f" · batch {current_batch:,}/{total_batches:,}"
+                                        if current_batch
+                                        else f" · {total_batches:,} batches planned"
+                                    )
+                                refinement_status.update(
+                                    label=(
+                                        f"Refinement {evaluation_number}/{maximum_new_caps} · "
+                                        f"cap {candidate_cap:,} · {stage}{suffix}"
+                                    ),
+                                    state="running",
+                                    expanded=True,
+                                )
+                                refinement_detail.caption(
+                                    "Refinement elapsed "
+                                    + format_elapsed(time.monotonic() - refinement_started)
+                                )
+    
+                            single_rows, _ = search_universal_shortlist_caps(
+                                CURRENT_USER,
+                                starting_cap=int(candidate_cap),
+                                maximum_cap=int(candidate_cap),
+                                adaptive=False,
+                                step=refinement_step,
+                                max_dd=float(saved_search_config["max_dd"]),
+                                target_volatility=saved_search_config.get(
+                                    "target_volatility"
+                                ),
+                                drop_bottom_pct=float(
+                                    saved_search_config["drop_bottom_pct"]
+                                ),
+                                history_buffer_days=int(
+                                    saved_search_config["history_buffer_days"]
+                                ),
+                                redundancy_corr_threshold=float(
+                                    saved_search_config["redundancy_corr_threshold"]
+                                ),
+                                exact_optimizer_asset_cap=int(
+                                    saved_search_config["exact_optimizer_asset_cap"]
+                                ),
+                                exact_optimizer_asset_caps=tuple(
+                                    saved_search_config.get("exact_optimizer_asset_caps")
+                                    or [saved_search_config["exact_optimizer_asset_cap"]]
+                                ),
+                                minimum_trading_days=int(
+                                    saved_search_config.get("minimum_trading_days", 252)
+                                ),
+                                on_progress=update_refinement_stage,
+                            )
+                            candidate_row = dict(
+                                best_feasible_result(single_rows) or single_rows[-1]
+                            )
+                            candidate_row["Search phase"] = "Refinement"
+                            combined_rows = [
+                                row
+                                for row in combined_rows
+                                if int(row["Shortlist cap"]) != int(candidate_cap)
+                            ]
+                            combined_rows.append(candidate_row)
+                            combined_rows.sort(key=lambda row: int(row["Shortlist cap"]))
+                            evaluated_rows.append(candidate_row)
+                            pair_rows.append(candidate_row)
+                            st.session_state["shortlist_cap_search_results"] = [
+                                dict(row) for row in combined_rows
+                            ]
+    
+                        if not pair_rows:
+                            break
+                        if not refinement_is_material(baseline_row, pair_rows):
+                            stop_reason = (
+                                "No material return improvement in the latest left/right pair"
+                            )
+                            break
+                        feasible_combined = [
+                            row for row in combined_rows if row.get("Status") == "Feasible"
+                        ]
+                        baseline_row = max(
+                            feasible_combined,
+                            key=lambda row: float(row.get("Annual Return", -np.inf)),
+                        )
+                        stop_reason = "Four-cap refinement limit reached"
+    
+                    elapsed = time.monotonic() - refinement_started
+                    st.session_state["shortlist_cap_refinement_summary"] = {
+                        "evaluated": len(evaluated_rows),
+                        "elapsed_seconds": elapsed,
+                        "stop_reason": stop_reason,
+                    }
+                    st.session_state.pop("shortlist_cap_refinement_error", None)
+                    refinement_progress.progress(1.0)
+                    refinement_status.update(
+                        label="Bounded local refinement completed",
+                        state="complete",
+                        expanded=False,
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.session_state["shortlist_cap_refinement_error"] = safe_stop_reason(exc)
+                    refinement_status.update(
+                        label="Local refinement stopped",
+                        state="error",
+                        expanded=True,
+                    )
+    
+            refinement_summary = st.session_state.get(
+                "shortlist_cap_refinement_summary"
             )
-        refinement_error = st.session_state.get("shortlist_cap_refinement_error")
-        if refinement_error:
-            st.error(f"Local refinement stopped: {refinement_error}")
-
-    percentage_columns = [
-        "Annual Return",
-        "Annual Volatility",
-        "Historical ES 95% (1 Session)",
-        "Block-Bootstrap ES 95% (20 Sessions)",
-        "Linear fit predicted return",
-        "Deviation from linear fit",
-    ]
-    feasible_chart = results_df.loc[results_df["Status"].eq("Feasible")].copy()
-    if not feasible_chart.empty:
-        chart_records = results_df.to_dict(orient="records")
-        raw_marker = best_row.to_dict() if not feasible_df.empty else None
-        robust_marker = robust_row.to_dict() if not feasible_df.empty else None
-        evaluated_caps = sorted(
-            feasible_chart["Shortlist cap"].astype(int).unique().tolist()
-        )
-        evaluated_asset_limits = sorted(
-            feasible_chart["Maximum assets"].astype(int).unique().tolist()
-        )
-        if len(evaluated_caps) < 2:
-            search_view = "Selected-cap curve"
-            st.caption(
-                f"Only shortlist cap {evaluated_caps[0]:,} has results, so a "
-                "Maximum-assets curve is shown. The heatmap unlocks after a second "
-                "shortlist cap completes."
+            if refinement_summary:
+                st.info(
+                    f"Local refinement evaluated "
+                    f"{int(refinement_summary.get('evaluated', 0))} additional cap(s) in "
+                    f"{format_elapsed(float(refinement_summary.get('elapsed_seconds', 0.0)))}. "
+                    f"Stopped because: {refinement_summary.get('stop_reason', 'completed')}."
+                )
+            refinement_error = st.session_state.get("shortlist_cap_refinement_error")
+            if refinement_error:
+                st.error(f"Local refinement stopped: {refinement_error}")
+    
+        percentage_columns = [
+            "Annual Return",
+            "Annual Volatility",
+            "Historical ES 95% (1 Session)",
+            "Block-Bootstrap ES 95% (20 Sessions)",
+            "Linear fit predicted return",
+            "Deviation from linear fit",
+        ]
+        feasible_chart = results_df.loc[results_df["Status"].eq("Feasible")].copy()
+        if not feasible_chart.empty:
+            chart_records = results_df.to_dict(orient="records")
+            raw_marker = best_row.to_dict() if not feasible_df.empty else None
+            robust_marker = robust_row.to_dict() if not feasible_df.empty else None
+            evaluated_caps = sorted(
+                feasible_chart["Shortlist cap"].astype(int).unique().tolist()
             )
-        elif len(evaluated_asset_limits) < 2:
-            search_view = "Decision heatmap"
-            st.caption(
-                "Only one Maximum-assets value has results; the heatmap shows the "
-                "observed return across shortlist caps."
+            evaluated_asset_limits = sorted(
+                feasible_chart["Maximum assets"].astype(int).unique().tolist()
             )
-        else:
-            search_view = st.segmented_control(
-                "Search landscape view",
-                options=["Decision heatmap", "Selected-cap curve", "3D landscape"],
-                default="Decision heatmap",
-                key="optimizer_search_landscape_view",
-            )
-        chart_config = {
-            "displaylogo": False,
-            "scrollZoom": False,
-            "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
-        }
-        if search_view == "3D landscape":
-            chart_figure = build_search_surface_figure(
-                chart_records,
-                raw_peak=raw_marker,
-                robust_choice=robust_marker,
-            )
-            chart_height = 650
-            chart_key = "optimizer_search_surface_3d"
-        elif search_view == "Selected-cap curve":
-            preferred_cap = int(robust_row["Shortlist cap"])
-            default_index = (
-                evaluated_caps.index(preferred_cap)
-                if preferred_cap in evaluated_caps else 0
-            )
-            if len(evaluated_caps) == 1:
-                selected_slice_cap = evaluated_caps[0]
+            if len(evaluated_caps) < 2:
+                search_view = "Selected-cap curve"
+                st.caption(
+                    f"Only shortlist cap {evaluated_caps[0]:,} has results, so a "
+                    "Maximum-assets curve is shown. The heatmap unlocks after a second "
+                    "shortlist cap completes."
+                )
+            elif len(evaluated_asset_limits) < 2:
+                search_view = "Decision heatmap"
+                st.caption(
+                    "Only one Maximum-assets value has results; the heatmap shows the "
+                    "observed return across shortlist caps."
+                )
             else:
-                selected_slice_cap = int(st.selectbox(
-                    "Cross-section shortlist cap",
-                    evaluated_caps,
-                    index=default_index,
-                    format_func=lambda value: f"{int(value):,}",
-                    key="optimizer_search_slice_cap",
-                ))
-            chart_figure = build_search_slice_figure(
-                chart_records, selected_slice_cap
-            )
-            chart_height = 430
-            chart_key = "optimizer_search_slice"
+                search_view = st.segmented_control(
+                    "Search landscape view",
+                    options=["Decision heatmap", "Selected-cap curve", "3D landscape"],
+                    default="Decision heatmap",
+                    key="optimizer_search_landscape_view",
+                )
+            chart_config = {
+                "displaylogo": False,
+                "scrollZoom": False,
+                "modeBarButtonsToRemove": ["toImage", "sendDataToCloud"],
+            }
+            if search_view == "3D landscape":
+                chart_figure = build_search_surface_figure(
+                    chart_records,
+                    raw_peak=raw_marker,
+                    robust_choice=robust_marker,
+                )
+                chart_height = 650
+                chart_key = "optimizer_search_surface_3d"
+            elif search_view == "Selected-cap curve":
+                preferred_cap = int(robust_row["Shortlist cap"])
+                default_index = (
+                    evaluated_caps.index(preferred_cap)
+                    if preferred_cap in evaluated_caps else 0
+                )
+                if len(evaluated_caps) == 1:
+                    selected_slice_cap = evaluated_caps[0]
+                else:
+                    selected_slice_cap = int(st.selectbox(
+                        "Cross-section shortlist cap",
+                        evaluated_caps,
+                        index=default_index,
+                        format_func=lambda value: f"{int(value):,}",
+                        key="optimizer_search_slice_cap",
+                    ))
+                chart_figure = build_search_slice_figure(
+                    chart_records, selected_slice_cap
+                )
+                chart_height = 430
+                chart_key = "optimizer_search_slice"
+            else:
+                chart_figure = build_search_heatmap_figure(
+                    chart_records,
+                    raw_peak=raw_marker,
+                    robust_choice=robust_marker,
+                    shortlist_caps=cap_search_values,
+                    maximum_assets_values=exact_asset_search_values,
+                )
+                chart_height = 520
+                chart_key = "optimizer_search_heatmap"
+            if run_cap_search_btn and search_view == "Decision heatmap":
+                live_search_chart.plotly_chart(
+                    chart_figure,
+                    width="stretch",
+                    height=chart_height,
+                    theme=None,
+                    key="optimizer_search_heatmap_live_final",
+                    config=chart_config,
+                )
+            else:
+                st.plotly_chart(
+                    chart_figure,
+                    width="stretch",
+                    height=chart_height,
+                    theme=None,
+                    key=chart_key,
+                    config=chart_config,
+                )
+        display_columns = [
+            "Search phase",
+            "Shortlist cap",
+            "Maximum assets",
+            "Effective maximum assets",
+            "Shortlisted",
+            "Assets",
+            "Trading days",
+            *percentage_columns,
+            "Sharpe Ratio",
+            "Elapsed seconds",
+            "Cap elapsed seconds",
+            "Next adaptive jump",
+            "Runtime brake",
+            "Status",
+        ]
+        if "Search phase" not in results_df.columns:
+            results_df["Search phase"] = "Previous run"
         else:
-            chart_figure = build_search_heatmap_figure(
-                chart_records,
-                raw_peak=raw_marker,
-                robust_choice=robust_marker,
-                shortlist_caps=cap_search_values,
-                maximum_assets_values=exact_asset_search_values,
-            )
-            chart_height = 520
-            chart_key = "optimizer_search_heatmap"
-        if run_cap_search_btn and search_view == "Decision heatmap":
-            live_search_chart.plotly_chart(
-                chart_figure,
-                width="stretch",
-                height=chart_height,
-                theme=None,
-                key="optimizer_search_heatmap_live_final",
-                config=chart_config,
-            )
-        else:
-            st.plotly_chart(
-                chart_figure,
-                width="stretch",
-                height=chart_height,
-                theme=None,
-                key=chart_key,
-                config=chart_config,
-            )
-    display_columns = [
-        "Search phase",
-        "Shortlist cap",
-        "Maximum assets",
-        "Effective maximum assets",
-        "Shortlisted",
-        "Assets",
-        "Trading days",
-        *percentage_columns,
-        "Sharpe Ratio",
-        "Elapsed seconds",
-        "Cap elapsed seconds",
-        "Next adaptive jump",
-        "Runtime brake",
-        "Status",
-    ]
-    if "Search phase" not in results_df.columns:
-        results_df["Search phase"] = "Previous run"
-    else:
-        results_df["Search phase"] = results_df["Search phase"].fillna("Previous run")
-    for model_column in (
-        "Linear fit predicted return",
-        "Deviation from linear fit",
-    ):
-        if model_column not in results_df.columns:
-            results_df[model_column] = np.nan
-    st.dataframe(
-        results_df[display_columns],
-        width="stretch",
-        hide_index=True,
-        column_config={
-            column: st.column_config.NumberColumn(column, format="percent")
-            for column in percentage_columns
-        }
-        | {
-            "Elapsed seconds": st.column_config.NumberColumn(
-                "Solver time (seconds)", format="%.1f"
-            ),
-            "Cap elapsed seconds": st.column_config.NumberColumn(
-                "Cap elapsed (seconds)", format="%.1f"
-            ),
-        },
-    )
-    st.caption(
-        "Fixed mode evaluates the complete configured shortlist-cap × Maximum-assets "
-        "grid. Each shortlist cap prepares history once; its exact-solver limits reuse "
-        "that chronology-identical matrix. Only feasible solutions with at least 252 "
-        "common trading sessions compete. The raw peak maximizes observed annual "
-        "return; the robust choice treats near-equal returns as a plateau and uses "
-        "downside risk, volatility, complexity and runtime as tie-breakers. Neither "
-        "is a guaranteed future return. Nothing is published or traded automatically."
-    )
-    st.caption(
-        "For adaptive refinements, a positive deviation means the solver beat the local "
-        "linear-fit prediction; the next step may expand in that direction. A negative "
-        "deviation means the fit was optimistic and the step is reduced."
-    )
+            results_df["Search phase"] = results_df["Search phase"].fillna("Previous run")
+        for model_column in (
+            "Linear fit predicted return",
+            "Deviation from linear fit",
+        ):
+            if model_column not in results_df.columns:
+                results_df[model_column] = np.nan
+        st.dataframe(
+            results_df[display_columns],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                column: st.column_config.NumberColumn(column, format="percent")
+                for column in percentage_columns
+            }
+            | {
+                "Elapsed seconds": st.column_config.NumberColumn(
+                    "Solver time (seconds)", format="%.1f"
+                ),
+                "Cap elapsed seconds": st.column_config.NumberColumn(
+                    "Cap elapsed (seconds)", format="%.1f"
+                ),
+            },
+        )
+        st.caption(
+            "Fixed mode evaluates the complete configured shortlist-cap × Maximum-assets "
+            "grid. Each shortlist cap prepares history once; its exact-solver limits reuse "
+            "that chronology-identical matrix. Only feasible solutions with at least 252 "
+            "common trading sessions compete. The raw peak maximizes observed annual "
+            "return; the robust choice treats near-equal returns as a plateau and uses "
+            "downside risk, volatility, complexity and runtime as tie-breakers. Neither "
+            "is a guaranteed future return. Nothing is published or traded automatically."
+        )
+        st.caption(
+            "For adaptive refinements, a positive deviation means the solver beat the local "
+            "linear-fit prediction; the next step may expand in that direction. A negative "
+            "deviation means the fit was optimistic and the step is reduced."
+        )
 
 with st.expander("🌐 Universal Portfolio", expanded=False):
     st.caption(
@@ -11077,7 +11079,7 @@ render_saved_analysis(
 st.subheader("Master Holdings")
 master_df = load_master_holdings(CURRENT_USER)
 
-with st.expander("Manage holdings", expanded=True):
+with st.expander("Manage holdings", expanded=False):
     st.markdown("**Add a holding**")
     st.caption(
         "Enter the bought quantity now. Average buy price is in the security's quoted "
