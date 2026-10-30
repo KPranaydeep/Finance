@@ -34,6 +34,7 @@ from portfolio_risk_metrics import (
 )
 from security_scenario_forecast import (
     forecast_executable_buys,
+    forecast_holdings_for_exit,
     normalize_saved_scenario_ranking,
 )
 from price_history_integrity import (
@@ -11695,9 +11696,17 @@ if run_btn:
         optimization_timer_placeholder.success(_timer_summary(finished_timer)[1])
         scenario_ranking = pd.DataFrame()
         scenario_ranking_error = None
+        exit_ranking = pd.DataFrame()
+        exit_ranking_error = None
         try:
             scenario_ranking = forecast_executable_buys(
                 rebal_df,
+                log_returns,
+                horizon_sessions=int(security_forecast_horizon),
+                one_way_cost_bps=float(security_forecast_cost_bps),
+            )
+            exit_ranking = forecast_holdings_for_exit(
+                portfolio_df,
                 log_returns,
                 horizon_sessions=int(security_forecast_horizon),
                 one_way_cost_bps=float(security_forecast_cost_bps),
@@ -11706,6 +11715,7 @@ if run_btn:
             # An optional research view must never invalidate the actionable
             # rebalance plan or its saved analysis.
             scenario_ranking_error = str(exc)
+            exit_ranking_error = str(exc)
 
         if missing_prices:
             st.warning(f"Skipped symbols with missing latest price: {', '.join(missing_prices)}")
@@ -11813,6 +11823,41 @@ if run_btn:
                 hide_index=True,
                 column_config={
                     "Optimized Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Expected net scenario return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                    "Median net return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                    "Probability of positive net return (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                    "Return × positive-probability score (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                },
+            )
+
+        st.markdown("**Single-sell review ranking (research-only)**")
+        st.caption(
+            "Inverse view of the single-buy model: owned holdings are sorted from weakest "
+            "to strongest by expected net scenario return × positive-path frequency. "
+            "This is a review queue, not an automatic sell signal; executable sells remain "
+            "controlled by the rebalancing plan and your 90-day deferrals."
+        )
+        if exit_ranking_error:
+            st.warning(f"Sell review ranking unavailable; the rebalance plan is unaffected: {exit_ranking_error}")
+        elif exit_ranking.empty:
+            st.info("No owned holdings with usable return history were available for sell review.")
+        else:
+            weakest_sell = exit_ranking.iloc[0]
+            st.warning(
+                f"Weakest single-sell review candidate (research-only): "
+                f"{weakest_sell['Security']} · expected net scenario return "
+                f"{float(weakest_sell['Expected net scenario return (%)']):+.2f}% · "
+                f"return × positive-path score "
+                f"{float(weakest_sell['Return × positive-probability score (%)']):+.2f}% · "
+                f"current weight {float(weakest_sell['Current Weight (%)']):.2f}%."
+            )
+            exit_display = exit_ranking.drop(columns=["Scenario method"])
+            st.dataframe(
+                exit_display,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Current Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
                     "Expected net scenario return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Median net return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Probability of positive net return (%)": st.column_config.NumberColumn(format="%.1f%%"),
@@ -11997,6 +12042,12 @@ if run_btn:
                 else []
             ),
             "security_scenario_ranking_error": scenario_ranking_error,
+            "security_exit_ranking": (
+                exit_ranking.to_dict(orient="records")
+                if not exit_ranking.empty
+                else []
+            ),
+            "security_exit_ranking_error": exit_ranking_error,
             "deferred_rebalancing_trades": deferred_rebal_df.to_dict(orient="records"),
             "lumpsum_plan": lumpsum_plan_payload,
             "warnings": {

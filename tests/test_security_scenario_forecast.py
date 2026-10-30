@@ -5,6 +5,7 @@ from security_scenario_forecast import (
     METHOD,
     _stationary_bootstrap_terminal_log_returns,
     forecast_executable_buys,
+    forecast_holdings_for_exit,
     normalize_saved_scenario_ranking,
 )
 
@@ -124,3 +125,15 @@ def test_stationary_bootstrap_is_finite_and_reproducible():
     )
     assert np.isfinite(a).all()
     np.testing.assert_array_equal(a, b)
+
+
+def test_holdings_exit_ranking_is_inverse_and_reports_current_weight():
+    dates = pd.date_range("2024-01-01", periods=80, freq="D")
+    returns = pd.DataFrame({"GOOD": np.full(80, 0.01), "BAD": np.full(80, -0.01)}, index=dates)
+    portfolio = pd.DataFrame({
+        "Symbol": ["GOOD", "BAD"], "Yahoo Ticker": ["GOOD", "BAD"],
+        "Quantity": [10, 10], "Current Weight": [0.6, 0.4],
+    })
+    result = forecast_holdings_for_exit(portfolio, returns, horizon_sessions=5, one_way_cost_bps=0, paths=300)
+    assert result["Security"].tolist() == ["BAD", "GOOD"]
+    assert result.iloc[0]["Current Weight (%)"] == 40.0

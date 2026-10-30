@@ -197,6 +197,67 @@ def forecast_executable_buys(
     return score_scenario_ranking(result)
 
 
+def forecast_holdings_for_exit(
+    portfolio: pd.DataFrame,
+    log_returns: pd.DataFrame,
+    *,
+    horizon_sessions: int,
+    one_way_cost_bps: float = 22.0,
+    paths: int = 4000,
+    seed: int = 20261014,
+) -> pd.DataFrame:
+    """Rank owned holdings from weakest to strongest for research-only review.
+
+    This deliberately reuses the buy model and its assumptions.  A low score
+    means the holding has the weakest expected net path and/or positive-path
+    frequency over the selected horizon; it is a review signal, never an
+    automatic sell instruction.
+    """
+    columns = [
+        "Security", "Yahoo Ticker", "Current Weight (%)",
+        "Expected net scenario return (%)", "Probability of positive net return (%)",
+        "Return × positive-probability score (%)", "Median net return (%)",
+        "10th–90th percentile net return (%)", "History sessions", "Scenario method",
+    ]
+    if portfolio is None or portfolio.empty:
+        return pd.DataFrame(columns=columns)
+    holdings = portfolio.copy()
+    quantity = pd.to_numeric(holdings.get("Quantity"), errors="coerce")
+    holdings = holdings.loc[quantity.fillna(0).gt(0)].copy()
+    if holdings.empty:
+        return pd.DataFrame(columns=columns)
+    holdings["Action"] = "Buy"
+    holdings["Executable Quantity"] = quantity.loc[holdings.index].fillna(0)
+    if "Optimal Weight" not in holdings.columns:
+        holdings["Optimal Weight"] = pd.to_numeric(
+            holdings.get("Current Weight", 0), errors="coerce"
+        ).fillna(0)
+    ranked = forecast_executable_buys(
+        holdings,
+        log_returns,
+        horizon_sessions=horizon_sessions,
+        one_way_cost_bps=one_way_cost_bps,
+        paths=paths,
+        seed=seed,
+    )
+    if ranked.empty:
+        return pd.DataFrame(columns=columns)
+    weight_map = {}
+    for _, row in holdings.iterrows():
+        ticker = str(row.get("Yahoo Ticker", "")).strip()
+        current_weight = row.get("Current Weight", row.get("Weight", 0.0))
+        try:
+            weight_map[ticker] = float(current_weight) * (100.0 if abs(float(current_weight)) <= 1.0 else 1.0)
+        except (TypeError, ValueError):
+            weight_map[ticker] = 0.0
+    ranked["Current Weight (%)"] = ranked["Yahoo Ticker"].map(weight_map).fillna(0.0)
+    ranked = ranked[columns]
+    return ranked.sort_values(
+        ["Return × positive-probability score (%)", "Expected net scenario return (%)"],
+        ascending=[True, True], kind="stable", na_position="last",
+    ).reset_index(drop=True)
+
+
 def score_scenario_ranking(frame: pd.DataFrame) -> pd.DataFrame:
     """Apply the requested return × positive-path probability ranking.
 
