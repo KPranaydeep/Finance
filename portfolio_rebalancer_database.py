@@ -11722,7 +11722,29 @@ if run_btn:
                 one_way_cost_bps=float(security_forecast_cost_bps),
             )
             exit_ranking = forecast_holdings_for_exit(
-                portfolio_df,
+                pd.concat(
+                    [
+                        portfolio_df,
+                        pd.DataFrame(
+                            [
+                                {
+                                    "Symbol": str(ticker),
+                                    "Yahoo Ticker": str(ticker),
+                                    "Quantity": 0,
+                                    "Current Weight": 0.0,
+                                    "Optimal Weight": float(weight),
+                                }
+                                for ticker, weight in zip(log_returns.columns, optimal_weights)
+                                if float(weight) > 0
+                                and str(ticker) not in set(
+                                    portfolio_df.get("Yahoo Ticker", pd.Series(dtype=str))
+                                    .astype(str)
+                                )
+                            ]
+                        ),
+                    ],
+                    ignore_index=True,
+                ),
                 log_returns,
                 horizon_sessions=int(security_forecast_horizon),
                 one_way_cost_bps=float(security_forecast_cost_bps),
