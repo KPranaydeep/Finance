@@ -25,6 +25,7 @@ import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
+from rebalance_review import assess_rebalance
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2837,6 +2838,38 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 + format_elapsed(run_timing.get("elapsed_seconds"))
                 + " · Finished when the rebalancing plan was generated."
             )
+
+        review_cost_bps = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
+        rebalance_review = assess_rebalance(current_stats, optimal_stats, rebalancing_plan, base_value, review_cost_bps)
+        with st.container(border=True):
+            st.markdown("**Is rebalancing worthwhile?**")
+            st.info(rebalance_review["decision"])
+            if rebalance_review["cost_fraction"] is not None:
+                st.caption(
+                    f"Gross traded / base: {rebalance_review['gross_traded_fraction']:.1%}"
+                    f" · Matched buy/sell turnover: {rebalance_review['two_way_turnover']:.1%}"
+                    f" · Estimated trading drag: {rebalance_review['cost_fraction']:.3%}"
+                    f" (₹{rebalance_review['cost_amount']:,.0f}, {review_cost_bps:g} bp per side)."
+                )
+            if rebalance_review["net_median_gain"] is not None:
+                st.caption(f"20-session median-return improvement after estimated trading drag: {rebalance_review['net_median_gain']:+.3%} of portfolio base.")
+            with st.expander("Metric changes and decision assumptions", expanded=False):
+                metric_rows = []
+                for item in rebalance_review["metrics"]:
+                    row = dict(item)
+                    for field in ("Current", "Optimal", "Change"):
+                        value = row[field]
+                        row[field] = "Unavailable" if value is None else (f"{value:.2f}" if row["Metric"] == "Sharpe Ratio" else f"{value:.2%}")
+                    metric_rows.append(row)
+                st.dataframe(pd.DataFrame(metric_rows), hide_index=True, width="stretch")
+                st.caption(
+                    "Compares saved current and full-target point estimates over 20 sessions. "
+                    "Trading drag uses saved executable values and the configured per-side cost assumption; "
+                    "spread, slippage and fees must fit inside that estimate; taxes are excluded. "
+                    "Suppressed partial trades and rounded shares can leave the executable mix short of the full target. "
+                    "Risk measures are reviewed separately; correlated metrics are not counted as independent votes. "
+                    "Historical estimates do not establish statistical significance. Orders remain available for review."
+                )
 
         with st.expander("Saved rebalancing plan", expanded=True):
             saved_rebal_df = pd.DataFrame(rebalancing_plan)
