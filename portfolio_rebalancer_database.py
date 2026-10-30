@@ -2649,6 +2649,26 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        # Lead with the portfolio decision; research picks are not trade instructions.
+        headline_review = payload.get("executable_rebalance_review") or {}
+        headline_window = payload.get("next_review_estimate") or {}
+        with st.container(border=True):
+            st.markdown("**Portfolio status**")
+            if headline_review.get("horizon_sessions", 20) == 30:
+                st.markdown(headline_review.get("decision") or "Rebalance assessment unavailable")
+                st.caption(f"Decision data through: {headline_review.get('as_of', 'Unknown')}")
+            else:
+                st.markdown("Update rebalance decision to establish the current 30-session assessment.")
+            if headline_window and headline_window.get("horizon_sessions", 20) == 30:
+                headline_calendar = review_market_date(
+                    headline_window.get("as_of") or str(pd.Timestamp.now(tz="Asia/Kolkata").date()),
+                    headline_window.get("sessions", 0), pd.Timestamp.now(tz="Asia/Kolkata").date(),
+                )
+                if headline_calendar.get("date"):
+                    st.markdown(f"**Next review: {headline_calendar['date']} · {headline_calendar['sessions_remaining']} NSE sessions away**")
+                    if headline_calendar.get("due_now"):
+                        st.caption("Review is due now.")
+            st.caption("Buy/sell scores below rank research candidates; they do not override this rebalance assessment.")
         if any("(20 Sessions)" in str(key) for key in optimal_stats):
             st.info("This saved portfolio contains historical 20-session risk metrics. Refresh scenarios for 30-session probabilities; a full optimization recalculates portfolio risk at 30 sessions. Existing 20-session values have not been relabeled.")
         if st.button("Refresh buy / sell scenarios", key=f"refresh_scenarios_{widget_scope}", help="Refresh daily histories and recompute scenarios for saved owned and optimal securities."):
