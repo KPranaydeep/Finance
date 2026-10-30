@@ -2955,6 +2955,13 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     saved_exit_review.drop(columns=["Scenario method"], errors="ignore"),
                     width="stretch",
                     hide_index=True,
+                    column_config={
+                        "Current Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "Expected net scenario return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                        "Median net return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                        "Probability of positive net return (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Return × positive-probability score (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                    },
                 )
             elif payload.get("security_exit_ranking_error"):
                 # Older saved payloads may contain the pre-feature error and no
