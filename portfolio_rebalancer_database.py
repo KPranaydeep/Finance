@@ -27,6 +27,8 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
+from election_reserve import pack_inr_history
+from election_reserve_ui import render_election_reserve
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2249,8 +2251,8 @@ def _render_saved_reserve_study(payload):
     reserve_amount = reserve["reserve_amount"]
     with st.container(border=True):
         st.markdown(
-            f"**Portfolio-derived reserve reference:** hold **{reserve_pct:.2%}** "
-            f"(₹{reserve_amount:,.2f}) as additional reserve while keeping the "
+            f"**Base portfolio buffer before election adjustment: {reserve_pct:.2%}** "
+            f"(₹{reserve_amount:,.2f}) as additional capital while keeping the "
             f"optimized portfolio 100% invested; it uses the {reserve['method']}’s "
             "central 30-session outcome plus one downside-tail standard deviation, "
             "as a deployment buffer—not insurance."
@@ -2617,6 +2619,30 @@ def refresh_security_scenarios(review_universe, start_date, horizon_sessions, on
     return ranking
 
 
+def refresh_election_inr_history(payload):
+    weights = (payload.get("election_reserve_history") or {}).get("weights") or {
+        str(r["ticker"]): float(r.get("target_weight") or 0) for r in payload.get("optimal_allocation") or []
+    }
+    currencies = {str(r["Yahoo Ticker"]): str(r["Currency"]).upper() for r in payload.get("current_allocation") or [] if r.get("Currency")}
+    unknown = [t for t, w in weights.items() if w > 0 and t not in currencies]
+    if unknown:
+        raise ValueError("Missing listing currency: " + ", ".join(unknown))
+    tickers = tuple(t for t, w in weights.items() if w > 0 and currencies.get(t) == "INR")
+    if not tickers:
+        return pack_inr_history(pd.DataFrame(), weights, currencies)
+    with st.spinner("Refreshing optimal INR election histories…"):
+        prices, _, _ = sync_market_history(
+            MARKET_HISTORY_CACHE_PATH, tickers, "2020-01-01",
+            str(pd.Timestamp.now(tz="Asia/Kolkata").date()), _fetch_combined_daily_history,
+            batch_size=FULL_HISTORY_BATCH_SIZE, retry_after_hours=0,
+        )
+        missing = [t for t in tickers if t not in prices or prices[t].dropna().empty]
+        if missing:
+            raise ValueError("Missing INR price history: " + ", ".join(missing))
+        returns = independent_security_log_returns(prices.loc[:, list(tickers)])
+        return pack_inr_history(returns, weights, currencies)
+
+
 def render_saved_analysis(placeholder, owner, *, instance_key="page"):
     """Display the latest saved analysis immediately below the live banner."""
     placeholder.empty()
@@ -2784,9 +2810,15 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         base_value = float(payload.get("current_portfolio_value") or total_invested)
         try:
             reserve_summary = calculate_portfolio_reserve_target(optimal_stats, invested_base=base_value)
-            reserve_card.metric("Additional reserve", f"{reserve_summary['reserve_fraction']:.2%}", border=True)
-            reserve_card.caption(f"₹{reserve_summary['reserve_amount']:,.0f} · deployment buffer")
-            reserve_card.caption(f"Data through: {str((payload.get('history') or {}).get('valid_end') or 'Unknown')[:10]}")
+            combined_fraction, election_reference = render_election_reserve(
+                payload, reserve_summary["reserve_fraction"], base_value, widget_scope,
+                refresh_election_inr_history, lambda value: save_latest_analysis(value, owner),
+            )
+            reserve_card.metric("Additional reserve", f"{combined_fraction:.2%}", border=True)
+            reserve_card.caption(f"₹{base_value * combined_fraction:,.0f} · max(portfolio buffer, active INR election stress)")
+            reserve_card.caption(f"Portfolio buffer data: {str((payload.get('history') or {}).get('valid_end') or 'Unknown')[:10]}")
+            if election_reference and election_reference.get("event_reserve_fraction") is not None:
+                reserve_card.caption(f"Election stress data: {election_reference.get('data_through') or 'Unknown'}")
         except (TypeError, ValueError, KeyError):
             reserve_card.metric("Additional reserve", "Unavailable", border=True)
         saved_returns = (payload.get("leverage_return_history") or {}).get("portfolio_log_returns") or []
@@ -12228,6 +12260,11 @@ if run_btn:
             executable_rebalance_review = {"decision": "Hold / review — executable comparison could not be completed", "error": str(exc)}
             next_review_estimate = {"sessions": 0, "reason": "review-date inputs unavailable", "metrics": []}
         analysis_payload = {
+            "election_reserve_history": pack_inr_history(
+                log_returns,
+                {str(t): float(w) for t, w in zip(log_returns.columns, optimal_weights)},
+                {str(r["Yahoo Ticker"]): str(r["Currency"]).upper() for _, r in portfolio_df.iterrows() if r.get("Currency")},
+            ),
             "executable_rebalance_review": executable_rebalance_review,
             "next_review_estimate": next_review_estimate,
             "review_analysis_context": {
