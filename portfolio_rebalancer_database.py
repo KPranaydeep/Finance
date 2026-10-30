@@ -2742,14 +2742,17 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         try:
             debt_summary = estimate_drawdown_conditioned_debt(saved_returns, borrowing_rate=LAMF_ADVERTISED_START_RATE)
             debt_ratio = float(debt_summary["recommended_debt_ratio_of_portfolio_base"])
-            debt_card.metric("Additional debt / invested base", "Not established")
+            debt_card.metric("Model additional debt / invested base", f"{debt_ratio:.1%}")
+            debt_card.caption(f"₹{base_value * debt_ratio:,.0f} · statistical model allocation")
             debt_card.caption(
                 f"Historical optimum: {debt_summary['raw_historical_optimum_debt_ratio']:.1%}"
                 f" · {debt_summary['independent_window_count']} non-overlapping windows"
                 f" · {debt_summary['evidence_status'].replace('_', ' ')}."
             )
             if debt_summary.get("at_search_boundary"):
-                debt_card.caption("Historical optimum hits the maximum tested debt; no borrowing amount is established.")
+                debt_card.caption("The unscreened historical optimum hits the search boundary; it is excluded from the model allocation.")
+            debt_card.caption(debt_summary["model_decision_reason"])
+            debt_card.caption(f"Tail evidence: {debt_summary['independent_window_count']} / {debt_summary['tail_coverage_floor']} non-overlapping windows needed for the minimum 95% coverage check. Lender capacity remains separate.")
             saved_debt_dates = (payload.get("leverage_return_history") or {}).get("dates") or []
             if saved_debt_dates:
                 debt_card.caption(f"Borrowing-model data through: {str(saved_debt_dates[-1])[:10]}")

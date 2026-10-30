@@ -22,7 +22,7 @@ def estimate_drawdown_conditioned_debt(
     grid_step: float = 0.025,
     analog_fraction: float = 0.20,
     minimum_analogs: int = 30,
-    minimum_independent_windows: int = 60,
+    minimum_independent_windows: int | None = None,
     bootstrap_paths: int = 5000,
     seed: int = 432,
 ) -> dict[str, object]:
@@ -35,6 +35,12 @@ def estimate_drawdown_conditioned_debt(
     not a safety limit or lender-approved amount.
     """
     logs = np.asarray(portfolio_log_returns, dtype=float).reshape(-1)
+    # At 95% confidence, seeing even one observation from the worst 5% needs
+    # ceil(log(.05)/log(.95)) = 59 independent windows. This is a necessary
+    # tail-coverage floor, not a claim of precise 5% quantile estimation.
+    tail_coverage_floor = int(math.ceil(math.log(.05) / math.log(.95)))
+    if minimum_independent_windows is None:
+        minimum_independent_windows = tail_coverage_floor
     rate = float(borrowing_rate)
     required_history = (
         drawdown_lookback_sessions + horizon_sessions + minimum_analogs
@@ -145,9 +151,9 @@ def estimate_drawdown_conditioned_debt(
         elif at_boundary:
             evidence_status = "search_boundary_unresolved"
         elif eligible:
-            # Conservative stable ratio, rather than maximizing another noisy
-            # objective over the same validation observations.
-            validated_ratio = min(row["debt_ratio"] for row in eligible)
+            # Optimize the stressed uncertainty-adjusted improvement, choosing
+            # lower debt when objectives tie. Zero is always a competing option.
+            validated_ratio = max(eligible, key=lambda row: (row["worst_adjusted_lower_bound"], -row["debt_ratio"]))["debt_ratio"]
             evidence_status = "historical_stability_supported"
         else:
             evidence_status = "uncertain_or_rate_stress_failed"
@@ -172,6 +178,14 @@ def estimate_drawdown_conditioned_debt(
         "evidence_status": evidence_status,
         "independent_window_count": len(independent_starts),
         "minimum_independent_windows": minimum_independent_windows,
+        "tail_coverage_floor": tail_coverage_floor,
+        "tail_observation_coverage": float(1 - .95 ** len(independent_starts)),
+        "model_selected_debt_ratio": debt_ratio,
+        "model_decision_reason": (
+            "Positive debt maximizes the stressed, uncertainty-adjusted historical objective"
+            if debt_ratio > 0 else
+            "Zero additional debt selected: positive debt did not pass the tail-evidence, stability, funding-stress and interior-optimum requirements"
+        ),
         "independent_state_indices": independent_starts,
         "forward_windows_start_after_state": True,
         "uncertainty_checks": bounds,

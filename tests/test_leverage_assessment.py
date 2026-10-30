@@ -154,3 +154,22 @@ def test_rate_stress_can_reject_an_apparent_base_rate_advantage():
     assert result["raw_historical_optimum_debt_ratio"] > 0
     assert all(row["worst_adjusted_lower_bound"] < 0 for row in result["uncertainty_checks"])
     assert result["validated_research_debt_ratio"] is None
+
+
+def test_model_can_select_positive_interior_debt_when_evidence_supports_it():
+    # Controlled repeating cycles test the selection mechanics, not forecasting.
+    logs = np.log1p(np.tile([.05, -.045, .002], 140))
+    result = estimate_drawdown_conditioned_debt(logs, horizon_sessions=3,
+        drawdown_lookback_sessions=6, minimum_analogs=4, analog_fraction=1,
+        bootstrap_paths=100, grid_step=.25)
+    assert result["independent_window_count"] >= result["tail_coverage_floor"]
+    assert result["model_selected_debt_ratio"] == .25
+    assert result["evidence_status"] == "historical_stability_supported"
+    assert result["borrowing_amount_established"] is False
+
+
+def test_sparse_tail_evidence_selects_explicit_zero_not_unknown():
+    result = estimate_drawdown_conditioned_debt([.001]*644)
+    assert result["tail_coverage_floor"] == 59
+    assert result["model_selected_debt_ratio"] == 0
+    assert result["tail_observation_coverage"] < .95
