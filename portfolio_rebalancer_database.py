@@ -2683,6 +2683,21 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         _render_saved_leverage_check(payload, owner=owner, widget_scope=widget_scope)
         saved_scenarios = payload.get("security_scenario_ranking") or []
         saved_scenario_df = normalize_saved_scenario_ranking(saved_scenarios)
+        saved_owned = {
+            str(row.get("Yahoo Ticker", row.get("Symbol", ""))).strip().upper()
+            for row in (payload.get("current_allocation") or [])
+            if float(row.get("Quantity", 0) or 0) > 0
+        }
+        saved_optimal = {
+            str(row.get("ticker", row.get("Yahoo Ticker", ""))).strip().upper()
+            for row in (payload.get("optimal_allocation") or [])
+            if float(row.get("target_weight", row.get("Optimal Weight", 0)) or 0) > 0
+        }
+        saved_review_symbols = saved_owned | saved_optimal
+        if not saved_scenario_df.empty and saved_review_symbols:
+            saved_scenario_df = saved_scenario_df.loc[
+                saved_scenario_df["Yahoo Ticker"].astype(str).str.upper().isin(saved_review_symbols)
+            ].reset_index(drop=True)
         if not saved_scenario_df.empty:
             saved_leader = saved_scenario_df.iloc[0]
             st.success(
