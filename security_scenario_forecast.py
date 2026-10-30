@@ -222,12 +222,18 @@ def forecast_holdings_for_exit(
     if portfolio is None or portfolio.empty:
         return pd.DataFrame(columns=columns)
     holdings = portfolio.copy()
-    quantity = pd.to_numeric(
-        holdings.get("Quantity", pd.Series(0, index=holdings.index)), errors="coerce"
+    quantity_source = (
+        holdings["Quantity"]
+        if "Quantity" in holdings.columns
+        else pd.Series(0, index=holdings.index)
     )
-    optimal_weight = pd.to_numeric(
-        holdings.get("Optimal Weight", pd.Series(0, index=holdings.index)), errors="coerce"
-    ).fillna(0)
+    optimal_source = (
+        holdings["Optimal Weight"]
+        if "Optimal Weight" in holdings.columns
+        else pd.Series(0, index=holdings.index)
+    )
+    quantity = pd.to_numeric(quantity_source, errors="coerce").fillna(0)
+    optimal_weight = pd.to_numeric(optimal_source, errors="coerce").fillna(0)
     # Include owned/protected holdings and positive-target optimal securities;
     # the latter are review candidates even when not currently owned.
     holdings = holdings.loc[quantity.fillna(0).gt(0) | optimal_weight.gt(0)].copy()
