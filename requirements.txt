@@ -31,3 +31,6 @@ google-auth>=2.29
 # Model review UI and exchange-session calendar
 pandas-market-calendars>=5,<6
 
+# Sequential market-change detection (bounded feature streams)
+river>=0.26.1,<0.27
+

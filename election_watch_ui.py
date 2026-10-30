@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+from market_regime_watch import detect_market_changes
 from election_watch import monthly_snapshot, upcoming_terms, representation_context, market_context, SOURCE, PARLIAMENT_SOURCE, REPRESENTATION_VERIFIED_AT, _atomic_save
 
 
@@ -12,12 +13,15 @@ def _market_snapshot(end_date):
     result = {}
     for ticker, name in (("^NSEI", "NIFTY 50"), ("^INDIAVIX", "India VIX")):
         try:
-            prices = yf.Ticker(ticker).history(period="2y", auto_adjust=True, timeout=12)
+            # Fixed start keeps the detector's initial scale stable across daily
+            # refreshes rather than moving the warmup with a rolling 2y request.
+            prices = yf.Ticker(ticker).history(start="2020-01-01", end=end_date, auto_adjust=True, timeout=12)
             if prices.empty:
                 raise ValueError("no daily prices returned")
             prices = prices.loc[[str(day)[:10] < end_date for day in prices.index]]
             if name == "NIFTY 50":
                 result[name] = market_context(prices["Close"])
+                result["Regime change"] = detect_market_changes(prices["Close"])
             else:
                 series = prices["Close"].dropna()
                 result[name] = {"level": float(series.iloc[-1]), "as_of": str(series.index[-1])[:10]}
@@ -27,7 +31,7 @@ def _market_snapshot(end_date):
 
 
 def render_election_watch(scope):
-    with st.expander("Election & volatility watch · monthly", expanded=False):
+    with st.expander("Election & regime watch", expanded=False):
         today = pd.Timestamp.now(tz="Asia/Kolkata").date()
         root = Path.home() / ".portfolio_rebalancer"
         refresh = st.button("Refresh election & market context", key=f"election_watch_{scope}")
@@ -67,10 +71,13 @@ def render_election_watch(scope):
             market = json.loads(market_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             market = {}
-        if refresh or market.get("attempted_month") != today.strftime("%Y-%m"):
+        if refresh or market.get("attempted_date") != str(today):
+            if refresh:
+                _market_snapshot.clear()
             fetched = _market_snapshot(str(today))
             # Preserve successful data through provider failures, with failure dates.
             market["attempted_month"] = today.strftime("%Y-%m")
+            market["attempted_date"] = str(today)
             errors = {}
             for name, values in fetched.items():
                 if values.get("error"):
@@ -89,6 +96,22 @@ def render_election_watch(scope):
             st.markdown(f"NIFTY 50: **{index['drawdown']:.1%} from its 252-session high** · 30-session realised volatility **{index['volatility']:.1%} annualised** · volatility percentile **{index['volatility_percentile']:.0f}/100** · data {index['as_of']}.")
         if vix:
             st.caption(f"India VIX: {vix['level']:.2f} · data {vix['as_of']}. VIX is an implied-volatility index, not a direction forecast.")
+        regime = market.get("Regime change") or {}
+        if regime.get("status") in {"recent_change", "no_recent_change"}:
+            if regime["status"] == "recent_change":
+                latest = regime["recent_events"][-1]
+                st.markdown(f"**Regime review flag:** {latest['Change']} · detected {latest['Detected on']} · data {regime['as_of']}.")
+            else:
+                st.caption(f"Regime monitor: no ADWIN change detected in the last {regime['recent_sessions']} observed sessions · data {regime['as_of']}.")
+            with st.expander("Regime-change evidence", expanded=False):
+                st.caption(regime["library"] + ". " + regime["method"])
+                for event in regime["events"][-5:]:
+                    st.caption(f"{event['Detected on']} · {event['Change']}")
+                st.caption("A change flag requests review; it does not identify the cause, predict a bottom, or automatically change reserve/debt allocations. Election events remain separate context.")
+        elif regime:
+            st.caption(f"Regime monitor unavailable: {regime.get('reason', 'insufficient data')}")
+        else:
+            st.caption("Refresh election & market context to populate the River regime monitor.")
         if market.get("refresh_errors"):
             st.caption("Market refresh incomplete; retained values may be stale: " + str(market["refresh_errors"]))
-        st.caption("Context: an approaching election and an observed decline/volatility rise justify checking the portfolio's existing buy scores, reserve and rebalance decision. They do not establish election causation, a bottom, or a profitable entry. This monthly/on-demand snapshot is not a live dip alert; the app must be running for refreshes.")
+        st.caption("Calendar checks monthly; market/regime data checks once daily when the app is used, plus manual refresh. A detected change is a reason to reassess portfolio evidence, not proof of election causation or a bottom. This is an on-screen review flag; no background notifications run while the app is closed.")
