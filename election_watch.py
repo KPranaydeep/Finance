@@ -1,7 +1,7 @@
 """Monthly, source-dated election context; independent of optimizer/trades."""
 from datetime import date, datetime, timezone
 from pathlib import Path
-import io
+from html.parser import HTMLParser
 import json
 import os
 import tempfile
@@ -53,14 +53,52 @@ def seed_snapshot():
             "rows": [dict(zip(("State", "Term ends", "Assembly seats", "Lok Sabha allocation", "Rajya Sabha allocation"), row)) for row in SEED]}
 
 
+class _TableParser(HTMLParser):
+    """Extract plain table cells with the standard library (no lxml needed)."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables, self.stack = [], []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.stack.append({"rows": [], "row": [], "cell": None})
+        elif self.stack:
+            frame = self.stack[-1]
+            if tag == "tr":
+                frame["row"] = []
+            elif tag in {"td", "th"}:
+                frame["cell"] = []
+            elif tag == "br" and frame["cell"] is not None:
+                frame["cell"].append(" ")
+
+    def handle_data(self, value):
+        if self.stack and self.stack[-1]["cell"] is not None:
+            self.stack[-1]["cell"].append(value)
+
+    def handle_endtag(self, tag):
+        if not self.stack:
+            return
+        frame = self.stack[-1]
+        if tag in {"td", "th"} and frame["cell"] is not None:
+            frame["row"].append(" ".join("".join(frame["cell"]).split()))
+            frame["cell"] = None
+        elif tag == "tr" and frame["row"]:
+            frame["rows"].append(frame["row"])
+            frame["row"] = []
+        elif tag == "table":
+            self.tables.append(self.stack.pop()["rows"])
+
+
 def parse_eci_terms(html):
     """Accept only a recognizable official house-terms schema; never guess dates."""
-    for table in pd.read_html(io.StringIO(html)):
-        # ECI can put headings in the first data row rather than a thead.
-        if not any("ASSEMBLY" in str(col).upper() for col in table.columns):
-            if not table.empty:
-                table.columns = table.iloc[0].astype(str)
-                table = table.iloc[1:]
+    parser = _TableParser()
+    parser.feed(html)
+    for raw_rows in parser.tables:
+        header_index = next((i for i,row in enumerate(raw_rows[:10]) if any("ASSEMBLY" in cell.upper() for cell in row) and any("STATE" in cell.upper() for cell in row)), None)
+        if header_index is None:
+            continue
+        header = raw_rows[header_index]
+        table = pd.DataFrame([row for row in raw_rows[header_index+1:] if len(row) == len(header)], columns=header)
         columns = {" ".join(str(col).upper().split()): col for col in table.columns}
         state = next((v for k,v in columns.items() if "STATE" in k), None)
         end = columns.get("TO")
@@ -102,10 +140,18 @@ def monthly_snapshot(path, today=None, force=False, fetch=None):
             raise ValueError("empty snapshot")
     except (OSError, ValueError, TypeError):
         saved = seed_snapshot()
+    baseline = seed_snapshot()
+    if (saved.get("source") == SOURCE and str(saved.get("verified_at", "")) <= baseline["verified_at"]
+            and str(saved.get("coverage", "")).startswith("7-state")):
+        # Migrate the first shipped partial baseline without claiming a live
+        # refresh succeeded or discarding any previously recorded errors.
+        saved["rows"] = baseline["rows"]
+        saved["coverage"] = baseline["coverage"]
+        _atomic_save(path, saved)
     month = today.strftime("%Y-%m")
-    if not force and saved.get("attempted_month") == month:
+    if not force and saved.get("attempted_month") == month and saved.get("parser_version") == 2:
         return saved
-    updated = dict(saved, attempted_month=month, attempted_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    updated = dict(saved, parser_version=2, attempted_month=month, attempted_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     try:
         response = (fetch or requests.get)(SOURCE, timeout=15, headers={"User-Agent": "Mozilla/5.0 portfolio election watch"})
         response.raise_for_status()

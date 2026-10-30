@@ -52,3 +52,25 @@ def test_market_context_measures_drawdown_without_claiming_event_causality():
     assert result["drawdown"] == pytest.approx(-.1)
     assert result["as_of"] == str(prices.index[-1].date())
     with pytest.raises(ValueError): market_context(prices.iloc[:20])
+
+
+def test_partial_baseline_migrates_even_when_refresh_fails(tmp_path):
+    path = tmp_path / "snapshot.json"
+    old = seed_snapshot()
+    old["rows"] = old["rows"][:7]
+    old["coverage"] = "7-state upcoming-term watchlist; polling/counting dates not verified"
+    old["attempted_month"] = "2026-10"
+    old["refresh_error"] = "ImportError: lxml"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    calls = []
+    def blocked(*a, **k):
+        calls.append(1)
+        raise ValueError("ECI unavailable")
+    fixed = monthly_snapshot(path, date(2026,10,30), fetch=blocked)
+    assert len(fixed["rows"]) == 31
+    assert len(upcoming_terms(fixed, date(2026,10,30))) == 10
+    assert fixed["verified_at"] == old["verified_at"]
+    assert "lxml" not in fixed["refresh_error"]
+    assert fixed["parser_version"] == 2
+    monthly_snapshot(path, date(2026,10,31), fetch=blocked)
+    assert len(calls) == 1
