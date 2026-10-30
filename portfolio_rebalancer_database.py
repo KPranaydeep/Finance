@@ -2695,6 +2695,22 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 f"{float(saved_leader.get('Probability of positive net return (%)', 0.0)):.1f}%."
             )
 
+        saved_exit_df = pd.DataFrame(payload.get("security_exit_ranking") or [])
+        if not saved_exit_df.empty:
+            saved_exit_df = saved_exit_df.sort_values(
+                ["Return × positive-probability score (%)", "Expected net scenario return (%)"],
+                ascending=[True, True], kind="stable", na_position="last",
+            )
+            saved_exit = saved_exit_df.iloc[0]
+            st.warning(
+                f"Top single-sell candidate (research-only): {saved_exit.get('Security', '—')} · "
+                f"expected net scenario return "
+                f"{float(saved_exit.get('Expected net scenario return (%)', 0.0)):+.2f}% · "
+                f"return × positive-path score "
+                f"{float(saved_exit.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
+                f"current weight {float(saved_exit.get('Current Weight (%)', 0.0)):.2f}%."
+            )
+
         # Compact information-only summary of the market data used for the
         # saved analysis. This does not expose or restore analysis settings.
         history = payload.get("history") or {}
