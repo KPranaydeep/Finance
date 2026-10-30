@@ -103,7 +103,16 @@ def forecast_executable_buys(
     buys = rebalance_plan.loc[
         rebalance_plan["Action"].astype(str).str.casefold().eq("buy")
         & pd.to_numeric(rebalance_plan["Executable Quantity"], errors="coerce").gt(0)
-    ]
+    ].copy()
+    if not buys.empty and "Yahoo Ticker" in buys.columns:
+        buys["_optimal_weight_sort"] = pd.to_numeric(
+            buys.get("Optimal Weight", 0), errors="coerce"
+        ).fillna(0.0)
+        buys = (
+            buys.sort_values(["Yahoo Ticker", "_optimal_weight_sort"], kind="stable")
+            .drop_duplicates(subset=["Yahoo Ticker"], keep="last")
+            .drop(columns=["_optimal_weight_sort"], errors="ignore")
+        )
     if buys.empty:
         return pd.DataFrame(columns=columns)
 

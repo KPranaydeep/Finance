@@ -2697,7 +2697,18 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         if not saved_scenario_df.empty and saved_review_symbols:
             saved_scenario_df = saved_scenario_df.loc[
                 saved_scenario_df["Yahoo Ticker"].astype(str).str.upper().isin(saved_review_symbols)
-            ].reset_index(drop=True)
+            ].copy()
+            saved_scenario_df["_weight_sort"] = pd.to_numeric(
+                saved_scenario_df.get("Optimized Weight (%)", 0), errors="coerce"
+            ).fillna(0.0)
+            saved_scenario_df = (
+                saved_scenario_df.sort_values(
+                    ["Yahoo Ticker", "_weight_sort"], kind="stable"
+                )
+                .drop_duplicates(subset=["Yahoo Ticker"], keep="last")
+                .drop(columns=["_weight_sort"], errors="ignore")
+                .reset_index(drop=True)
+            )
         if not saved_scenario_df.empty:
             saved_leader = saved_scenario_df.iloc[0]
             st.success(
