@@ -8,6 +8,7 @@ from security_scenario_forecast import (
     independent_security_log_returns,
     forecast_holdings_for_exit,
     normalize_saved_scenario_ranking,
+    zero_target_sell_ranking,
 )
 
 
@@ -126,6 +127,18 @@ def test_stationary_bootstrap_is_finite_and_reproducible():
     )
     assert np.isfinite(a).all()
     np.testing.assert_array_equal(a, b)
+
+
+def test_sell_requires_ownership_and_zero_optimal_weight_then_lowest_score():
+    rows = pd.DataFrame([
+        {"Yahoo Ticker":t,"Optimized Weight (%)":w,"Expected net scenario return (%)":r,"Probability of positive net return (%)":50}
+        for t,w,r in [("HELD_POSITIVE",5,-9),("UNOWNED",0,-8),("EXIT_A",0,2),("EXIT_B",0,1),("UNKNOWN",None,-7)]
+    ])
+    owned = ["HELD_POSITIVE","EXIT_A","EXIT_B","UNKNOWN"]
+    result = zero_target_sell_ranking(rows, owned)
+    assert result["Yahoo Ticker"].tolist() == ["EXIT_B","EXIT_A"]
+    assert zero_target_sell_ranking(rows, ["HELD_POSITIVE"]).empty
+    assert zero_target_sell_ranking(rows, owned, ["EXIT_B"])["Yahoo Ticker"].tolist() == ["EXIT_A"]
 
 
 def test_scenario_history_keeps_latest_date_despite_stale_peer():

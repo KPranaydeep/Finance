@@ -326,3 +326,16 @@ def normalize_saved_scenario_ranking(records) -> pd.DataFrame:
     if frame.empty:
         return frame
     return score_scenario_ranking(frame)
+
+
+def zero_target_sell_ranking(frame, owned_tickers, positive_target_tickers=()):
+    """Lowest score first, limited to owned securities with explicit zero target."""
+    if frame.empty:
+        return frame.copy()
+    result = score_scenario_ranking(frame)
+    tickers = result["Yahoo Ticker"].astype(str).str.strip().str.upper()
+    owned = {str(t).strip().upper() for t in owned_tickers}
+    positive = {str(t).strip().upper() for t in positive_target_tickers}
+    weights = pd.to_numeric(result.get("Optimized Weight (%)", pd.Series(float("nan"), index=result.index)), errors="coerce")
+    result = result.loc[tickers.isin(owned) & ~tickers.isin(positive) & weights.eq(0)]
+    return result.iloc[::-1].reset_index(drop=True)

@@ -38,6 +38,7 @@ from security_scenario_forecast import (
     independent_security_log_returns,
     forecast_holdings_for_exit,
     normalize_saved_scenario_ranking,
+    zero_target_sell_ranking,
 )
 from price_history_integrity import (
     DEFAULT_EXTREME_RETURN_THRESHOLD,
@@ -2663,7 +2664,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     raise ValueError("No usable scenario histories returned; previous results retained.")
                 payload["security_scenario_ranking"] = refreshed.to_dict(orient="records")
                 payload.setdefault("settings", {}).setdefault("security_scenario_forecast", {})["horizon_sessions"] = 30
-                payload["security_exit_ranking"] = refreshed.iloc[::-1].to_dict(orient="records")
+                refresh_owned = review.loc[pd.to_numeric(review["Quantity"], errors="coerce").fillna(0).gt(0), "Yahoo Ticker"]
+                payload["security_exit_ranking"] = zero_target_sell_ranking(refreshed, refresh_owned, [t for t,w in targets.items() if w > 0]).to_dict(orient="records")
                 payload["security_scenario_ranking_error"] = None
                 payload["security_exit_ranking_error"] = None
                 payload["scenario_updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -2707,7 +2709,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 ).fillna(0.0)
         saved_scenario_df = normalize_saved_scenario_ranking(saved_scenario_df.to_dict(orient="records"))
         # One snapshot powers every decision card and scenario table.
-        saved_exit_df = saved_scenario_df.iloc[::-1].reset_index(drop=True)
+        saved_exit_df = zero_target_sell_ranking(saved_scenario_df, saved_owned, saved_optimal)
         st.markdown("**Buy / sell shortlist**")
         if saved_scenario_df.empty:
             st.caption("Refresh scenarios to populate the shortlist.")
@@ -2721,15 +2723,17 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             groups = [("Overall", saved_scenario_df), *currency_ranking.groupby("Currency", sort=True)]
             shortlist = []
             for currency, group in groups:
-                highest, lowest = group.iloc[0], group.iloc[-1]
+                highest = group.iloc[0]
+                eligible_sells = saved_exit_df.loc[saved_exit_df["Yahoo Ticker"].isin(group["Yahoo Ticker"])]
+                lowest = eligible_sells.iloc[0] if not eligible_sells.empty else None
                 buy_date = str(highest.get("Price data through", "Unknown"))
-                sell_date = str(lowest.get("Price data through", "Unknown"))
+                sell_date = str(lowest.get("Price data through", "Unknown")) if lowest is not None else buy_date
                 shortlist.append({
                     "Currency": currency,
                     "Top buy": highest["Security"],
                     "Buy score": float(highest["Return × positive-probability score (%)"]),
-                    "Top sell": lowest["Security"],
-                    "Sell score": float(lowest["Return × positive-probability score (%)"]),
+                    "Top sell": lowest["Security"] if lowest is not None else None,
+                    "Sell score": float(lowest["Return × positive-probability score (%)"]) if lowest is not None else None,
                     "Price data through": buy_date if buy_date == sell_date else f"Buy {buy_date} / sell {sell_date}",
                 })
             overall = shortlist[0]
@@ -2745,9 +2749,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                         st.markdown(
                             f":green[Buy] **{pick['Top buy']}** · **{pick['Buy score']:+.2f}%**"
                         )
-                        st.markdown(
-                            f":orange[Sell] **{pick['Top sell']}** · **{pick['Sell score']:+.2f}%**"
-                        )
+                        if pick["Top sell"] is None:
+                            st.caption("Sell: no owned security has zero optimal weight.")
+                        else:
+                            st.markdown(f":orange[Sell] **{pick['Top sell']}** · **{pick['Sell score']:+.2f}%**")
                         st.caption(f"Price data: {pick['Price data through']}")
         forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
         st.caption(
@@ -11976,7 +11981,8 @@ if run_btn:
             )
             # Reuse the identical scenarios for both directions, including
             # securities present only in the positive optimal allocation.
-            exit_ranking = scenario_ranking.iloc[::-1].reset_index(drop=True).copy()
+            owned_for_exit = portfolio_df.loc[pd.to_numeric(portfolio_df["Quantity"], errors="coerce").fillna(0).gt(0), "Yahoo Ticker"]
+            exit_ranking = zero_target_sell_ranking(scenario_ranking, owned_for_exit)
             owned_weight_map = {
                 str(row.get("Yahoo Ticker", "")).strip(): float(row.get("Weight", 0) or 0) * 100
                 for _, row in portfolio_df.iterrows()
