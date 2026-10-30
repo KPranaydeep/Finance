@@ -11770,8 +11770,9 @@ if run_btn:
                 "Current Weight": 0.0,
                 "Optimal Weight": np.asarray(optimal_weights, dtype=float),
             })
+            optimal_rows = optimal_rows.loc[optimal_rows["Optimal Weight"].gt(0)].copy()
             review_universe = pd.concat(
-                [portfolio_df, rebal_df, optimal_rows], ignore_index=True, sort=False
+                [portfolio_df, optimal_rows], ignore_index=True, sort=False
             )
             review_universe = review_universe.loc[:, ~review_universe.columns.duplicated()]
             review_universe["Action"] = "Buy"
@@ -11870,8 +11871,8 @@ if run_btn:
             "negative paths. These frequencies "
             "are not calibrated future probabilities; taxes, security-specific fees, "
             "available-cash feasibility, and market impact are not modeled. This ranks the "
-            "full relevant union of holdings, action rows, and positive-target optimal "
-            "securities; it does not change any order."
+            "union of owned holdings and positive-target optimal securities; it does not "
+            "change any order."
         )
         if scenario_ranking_error:
             st.warning(f"Scenario ranking unavailable; the rebalance plan is unaffected: {scenario_ranking_error}")
