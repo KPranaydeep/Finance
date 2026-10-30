@@ -2924,10 +2924,28 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     hide_index=True,
                 )
             elif payload.get("security_exit_ranking_error"):
-                st.warning(
-                    "Sell review ranking reported an issue: "
-                    + str(payload["security_exit_ranking_error"])
-                )
+                # Older saved payloads may contain the pre-feature error and no
+                # return matrix. Keep the independent review useful by falling
+                # back to the saved action table rather than forcing a rerun.
+                action_rows = pd.DataFrame(payload.get("holdings_action_summary") or [])
+                if not action_rows.empty and "Expected Annual Return Lift (%)" in action_rows.columns:
+                    action_rows["_lift"] = pd.to_numeric(
+                        action_rows["Expected Annual Return Lift (%)"], errors="coerce"
+                    )
+                    action_rows = action_rows.loc[action_rows["_lift"].notna()].sort_values(
+                        "_lift", ascending=True, kind="stable"
+                    )
+                if not action_rows.empty:
+                    st.info(
+                        "Saved 20-session sell scenarios are unavailable in this older payload; "
+                        "showing the weakest saved holding-to-target return lift as a no-rerun proxy."
+                    )
+                    st.dataframe(action_rows.drop(columns=["_lift"], errors="ignore"), width="stretch", hide_index=True)
+                else:
+                    st.warning(
+                        "Sell review ranking reported an issue: "
+                        + str(payload["security_exit_ranking_error"])
+                    )
 
 
 def _normalize_currency_code(currency):
