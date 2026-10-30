@@ -2746,6 +2746,18 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     f"current weight {float(saved_exit.get('Current Weight (%)', 0.0)):.2f}%."
                 )
         else:
+            if not saved_scenario_df.empty:
+                weakest = saved_scenario_df.sort_values(
+                    "Return × positive-probability score (%)", ascending=True, kind="stable"
+                ).iloc[0]
+                weakest_ticker = str(weakest.get("Yahoo Ticker", "")).upper()
+                ownership_note = "owned" if weakest_ticker in saved_owned else "not currently owned"
+                st.warning(
+                    f"Top single-sell candidate (lowest displayed score): {weakest.get('Security', '—')} · "
+                    f"return × positive-path score "
+                    f"{float(weakest.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
+                    f"{ownership_note}."
+                )
             # Existing saved analyses may lack the new exit-ranking payload;
             # surface the weakest owned action as the persistent top-sell proxy.
             fallback_sell = pd.DataFrame(payload.get("holdings_action_summary") or [])
