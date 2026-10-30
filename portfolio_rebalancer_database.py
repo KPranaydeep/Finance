@@ -2709,6 +2709,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 .drop(columns=["_weight_sort"], errors="ignore")
                 .reset_index(drop=True)
             )
+            if "Optimized Weight (%)" in saved_scenario_df.columns:
+                saved_scenario_df["Optimized Weight (%)"] = pd.to_numeric(
+                    saved_scenario_df["Optimized Weight (%)"], errors="coerce"
+                ).fillna(0.0)
         if not saved_scenario_df.empty:
             saved_leader = saved_scenario_df.iloc[0]
             st.success(
@@ -2948,7 +2952,20 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             if not saved_exit_review.empty and saved_owned:
                 saved_exit_review = saved_exit_review.loc[
                     saved_exit_review["Yahoo Ticker"].astype(str).str.upper().isin(saved_owned)
-                ].reset_index(drop=True)
+                ].copy()
+            if not saved_exit_review.empty:
+                saved_exit_review["_score_sort"] = pd.to_numeric(
+                    saved_exit_review.get("Return × positive-probability score (%)", 0),
+                    errors="coerce",
+                )
+                saved_exit_review = (
+                    saved_exit_review.sort_values(
+                        ["_score_sort", "Yahoo Ticker"], ascending=[True, True], kind="stable", na_position="last"
+                    )
+                    .drop_duplicates(subset=["Yahoo Ticker"], keep="first")
+                    .drop(columns=["_score_sort"], errors="ignore")
+                    .reset_index(drop=True)
+                )
             if not saved_exit_review.empty:
                 st.markdown("**Saved sell review ranking (weakest first)**")
                 st.dataframe(
