@@ -34,6 +34,7 @@ from portfolio_risk_metrics import (
 )
 from security_scenario_forecast import (
     forecast_executable_buys,
+    independent_security_log_returns,
     forecast_holdings_for_exit,
     normalize_saved_scenario_ranking,
 )
@@ -2617,6 +2618,49 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
         )
 
 
+def refresh_security_scenarios(review_universe, start_date, horizon_sessions, one_way_cost_bps):
+    review_universe = review_universe.copy()
+    for name in ("Quantity", "Optimal Weight"):
+        if name not in review_universe.columns:
+            review_universe[name] = 0.0
+    relevant = pd.to_numeric(review_universe["Quantity"], errors="coerce").fillna(0).gt(0) | pd.to_numeric(review_universe["Optimal Weight"], errors="coerce").fillna(0).gt(0)
+    currency_rows = review_universe.dropna(subset=["Currency"]) if "Currency" in review_universe.columns else pd.DataFrame()
+    review_universe = review_universe.loc[relevant].copy()
+    scenario_symbols = tuple(review_universe["Yahoo Ticker"].dropna().astype(str).unique())
+    # Refresh just the review securities through the last completed daily
+    # session, independently of the optimizer's common-history cutoff.
+    scenario_end = pd.Timestamp.now(tz="Asia/Kolkata").normalize().tz_localize(None)
+    with st.spinner("Refreshing latest daily histories for buy / sell scenarios…"):
+        scenario_prices, _, scenario_cache = sync_market_history(
+            MARKET_HISTORY_CACHE_PATH,
+            scenario_symbols,
+            start_date,
+            scenario_end.strftime("%Y-%m-%d"),
+            _fetch_combined_daily_history,
+            batch_size=FULL_HISTORY_BATCH_SIZE,
+            retry_after_hours=0,
+        )
+        currency_lookup = dict(zip(currency_rows["Yahoo Ticker"].astype(str), currency_rows["Currency"])) if not currency_rows.empty else {}
+        converted_series = {}
+        for ticker in scenario_prices.columns:
+            observed = scenario_prices[[ticker]].dropna()
+            if observed.empty:
+                continue
+            currency = currency_lookup.get(str(ticker))
+            if not currency:
+                raise ValueError(f"Missing currency for scenario security {ticker}")
+            converted_series[ticker] = convert_price_history_to_inr(
+                observed, [(ticker, currency)]
+            )[ticker]
+        scenario_returns = independent_security_log_returns(pd.DataFrame(converted_series))
+    return forecast_executable_buys(
+        review_universe,
+        scenario_returns,
+        horizon_sessions=int(horizon_sessions),
+        one_way_cost_bps=float(one_way_cost_bps),
+    )
+
+
 def render_saved_analysis(placeholder, owner, *, instance_key="page"):
     """Display the latest saved analysis immediately below the live banner."""
     placeholder.empty()
@@ -2649,6 +2693,29 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        if st.button("Refresh buy / sell scenarios", key=f"refresh_scenarios_{widget_scope}", help="Refresh daily histories and recompute scenarios for saved owned and optimal securities."):
+            try:
+                review = pd.DataFrame(payload.get("current_allocation") or [])
+                targets = {str(row["ticker"]): float(row.get("target_weight") or 0) for row in payload.get("optimal_allocation") or []}
+                review["Optimal Weight"] = review["Yahoo Ticker"].map(targets).fillna(0.0)
+                review["Action"] = "Buy"
+                review["Executable Quantity"] = 1.0
+                config = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
+                history_start = str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10]
+                refreshed = refresh_security_scenarios(review, history_start, int(config.get("horizon_sessions") or 20), float(config.get("one_way_cost_bps", 22)))
+                if refreshed.empty:
+                    raise ValueError("No usable scenario histories returned; previous results retained.")
+                payload["security_scenario_ranking"] = refreshed.to_dict(orient="records")
+                payload["security_exit_ranking"] = refreshed.iloc[::-1].to_dict(orient="records")
+                payload["security_scenario_ranking_error"] = None
+                payload["security_exit_ranking_error"] = None
+                payload["scenario_updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                save_latest_analysis(payload, owner)
+                st.success("Buy / sell scenarios refreshed and saved.")
+            except Exception as exc:
+                st.warning(f"Scenario refresh could not finish: {exc}")
+        if payload.get("scenario_updated_at"):
+            st.caption(f"Scenarios refreshed at: {payload['scenario_updated_at']}")
         saved_scenarios = payload.get("security_scenario_ranking") or []
         saved_scenario_df = normalize_saved_scenario_ranking(saved_scenarios)
         saved_owned = {
@@ -2700,6 +2767,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                         f" · Net return {float(candidate['Expected net scenario return (%)']):+.2f}%"
                         f" · Positive paths {float(candidate['Probability of positive net return (%)']):.1f}%"
                     )
+                    st.caption(f"Price data through: {candidate.get('Price data through', 'not recorded in this saved analysis')}")
         forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
         st.caption(
             f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 20)} sessions"
@@ -11809,11 +11877,9 @@ if run_btn:
             review_universe = review_universe.loc[:, ~review_universe.columns.duplicated()]
             review_universe["Action"] = "Buy"
             review_universe["Executable Quantity"] = 1.0
-            scenario_ranking = forecast_executable_buys(
-                review_universe,
-                log_returns,
-                horizon_sessions=int(security_forecast_horizon),
-                one_way_cost_bps=float(security_forecast_cost_bps),
+            scenario_ranking = refresh_security_scenarios(
+                review_universe, str(log_returns.index.min())[:10],
+                security_forecast_horizon, security_forecast_cost_bps,
             )
             # Reuse the identical scenarios for both directions, including
             # securities present only in the positive optimal allocation.

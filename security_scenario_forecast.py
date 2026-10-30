@@ -16,6 +16,16 @@ import pandas as pd
 METHOD = "eb-shrunk-stationary-block-bootstrap-v1"
 
 
+def independent_security_log_returns(prices: pd.DataFrame) -> pd.DataFrame:
+    """Keep each security's own observed chronology, including its latest date."""
+    columns = {}
+    for ticker in prices.columns:
+        series = pd.to_numeric(prices[ticker], errors="coerce")
+        series = series.loc[np.isfinite(series) & series.gt(0)].sort_index()
+        columns[ticker] = np.log(series / series.shift(1)).dropna()
+    return pd.DataFrame(columns)
+
+
 def _long_run_mean_variance(values: np.ndarray) -> float:
     """Newey-West estimate of sampling variance for a dependent-series mean."""
     values = np.asarray(values, dtype=float)
@@ -89,6 +99,7 @@ def forecast_executable_buys(
         "Median net return (%)",
         "10th–90th percentile net return (%)",
         "History sessions",
+        "Price data through",
         "Scenario method",
     ]
     if rebalance_plan is None or rebalance_plan.empty or log_returns is None:
@@ -197,6 +208,7 @@ def forecast_executable_buys(
             "Median net return (%)": float(median) * 100.0,
             "10th–90th percentile net return (%)": f"{q10 * 100.0:.1f}% to {q90 * 100.0:.1f}%",
             "History sessions": int(len(history)),
+            "Price data through": str(log_returns[ticker].dropna().index.max())[:10],
             "Scenario method": METHOD,
         })
 
