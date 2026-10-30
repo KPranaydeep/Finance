@@ -11761,16 +11761,12 @@ if run_btn:
         exit_ranking = pd.DataFrame()
         exit_ranking_error = None
         try:
-            scenario_ranking = forecast_executable_buys(
-                rebal_df,
-                log_returns,
-                horizon_sessions=int(security_forecast_horizon),
-                one_way_cost_bps=float(security_forecast_cost_bps),
-            )
             optimal_rows = pd.DataFrame({
                 "Symbol": log_returns.columns.astype(str),
                 "Yahoo Ticker": log_returns.columns.astype(str),
-                "Quantity": 0.0,
+                "Quantity": 1.0,
+                "Executable Quantity": 1.0,
+                "Action": "Buy",
                 "Current Weight": 0.0,
                 "Optimal Weight": np.asarray(optimal_weights, dtype=float),
             })
@@ -11778,6 +11774,14 @@ if run_btn:
                 [portfolio_df, rebal_df, optimal_rows], ignore_index=True, sort=False
             )
             review_universe = review_universe.loc[:, ~review_universe.columns.duplicated()]
+            review_universe["Action"] = "Buy"
+            review_universe["Executable Quantity"] = 1.0
+            scenario_ranking = forecast_executable_buys(
+                review_universe,
+                log_returns,
+                horizon_sessions=int(security_forecast_horizon),
+                one_way_cost_bps=float(security_forecast_cost_bps),
+            )
             exit_ranking = forecast_holdings_for_exit(
                 review_universe,
                 log_returns,
@@ -11865,8 +11869,9 @@ if run_btn:
             "heuristic, not expected value, because the mean return already includes "
             "negative paths. These frequencies "
             "are not calibrated future probabilities; taxes, security-specific fees, "
-            "available-cash feasibility, and market impact are not modeled. This ranks "
-            "buys already present in the executable plan and does not change any order."
+            "available-cash feasibility, and market impact are not modeled. This ranks the "
+            "full relevant union of holdings, action rows, and positive-target optimal "
+            "securities; it does not change any order."
         )
         if scenario_ranking_error:
             st.warning(f"Scenario ranking unavailable; the rebalance plan is unaffected: {scenario_ranking_error}")
