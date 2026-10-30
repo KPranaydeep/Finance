@@ -10,6 +10,9 @@ import requests
 
 SOURCE = "https://www.eci.gov.in/term-of-the-houses/"
 PARLIAMENT_SOURCE = "https://sansad.in/rs/faq"
+LOK_SABHA_ELECTED_SEATS = 543
+RAJYA_SABHA_ELECTED_SEATS = 233
+REPRESENTATION_VERIFIED_AT = "2026-10-30"
 # Verified 30 Oct 2026 from ECI's house-terms table and official publications.
 # All 31 assemblies; allocations are geographic, never party/coalition counts.
 SEED = [
@@ -174,6 +177,36 @@ def upcoming_terms(snapshot, today, months=18):
                                        "Full-house majority": int(item["Assembly seats"])//2 + 1,
                                        "Election dates": "Not verified — term end is not polling day"}))
     return sorted(rows, key=lambda row: row["Term ends"])
+
+
+def representation_context(snapshot, today, months=18):
+    """Separate assembly exposure, national footprint, and verified contests.
+
+    An assembly election changes no Lok Sabha seats directly. RS allocations
+    are not election-cycle counts; absent verified schedule counts stay unknown.
+    """
+    rows = upcoming_terms(snapshot, today, months)
+    all_rows = snapshot.get("rows") or []
+    complete = len({r["State"] for r in all_rows}) == 31
+    assembly_total = sum(int(r["Assembly seats"]) for r in all_rows) if complete else None
+    for row in rows:
+        row["Share of all assembly seats (%)"] = 100 * row["Assembly seats"] / assembly_total if assembly_total else None
+        row["Lok Sabha footprint (%)"] = 100 * row["Lok Sabha allocation"] / LOK_SABHA_ELECTED_SEATS
+        row["Rajya Sabha footprint (%)"] = 100 * row["Rajya Sabha allocation"] / RAJYA_SABHA_ELECTED_SEATS
+        # The current source contains term dates, not verified election schedules.
+        row["Assembly seats actually at stake (%)"] = None
+        row["Rajya Sabha seats actually at stake (%)"] = None
+        row["Direct Lok Sabha seats changed"] = 0
+    assembly_count = sum(r["Assembly seats"] for r in rows)
+    lok_count = sum(r["Lok Sabha allocation"] for r in rows)
+    rajya_count = sum(r["Rajya Sabha allocation"] for r in rows)
+    return {"rows": rows, "assembly_count": assembly_count, "assembly_total": assembly_total,
+            "assembly_share": assembly_count / assembly_total if assembly_total else None,
+            "lok_count": lok_count, "lok_share": lok_count / LOK_SABHA_ELECTED_SEATS,
+            "rajya_count": rajya_count, "rajya_share": rajya_count / RAJYA_SABHA_ELECTED_SEATS,
+            "direct_lok_change_share": 0.0,
+            "confirmed_assembly_contest_share": None, "confirmed_rajya_contest_share": None,
+            "coalition_majority_impact": None}
 
 
 def market_context(closes):

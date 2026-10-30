@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
-from election_watch import seed_snapshot, monthly_snapshot, upcoming_terms, parse_eci_terms, market_context
+from election_watch import seed_snapshot, monthly_snapshot, upcoming_terms, representation_context, parse_eci_terms, market_context
 
 
 class Response:
@@ -74,3 +74,27 @@ def test_partial_baseline_migrates_even_when_refresh_fails(tmp_path):
     assert fixed["parser_version"] == 2
     monthly_snapshot(path, date(2026,10,31), fetch=blocked)
     assert len(calls) == 1
+
+
+def test_representative_percentages_do_not_mislabel_allocations_as_contests():
+    context = representation_context(seed_snapshot(), date(2026,10,30))
+    assert context["assembly_total"] == 4123
+    assert context["assembly_count"] == 1120
+    assert context["assembly_share"] == pytest.approx(1120 / 4123)
+    assert context["lok_share"] == pytest.approx(137 / 543)
+    assert context["rajya_share"] == pytest.approx(60 / 233)
+    assert context["direct_lok_change_share"] == 0
+    assert context["confirmed_assembly_contest_share"] is None
+    assert context["confirmed_rajya_contest_share"] is None
+    assert context["coalition_majority_impact"] is None
+    up = next(row for row in context["rows"] if row["State"] == "Uttar Pradesh")
+    assert up["Lok Sabha footprint (%)"] == pytest.approx(80 / 543 * 100)
+    assert up["Assembly seats actually at stake (%)"] is None
+
+
+def test_partial_snapshot_does_not_invent_national_assembly_denominator():
+    snapshot = seed_snapshot()
+    snapshot["rows"] = snapshot["rows"][:7]
+    context = representation_context(snapshot, date(2026,10,30))
+    assert context["assembly_total"] is None
+    assert context["assembly_share"] is None
