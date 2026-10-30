@@ -11891,6 +11891,10 @@ if run_btn:
                 horizon_sessions=int(security_forecast_horizon),
                 one_way_cost_bps=float(security_forecast_cost_bps),
             )
+            if not exit_ranking.empty and "Current Weight (%)" in exit_ranking.columns:
+                exit_ranking = exit_ranking.loc[
+                    pd.to_numeric(exit_ranking["Current Weight (%)"], errors="coerce").fillna(0).gt(0)
+                ].reset_index(drop=True)
         except Exception as exc:
             # An optional research view must never invalidate the actionable
             # rebalance plan or its saved analysis.
