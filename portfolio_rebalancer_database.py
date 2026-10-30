@@ -25,7 +25,7 @@ import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
-from rebalance_review import assess_rebalance, assess_executable_rebalance
+from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2850,7 +2850,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 try:
                     review_universe = pd.DataFrame(payload.get("current_allocation") or [])
                     trade_tickers = {str(t.get("Yahoo Ticker", "")) for t in rebalancing_plan}
-                    review_universe["Optimal Weight"] = review_universe["Yahoo Ticker"].astype(str).isin(trade_tickers).astype(float)
+                    target_tickers = {str(t.get("ticker", "")) for t in payload.get("optimal_allocation") or [] if float(t.get("target_weight", 0) or 0) > 0}
+                    review_universe["Optimal Weight"] = review_universe["Yahoo Ticker"].astype(str).isin(trade_tickers | target_tickers).astype(float)
                     review_universe["Action"] = "Buy"
                     review_universe["Executable Quantity"] = 1.0
                     _, refreshed_returns, marks = refresh_security_scenarios(
@@ -2860,6 +2861,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     owned = {str(row["Yahoo Ticker"]): float(row["Quantity"]) * marks.get(str(row["Yahoo Ticker"]), float("nan")) for _, row in review_universe.iterrows() if float(row.get("Quantity", 0) or 0) > 0}
                     marked_orders = [dict(t, **{"Executable Value": abs(float(t["Executable Quantity"])) * marks.get(str(t["Yahoo Ticker"]), float("nan"))}) for t in rebalancing_plan]
                     payload["executable_rebalance_review"] = assess_executable_rebalance(refreshed_returns, owned, marked_orders, cost_bps=review_cost_bps)
+                    target_map = {str(row["ticker"]): float(row.get("target_weight") or 0) for row in payload.get("optimal_allocation") or []}
+                    payload["next_review_estimate"] = estimate_review_window(refreshed_returns, owned, target_map, cost_bps=review_cost_bps, risk_free_rate=float((payload.get("review_analysis_context") or {}).get("risk_free_rate_annual", RISK_FREE_RATE_ANNUAL)))
                     payload["executable_rebalance_review"]["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     save_latest_analysis(payload, owner)
                 except Exception as exc:
@@ -2868,6 +2871,25 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             st.info(executable_review.get("decision", "Hold / review — executable-portfolio uncertainty check unavailable for this saved run"))
             if executable_review.get("as_of"):
                 st.caption(f"Paired history through {executable_review['as_of']} · {executable_review.get('observations', 0)} observations · saved whole-share order quantities repriced for this comparison.")
+            review_estimate = payload.get("next_review_estimate") or {}
+            if review_estimate:
+                calendar = review_market_date(review_estimate.get("as_of") or str(pd.Timestamp.now(tz="Asia/Kolkata").date()), review_estimate.get("sessions", 0), pd.Timestamp.now(tz="Asia/Kolkata").date())
+                if calendar.get("date"):
+                    st.markdown(
+                        f"**Next review: {calendar['date']} · {calendar['sessions_remaining']} NSE market sessions away**"
+                        f" · driven by {review_estimate['reason']}."
+                    )
+                    if calendar.get("due_now"):
+                        st.caption("Review is due now: the scheduled window has already elapsed from the data date.")
+                else:
+                    st.caption(f"Review window: {review_estimate.get('sessions', 0)} sessions from the data date. {calendar.get('calendar_error', '')}")
+                with st.expander("How the next review date is estimated", expanded=False):
+                    st.caption(review_estimate.get("method", ""))
+                    st.caption("All seven current/target metrics are checked. The first simulated metric deterioration that the target improves and whose median gain clears doubled costs triggers review. Otherwise review is due at the end of the existing 20-session evidence window. This is a bounded model schedule, not an optimized or guaranteed safe waiting period. Dates use the verified NSE calendar; US and other markets can have different holidays.")
+                    if review_estimate.get("timeline"):
+                        st.dataframe(pd.DataFrame(review_estimate["timeline"]), hide_index=True, width="stretch", column_config={"Target median gain after 2× costs": st.column_config.NumberColumn(format="percent")})
+            else:
+                st.caption("Next review date: click Update rebalance decision to estimate it from all seven metrics.")
             if rebalance_review["cost_fraction"] is not None:
                 st.caption(
                     f"Gross traded / base: {rebalance_review['gross_traded_fraction']:.1%}"
@@ -12166,10 +12188,16 @@ if run_btn:
                 log_returns, owned_values, rebal_df.to_dict(orient="records"),
                 cost_bps=float(security_forecast_cost_bps),
             )
+            next_review_estimate = estimate_review_window(
+                log_returns, owned_values, dict(zip(log_returns.columns, optimal_weights)),
+                cost_bps=float(security_forecast_cost_bps), risk_free_rate=RISK_FREE_RATE_ANNUAL,
+            )
         except Exception as exc:
             executable_rebalance_review = {"decision": "Hold / review — executable comparison could not be completed", "error": str(exc)}
+            next_review_estimate = {"sessions": 0, "reason": "review-date inputs unavailable", "metrics": []}
         analysis_payload = {
             "executable_rebalance_review": executable_rebalance_review,
+            "next_review_estimate": next_review_estimate,
             "review_analysis_context": {
                 "schema_version": 1,
                 "optimizer_config_version": OPTIMIZER_CONFIG_VERSION,

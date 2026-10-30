@@ -2,6 +2,8 @@
 import math
 import numpy as np
 import pandas as pd
+from datetime import timedelta
+from nse_market_calendar import get_nse_equity_session
 
 
 METRICS = {
@@ -187,3 +189,115 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
     result["as_of"] = str(lr.index.max())[:10]
     result["confidence_note"] = "95% family-wise historical bootstrap check across tested candidates and three chronological segments; full-history selection bias remains."
     return result
+
+
+def estimate_review_window(log_returns, current_values, target_weights, cost_bps=22,
+                           risk_free_rate=.08225, horizon=20, seed=431):
+    """Estimate a bounded review window from all seven portfolio metrics.
+
+    Joint stationary bootstrap paths preserve cross-asset dependence. Compare
+    drifted holdings against their initial 95% simulation bands and the target.
+    A breach calls for review, not an order. The existing scenario horizon is
+    the evidence expiry, not a claim of an optimal or safe holding period.
+    """
+    lr = pd.DataFrame(log_returns).replace([np.inf, -np.inf], np.nan)
+    values = {str(t): _finite(v) for t, v in current_values.items()}
+    targets = {str(t): _finite(w) for t, w in target_weights.items()}
+    symbols = sorted({t for t,v in values.items() if v is not None and v > 0} | {t for t,w in targets.items() if w is not None and w > 0})
+    if not symbols or any(t not in lr for t in symbols) or any(v is None or v < 0 for v in values.values()):
+        return {"sessions": 0, "reason": "missing portfolio history or valuation", "metrics": []}
+    matrix = lr[symbols].dropna()
+    if len(matrix) < 252:
+        return {"sessions": 0, "reason": "insufficient common history", "metrics": []}
+    base = sum(values.values())
+    target = np.array([targets.get(t, 0) or 0 for t in symbols], dtype=float)
+    if base <= 0 or target.sum() <= 0:
+        return {"sessions": 0, "reason": "incomplete current or target allocation", "metrics": []}
+    current = np.array([values.get(t, 0) or 0 for t in symbols]) / base
+    target /= target.sum()
+    groups, group_size = 32, 128
+    rng = np.random.default_rng(seed)
+    n = len(matrix)
+    block = max(2, int(math.ceil(n ** (1/3))))
+    indices = rng.integers(n, size=groups * group_size)
+    data = matrix.to_numpy()
+    cumulative = [np.zeros((groups * group_size, len(symbols)))]
+    for _ in range(2 * horizon):
+        cumulative.append(cumulative[-1] + data[indices])
+        indices = np.where(rng.random(len(indices)) < 1 / block, rng.integers(n, size=len(indices)), (indices + 1) % n)
+    cumulative = np.asarray(cumulative)
+
+    def metrics(terminal, one_day):
+        returns = terminal.reshape(groups, group_size)
+        daily = one_day.reshape(groups, group_size)
+        logs = np.log1p(np.maximum(returns, -.999999))
+        annual = np.expm1(logs.mean(axis=1) * 252 / horizon)
+        vol = logs.std(axis=1) * np.sqrt(252 / horizon)
+        tail = np.sort(returns, axis=1)[:, :max(1, math.ceil(group_size * .05))]
+        day_tail = np.sort(daily, axis=1)[:, :max(1, math.ceil(group_size * .05))]
+        return np.array([annual, vol, -day_tail.mean(axis=1), -tail.mean(axis=1),
+                         np.median(returns, axis=1), tail.std(axis=1),
+                         np.divide(annual - risk_free_rate, vol, out=np.zeros_like(vol), where=vol>0)])
+
+    initial_end = np.expm1(cumulative[horizon]) @ current
+    initial_day = np.expm1(cumulative[1]) @ current
+    reference = metrics(initial_end, initial_day)
+    names = list(METRICS)
+    # Bonferroni simulation bands cover the seven metrics and tested horizons.
+    alpha = .05 / (len(names) * horizon)
+    bands = [np.quantile(row, [alpha/2, 1-alpha/2]) for row in reference]
+    timeline = []
+    chosen = None
+    for wait in range(1, horizon + 1):
+        drift = current * np.exp(cumulative[wait])
+        drift /= drift.sum(axis=1, keepdims=True)
+        future = np.expm1(cumulative[wait+horizon] - cumulative[wait])
+        day = np.expm1(cumulative[wait+1] - cumulative[wait])
+        hold_metrics = metrics((future * drift).sum(axis=1), (day * drift).sum(axis=1))
+        target_metrics = metrics(future @ target, day @ target)
+        transaction_drag = float(np.median(np.abs(drift-target).sum(axis=1))) * cost_bps / 10000 * 2
+        breaches = []
+        for i, (name, direction) in enumerate(METRICS.items()):
+            projected = float(np.median(hold_metrics[i]))
+            comparator = float(np.median(target_metrics[i]))
+            boundary = bands[i][0] if direction > 0 else bands[i][1]
+            deteriorated = direction * (projected - boundary) < 0
+            target_helps = direction * (comparator - projected) > 0
+            if deteriorated and target_helps:
+                breaches.append(name)
+        median_net_gain = float(np.median(target_metrics[4] - hold_metrics[4])) - transaction_drag
+        # Review a risk/quality breach only with a target that also clears the
+        # doubled-cost median-return hurdle; mixed trade-offs expire at horizon.
+        trigger = bool(breaches) and median_net_gain > 0
+        timeline.append({"Sessions ahead": wait, "Metrics outside initial simulation bands": ", ".join(breaches) or "None", "Target median gain after 2× costs": median_net_gain})
+        if trigger and chosen is None:
+            chosen = {"sessions": wait, "reason": "projected deterioration: " + ", ".join(breaches)}
+    result = chosen or {"sessions": horizon, "reason": "scenario evidence window expires; no earlier joint metric/cost trigger"}
+    result.update({"as_of": str(matrix.index.max())[:10], "metrics": names, "timeline": timeline,
+                   "method": "Joint historical bootstrap review window; fixed target, 32 simulation groups × 128 paths. Simulation bands are not calibrated forecast confidence intervals."})
+    return result
+
+
+def review_market_date(as_of, sessions, today):
+    """Map evidence age to verified NSE sessions; unsupported years stay explicit."""
+    from datetime import date
+    anchor = date.fromisoformat(str(as_of)[:10])
+    due = anchor
+    remaining = max(0, int(sessions))
+    try:
+        while remaining:
+            due += timedelta(days=1)
+            if get_nse_equity_session(due)["is_open"]:
+                remaining -= 1
+        if due <= today:
+            due = today
+            while not get_nse_equity_session(due)["is_open"]:
+                due += timedelta(days=1)
+            return {"date": str(due), "sessions_remaining": 0, "due_now": True, "calendar": "NSE equity"}
+        count, cursor = 0, today
+        while cursor < due:
+            cursor += timedelta(days=1)
+            count += int(get_nse_equity_session(cursor)["is_open"])
+        return {"date": str(due), "sessions_remaining": count, "due_now": False, "calendar": "NSE equity"}
+    except ValueError as exc:
+        return {"date": None, "sessions_remaining": None, "calendar_error": str(exc)}
