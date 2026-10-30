@@ -2649,39 +2649,6 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
-        with st.expander("Market backdrop and risk details", expanded=False):
-            saved_preselection = (payload.get("settings") or {}).get(
-                "universe_preselection", {}
-            )
-            if saved_preselection:
-                saved_risk_appetite = (
-                    (saved_preselection.get("market_data") or {}).get("risk_appetite")
-                    or {}
-                )
-                saved_market_read = interpret_risk_appetite_regime(saved_risk_appetite)
-                saved_market_cap = saved_preselection.get("market_cap_filter") or {}
-                _render_market_read_panel(saved_market_read, title="Saved market backdrop")
-                _render_saved_downside_tradeoff(current_stats, optimal_stats)
-                if not int(saved_market_cap.get("fresh_known", saved_market_cap.get("known", 0))):
-                    st.warning(
-                        "Market-cap screen was inactive for this saved run: no fresh "
-                        "dated snapshot was available, so it excluded no symbols. "
-                        f"{int(saved_market_cap.get('missing', saved_preselection.get('eligible', 0))):,} "
-                        "market-cap values were missing."
-                    )
-                else:
-                    st.caption(
-                        "Market-cap coverage was present for some eligible symbols; "
-                        f"{int(saved_market_cap.get('excluded', 0)):,} were excluded and "
-                        f"{int(saved_market_cap.get('missing', 0)):,} missing values were retained."
-                    )
-            else:
-                st.info(
-                    "No saved universe-regime interpretation is available for this older "
-                    "analysis. It will be included with the next completed optimization."
-                )
-        _render_saved_reserve_study(payload)
-        _render_saved_leverage_check(payload, owner=owner, widget_scope=widget_scope)
         saved_scenarios = payload.get("security_scenario_ranking") or []
         saved_scenario_df = normalize_saved_scenario_ranking(saved_scenarios)
         saved_owned = {
@@ -2715,31 +2682,45 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     saved_scenario_df["Optimized Weight (%)"], errors="coerce"
                 ).fillna(0.0)
         saved_scenario_df = normalize_saved_scenario_ranking(saved_scenario_df.to_dict(orient="records"))
-        if not saved_scenario_df.empty:
-            saved_leader = saved_scenario_df.iloc[0]
-            st.success(
-                f"Top single-buy candidate (research-only): {saved_leader.get('Security', '—')} · "
-                f"expected net scenario return "
-                f"{float(saved_leader.get('Expected net scenario return (%)', 0.0)):+.2f}% · "
-                f"return × positive-path score "
-                f"{float(saved_leader.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
-                f"historical-bootstrap positive-path frequency "
-                f"{float(saved_leader.get('Probability of positive net return (%)', 0.0)):.1f}%."
-            )
-
-        # Both banners and both tables share one scenario snapshot.
+        # One snapshot powers every decision card and scenario table.
         saved_exit_df = saved_scenario_df.iloc[::-1].reset_index(drop=True)
-        if not saved_exit_df.empty:
-            saved_exit = saved_exit_df.iloc[0]
-            st.warning(
-                f"Top single-sell candidate (lowest displayed score): {saved_exit.get('Security', '—')} · "
-                f"expected net scenario return "
-                f"{float(saved_exit.get('Expected net scenario return (%)', 0.0)):+.2f}% · "
-                f"return × positive-path score "
-                f"{float(saved_exit.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
-                f"historical-bootstrap positive-path frequency "
-                f"{float(saved_exit.get('Probability of positive net return (%)', 0.0)):.1f}%."
-            )
+        buy_card, sell_card = st.columns(2, gap="medium")
+        for card, label, rows in (
+            (buy_card, "Top buy · highest score", saved_scenario_df),
+            (sell_card, "Top sell · lowest score", saved_exit_df),
+        ):
+            with card.container(border=True):
+                if rows.empty:
+                    st.metric(label, "Unavailable")
+                else:
+                    candidate = rows.iloc[0]
+                    st.metric(label, str(candidate.get("Security", "—")))
+                    st.markdown(
+                        f"**Score {float(candidate['Return × positive-probability score (%)']):+.2f}%**"
+                        f" · Net return {float(candidate['Expected net scenario return (%)']):+.2f}%"
+                        f" · Positive paths {float(candidate['Probability of positive net return (%)']):.1f}%"
+                    )
+        forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
+        st.caption(
+            f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 20)} sessions"
+            " · score = expected net return × positive-path frequency."
+        )
+        reserve_card, debt_card = st.columns(2, gap="medium")
+        base_value = float(payload.get("current_portfolio_value") or total_invested)
+        try:
+            reserve_summary = calculate_portfolio_reserve_target(optimal_stats, invested_base=base_value)
+            reserve_card.metric("Additional reserve / invested base", f"{reserve_summary['reserve_fraction']:.2%}")
+            reserve_card.caption(f"₹{reserve_summary['reserve_amount']:,.0f} · deployment buffer")
+        except (TypeError, ValueError, KeyError):
+            reserve_card.metric("Additional reserve / invested base", "Unavailable")
+        saved_returns = (payload.get("leverage_return_history") or {}).get("portfolio_log_returns") or []
+        try:
+            debt_summary = estimate_drawdown_conditioned_debt(saved_returns, borrowing_rate=LAMF_ADVERTISED_START_RATE)
+            debt_ratio = float(debt_summary["recommended_debt_ratio_of_portfolio_base"])
+            debt_card.metric("Additional debt / invested base", f"{debt_ratio:.1%}")
+            debt_card.caption(f"₹{base_value * debt_ratio:,.0f} · drawdown-conditioned model")
+        except (TypeError, ValueError, KeyError, IndexError):
+            debt_card.metric("Additional debt / invested base", "Unavailable")
 
         # Compact information-only summary of the market data used for the
         # saved analysis. This does not expose or restore analysis settings.
@@ -2788,6 +2769,51 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 + format_elapsed(run_timing.get("elapsed_seconds"))
                 + " · Finished when the rebalancing plan was generated."
             )
+
+        with st.expander("Saved rebalancing plan", expanded=True):
+            saved_rebal_df = pd.DataFrame(rebalancing_plan)
+            if not saved_rebal_df.empty:
+                saved_rebal_df = _sort_rebalance_df_for_priority(saved_rebal_df)
+            render_trade_deferral_editor(
+                saved_rebal_df,
+                owner,
+                key_prefix=f"saved_rebalancing_plan_{widget_scope}",
+            )
+
+        with st.expander("Market, reserve and borrowing details", expanded=False):
+            with st.expander("Market backdrop and risk details", expanded=False):
+                saved_preselection = (payload.get("settings") or {}).get(
+                    "universe_preselection", {}
+                )
+                if saved_preselection:
+                    saved_risk_appetite = (
+                        (saved_preselection.get("market_data") or {}).get("risk_appetite")
+                        or {}
+                    )
+                    saved_market_read = interpret_risk_appetite_regime(saved_risk_appetite)
+                    saved_market_cap = saved_preselection.get("market_cap_filter") or {}
+                    _render_market_read_panel(saved_market_read, title="Saved market backdrop")
+                    _render_saved_downside_tradeoff(current_stats, optimal_stats)
+                    if not int(saved_market_cap.get("fresh_known", saved_market_cap.get("known", 0))):
+                        st.warning(
+                            "Market-cap screen was inactive for this saved run: no fresh "
+                            "dated snapshot was available, so it excluded no symbols. "
+                            f"{int(saved_market_cap.get('missing', saved_preselection.get('eligible', 0))):,} "
+                            "market-cap values were missing."
+                        )
+                    else:
+                        st.caption(
+                            "Market-cap coverage was present for some eligible symbols; "
+                            f"{int(saved_market_cap.get('excluded', 0)):,} were excluded and "
+                            f"{int(saved_market_cap.get('missing', 0)):,} missing values were retained."
+                        )
+                else:
+                    st.info(
+                        "No saved universe-regime interpretation is available for this older "
+                        "analysis. It will be included with the next completed optimization."
+                    )
+            _render_saved_reserve_study(payload)
+            _render_saved_leverage_check(payload, owner=owner, widget_scope=widget_scope)
 
         backup_json = json.dumps(
             make_json_safe(payload),
@@ -2897,16 +2923,6 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                         )
                     else:
                         st.caption("No optimized-portfolio statistics were saved.")
-
-        with st.expander("Saved rebalancing plan", expanded=True):
-            saved_rebal_df = pd.DataFrame(rebalancing_plan)
-            if not saved_rebal_df.empty:
-                saved_rebal_df = _sort_rebalance_df_for_priority(saved_rebal_df)
-            render_trade_deferral_editor(
-                saved_rebal_df,
-                owner,
-                key_prefix=f"saved_rebalancing_plan_{widget_scope}",
-            )
 
         scenario_config = (payload.get("settings") or {}).get(
             "security_scenario_forecast", {}
