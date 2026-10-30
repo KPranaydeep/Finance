@@ -2708,37 +2708,38 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         saved_scenario_df = normalize_saved_scenario_ranking(saved_scenario_df.to_dict(orient="records"))
         # One snapshot powers every decision card and scenario table.
         saved_exit_df = saved_scenario_df.iloc[::-1].reset_index(drop=True)
-        buy_card, sell_card = st.columns(2, gap="medium")
-        for card, label, rows in (
-            (buy_card, "Top buy · highest score", saved_scenario_df),
-            (sell_card, "Top sell · lowest score", saved_exit_df),
-        ):
-            with card.container(border=True):
-                if rows.empty:
-                    st.metric(label, "Unavailable")
-                else:
-                    candidate = rows.iloc[0]
-                    st.metric(label, str(candidate.get("Security", "—")))
-                    st.markdown(
-                        f"**Score {float(candidate['Return × positive-probability score (%)']):+.2f}%**"
-                        f" · Net return {float(candidate['Expected net scenario return (%)']):+.2f}%"
-                        f" · Positive paths {float(candidate['Probability of positive net return (%)']):.1f}%"
-                    )
-                    st.caption(f"Price data through: {candidate.get('Price data through', 'not recorded in this saved analysis')}")
-        if not saved_scenario_df.empty:
+        st.markdown("**Buy / sell shortlist**")
+        if saved_scenario_df.empty:
+            st.caption("Refresh scenarios to populate the shortlist.")
+        else:
             currency_by_ticker = {
-                str(row.get("Yahoo Ticker", "")).strip().upper(): str(row.get("Currency", "")).strip()
-                for row in payload.get("current_allocation") or []
-                if row.get("Currency")
+                str(row.get("Yahoo Ticker", "")).strip().upper(): str(row.get("Currency", "")).strip().upper()
+                for row in payload.get("current_allocation") or [] if row.get("Currency")
             }
             currency_ranking = saved_scenario_df.copy()
             currency_ranking["Currency"] = currency_ranking["Yahoo Ticker"].astype(str).str.strip().str.upper().map(currency_by_ticker).fillna("Unknown")
-            for currency, group in currency_ranking.groupby("Currency", sort=True):
+            groups = [("Overall", saved_scenario_df), *currency_ranking.groupby("Currency", sort=True)]
+            shortlist = []
+            for currency, group in groups:
                 highest, lowest = group.iloc[0], group.iloc[-1]
-                st.markdown(
-                    f"**{currency}** · Buy **{highest['Security']}** ({float(highest['Return × positive-probability score (%)']):+.2f}%)"
-                    f" · Sell **{lowest['Security']}** ({float(lowest['Return × positive-probability score (%)']):+.2f}%)"
-                )
+                buy_date = str(highest.get("Price data through", "Unknown"))
+                sell_date = str(lowest.get("Price data through", "Unknown"))
+                shortlist.append({
+                    "Currency": currency,
+                    "Top buy": highest["Security"],
+                    "Buy score": float(highest["Return × positive-probability score (%)"]),
+                    "Top sell": lowest["Security"],
+                    "Sell score": float(lowest["Return × positive-probability score (%)"]),
+                    "Price data through": buy_date if buy_date == sell_date else f"Buy {buy_date} / sell {sell_date}",
+                })
+            st.dataframe(
+                pd.DataFrame(shortlist), hide_index=True, width="stretch",
+                height=36 * (len(shortlist) + 1) + 4,
+                column_config={
+                    "Buy score": st.column_config.NumberColumn(format="%+.2f%%"),
+                    "Sell score": st.column_config.NumberColumn(format="%+.2f%%"),
+                },
+            )
         forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
         st.caption(
             f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 30)} sessions"
@@ -2748,32 +2749,36 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         base_value = float(payload.get("current_portfolio_value") or total_invested)
         try:
             reserve_summary = calculate_portfolio_reserve_target(optimal_stats, invested_base=base_value)
-            reserve_card.metric("Additional reserve / invested base", f"{reserve_summary['reserve_fraction']:.2%}")
+            reserve_card.metric("Additional reserve", f"{reserve_summary['reserve_fraction']:.2%}", border=True)
             reserve_card.caption(f"₹{reserve_summary['reserve_amount']:,.0f} · deployment buffer")
+            reserve_card.caption(f"Data through: {str((payload.get('history') or {}).get('valid_end') or 'Unknown')[:10]}")
         except (TypeError, ValueError, KeyError):
-            reserve_card.metric("Additional reserve / invested base", "Unavailable")
+            reserve_card.metric("Additional reserve", "Unavailable", border=True)
         saved_returns = (payload.get("leverage_return_history") or {}).get("portfolio_log_returns") or []
+        debt_summary = None
         try:
             debt_summary = estimate_drawdown_conditioned_debt(saved_returns, borrowing_rate=LAMF_ADVERTISED_START_RATE)
             debt_ratio = float(debt_summary["recommended_debt_ratio_of_portfolio_base"])
-            debt_card.metric("Model additional debt / invested base", f"{debt_ratio:.1%}")
+            debt_card.metric("Model additional debt", f"{debt_ratio:.1%}", border=True)
             debt_card.caption(f"₹{base_value * debt_ratio:,.0f} · statistical model allocation")
-            debt_card.caption(
-                f"Historical optimum: {debt_summary['raw_historical_optimum_debt_ratio']:.1%}"
-                f" · {debt_summary['independent_window_count']} non-overlapping windows"
-                f" · {debt_summary['evidence_status'].replace('_', ' ')}."
-            )
-            if debt_summary.get("at_search_boundary"):
-                debt_card.caption("The unscreened historical optimum hits the search boundary; it is excluded from the model allocation.")
-            debt_card.caption(debt_summary["model_decision_reason"])
-            debt_card.caption(f"Tail evidence: {debt_summary['independent_window_count']} / {debt_summary['tail_coverage_floor']} non-overlapping windows needed for the minimum 95% coverage check. Lender capacity remains separate.")
             saved_debt_dates = (payload.get("leverage_return_history") or {}).get("dates") or []
-            if saved_debt_dates:
-                debt_card.caption(f"Borrowing-model data through: {str(saved_debt_dates[-1])[:10]}")
-            if debt_summary.get("validated_research_debt_ratio") is not None:
-                debt_card.caption(f"Stability-screened research ratio: {debt_summary['validated_research_debt_ratio']:.1%}; eligible collateral and lender capacity are unverified.")
+            debt_card.caption(f"Data through: {str(saved_debt_dates[-1])[:10] if saved_debt_dates else 'Unknown'}")
         except (TypeError, ValueError, KeyError, IndexError):
-            debt_card.metric("Additional debt / invested base", "Unavailable")
+            debt_card.metric("Model additional debt", "Unavailable", border=True)
+
+        st.caption("Reserve and model debt percentages are relative to the invested portfolio base.")
+        with st.expander("Why these reserve and debt amounts?", expanded=False):
+            st.caption("Reserve is additional capital available for deployment; the detailed calculation is under Market, reserve and borrowing details.")
+            if debt_summary:
+                st.markdown(debt_summary["model_decision_reason"])
+                st.caption(
+                    f"Historical optimum: {debt_summary['raw_historical_optimum_debt_ratio']:.1%}"
+                    f" · {debt_summary['independent_window_count']} / {debt_summary['tail_coverage_floor']} non-overlapping windows"
+                    f" · {debt_summary['evidence_status'].replace('_', ' ')}."
+                )
+                if debt_summary.get("at_search_boundary"):
+                    st.caption("The unscreened optimum hits the maximum tested debt; it is excluded from the model allocation.")
+                st.caption("The statistical model allocation is separate from lender-approved capacity.")
 
         # Compact information-only summary of the market data used for the
         # saved analysis. This does not expose or restore analysis settings.
