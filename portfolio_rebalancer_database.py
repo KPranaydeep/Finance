@@ -2713,6 +2713,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 saved_scenario_df["Optimized Weight (%)"] = pd.to_numeric(
                     saved_scenario_df["Optimized Weight (%)"], errors="coerce"
                 ).fillna(0.0)
+        saved_scenario_df = normalize_saved_scenario_ranking(saved_scenario_df.to_dict(orient="records"))
         if not saved_scenario_df.empty:
             saved_leader = saved_scenario_df.iloc[0]
             st.success(
@@ -2725,60 +2726,19 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 f"{float(saved_leader.get('Probability of positive net return (%)', 0.0)):.1f}%."
             )
 
-        saved_exit_df = pd.DataFrame(payload.get("security_exit_ranking") or [])
+        # Both banners and both tables share one scenario snapshot.
+        saved_exit_df = saved_scenario_df.iloc[::-1].reset_index(drop=True)
         if not saved_exit_df.empty:
-            if "Current Weight (%)" in saved_exit_df.columns:
-                saved_exit_df = saved_exit_df.loc[
-                    pd.to_numeric(saved_exit_df["Current Weight (%)"], errors="coerce").fillna(0).gt(0)
-                ]
-            if not saved_exit_df.empty:
-                saved_exit_df = saved_exit_df.sort_values(
-                    ["Return × positive-probability score (%)", "Expected net scenario return (%)"],
-                    ascending=[True, True], kind="stable", na_position="last",
-                )
-                saved_exit = saved_exit_df.iloc[0]
-                st.warning(
-                    f"Top single-sell candidate (research-only): {saved_exit.get('Security', '—')} · "
-                    f"expected net scenario return "
-                    f"{float(saved_exit.get('Expected net scenario return (%)', 0.0)):+.2f}% · "
-                    f"return × positive-path score "
-                    f"{float(saved_exit.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
-                    f"current weight {float(saved_exit.get('Current Weight (%)', 0.0)):.2f}%."
-                )
-        else:
-            if not saved_scenario_df.empty:
-                weakest = saved_scenario_df.sort_values(
-                    "Return × positive-probability score (%)", ascending=True, kind="stable"
-                ).iloc[0]
-                weakest_ticker = str(weakest.get("Yahoo Ticker", "")).upper()
-                ownership_note = "owned" if weakest_ticker in saved_owned else "not currently owned"
-                st.warning(
-                    f"Top single-sell candidate (lowest displayed score): {weakest.get('Security', '—')} · "
-                    f"return × positive-path score "
-                    f"{float(weakest.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
-                    f"{ownership_note}."
-                )
-            # Existing saved analyses may lack the new exit-ranking payload;
-            # surface the weakest owned action as the persistent top-sell proxy.
-            fallback_sell = pd.DataFrame(payload.get("holdings_action_summary") or [])
-            if not fallback_sell.empty and "Quantity" in fallback_sell.columns:
-                fallback_sell = fallback_sell.loc[
-                    pd.to_numeric(fallback_sell["Quantity"], errors="coerce").fillna(0).gt(0)
-                ]
-            if not fallback_sell.empty and "Expected Annual Return Lift (%)" in fallback_sell.columns:
-                fallback_sell["_lift"] = pd.to_numeric(
-                    fallback_sell["Expected Annual Return Lift (%)"], errors="coerce"
-                )
-                fallback_sell = fallback_sell.loc[fallback_sell["_lift"].notna()].sort_values(
-                    "_lift", ascending=True, kind="stable"
-                )
-                if not fallback_sell.empty:
-                    row = fallback_sell.iloc[0]
-                    st.warning(
-                        f"Top single-sell candidate (saved holding proxy): {row.get('Symbol', '—')} · "
-                        f"weakest holding-to-target return lift {float(row['_lift']):+.2f}% · "
-                        f"current weight {float(row.get('Current Weight', 0.0)) * 100:.2f}%."
-                    )
+            saved_exit = saved_exit_df.iloc[0]
+            st.warning(
+                f"Top single-sell candidate (lowest displayed score): {saved_exit.get('Security', '—')} · "
+                f"expected net scenario return "
+                f"{float(saved_exit.get('Expected net scenario return (%)', 0.0)):+.2f}% · "
+                f"return × positive-path score "
+                f"{float(saved_exit.get('Return × positive-probability score (%)', 0.0)):+.2f}% · "
+                f"historical-bootstrap positive-path frequency "
+                f"{float(saved_exit.get('Probability of positive net return (%)', 0.0)):.1f}%."
+            )
 
         # Compact information-only summary of the market data used for the
         # saved analysis. This does not expose or restore analysis settings.
@@ -2986,71 +2946,21 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 )
             else:
                 st.caption("No scenario ranking is present in this saved analysis.")
-            saved_exit_records = payload.get("security_exit_ranking") or []
-            saved_exit_review = pd.DataFrame(saved_exit_records)
-            if not saved_exit_review.empty and saved_owned:
-                saved_exit_review = saved_exit_review.loc[
-                    saved_exit_review["Yahoo Ticker"].astype(str).str.upper().isin(saved_owned)
-                ].copy()
+            saved_exit_review = saved_exit_df
             if not saved_exit_review.empty:
-                if "Current Weight (%)" in saved_exit_review.columns:
-                    saved_exit_review = saved_exit_review.loc[
-                        pd.to_numeric(saved_exit_review["Current Weight (%)"], errors="coerce").fillna(0).gt(0)
-                    ].copy()
-            if not saved_exit_review.empty:
-                saved_exit_review["_score_sort"] = pd.to_numeric(
-                    saved_exit_review.get("Return × positive-probability score (%)", 0),
-                    errors="coerce",
-                )
-                saved_exit_review = (
-                    saved_exit_review.sort_values(
-                        ["_score_sort", "Yahoo Ticker"], ascending=[True, True], kind="stable", na_position="last"
-                    )
-                    .drop_duplicates(subset=["Yahoo Ticker"], keep="first")
-                    .drop(columns=["_score_sort"], errors="ignore")
-                    .reset_index(drop=True)
-                )
-            if not saved_exit_review.empty:
-                st.markdown("**Saved sell review ranking (weakest first)**")
+                st.markdown("**Saved sell review ranking (lowest score first)**")
                 st.dataframe(
                     saved_exit_review.drop(columns=["Scenario method"], errors="ignore"),
                     width="stretch",
                     hide_index=True,
                     column_config={
-                        "Current Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "Optimized Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
                         "Expected net scenario return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
                         "Median net return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
                         "Probability of positive net return (%)": st.column_config.NumberColumn(format="%.1f%%"),
                         "Return × positive-probability score (%)": st.column_config.NumberColumn(format="%+.2f%%"),
                     },
                 )
-            elif payload.get("security_exit_ranking_error") or saved_exit_records:
-                # Older saved payloads may contain the pre-feature error and no
-                # return matrix. Keep the independent review useful by falling
-                # back to the saved action table rather than forcing a rerun.
-                action_rows = pd.DataFrame(payload.get("holdings_action_summary") or [])
-                if not action_rows.empty and "Quantity" in action_rows.columns:
-                    action_rows = action_rows.loc[
-                        pd.to_numeric(action_rows["Quantity"], errors="coerce").fillna(0).gt(0)
-                    ]
-                if not action_rows.empty and "Expected Annual Return Lift (%)" in action_rows.columns:
-                    action_rows["_lift"] = pd.to_numeric(
-                        action_rows["Expected Annual Return Lift (%)"], errors="coerce"
-                    )
-                    action_rows = action_rows.loc[action_rows["_lift"].notna()].sort_values(
-                        "_lift", ascending=True, kind="stable"
-                    )
-                if not action_rows.empty:
-                    st.info(
-                        "Saved 20-session sell scenarios are unavailable in this older payload; "
-                        "showing the weakest saved holding-to-target return lift as a no-rerun proxy."
-                    )
-                    st.dataframe(action_rows.drop(columns=["_lift"], errors="ignore"), width="stretch", hide_index=True)
-                else:
-                    st.warning(
-                        "Sell review ranking reported an issue: "
-                        + str(payload["security_exit_ranking_error"])
-                    )
 
 
 def _normalize_currency_code(currency):
@@ -11885,16 +11795,14 @@ if run_btn:
                 horizon_sessions=int(security_forecast_horizon),
                 one_way_cost_bps=float(security_forecast_cost_bps),
             )
-            exit_ranking = forecast_holdings_for_exit(
-                review_universe,
-                log_returns,
-                horizon_sessions=int(security_forecast_horizon),
-                one_way_cost_bps=float(security_forecast_cost_bps),
-            )
-            if not exit_ranking.empty and "Current Weight (%)" in exit_ranking.columns:
-                exit_ranking = exit_ranking.loc[
-                    pd.to_numeric(exit_ranking["Current Weight (%)"], errors="coerce").fillna(0).gt(0)
-                ].reset_index(drop=True)
+            # Reuse the identical scenarios for both directions, including
+            # securities present only in the positive optimal allocation.
+            exit_ranking = scenario_ranking.iloc[::-1].reset_index(drop=True).copy()
+            owned_weight_map = {
+                str(row.get("Yahoo Ticker", "")).strip(): float(row.get("Weight", 0) or 0) * 100
+                for _, row in portfolio_df.iterrows()
+            }
+            exit_ranking["Current Weight (%)"] = exit_ranking["Yahoo Ticker"].map(owned_weight_map).fillna(0.0)
         except Exception as exc:
             # An optional research view must never invalidate the actionable
             # rebalance plan or its saved analysis.
