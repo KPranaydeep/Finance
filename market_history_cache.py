@@ -247,6 +247,18 @@ def _load_frames(connection, tickers, start, end):
     return closes, volumes
 
 
+def load_cached_market_history(path, tickers, start, end):
+    """Read existing prices without planning requests or contacting a provider."""
+    if not Path(path).exists():
+        return pd.DataFrame(), pd.DataFrame()
+    with _CACHE_LOCK:
+        connection = _connect(path)
+        try:
+            return _load_frames(connection, _normalized_tickers(tickers), start, end)
+        finally:
+            connection.close()
+
+
 def sync_market_history(
     path,
     tickers,

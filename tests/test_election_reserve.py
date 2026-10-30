@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
 import pytest
-from election_reserve import election_reserve_reference, combined_reserve, pack_inr_history, saved_event_reference
+from election_reserve import election_reserve_reference, combined_reserve, pack_inr_history, saved_event_reference, history_from_market_cache
 from election_schedule import parse_schedule, monthly_schedule
 
 
@@ -77,5 +77,36 @@ def test_schedule_outage_preserves_baseline_and_is_monthly(tmp_path):
     first = monthly_schedule(path, "2026-10-30", fetch=fail)
     second = monthly_schedule(path, "2026-10-31", fetch=fail)
     assert first["events"] == second["events"]
-    assert len(first["events"]) == 3 and len(calls) == 1
+    assert len(first["events"]) == 3 and len(calls) == 2
     assert "refresh_error" in second
+
+
+def test_old_analysis_recovers_inr_history_from_cache_without_download(tmp_path):
+    from market_history_cache import sync_market_history
+    frame, weights, currencies, events = example()
+    prices = 100*np.exp(frame[["INDIA"]].cumsum())
+    cache = tmp_path / "market.duckdb"
+    sync_market_history(cache, ["INDIA"], "2024-12-01", "2025-06-06",
+                        lambda *args: (prices, pd.DataFrame(), {}))
+    payload = {"optimal_allocation":[{"ticker":t,"target_weight":w} for t,w in weights.items()],
+               "current_allocation":[{"Yahoo Ticker":t,"Currency":c} for t,c in currencies.items()]}
+    history = history_from_market_cache(payload, cache, "2025-06-06")
+    result = saved_event_reference(dict(payload,election_reserve_history=history), events, "2025-06-06")
+    assert history["source"] == "existing persistent price cache"
+    assert history["columns"] == ["INDIA"]
+    assert result["event_reserve_fraction"] == pytest.approx(.04)
+
+
+def test_eci_failure_discovers_explicit_pib_schedule(tmp_path):
+    class Response:
+        def __init__(self,text): self.text=text
+        def raise_for_status(self): pass
+    def fetch(url, **kwargs):
+        if 'eci.gov.in' in url: raise OSError('406 blocked')
+        if 'allRel.aspx' in url:
+            return Response('<a href="PressReleasePage.aspx?PRID=12345">Schedule for General Election to Legislative Assembly</a>')
+        return Response('General Election to Legislative Assembly <table><tr><td>Date of Poll</td><td>01.03.2027</td></tr><tr><td>Date of Counting</td><td>05.03.2027</td></tr></table>')
+    result = monthly_schedule(tmp_path/'schedule.json','2026-10-30',fetch=fetch)
+    assert result["fallback_schedules"] == 1
+    assert any(e["counting_date"] == "2027-03-05" for e in result["events"])
+    assert len(result["events"]) == 4

@@ -4,6 +4,26 @@ import pandas as pd
 import pandas_market_calendars as mcal
 
 
+def history_from_market_cache(payload, path, today):
+    """Migrate older saved analyses using their existing local INR prices."""
+    from market_history_cache import load_cached_market_history
+    weights = (payload.get("election_reserve_history") or {}).get("weights") or {
+        str(r["ticker"]): float(r.get("target_weight") or 0) for r in payload.get("optimal_allocation") or []
+    }
+    currencies = {str(r["Yahoo Ticker"]): str(r["Currency"]).upper() for r in payload.get("current_allocation") or [] if r.get("Currency")}
+    if not weights or any(w > 0 and t not in currencies for t, w in weights.items()):
+        raise ValueError("Saved allocation lacks complete listing currency metadata")
+    tickers = [t for t, w in weights.items() if w > 0 and currencies.get(t) == "INR"]
+    if not tickers:
+        return pack_inr_history(pd.DataFrame(), weights, currencies)
+    prices, _ = load_cached_market_history(path, tickers, "2020-01-01", str(today))
+    if any(t not in prices or prices[t].dropna().size < 31 for t in tickers):
+        raise ValueError("Local price cache lacks sufficient INR history")
+    prices = prices.loc[:, tickers].where(prices.loc[:, tickers] > 0)
+    returns = np.log(prices / prices.shift(1)).dropna(how="all")
+    return dict(pack_inr_history(returns, weights, currencies), source="existing persistent price cache")
+
+
 def pack_inr_history(log_returns, weights, currencies):
     tickers = [t for t, w in weights.items() if w > 0 and currencies.get(t) == "INR"]
     frame = pd.DataFrame(log_returns).reindex(columns=tickers).replace([np.inf, -np.inf], np.nan)

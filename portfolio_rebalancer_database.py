@@ -27,7 +27,7 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
-from election_reserve import pack_inr_history
+from election_reserve import pack_inr_history, history_from_market_cache
 from election_reserve_ui import render_election_reserve
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
@@ -2813,6 +2813,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             combined_fraction, election_reference = render_election_reserve(
                 payload, reserve_summary["reserve_fraction"], base_value, widget_scope,
                 refresh_election_inr_history, lambda value: save_latest_analysis(value, owner),
+                hydrate_history=lambda value: history_from_market_cache(value, MARKET_HISTORY_CACHE_PATH, pd.Timestamp.now(tz="Asia/Kolkata").date()),
             )
             reserve_card.metric("Additional reserve", f"{combined_fraction:.2%}", border=True)
             reserve_card.caption(f"₹{base_value * combined_fraction:,.0f} · max(portfolio buffer, active INR election stress)")
