@@ -2732,14 +2732,19 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     "Sell score": float(lowest["Return × positive-probability score (%)"]),
                     "Price data through": buy_date if buy_date == sell_date else f"Buy {buy_date} / sell {sell_date}",
                 })
-            st.dataframe(
-                pd.DataFrame(shortlist), hide_index=True, width="stretch",
-                height=36 * (len(shortlist) + 1) + 4,
-                column_config={
-                    "Buy score": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "Sell score": st.column_config.NumberColumn(format="%+.2f%%"),
-                },
-            )
+            for offset in range(0, len(shortlist), 3):
+                row = shortlist[offset:offset + 3]
+                cards = st.columns(len(row), gap="small")
+                for card, pick in zip(cards, row):
+                    with card.container(border=True):
+                        st.markdown(f"**{pick['Currency']}**")
+                        st.markdown(
+                            f":green[Buy] **{pick['Top buy']}** · **{pick['Buy score']:+.2f}%**"
+                        )
+                        st.markdown(
+                            f":orange[Sell] **{pick['Top sell']}** · **{pick['Sell score']:+.2f}%**"
+                        )
+                        st.caption(f"Price data: {pick['Price data through']}")
         forecast_settings = (payload.get("settings") or {}).get("security_scenario_forecast") or {}
         st.caption(
             f"Research ranking · {int(forecast_settings.get('horizon_sessions') or 30)} sessions"
