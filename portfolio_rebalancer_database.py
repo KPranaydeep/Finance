@@ -26,6 +26,7 @@ from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
+from election_watch_ui import render_election_watch
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2793,6 +2794,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 if debt_summary.get("at_search_boundary"):
                     st.caption("The unscreened optimum hits the maximum tested debt; it is excluded from the model allocation.")
                 st.caption("The statistical model allocation is separate from lender-approved capacity.")
+
+        render_election_watch(widget_scope)
 
         # Compact information-only summary of the market data used for the
         # saved analysis. This does not expose or restore analysis settings.
