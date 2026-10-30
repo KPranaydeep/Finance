@@ -2888,7 +2888,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             if not saved_scenario_df.empty:
                 saved_scenario_error = payload.get("security_scenario_ranking_error")
                 if saved_scenario_error:
-                    st.warning(f"Scenario ranking reported an issue: {saved_scenario_error}")
+                    st.caption(
+                        "Older metadata noted a prior scenario issue, but the saved buy "
+                        "ranking below is available and being reused."
+                    )
                 st.caption(
                     f"Historical scenarios · {int(scenario_config.get('horizon_sessions', 0))} "
                     f"sessions · {float(scenario_config.get('one_way_cost_bps', 0.0)):.0f} bp "
