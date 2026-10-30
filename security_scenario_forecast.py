@@ -221,7 +221,10 @@ def forecast_holdings_for_exit(
     ]
     if portfolio is None or portfolio.empty:
         return pd.DataFrame(columns=columns)
-    holdings = portfolio.copy()
+    holdings = pd.DataFrame(portfolio).copy()
+    # Uploaded/editor-derived frames can contain duplicate labels; retain the
+    # first canonical column so scalar values never leak into normalization.
+    holdings = holdings.loc[:, ~holdings.columns.duplicated()].reset_index(drop=True)
     quantity_source = (
         holdings["Quantity"]
         if "Quantity" in holdings.columns

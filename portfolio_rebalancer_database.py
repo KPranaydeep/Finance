@@ -11746,30 +11746,19 @@ if run_btn:
                 horizon_sessions=int(security_forecast_horizon),
                 one_way_cost_bps=float(security_forecast_cost_bps),
             )
+            optimal_rows = pd.DataFrame({
+                "Symbol": log_returns.columns.astype(str),
+                "Yahoo Ticker": log_returns.columns.astype(str),
+                "Quantity": 0.0,
+                "Current Weight": 0.0,
+                "Optimal Weight": np.asarray(optimal_weights, dtype=float),
+            })
+            review_universe = pd.concat(
+                [portfolio_df, rebal_df, optimal_rows], ignore_index=True, sort=False
+            )
+            review_universe = review_universe.loc[:, ~review_universe.columns.duplicated()]
             exit_ranking = forecast_holdings_for_exit(
-                pd.concat(
-                    [
-                        portfolio_df,
-                        pd.DataFrame(
-                            [
-                                {
-                                    "Symbol": str(ticker),
-                                    "Yahoo Ticker": str(ticker),
-                                    "Quantity": 0,
-                                    "Current Weight": 0.0,
-                                    "Optimal Weight": float(weight),
-                                }
-                                for ticker, weight in zip(log_returns.columns, optimal_weights)
-                                if float(weight) > 0
-                                and str(ticker) not in set(
-                                    portfolio_df.get("Yahoo Ticker", pd.Series(dtype=str))
-                                    .astype(str)
-                                )
-                            ]
-                        ),
-                    ],
-                    ignore_index=True,
-                ),
+                review_universe,
                 log_returns,
                 horizon_sessions=int(security_forecast_horizon),
                 one_way_cost_bps=float(security_forecast_cost_bps),
