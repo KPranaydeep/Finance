@@ -12255,6 +12255,7 @@ if run_btn:
         )
         market_cap_filter = ((analysis_payload.get("settings") or {}).get("universe_preselection") or {}).get("market_cap_filter") or {}
         leading_buy = scenario_ranking.iloc[0] if not scenario_ranking.empty else None
+        leading_sell = exit_ranking.iloc[0] if not exit_ranking.empty else None
         try:
             reserve_log = calculate_portfolio_reserve_target(
                 analysis_payload.get("optimal_stats") or {},
@@ -12283,6 +12284,8 @@ if run_btn:
             ),
             top_buy_symbol=(str(leading_buy.get("Security")) if leading_buy is not None and leading_buy.get("Security") else None),
             top_buy_score=(float(leading_buy.get("Return × positive-probability score (%)")) if leading_buy is not None and leading_buy.get("Return × positive-probability score (%)") is not None else None),
+            top_sell_symbol=(str(leading_sell.get("Security")) if leading_sell is not None and leading_sell.get("Security") else None),
+            top_sell_score=(float(leading_sell.get("Return × positive-probability score (%)")) if leading_sell is not None and leading_sell.get("Return × positive-probability score (%)") is not None else None),
             warning_count=len((analysis_payload.get("warnings") or {})),
         )
 
