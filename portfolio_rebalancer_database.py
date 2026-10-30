@@ -25,7 +25,7 @@ import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
-from rebalance_review import assess_rebalance
+from rebalance_review import assess_rebalance, assess_executable_rebalance
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2619,7 +2619,7 @@ def _render_saved_leverage_check(payload, *, owner, widget_scope):
         )
 
 
-def refresh_security_scenarios(review_universe, start_date, horizon_sessions, one_way_cost_bps):
+def refresh_security_scenarios(review_universe, start_date, horizon_sessions, one_way_cost_bps, include_history=False):
     review_universe = review_universe.copy()
     for name in ("Quantity", "Optimal Weight"):
         if name not in review_universe.columns:
@@ -2654,12 +2654,15 @@ def refresh_security_scenarios(review_universe, start_date, horizon_sessions, on
                 observed, [(ticker, currency)]
             )[ticker]
         scenario_returns = independent_security_log_returns(pd.DataFrame(converted_series))
-    return forecast_executable_buys(
+    ranking = forecast_executable_buys(
         review_universe,
         scenario_returns,
         horizon_sessions=int(horizon_sessions),
         one_way_cost_bps=float(one_way_cost_bps),
     )
+    if include_history:
+        return ranking, scenario_returns, {t: float(series.dropna().iloc[-1]) for t, series in converted_series.items() if not series.dropna().empty}
+    return ranking
 
 
 def render_saved_analysis(placeholder, owner, *, instance_key="page"):
@@ -2843,7 +2846,28 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         rebalance_review = assess_rebalance(current_stats, optimal_stats, rebalancing_plan, base_value, review_cost_bps)
         with st.container(border=True):
             st.markdown("**Is rebalancing worthwhile?**")
-            st.info(rebalance_review["decision"])
+            if st.button("Update rebalance decision", key=f"rebalance_decision_{widget_scope}", help="Refresh relevant histories and compare saved whole-share orders with holding; no optimizer run."):
+                try:
+                    review_universe = pd.DataFrame(payload.get("current_allocation") or [])
+                    trade_tickers = {str(t.get("Yahoo Ticker", "")) for t in rebalancing_plan}
+                    review_universe["Optimal Weight"] = review_universe["Yahoo Ticker"].astype(str).isin(trade_tickers).astype(float)
+                    review_universe["Action"] = "Buy"
+                    review_universe["Executable Quantity"] = 1.0
+                    _, refreshed_returns, marks = refresh_security_scenarios(
+                        review_universe, str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10],
+                        20, review_cost_bps, include_history=True,
+                    )
+                    owned = {str(row["Yahoo Ticker"]): float(row["Quantity"]) * marks.get(str(row["Yahoo Ticker"]), float("nan")) for _, row in review_universe.iterrows() if float(row.get("Quantity", 0) or 0) > 0}
+                    marked_orders = [dict(t, **{"Executable Value": abs(float(t["Executable Quantity"])) * marks.get(str(t["Yahoo Ticker"]), float("nan"))}) for t in rebalancing_plan]
+                    payload["executable_rebalance_review"] = assess_executable_rebalance(refreshed_returns, owned, marked_orders, cost_bps=review_cost_bps)
+                    payload["executable_rebalance_review"]["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    save_latest_analysis(payload, owner)
+                except Exception as exc:
+                    st.warning(f"Decision update could not finish; saved assessment retained: {exc}")
+            executable_review = payload.get("executable_rebalance_review") or {}
+            st.info(executable_review.get("decision", "Hold / review — executable-portfolio uncertainty check unavailable for this saved run"))
+            if executable_review.get("as_of"):
+                st.caption(f"Paired history through {executable_review['as_of']} · {executable_review.get('observations', 0)} observations · saved whole-share order quantities repriced for this comparison.")
             if rebalance_review["cost_fraction"] is not None:
                 st.caption(
                     f"Gross traded / base: {rebalance_review['gross_traded_fraction']:.1%}"
@@ -2852,7 +2876,18 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     f" (₹{rebalance_review['cost_amount']:,.0f}, {review_cost_bps:g} bp per side)."
                 )
             if rebalance_review["net_median_gain"] is not None:
-                st.caption(f"20-session median-return improvement after estimated trading drag: {rebalance_review['net_median_gain']:+.3%} of portfolio base.")
+                st.caption(f"Full-target median improvement less order costs: {rebalance_review['net_median_gain']:+.3%}. Context only; the executable stability check determines the assessment above.")
+            if executable_review.get("candidates"):
+                with st.expander("Executable subsets and uncertainty check", expanded=False):
+                    st.dataframe(pd.DataFrame(executable_review["candidates"]), hide_index=True, width="stretch", column_config={
+                        name: st.column_config.NumberColumn(format="percent")
+                        for name in ("Gross traded / base", "Cost / base", "Net mean gain", "Worst segment lower bound (log wealth)", "Hold ES95", "Post-trade ES95 (2× costs)")
+                    })
+                    st.caption(executable_review.get("confidence_note", ""))
+                    st.caption("Costs are stressed at 2× the configured assumption. Cash is assumed zero unless recorded; unfunded orders cannot pass. The lowest-turnover passing whole-order subset is preferred. Scenarios hold the resulting mix for 20 sessions. The tested subset family is bounded, not an exhaustive trade search.")
+                    if executable_review.get("selected_orders"):
+                        st.markdown("**Lower-turnover subset for review**")
+                        st.dataframe(pd.DataFrame(executable_review["selected_orders"]), hide_index=True, width="stretch")
             with st.expander("Metric changes and decision assumptions", expanded=False):
                 metric_rows = []
                 for item in rebalance_review["metrics"]:
@@ -12119,7 +12154,22 @@ if run_btn:
             # completed rebalancing plan when its statistical input is unusable.
             leverage_assessment_error = str(exc)
         prior_saved_analysis = load_latest_analysis(CURRENT_USER) or {}
+        try:
+            owned_values = {
+                str(row["Yahoo Ticker"]): (
+                    float(row["Quantity"]) * float(price_map[str(row["Yahoo Ticker"])]) * float(row["FX to INR"])
+                    if str(row["Yahoo Ticker"]) in price_map else None
+                )
+                for _, row in portfolio_df.iterrows() if float(row.get("Quantity", 0) or 0) > 0
+            }
+            executable_rebalance_review = assess_executable_rebalance(
+                log_returns, owned_values, rebal_df.to_dict(orient="records"),
+                cost_bps=float(security_forecast_cost_bps),
+            )
+        except Exception as exc:
+            executable_rebalance_review = {"decision": "Hold / review — executable comparison could not be completed", "error": str(exc)}
         analysis_payload = {
+            "executable_rebalance_review": executable_rebalance_review,
             "review_analysis_context": {
                 "schema_version": 1,
                 "optimizer_config_version": OPTIMIZER_CONFIG_VERSION,
