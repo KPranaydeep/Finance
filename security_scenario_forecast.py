@@ -245,10 +245,9 @@ def forecast_holdings_for_exit(
         else pd.Series(0, index=holdings.index)
     )
     quantity = pd.to_numeric(quantity_source, errors="coerce").fillna(0)
-    optimal_weight = pd.to_numeric(optimal_source, errors="coerce").fillna(0)
-    # Include owned/protected holdings and positive-target optimal securities;
-    # the latter are review candidates even when not currently owned.
-    holdings = holdings.loc[quantity.fillna(0).gt(0) | optimal_weight.gt(0)].copy()
+    # A sell candidate must be owned; positive optimal targets with zero current
+    # quantity belong only in the buy review.
+    holdings = holdings.loc[quantity.fillna(0).gt(0)].copy()
     if holdings.empty:
         return pd.DataFrame(columns=columns)
     holdings["Action"] = "Buy"

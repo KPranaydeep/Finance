@@ -2957,6 +2957,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 # return matrix. Keep the independent review useful by falling
                 # back to the saved action table rather than forcing a rerun.
                 action_rows = pd.DataFrame(payload.get("holdings_action_summary") or [])
+                if not action_rows.empty and "Quantity" in action_rows.columns:
+                    action_rows = action_rows.loc[
+                        pd.to_numeric(action_rows["Quantity"], errors="coerce").fillna(0).gt(0)
+                    ]
                 if not action_rows.empty and "Expected Annual Return Lift (%)" in action_rows.columns:
                     action_rows["_lift"] = pd.to_numeric(
                         action_rows["Expected Annual Return Lift (%)"], errors="coerce"
