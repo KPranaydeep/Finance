@@ -10198,13 +10198,17 @@ if cap_search_results:
         ):
             if model_column not in results_df.columns:
                 results_df[model_column] = np.nan
+        legacy_es_column = "Block-Bootstrap ES 95% (20 Sessions)"
+        if legacy_es_column in results_df.columns:
+            display_columns.append(legacy_es_column)
+            st.caption("Restored rows may contain historical 20-session ES. Those values remain in their original column; blank 30-session ES means it has not been recalculated.")
         st.dataframe(
-            results_df[display_columns],
+            results_df.reindex(columns=display_columns),
             width="stretch",
             hide_index=True,
             column_config={
                 column: st.column_config.NumberColumn(column, format="percent")
-                for column in percentage_columns
+                for column in [*percentage_columns, legacy_es_column]
             }
             | {
                 "Elapsed seconds": st.column_config.NumberColumn(
