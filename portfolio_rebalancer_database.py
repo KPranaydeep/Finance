@@ -2945,6 +2945,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 st.caption("No scenario ranking is present in this saved analysis.")
             saved_exit_records = payload.get("security_exit_ranking") or []
             saved_exit_review = pd.DataFrame(saved_exit_records)
+            if not saved_exit_review.empty and saved_owned:
+                saved_exit_review = saved_exit_review.loc[
+                    saved_exit_review["Yahoo Ticker"].astype(str).str.upper().isin(saved_owned)
+                ].reset_index(drop=True)
             if not saved_exit_review.empty:
                 st.markdown("**Saved sell review ranking (weakest first)**")
                 st.dataframe(
