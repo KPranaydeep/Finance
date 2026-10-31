@@ -113,3 +113,30 @@ def combined_reserve(base_fraction, reference):
     """Refresh applicability against today's schedule before calling."""
     event = reference.get("event_reserve_fraction")
     return max(float(base_fraction), float(event) if event is not None else 0.0)
+
+
+def reserve_decision_summary(base_fraction, india, us):
+    """One selection and explanation for the saved optimal portfolio's card/panel."""
+    base = float(base_fraction)
+    if not np.isfinite(base) or base < 0:
+        raise ValueError("A finite non-negative portfolio buffer is required")
+    components = {"portfolio buffer": base}
+    pending = []
+    for label, evidence, active_status in (
+        ("India election stress", india, "active_event_stress"),
+        ("US whole-portfolio stress", us, "historical_scenario"),
+    ):
+        amount = evidence.get("event_reserve_fraction")
+        active = bool(evidence.get("active_events"))
+        usable = (evidence.get("status") == active_status and active and amount is not None
+                  and np.isfinite(float(amount)) and float(amount) >= 0)
+        if usable:
+            components[label] = float(amount)
+        elif active or evidence.get("status") in {"not_assessed", "stale_or_incomplete_prices"}:
+            pending.append(label + " not assessed")
+    fraction = max(components.values())
+    drivers = [label for label, value in components.items() if abs(value - fraction) < 1e-12]
+    return dict(fraction=fraction, driver="Driven by " + " / ".join(drivers),
+                components=components,
+                comparison=" · ".join(f"{label.capitalize()} {value:.2%}" for label,value in components.items()),
+                pending=" · ".join(pending))

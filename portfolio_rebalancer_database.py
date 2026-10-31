@@ -2902,7 +2902,12 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 hydrate_history=lambda value: history_from_market_cache(value, MARKET_HISTORY_CACHE_PATH, pd.Timestamp.now(tz="Asia/Kolkata").date()),
             )
             reserve_card.metric("Additional reserve reference", f"{combined_fraction:.2%}", border=True)
-            reserve_card.caption(f"₹{base_value * combined_fraction:,.0f} · max(portfolio buffer, supported event stresses)")
+            reserve_driver = ((election_reference or {}).get('reserve_summary') or {}).get('driver', 'Portfolio buffer only · event assessment unavailable')
+            reserve_card.caption(f"₹{base_value * combined_fraction:,.0f} · {reserve_driver}")
+            reserve_card.caption("Basis: saved optimal mix, expressed against total invested capital")
+            reserve_pending = ((election_reference or {}).get('reserve_summary') or {}).get('pending')
+            if reserve_pending:
+                reserve_card.caption(reserve_pending + ' · not treated as zero risk')
             reserve_card.caption(f"Portfolio buffer data: {metrics_date}")
             if election_reference and not election_reference.get('coverage_complete'):
                 reserve_card.caption("Partial event coverage · see US/India assessment below")
