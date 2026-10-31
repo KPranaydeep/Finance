@@ -4,11 +4,12 @@ import pandas as pd
 import streamlit as st
 from election_schedule import monthly_schedule
 from election_reserve import saved_event_reference, combined_reserve
+from us_election_risk import us_election_reference, US_EVENTS, allocation_inputs, next_us_event_review
 
 
 def render_election_reserve(payload, base_fraction, base_value, scope, refresh_history, save, *, hydrate_history=None):
     today = pd.Timestamp.now(tz="Asia/Kolkata").date()
-    with st.expander("INR election reserve · dates & stress", expanded=False):
+    with st.expander("Election reserve · India & US", expanded=True):
         refresh = st.button("Refresh election reserve", key=f"election_reserve_refresh_{scope}",
                             help="Refresh only optimal INR histories and official schedules; no optimizer or trades.")
         history_error = None
@@ -38,11 +39,39 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
         except Exception as exc:
             st.caption(f"Election reserve update unavailable; portfolio reserve retained. {exc}")
             return float(base_fraction), None
-        final = combined_reserve(base_fraction, reference)
+        try:
+            us = us_election_reference(payload.get('portfolio_evidence_history'), today, schedule['events'])
+        except Exception as exc:
+            us = dict(status='not_assessed', coverage_complete=False, active_events=[], windows=[],
+                      event_reserve_fraction=None, reason='US election risk not assessed: '+str(exc))
+        reference['us'] = us
+        reference['coverage_complete'] = bool(us.get('coverage_complete')) and not bool(schedule.get('refresh_error'))
+        final = max(combined_reserve(base_fraction, reference), float(us.get('event_reserve_fraction') or 0))
+        upcoming_us = next((e for e in US_EVENTS if e['event_date'] >= str(today)), None)
+        if upcoming_us:
+            days = (pd.Timestamp(upcoming_us['event_date']).date()-today).days
+            st.markdown(f"**US election · {upcoming_us['event_date']} · {days} calendar days away**")
+            st.caption('House: 435/435 seats (100%) · Senate: 33/100 regular-cycle seats (33%), plus specials not included in this count. Congressional control is at stake; this is not a presidential election.')
+        if us.get('active_events'):
+            st.caption('Active US watch: 30 NYSE sessions before/after election day. Results may emerge over multiple days; no fixed certification/counting day is assumed.')
+        event_review=next_us_event_review(today)
+        if event_review:
+            st.markdown(f"**US event review: {event_review} · NYSE session before/at election day**")
+        if us.get('event_reserve_fraction') is None:
+            st.warning(us['reason'])
+        else:
+            st.markdown(f"**US whole-portfolio historical stress: {us['event_reserve_fraction']:.2%} of total base** · {len(us['windows'])} complete episodes · data {us.get('data_through')}")
+            st.caption(us['reason'])
+        weights, metadata = allocation_inputs(payload)
+        quoted_usd = sum(w for t,w in weights.items() if metadata.get(t,{}).get('Currency') == 'USD')
+        crypto = sum(w for t,w in weights.items() if metadata.get(t,{}).get('Exchange') == 'CCC')
+        st.caption(f"USD quoted: {quoted_usd:.1%} · crypto: {crypto:.1%} of total base. US stress replays the complete INR-valued mix, including FX and INR holdings. Issuer domicile/sector sensitivity is not inferred from quote currency; foreign-listing classification remains unverified.")
         event_fraction = reference.get("event_reserve_fraction")
         st.markdown(f"**Combined reserve: {final:.2%} · ₹{base_value*final:,.0f}** of total invested base")
         st.caption(f"Portfolio buffer {base_fraction:.2%} · active election stress {event_fraction:.2%}" if event_fraction is not None
-                   else "Portfolio buffer retained · no verified active election adjustment")
+                   else f"Portfolio buffer {base_fraction:.2%} · India event adjustment not established/active")
+        if not reference['coverage_complete']:
+            st.caption('Partial event coverage: this is a limited reserve reference, not a complete or optimal portfolio protection amount. Country amounts are never summed.')
         for event in reference.get("active_events", []):
             st.markdown(f"**{event['name']}** · prepare from **{event['preparation_date']}** · counting **{event['counting_date']}**")
             st.caption("Polls: " + ", ".join(event.get("poll_dates", [])))
@@ -69,4 +98,9 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
                 st.caption(f"{window['counting_date']} · INR drawdown {window['loss']:.2%} · {window['start']} → {window['end']}")
             for event in schedule["events"]:
                 st.markdown(f"[{event['name']} · {event['counting_date']}]({event['source']})")
+            for event in US_EVENTS:
+                st.markdown(f"[{event['name']} · {event['event_date']}]({event['source']})")
+            for window in us.get('windows', []):
+                st.caption(f"US {window['event_date']} · full-mix drawdown {window['loss']:.2%} · {window['start']} → {window['end']}")
+            st.caption('US scenarios include the same native-price/dated-FX paths for all holdings, preserving co-movement. Different country scenario maxima are not added. If India/US windows overlap without a validated joint analog, coverage remains partial. Thirty-session windows and historical maxima are stress assumptions; few episodes do not validate an optimal reserve.')
         return final, reference

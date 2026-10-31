@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 from market_regime_watch import detect_market_changes
+from us_election_risk import US_EVENTS
 from election_watch import monthly_snapshot, representation_context, market_context, SOURCE, PARLIAMENT_SOURCE, REPRESENTATION_VERIFIED_AT, _atomic_save
 
 
@@ -136,9 +137,13 @@ def render_election_watch(scope):
         st.caption("Decision context: the decline measures the pullback; the volatility percentile measures unusual movement, not upside potential. The portfolio's cost-tested rebalance decision and reserve model determine the response.")
         context = representation_context(snapshot, today)
         upcoming = context["rows"]
+        next_us = next((event for event in US_EVENTS if event['event_date'] >= str(today)), None)
+        if next_us:
+            days=(pd.Timestamp(next_us['event_date']).date()-today).days
+            st.markdown(f"**US timing:** [federal election {next_us['event_date']}]({next_us['source']}) · **{days} calendar days away**. Whole-portfolio assessment is in Election reserve above.")
         if upcoming:
             nearest = upcoming[0]
-            st.markdown(f"**Election timing:** nearest tracked term end is **{nearest['State']} in {nearest['Days to term end']} days**. Polling/counting dates remain unverified.")
+            st.markdown(f"**India timing:** nearest tracked term end is **{nearest['State']} in {nearest['Days to term end']} days**. Polling/counting dates remain unverified.")
             share = f"{context['assembly_share']:.1%}" if context['assembly_share'] is not None else "unknown"
             st.caption(f"18-month watch: {len(upcoming)} states · {share} of assembly seats geographically covered; not confirmed seats at stake or a market-impact probability.")
         with st.expander("States · timing & seat footprint", expanded=False):

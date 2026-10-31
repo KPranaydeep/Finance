@@ -29,6 +29,7 @@ from rebalance_review import assess_rebalance, assess_executable_rebalance, esti
 from election_watch_ui import render_election_watch
 from election_reserve import pack_inr_history, history_from_market_cache
 from election_reserve_ui import render_election_reserve
+from us_election_risk import portfolio_prices_from_cache, unpack_prices, allocation_inputs, listing_calendar, latest_joint_session, next_us_event_review
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2643,6 +2644,61 @@ def refresh_election_inr_history(payload):
         return pack_inr_history(returns, weights, currencies)
 
 
+def refresh_portfolio_evidence(payload, *, download=False):
+    """Refresh evidence for fixed saved weights; never search or optimize."""
+    weights, metadata = allocation_inputs(payload)
+    tickers = list(dict.fromkeys([*weights, *[str(r['Yahoo Ticker']) for r in payload.get('current_allocation') or [] if float(r.get('Quantity') or 0)>0]]))
+    if download:
+        import yfinance as yf
+        with st.spinner("Refreshing portfolio prices, FX and decision evidence…"):
+            rows=[dict(r) for r in payload.get('current_allocation') or []]
+            for row in rows:
+                if str(row.get('Yahoo Ticker')) not in tickers: continue
+                try: listing_calendar(row)
+                except ValueError:
+                    instrument=yf.Ticker(str(row['Yahoo Ticker']))
+                    instrument.history(period='5d',timeout=8)
+                    listing=instrument.get_history_metadata()
+                    if str(listing.get('currency','')).upper()!=str(row.get('Currency','')).upper():
+                        raise ValueError('Quote currency verification failed for '+str(row['Yahoo Ticker']))
+                    row['Exchange']=listing.get('exchangeName','')
+                    row['Instrument Type']=listing.get('instrumentType','')
+                    listing_calendar(row)  # reject unsupported evidence, never guess
+            payload['current_allocation']=rows
+            sync_market_history(MARKET_HISTORY_CACHE_PATH, tuple(tickers+["USDINR=X","INR=X"]), "2020-01-01",
+                                str(pd.Timestamp.now(tz="Asia/Kolkata").date()), _fetch_combined_daily_history,
+                                batch_size=FULL_HISTORY_BATCH_SIZE, retry_after_hours=0)
+    history = portfolio_prices_from_cache(payload, MARKET_HISTORY_CACHE_PATH, pd.Timestamp.now(tz="Asia/Kolkata").date())
+    prices = unpack_prices(history)
+    # Retain a contiguous complete tail; do not compress missing market dates.
+    missing = prices.isna().any(axis=1)
+    if missing.any(): prices = prices.loc[prices.index > missing[missing].index[-1]]
+    if len(prices)<121 or str(prices.index[-1].date()) != history['expected_through']:
+        raise ValueError("Fresh common price/FX history insufficient; earlier assessments retained")
+    returns = np.log(prices/prices.shift(1)).iloc[1:]
+    targets = np.array([weights.get(t,0.) for t in returns.columns])
+    owned = {str(r['Yahoo Ticker']):float(r['Quantity'])*float(prices[str(r['Yahoo Ticker'])].iloc[-1])
+             for r in payload.get('current_allocation') or [] if float(r.get('Quantity') or 0)>0}
+    total = sum(owned.values())
+    if total<=0: raise ValueError("Positive marked holdings value required")
+    current = np.array([owned.get(t,0.)/total for t in returns.columns])
+    cost=float(((payload.get('settings') or {}).get('security_scenario_forecast') or {}).get('one_way_cost_bps',22))
+    orders=[dict(t, **{'Executable Value':abs(float(t.get('Executable Quantity') or 0))*float(prices[str(t['Yahoo Ticker'])].iloc[-1])})
+            for t in payload.get('rebalancing_plan') or [] if str(t.get('Yahoo Ticker')) in prices]
+    candidate=dict(payload, current_stats=portfolio_stats(current,returns), optimal_stats=portfolio_stats(targets,returns),
+                   current_portfolio_value=total,
+                   rebalance_review_orders=orders,
+                   executable_rebalance_review=assess_executable_rebalance(returns,owned,orders,cost_bps=cost),
+                   next_review_estimate=estimate_review_window(returns,owned,weights,cost_bps=cost,risk_free_rate=RISK_FREE_RATE_ANNUAL),
+                   leverage_return_history={'dates':[str(d) for d in returns.index], 'portfolio_log_returns':(returns@targets).tolist()},
+                   portfolio_metrics_as_of=str(returns.index[-1].date()), portfolio_evidence_history=history,
+                   leverage_assessment=None, leverage_assessment_error="Portfolio evidence refreshed; older detailed leverage scenarios invalidated. Headline debt uses the refreshed history.",
+                   portfolio_evidence_updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds'))
+    # Mutate only after every dependent assessment succeeds.
+    payload.update(candidate)
+    return history
+
+
 def render_saved_analysis(placeholder, owner, *, instance_key="page"):
     """Display the latest saved analysis immediately below the live banner."""
     placeholder.empty()
@@ -2675,9 +2731,35 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        evidence_refresh = st.button("Refresh portfolio evidence", key=f"portfolio_evidence_{widget_scope}",
+                                     help="Update prices, FX, current/target metrics, reserve, debt and rebalance checks at fixed saved weights. No optimizer search.")
+        cache_attempt = f"portfolio_evidence_cache_v2_{owner}_{saved_at}_{pd.Timestamp.now(tz='Asia/Kolkata').date()}"
+        if evidence_refresh or not st.session_state.get(cache_attempt):
+            st.session_state[cache_attempt] = True
+            try:
+                candidate = dict(payload)
+                refresh_portfolio_evidence(candidate, download=evidence_refresh)
+                save_latest_analysis(candidate, owner)
+                payload.update(candidate)
+                current_stats, optimal_stats = payload['current_stats'], payload['optimal_stats']
+                st.session_state.pop(cache_attempt + '_error', None)
+            except Exception as exc:
+                st.session_state[cache_attempt + '_error'] = str(exc)
+        metrics_date = str(payload.get('portfolio_metrics_as_of') or (payload.get('history') or {}).get('valid_end') or 'Unknown')[:10]
+        st.caption(f"Portfolio evidence: {metrics_date} · optimizer weights remain from the saved analysis.")
+        latest_expected = latest_joint_session(pd.Timestamp.now(tz='Asia/Kolkata').date())
+        if metrics_date < latest_expected:
+            st.warning(f"Portfolio evidence is older than the latest completed joint market date ({latest_expected}). Reserve, debt and rebalance values remain dated references until refresh succeeds.")
+        scenario_dates = [str(r.get('Price data through') or '')[:10] for r in payload.get('security_scenario_ranking') or []]
+        if max(scenario_dates, default='') > metrics_date:
+            st.warning(f"Evidence dates differ: portfolio metrics/rebalance {metrics_date}; some security scenarios {max(scenario_dates)}. Refresh portfolio evidence before treating these as a current combined assessment.")
+        if st.session_state.get(cache_attempt + '_error'):
+            with st.expander("Portfolio refresh status", expanded=False):
+                st.caption("Earlier assessments retained: " + st.session_state[cache_attempt + '_error'])
         # Lead with the portfolio decision; research picks are not trade instructions.
         headline_review = payload.get("executable_rebalance_review") or {}
         headline_window = payload.get("next_review_estimate") or {}
+        event_review_date = next_us_event_review(pd.Timestamp.now(tz='Asia/Kolkata').date())
         with st.container(border=True):
             st.markdown("**Portfolio status**")
             if headline_review.get("horizon_sessions", 20) == 30:
@@ -2691,7 +2773,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     headline_window.get("sessions", 0), pd.Timestamp.now(tz="Asia/Kolkata").date(),
                 )
                 if headline_calendar.get("date"):
-                    st.markdown(f"**Next review: {headline_calendar['date']} · {headline_calendar['sessions_remaining']} NSE sessions away**")
+                    if event_review_date and event_review_date < headline_calendar['date']:
+                        st.markdown(f"**Next review: {event_review_date} · US election preparation · NYSE session**")
+                        st.caption(f"Portfolio-model baseline review remains {headline_calendar['date']}; the event brings the review forward, not an automatic trade.")
+                    else:
+                        st.markdown(f"**Next review: {headline_calendar['date']} · {headline_calendar['sessions_remaining']} NSE sessions away**")
                     if headline_calendar.get("due_now"):
                         st.caption("Review is due now.")
             st.caption("Buy/sell scores below rank research candidates; they do not override this rebalance assessment.")
@@ -2815,9 +2901,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 refresh_election_inr_history, lambda value: save_latest_analysis(value, owner),
                 hydrate_history=lambda value: history_from_market_cache(value, MARKET_HISTORY_CACHE_PATH, pd.Timestamp.now(tz="Asia/Kolkata").date()),
             )
-            reserve_card.metric("Additional reserve", f"{combined_fraction:.2%}", border=True)
-            reserve_card.caption(f"₹{base_value * combined_fraction:,.0f} · max(portfolio buffer, active INR election stress)")
-            reserve_card.caption(f"Portfolio buffer data: {str((payload.get('history') or {}).get('valid_end') or 'Unknown')[:10]}")
+            reserve_card.metric("Additional reserve reference", f"{combined_fraction:.2%}", border=True)
+            reserve_card.caption(f"₹{base_value * combined_fraction:,.0f} · max(portfolio buffer, supported event stresses)")
+            reserve_card.caption(f"Portfolio buffer data: {metrics_date}")
+            if election_reference and not election_reference.get('coverage_complete'):
+                reserve_card.caption("Partial event coverage · see US/India assessment below")
             if election_reference and election_reference.get("event_reserve_fraction") is not None:
                 reserve_card.caption(f"Election stress data: {election_reference.get('data_through') or 'Unknown'}")
         except (TypeError, ValueError, KeyError):
@@ -2899,7 +2987,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             )
 
         review_cost_bps = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
-        rebalance_review = assess_rebalance(current_stats, optimal_stats, rebalancing_plan, base_value, review_cost_bps)
+        rebalance_review = assess_rebalance(current_stats, optimal_stats, payload.get('rebalance_review_orders') or rebalancing_plan, base_value, review_cost_bps)
         with st.container(border=True):
             st.markdown("**Is rebalancing worthwhile?**")
             if st.button("Update rebalance decision", key=f"rebalance_decision_{widget_scope}", help="Refresh relevant histories and compare saved whole-share orders with holding; no optimizer run."):
@@ -2936,7 +3024,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 calendar = review_market_date(review_estimate.get("as_of") or str(pd.Timestamp.now(tz="Asia/Kolkata").date()), review_estimate.get("sessions", 0), pd.Timestamp.now(tz="Asia/Kolkata").date())
                 if calendar.get("date"):
                     st.markdown(
-                        f"**Next review: {calendar['date']} · {calendar['sessions_remaining']} NSE market sessions away**"
+                        f"**Portfolio-model review: {calendar['date']} · {calendar['sessions_remaining']} NSE market sessions away**"
                         f" · driven by {review_estimate['reason']}."
                     )
                     if calendar.get("due_now"):
