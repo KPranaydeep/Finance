@@ -45,9 +45,11 @@ def test_refresh_updates_dependent_dates_at_fixed_weights():
     assert len(p['leverage_return_history']['dates'])==179
 
 
-def test_incomplete_common_tail_preserves_previous_assessments():
+def test_incomplete_metrics_tail_retains_independent_event_evidence():
     ns,_=functions()
     ns['portfolio_prices_from_cache']=lambda *a:dict(schema_version=2,basis='INR',columns=['A'],dates=['2026-10-29'],values=[[100]],expected_through='2026-10-30')
     p={'optimal_allocation':[{'ticker':'A','target_weight':1.}],'optimal_stats':{'old':1}}
-    with pytest.raises(ValueError):ns['refresh_portfolio_evidence'](p)
+    history=ns['refresh_portfolio_evidence'](p)
     assert p['optimal_stats']=={'old':1} and 'portfolio_metrics_as_of' not in p
+    assert p['portfolio_evidence_history']==history
+    assert 'retained' in p['portfolio_metrics_refresh_error']

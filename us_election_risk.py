@@ -101,7 +101,7 @@ def us_election_reference(history, today, india_events=()):
     lower,upper=around[around<today][-30],around[around>=today][29]
     active=[e for e in US_EVENTS if lower<=pd.Timestamp(e['event_date'])<=upper]
     result=dict(status="not_assessed",coverage_complete=False,active_events=active,windows=[],event_reserve_fraction=None,
-                reason="US election risk not assessed",historical_stress_fraction=None)
+                reason="US election risk not assessed: whole-portfolio price/FX evidence has not been prepared",historical_stress_fraction=None)
     if not active:
         return dict(result,status="no_active_us_event",reason="No verified US federal election in the 30-session watch window; calendar baseline covers through 2026 only")
     if not history: return result

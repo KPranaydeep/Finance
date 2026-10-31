@@ -7,11 +7,11 @@ from election_reserve import saved_event_reference, reserve_decision_summary
 from us_election_risk import us_election_reference, US_EVENTS, allocation_inputs, next_us_event_review
 
 
-def render_election_reserve(payload, base_fraction, base_value, scope, refresh_history, save, *, hydrate_history=None):
+def render_election_reserve(payload, base_fraction, base_value, scope, refresh_history, save, *, hydrate_history=None, refresh_portfolio=None):
     today = pd.Timestamp.now(tz="Asia/Kolkata").date()
     with st.expander("Election reserve · India & US", expanded=True):
         refresh = st.button("Refresh election reserve", key=f"election_reserve_refresh_{scope}",
-                            help="Refresh only optimal INR histories and official schedules; no optimizer or trades.")
+                            help="Refresh portfolio listing calendars, prices, FX and election evidence; no optimizer or trades.")
         history_error = None
         attempt_key = "election_reserve_hydrated_" + str(payload.get("run_id") or payload.get("saved_at") or scope)
         if not payload.get("election_reserve_history") and hydrate_history and not st.session_state.get(attempt_key):
@@ -27,6 +27,12 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
             if refresh:
                 # Calculate successfully before replacing the previous history.
                 try:
+                    if refresh_portfolio:
+                        candidate=dict(payload)
+                        refresh_portfolio(candidate)
+                        save(candidate)
+                        payload.update(candidate)
+                        st.rerun()
                     history = refresh_history(payload)
                     candidate = dict(payload, election_reserve_history=history)
                     saved_event_reference(candidate, schedule["events"], today)
@@ -61,6 +67,8 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
             st.markdown(f"**US event review: {event_review} · NYSE session before/at election day**")
         if us.get('event_reserve_fraction') is None:
             st.warning(us['reason'])
+            if payload.get('portfolio_evidence_error'):
+                st.caption('Evidence refresh could not finish: '+payload['portfolio_evidence_error'])
         else:
             st.markdown(f"**US whole-portfolio historical stress: {us['event_reserve_fraction']:.2%} of total base** · {len(us['windows'])} complete episodes · data {us.get('data_through')}")
             st.caption(us['reason'])

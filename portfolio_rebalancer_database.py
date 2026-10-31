@@ -29,7 +29,7 @@ from rebalance_review import assess_rebalance, assess_executable_rebalance, esti
 from election_watch_ui import render_election_watch
 from election_reserve import pack_inr_history, history_from_market_cache
 from election_reserve_ui import render_election_reserve
-from us_election_risk import portfolio_prices_from_cache, unpack_prices, allocation_inputs, listing_calendar, latest_joint_session, next_us_event_review
+from us_election_risk import portfolio_prices_from_cache, unpack_prices, allocation_inputs, listing_calendar, latest_joint_session, next_us_event_review, us_election_reference
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_portfolio_publications import publish_approved_portfolio
 from portfolio_risk_metrics import (
@@ -2674,7 +2674,13 @@ def refresh_portfolio_evidence(payload, *, download=False):
     missing = prices.isna().any(axis=1)
     if missing.any(): prices = prices.loc[prices.index > missing[missing].index[-1]]
     if len(prices)<121 or str(prices.index[-1].date()) != history['expected_through']:
-        raise ValueError("Fresh common price/FX history insufficient; earlier assessments retained")
+        # Historical election episodes do not require a contiguous 120-return
+        # tail for the independent current/target metrics engine. Keep usable
+        # event evidence rather than discarding it with an unrelated failure.
+        payload.update(portfolio_evidence_history=history,
+                       portfolio_event_evidence_updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                       portfolio_metrics_refresh_error="Fewer than 120 contiguous common returns, or incomplete latest common prices. Prior portfolio metrics/rebalance/debt retained; election evidence refreshed independently.")
+        return history
     returns = np.log(prices/prices.shift(1)).iloc[1:]
     targets = np.array([weights.get(t,0.) for t in returns.columns])
     owned = {str(r['Yahoo Ticker']):float(r['Quantity'])*float(prices[str(r['Yahoo Ticker'])].iloc[-1])
@@ -2692,6 +2698,7 @@ def refresh_portfolio_evidence(payload, *, download=False):
                    next_review_estimate=estimate_review_window(returns,owned,weights,cost_bps=cost,risk_free_rate=RISK_FREE_RATE_ANNUAL),
                    leverage_return_history={'dates':[str(d) for d in returns.index], 'portfolio_log_returns':(returns@targets).tolist()},
                    portfolio_metrics_as_of=str(returns.index[-1].date()), portfolio_evidence_history=history,
+                   portfolio_metrics_refresh_error=None,
                    leverage_assessment=None, leverage_assessment_error="Portfolio evidence refreshed; older detailed leverage scenarios invalidated. Headline debt uses the refreshed history.",
                    portfolio_evidence_updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds'))
     # Mutate only after every dependent assessment succeeds.
@@ -2733,23 +2740,34 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         st.caption(f"Saved at: {saved_at}")
         evidence_refresh = st.button("Refresh portfolio evidence", key=f"portfolio_evidence_{widget_scope}",
                                      help="Update prices, FX, current/target metrics, reserve, debt and rebalance checks at fixed saved weights. No optimizer search.")
-        cache_attempt = f"portfolio_evidence_cache_v2_{owner}_{saved_at}_{pd.Timestamp.now(tz='Asia/Kolkata').date()}"
+        cache_attempt = f"portfolio_evidence_cache_v3_{owner}_{saved_at}_{pd.Timestamp.now(tz='Asia/Kolkata').date()}"
         if evidence_refresh or not st.session_state.get(cache_attempt):
             st.session_state[cache_attempt] = True
             try:
                 candidate = dict(payload)
-                refresh_portfolio_evidence(candidate, download=evidence_refresh)
+                try:
+                    refresh_portfolio_evidence(candidate, download=evidence_refresh)
+                except Exception:
+                    if evidence_refresh or not us_election_reference(None, pd.Timestamp.now(tz='Asia/Kolkata').date())['active_events']:
+                        raise
+                    # During an active US event, repair missing calendars and
+                    # quote/FX tails once per saved run/day, without a solver.
+                    candidate = dict(payload)
+                    refresh_portfolio_evidence(candidate, download=True)
                 save_latest_analysis(candidate, owner)
                 payload.update(candidate)
                 current_stats, optimal_stats = payload['current_stats'], payload['optimal_stats']
                 st.session_state.pop(cache_attempt + '_error', None)
             except Exception as exc:
                 st.session_state[cache_attempt + '_error'] = str(exc)
+        payload['portfolio_evidence_error'] = st.session_state.get(cache_attempt + '_error')
         metrics_date = str(payload.get('portfolio_metrics_as_of') or (payload.get('history') or {}).get('valid_end') or 'Unknown')[:10]
         st.caption(f"Portfolio evidence: {metrics_date} · optimizer weights remain from the saved analysis.")
         latest_expected = latest_joint_session(pd.Timestamp.now(tz='Asia/Kolkata').date())
         if metrics_date < latest_expected:
-            st.warning(f"Portfolio evidence is older than the latest completed joint market date ({latest_expected}). Reserve, debt and rebalance values remain dated references until refresh succeeds.")
+            st.warning(f"Portfolio metrics are older than the latest completed joint market date ({latest_expected}). Portfolio-buffer, debt and rebalance evidence remain dated; election stress has its own data date below.")
+        if payload.get('portfolio_metrics_refresh_error'):
+            st.caption(payload['portfolio_metrics_refresh_error'])
         scenario_dates = [str(r.get('Price data through') or '')[:10] for r in payload.get('security_scenario_ranking') or []]
         if max(scenario_dates, default='') > metrics_date:
             st.warning(f"Evidence dates differ: portfolio metrics/rebalance {metrics_date}; some security scenarios {max(scenario_dates)}. Refresh portfolio evidence before treating these as a current combined assessment.")
@@ -2900,6 +2918,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 payload, reserve_summary["reserve_fraction"], base_value, widget_scope,
                 refresh_election_inr_history, lambda value: save_latest_analysis(value, owner),
                 hydrate_history=lambda value: history_from_market_cache(value, MARKET_HISTORY_CACHE_PATH, pd.Timestamp.now(tz="Asia/Kolkata").date()),
+                refresh_portfolio=lambda value: refresh_portfolio_evidence(value, download=True),
             )
             reserve_card.metric("Additional reserve reference", f"{combined_fraction:.2%}", border=True)
             reserve_driver = ((election_reference or {}).get('reserve_summary') or {}).get('driver', 'Portfolio buffer only · event assessment unavailable')
