@@ -3,11 +3,28 @@
 from __future__ import annotations
 
 import re
+import math
+from decimal import Decimal
 from typing import Any
 
 SENSITIVE_KEYS=re.compile(r"(password|passwd|secret|token|api.?key|broker|account.?number|database.?url|credential|private.?key)",re.I)
 SENSITIVE_VALUES=(re.compile(r"postgres(?:ql)?://",re.I),re.compile(r"(?:[A-Z]:\\Users\\|/home/|/Users/)",re.I),re.compile(r"-----BEGIN .*PRIVATE KEY-----"))
 TEST_MARKERS=re.compile(r"(^|[-_ ])(test|fixture|synthetic|fake|development|dev)([-_ ]|$)",re.I)
+PUBLIC_MODEL_FEE_PATH = re.compile(
+    r"\$\.review_events\[\d+\]\.payload\."
+    r"(?:lots\[\d+\]\.entry_charges|metrics\.rows\[\d+\]\.fees)\.brokerage"
+)
+
+
+def _public_model_fee(path: str, value: Any) -> bool:
+    """Allow only finite, nonnegative fee amounts at documented public paths."""
+    if (not PUBLIC_MODEL_FEE_PATH.fullmatch(path) or isinstance(value, bool)
+            or not isinstance(value, (int, float, Decimal))):
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def inspect_public_data(value: Any, *, production: bool = True, path: str = "$") -> list[str]:
@@ -15,7 +32,8 @@ def inspect_public_data(value: Any, *, production: bool = True, path: str = "$")
     if isinstance(value,dict):
         for key,item in value.items():
             child=f"{path}.{key}"
-            if SENSITIVE_KEYS.search(str(key)): findings.append(f"Sensitive field name at {child}")
+            if SENSITIVE_KEYS.search(str(key)) and not _public_model_fee(child, item):
+                findings.append(f"Sensitive field name at {child}")
             findings.extend(inspect_public_data(item,production=production,path=child))
     elif isinstance(value,(list,tuple)):
         for index,item in enumerate(value): findings.extend(inspect_public_data(item,production=production,path=f"{path}[{index}]"))

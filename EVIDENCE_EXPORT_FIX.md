@@ -8,4 +8,11 @@ The page offers Download simulation evidence when loaded NAV records explicitly 
 
 No additional secrets, database writes or workflow changes are required. The production smoke test and its configured backfill gate are unchanged.
 
+Review-event exports also retain public modeled brokerage amounts. Only finite,
+nonnegative numbers at `review_events[].payload.lots[].entry_charges.brokerage`
+and `review_events[].payload.metrics.rows[].fees.brokerage` pass the field-name
+check. Arbitrary brokerage fields, strings, nested objects, credentials, private
+paths and non-production markers remain blocked. The original records and audit
+hashes are preserved.
+
 Five unit tests passed, plus Python syntax checks. Streamlit rendering and the live database were not exercised locally. This fix does not validate the reported returns, forecasts, cost assumptions or future performance.
