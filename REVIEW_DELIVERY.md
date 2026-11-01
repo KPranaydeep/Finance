@@ -110,6 +110,9 @@ shortening the forecast. An expired calendar still blocks assessment.
 The review workflow also exports verified failure evidence after a failed model
 check. The job remains failed, but the public snapshot can show the current
 reason instead of leaving an old heartbeat as the only visible symptom.
+Public snapshot downloads use a shared five-minute cache window on the default
+GitHub branch URL, so a previous CDN response is not reused indefinitely after
+publication. Custom snapshot URLs retain their original query parameters.
 
 ## Owner acknowledgement
 

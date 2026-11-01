@@ -568,7 +568,8 @@ def run(conn, basket, policy, *, acknowledge=None, now=None):
                 observation_rows=observation_rows,
             )
             key = "assessment:" + baseline_id + ":" + digest({"method": METHOD, "as_of": as_of, "policy": policy,
-                  "prices": payload["price_hash"], "ack": (store.latest(history, "ACKNOWLEDGED", baseline_id) or {}).get("seq")})
+                  "prices": payload["price_hash"], "forecast_calendar": future,
+                  "ack": (store.latest(history, "ACKNOWLEDGED", baseline_id) or {}).get("seq")})
             store.append(conn, basket, key, "ASSESSMENT", baseline_id, payload)
             store.append(conn, basket, "heartbeat:" + baseline_id + ":" + now.isoformat(),
                          "HEARTBEAT", baseline_id, {"at": now.isoformat(), "as_of": as_of,

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+from unittest.mock import Mock
 
 from public_portfolio_trust import fingerprint
 from public_record_snapshot import (
@@ -11,6 +12,7 @@ from public_record_snapshot import (
     load_snapshot,
     verify_snapshot,
     write_snapshot,
+    DEFAULT_SNAPSHOT_URL,
 )
 
 
@@ -74,3 +76,24 @@ def test_snapshot_json_contains_no_python_specific_values():
     snapshot = build_snapshot(sample_record(), basket_id="PUBLIC-01")
     encoded = json.dumps(snapshot, allow_nan=False)
     assert "PUB-TEST" in encoded
+
+
+def test_default_branch_uses_shared_bounded_cdn_cache_window(monkeypatch):
+    response = Mock(text=json.dumps(build_snapshot(sample_record(), basket_id="PUBLIC-01")))
+    get = Mock(return_value=response)
+    monkeypatch.setattr("public_record_snapshot.requests.get", get)
+    monkeypatch.setattr("public_record_snapshot.time.time", lambda: 900.0)
+    monkeypatch.delenv("PUBLIC_RECORD_SNAPSHOT_URL", raising=False)
+    result = load_snapshot("PUBLIC-01")
+    get.assert_called_once_with(DEFAULT_SNAPSHOT_URL, timeout=8.0,
+                                params={"snapshot_window": 3})
+    assert result["record_source"] == "verified_snapshot"
+
+
+def test_custom_snapshot_url_is_preserved_without_extra_query_parameters(monkeypatch):
+    response = Mock(text=json.dumps(build_snapshot(sample_record(), basket_id="PUBLIC-01")))
+    get = Mock(return_value=response)
+    monkeypatch.setattr("public_record_snapshot.requests.get", get)
+    url = "https://example.invalid/snapshot?signature=test-only"
+    load_snapshot("PUBLIC-01", url=url)
+    get.assert_called_once_with(url, timeout=8.0)

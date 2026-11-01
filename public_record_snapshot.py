@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -17,6 +18,7 @@ from public_portfolio_publications import verify_trust_audit
 
 SNAPSHOT_SCHEMA = "public-portfolio-record-snapshot"
 SNAPSHOT_VERSION = 1
+SNAPSHOT_CACHE_TTL_SECONDS = 300
 DEFAULT_SNAPSHOT_URL = (
     "https://raw.githubusercontent.com/KPranaydeep/Finance/"
     "public-snapshot/public_record_snapshot.json"
@@ -155,7 +157,15 @@ def load_snapshot(
         raw = Path(local_path).read_text(encoding="utf-8")
     else:
         snapshot_url = url or os.getenv("PUBLIC_RECORD_SNAPSHOT_URL") or DEFAULT_SNAPSHOT_URL
-        response = requests.get(snapshot_url, timeout=timeout_seconds)
+        request_options = {"timeout": timeout_seconds}
+        if snapshot_url == DEFAULT_SNAPSHOT_URL:
+            # GitHub's mutable branch URL can keep serving the previous file
+            # after a successful publish. Share a bounded CDN cache key across
+            # readers, aligned with the public feed's five-minute cache.
+            request_options["params"] = {
+                "snapshot_window": int(time.time() // SNAPSHOT_CACHE_TTL_SECONDS)
+            }
+        response = requests.get(snapshot_url, **request_options)
         response.raise_for_status()
         raw = response.text
     return verify_snapshot(json.loads(raw), basket_id)

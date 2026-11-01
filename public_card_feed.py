@@ -14,7 +14,7 @@ import streamlit as st
 from public_basket_postgres import connect_public_basket_db, get_public_basket_database_url
 from public_nav_snapshots import load_nav_snapshot
 from public_portfolio_publications import load_trust_records
-from public_record_snapshot import load_snapshot
+from public_record_snapshot import load_snapshot, SNAPSHOT_CACHE_TTL_SECONDS
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -73,12 +73,13 @@ def basket_since_launch_return(nav_rows: list[dict[str, Any]]) -> float | None:
     return observations[-1][1] / observations[0][1] - 1.0
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=SNAPSHOT_CACHE_TTL_SECONDS, show_spinner=False)
 def load_public_record(basket_id: str) -> dict[str, Any]:
     """Load a verified static snapshot without waking the production database.
 
     Direct database fallback is opt-in for local/operator diagnostics.  Public
     Streamlit readers therefore cannot keep a free-plan compute endpoint awake.
+    The default GitHub URL shares the same bounded five-minute cache window.
     """
     try:
         return load_snapshot(

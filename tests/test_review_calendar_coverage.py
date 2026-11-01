@@ -114,6 +114,32 @@ class ReviewCalendarCoverageTests(unittest.TestCase):
         self.assertTrue(any('3 of 20 future sessions' in x.value for x in at.info))
         self.assertFalse(any('heartbeat is stale' in x.value for x in at.warning))
 
+    def test_calendar_change_is_not_deduplicated_against_older_same_price_assessment(self):
+        p, b, db = policy(), baseline(), FakeDB()
+        b['entry_model_version'] = market.ENTRY_MODEL_VERSION
+        store.append(db, 'TEST', 'baseline-test', 'BASELINE', b['baseline_id'], b)
+        pub = {k: b[k] for k in ['publication_id', 'basket_id', 'portfolio_version',
+                                'published_at', 'weights']}
+        future = [str(d.date()) for d in pd.bdate_range('2026-09-10', periods=p['max_review_sessions'])]
+        with patch('public_review.service.publications', return_value=[pub]), \
+             patch('public_review.market.require_forecast_observation_sessions', return_value=[]), \
+             patch('public_review.market.sessions', side_effect=[
+                 ('2026-05-04', '2026-09-09', future), ('2026-05-04', '2026-09-09', [])]), \
+             patch('public_review.market.fetch', return_value=self.histories(p)), \
+             patch('public_review.service.estimate', return_value={
+                 'status': 'RESEARCH_ONLY', 'next_review': None}), \
+             patch('public_review.service.validate', return_value={'passed': False}), \
+             patch('public_market_mood.fetch_mmi', return_value={'status': 'UNAVAILABLE'}), \
+             patch('public_review.service.compare_exits', return_value=[]), \
+             patch('public_review.service.send', return_value=False):
+            first = run(db, 'TEST', p, now=datetime(2026, 9, 9, 13, tzinfo=timezone.utc))
+            second = run(db, 'TEST', p, now=datetime(2026, 9, 9, 13, 1, tzinfo=timezone.utc))
+        self.assertEqual(first['failed'] + second['failed'], 0)
+        assessments = [e for e in db.rows if e['kind'] == 'ASSESSMENT']
+        self.assertEqual(len(assessments), 2)
+        self.assertTrue(assessments[0]['payload']['calendar_coverage']['complete'])
+        self.assertFalse(assessments[1]['payload']['calendar_coverage']['complete'])
+
     def test_failed_review_can_publish_failure_evidence_without_greenwashing(self):
         workflow = (Path(__file__).resolve().parents[1] /
                     '.github/workflows/public_portfolio_review.yml').read_text()
