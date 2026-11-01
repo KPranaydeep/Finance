@@ -100,6 +100,17 @@ date.
 GitHub cron is best effort and may start late. The workflow is idempotent and a
 delayed run does not invent missing prices.
 
+Completed-session valuations and current risk checks continue when fewer future
+calendar sessions remain than the configured forecast horizon. The optional
+five-session follow-up tail does not block monitoring. A forecast is withheld
+when its full configured horizon is unavailable; the public panel shows the
+verified coverage and calendar expiry instead of inventing dates or silently
+shortening the forecast. An expired calendar still blocks assessment.
+
+The review workflow also exports verified failure evidence after a failed model
+check. The job remains failed, but the public snapshot can show the current
+reason instead of leaving an old heartbeat as the only visible symptom.
+
 ## Owner acknowledgement
 
 After genuinely reviewing the latest active assessment, manually run **Public

@@ -102,6 +102,8 @@ def sessions(now, published_at, policy, instrument_kinds=None):
     if published.tzinfo is None:
         raise ValueError("AWARE_PUBLICATION_TIME_REQUIRED")
     local = now.tz_convert("Asia/Kolkata").date()
+    if str(local) > policy["calendar_verified_through"]:
+        raise ValueError("CALENDAR_REVIEW_REQUIRED")
     end = min(str(local + timedelta(days=100)), policy["calendar_verified_through"])
     schedule = joint_calendar(published.date() - timedelta(days=7), end, policy,
                               instrument_kinds)
@@ -119,7 +121,10 @@ def sessions(now, published_at, policy, instrument_kinds=None):
     # the configured simulation horizon.
     required_future = policy["max_review_sessions"] + 5
     future = schedule[schedule.market_open > now].iloc[:required_future]
-    if completed.empty or len(future) < required_future:
+    # Future forecast coverage must not suppress a valid completed-session
+    # valuation. The extra five dates are optional follow-up candidates, not
+    # five additional sessions required to monitor the current portfolio.
+    if completed.empty:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     return str(eligible.index[0].date()), str(completed.index[-1].date()), [str(d.date()) for d in future.index]
 

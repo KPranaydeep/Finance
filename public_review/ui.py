@@ -1083,6 +1083,16 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.warning("Monitoring heartbeat is stale. Do not rely on the previous review date. Check the scheduled workflow.")
         return
     m, d = p["metrics"], p["decision"]
+    calendar_coverage = p.get("calendar_coverage", {})
+    if calendar_coverage.get("complete") is False:
+        st.info(
+            "Observed performance and risk checks are current; the review-date "
+            "forecast is unavailable. "
+            f"{calendar_coverage['available_forecast_sessions']} of "
+            f"{calendar_coverage['required_forecast_sessions']} future sessions "
+            f"are verified through {calendar_coverage['verified_through']}. "
+            "Reverify the calendar to restore the full forecast horizon."
+        )
     status = d["status"].replace("_", " ").capitalize()
     review_required = d.get(
         "review_required",

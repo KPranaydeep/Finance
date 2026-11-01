@@ -66,6 +66,7 @@ jobs:
         if: steps.schedule-guard.outputs.run == 'true'
         run: python -m unittest discover -s tests -p 'test_review_*.py' -v
       - name: Run model review and notify owner
+        id: model-review
         if: steps.schedule-guard.outputs.run == 'true'
         run: python update_public_review.py
         env:
@@ -83,11 +84,14 @@ jobs:
           PUBLIC_REVIEW_EMAIL_FROM: ${{ secrets.PUBLIC_REVIEW_EMAIL_FROM }}
           PUBLIC_REVIEW_EMAIL_TO: ${{ secrets.PUBLIC_REVIEW_EMAIL_TO }}
       - name: Export verified public snapshot
-        if: steps.schedule-guard.outputs.run == 'true'
+        id: export-snapshot
+        # A failed assessment may append useful failure evidence. Publish it so
+        # public readers see the actual blocker rather than an old heartbeat.
+        if: ${{ !cancelled() && (steps.model-review.outcome == 'success' || steps.model-review.outcome == 'failure') }}
         run: python export_public_record_snapshot.py
         env:
           PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
       - name: Publish quota-free public snapshot
-        if: steps.schedule-guard.outputs.run == 'true'
+        if: ${{ !cancelled() && steps.export-snapshot.outcome == 'success' }}
         run: bash scripts/publish_public_snapshot.sh public_record_snapshot.json
 

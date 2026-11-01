@@ -205,7 +205,16 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
         peak = max(peak, m["net_proceeds"])
     validation = {"passed": False, "reason": "INSUFFICIENT_COMMON_HISTORY"}
     forecast = {"status": "INSUFFICIENT_COMMON_HISTORY", "next_review": None}
-    if len(returns) >= 126:
+    calendar_coverage = {
+        "required_forecast_sessions": int(policy["max_review_sessions"]),
+        "available_forecast_sessions": len(future),
+        "verified_through": policy["calendar_verified_through"],
+        "complete": len(future) >= int(policy["max_review_sessions"]),
+    }
+    if not calendar_coverage["complete"]:
+        validation = {"passed": False, "reason": "CALENDAR_HORIZON_INCOMPLETE"}
+        forecast = {"status": "CALENDAR_HORIZON_INCOMPLETE", "next_review": None}
+    if len(returns) >= 126 and calendar_coverage["complete"]:
         try:
             validation = validate(
                 returns, baseline, prices, list(returns.index), policy)
@@ -295,6 +304,7 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
     return {"version": VERSION, "baseline_id": baseline["baseline_id"], "as_of": as_of,
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
+            "calendar_coverage": calendar_coverage,
             "comparisons": exit_comparisons,
             "operational_review_window": operational_window,
             "forecast_observation_pending": not forecast_ready,
