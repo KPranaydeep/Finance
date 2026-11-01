@@ -762,12 +762,24 @@ def render_snapshot_review_panel(active_publications, events):
     return summary
 
 
-def render_operational_window(payload):
+def render_operational_window(payload, now=None):
     operational = resolved_operational_window(payload)
     if not operational.get("start_at") or not operational.get("end_at"):
         return
+    now = pd.Timestamp(now or datetime.now(timezone.utc))
+    start, end = pd.Timestamp(operational["start_at"]), pd.Timestamp(operational["end_at"])
+    if start.tzinfo is None or end.tzinfo is None or now.tzinfo is None:
+        st.caption("The stored review window has no verified timezone; no current slot is shown.")
+        return
+    if end <= now:
+        st.caption(
+            "Previous planned review window: " + operational["date_label"]
+            + " · " + operational["time_label"]
+            + " · passed. Follow the current review status above."
+        )
+        return
     st.info(
-        "Recommended one-hour review: "
+        ("Current planned review window: " if start <= now else "Recommended one-hour review: ")
         + operational["date_label"]
         + " · " + operational["time_label"]
         + " · " + operational.get("market_context", "")
@@ -1039,6 +1051,9 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
                             format_func=lambda i: f'P{baselines[i]["portfolio_version"]:03d} · entry {baselines[i]["entry_date"]}',
                             key="review_publication")
     baseline = baselines[selected]
+    if (latest_publication_id is not None
+            and baseline["publication_id"] != latest_publication_id):
+        st.markdown(f"**Earlier model investment · P{baseline['portfolio_version']:03d}**")
     bid = baseline["baseline_id"]
     last = store.latest(events, "ASSESSMENT", bid)
     provisional = store.latest(events, "PREVIEW", bid)
@@ -1115,7 +1130,7 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.metric("Estimated net XIRR", percent(m["xirr"]))
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
-    render_operational_window(p)
+    render_operational_window(p, now=now)
     forecast_review = p.get("forecast", {}).get("next_review")
     if p.get("forecast_observation_pending"):
         forecast_review = d.get("planning_review")

@@ -114,6 +114,11 @@ Public snapshot downloads use a shared five-minute cache window on the default
 GitHub branch URL, so a previous CDN response is not reused indefinitely after
 publication. Custom snapshot URLs retain their original query parameters.
 
+When the newest publication is awaiting its exchange entries, performance shown
+for an older frozen investment is explicitly labelled with that older version.
+Elapsed owner-review windows remain historical evidence and are never labelled
+as an upcoming recommendation; the current review status remains authoritative.
+
 ## Owner acknowledgement
 
 After genuinely reviewing the latest active assessment, manually run **Public

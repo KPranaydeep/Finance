@@ -73,6 +73,12 @@ class UiTests(unittest.TestCase):
         app=self.app('recovered')
         self.assertEqual(len(app.metric),4)
 
+    def test_pending_publication_does_not_claim_older_model_performance(self):
+        app = self.app('latest_pending')
+        self.assertEqual(len(app.metric), 4)
+        self.assertTrue(any('Earlier model investment · P001' in item.value
+                            for item in app.markdown))
+
     def test_latest_selected_and_older_selectable(self):
         app=self.app('second')
         self.assertEqual(app.selectbox[0].value,0)
