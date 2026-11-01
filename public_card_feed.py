@@ -23,7 +23,9 @@ CARD_FEED_SCHEMA_VERSION = 3
 LOGGER = logging.getLogger(__name__)
 
 
-def load_public_record_from_database(conn, basket_id: str) -> dict[str, Any]:
+def load_public_record_from_database(
+    conn, basket_id: str, *, initialize_schema: bool = True
+) -> dict[str, Any]:
     """Load one public record using an already-open writer/admin connection."""
     basket = conn.execute(
         "SELECT * FROM public_baskets WHERE basket_id=%s", (basket_id,)
@@ -31,7 +33,7 @@ def load_public_record_from_database(conn, basket_id: str) -> dict[str, Any]:
     if not basket:
         return {"basket": None}
     nav = load_nav_snapshot(conn, basket_id)
-    trust = load_trust_records(conn, basket_id)
+    trust = load_trust_records(conn, basket_id, initialize_schema=initialize_schema)
     publication_positions = conn.execute(
         """SELECT p.publication_id,v.portfolio_version,p.ticker,p.target_weight
            FROM public_portfolio_positions p

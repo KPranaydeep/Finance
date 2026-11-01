@@ -1,0 +1,30 @@
+name: Recover verified public snapshot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: public-portfolio-database-writer
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    environment: PRODUCTION
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Read and verify existing record (no NAV updates or model review)
+        run: python export_public_record_snapshot.py
+        env:
+          PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
+      - name: Publish quota-free public snapshot
+        run: bash scripts/publish_public_snapshot.sh public_record_snapshot.json

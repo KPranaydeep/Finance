@@ -29,8 +29,9 @@ else
   git worktree add --detach "$snapshot_checkout" HEAD
   (
     cd "$snapshot_checkout"
+    # switch --orphan already removes tracked files from the worktree/index.
+    # A following git rm fails with an empty index and aborts the first publish.
     git switch --orphan "$snapshot_branch"
-    git rm -rf .
   )
 fi
 

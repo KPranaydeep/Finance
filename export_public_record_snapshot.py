@@ -24,8 +24,14 @@ def main() -> int:
     if not url:
         raise RuntimeError("Public PostgreSQL is not configured")
     with connect_public_basket_db(url) as conn:
-        record = load_public_record_from_database(conn, args.basket_id)
-        review_events = read_review_events(conn, args.basket_id)
+        # The recovery/export job must never create schemas or mutate records.
+        # Keep all component reads on one consistent PostgreSQL snapshot.
+        with conn.transaction():
+            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            record = load_public_record_from_database(
+                conn, args.basket_id, initialize_schema=False
+            )
+            review_events = read_review_events(conn, args.basket_id)
     snapshot = build_snapshot(
         record,
         basket_id=args.basket_id,

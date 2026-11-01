@@ -55,7 +55,16 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
             ast.unparse({item.arg: item.value for item in call.keywords}["maximum_candidates"])
             for call in calls
         }
-        self.assertEqual(supplied_caps, {"cap", "universal_preselection_cap"})
+        self.assertEqual(supplied_caps, {"cap", "universal_preselection_cap", "int(missing_cap)"})
+        # Finalist restoration also prepares a configured cap that has no cached
+        # matrix yet. Confirm that this value comes from the user's cap grid.
+        recovery_loop = next(
+            node for node in ast.walk(self.tree)
+            if isinstance(node, ast.For)
+            and ast.unparse(node.target) == "missing_cap"
+            and ast.unparse(node.iter) == "cap_grid"
+        )
+        self.assertIn("maximum_candidates=int(missing_cap)", ast.unparse(recovery_loop))
 
     def test_advanced_search_uses_adaptive_steps_with_fifty_minimum(self):
         function = next(

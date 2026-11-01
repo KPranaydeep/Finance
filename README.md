@@ -51,6 +51,22 @@ performance calculations are separate operations with separate audit records.
   append an acknowledgement that the owner completed a review.
 - `.github/workflows/tests.yml` runs the deterministic test suite on pushes and
   pull requests.
+- `.github/workflows/public_snapshot_recovery.yml` manually republishes the
+  existing verified record after an outage, without running NAV updates or model
+  review. It reads one repeatable-read, read-only PostgreSQL transaction and
+  publishes `public_record_snapshot.json` to the `public-snapshot` branch. The
+  production database must be available; missing or invalid evidence stops the
+  export and leaves any previously published snapshot intact.
+
+Public readers use that verified static snapshot instead of querying PostgreSQL.
+After deployment, check that the snapshot branch exists and the public page
+loads. Do not enable database fallback to work around a missing snapshot: public
+traffic would consume the database quota again.
+
+The Streamlit 1.59 dependency range is paired with `starlette<1.8`, tested with
+1.7.0. The Cloud combination of Streamlit 1.59.2 and Starlette 1.10.0 can send
+media response bodies before their headers. Run the HTTP middleware regression
+tests before widening this compatibility constraint.
 
 ## Development and release
 

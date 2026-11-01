@@ -188,8 +188,9 @@ def publish_approved_portfolio(conn: Any, *, basket_id: str, run_id: str, as_of:
             "published_at":now,"publication_status":"PUBLISHED"}
 
 
-def load_trust_records(conn: Any, basket_id: str) -> dict:
-    init_trust_schema(conn)
+def load_trust_records(conn: Any, basket_id: str, *, initialize_schema: bool = True) -> dict:
+    if initialize_schema:
+        init_trust_schema(conn)
     publications = conn.execute("SELECT * FROM public_portfolio_versions WHERE basket_id=%s ORDER BY portfolio_version DESC", (basket_id,)).fetchall()
     corrections = conn.execute(
         "SELECT * FROM public_portfolio_corrections WHERE basket_id=%s ORDER BY created_at DESC", (basket_id,)

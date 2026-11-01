@@ -1,4 +1,7 @@
 streamlit>=1.57,<1.60
+# Streamlit 1.59's media gzip responder requires Starlette's pre-1.8
+# response-start behavior. Recheck the HTTP regression tests before widening.
+starlette>=0.40,<1.8
 numpy>=2.0,<2.4
 pandas>=2.2,<3.0
 scipy>=1.13,<1.17
