@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-01T03:33:37.247620+00:00",
-  "payload_sha256": "a45b9cf21fc69bb12e54d5bbb9019bd8f76a887496776216adba02096433972a",
+  "generated_at": "2026-11-01T18:08:53.865944+00:00",
+  "payload_sha256": "731b250a86aa2ef6c0b249450f80ef5471186cb127baee53d4b564dd99741082",
   "record": {
     "active_forecast_realizations": [
       {
@@ -230952,6 +230952,123 @@
       },
       "previous_hash": "94b36fd95fcbdd40909daea8c94fcc5cebce366d56edff336c2165004b4bc7fb",
       "seq": 780
+    },
+    {
+      "baseline_id": "PUB-8C8690BE7A2F12FD7669567B",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-01T18:08:32.261371+00:00",
+      "event_hash": "12d1a3d1536c7b8ed4835d14f7031da45225caddaa67ff3a89195e4af9578cea",
+      "event_key": "waiting:PUB-8C8690BE7A2F12FD7669567B:2026-11-01T18:08:31.430229+00:00",
+      "kind": "WAITING",
+      "payload": {
+        "captured_entries": 0,
+        "checked_at": "2026-11-01T18:08:31.430229+00:00",
+        "entry_date": "2026-11-02",
+        "entry_frozen": false,
+        "entry_model_version": "per-security-publication-or-open-plus-wait-v1",
+        "model_only": true,
+        "observation_rows": null,
+        "observation_sessions": null,
+        "pending_ticker": null,
+        "pending_tickers": [
+          "BAFNAPH.NS",
+          "BTI",
+          "BTSG",
+          "CBOE",
+          "CVS",
+          "DG",
+          "ESLT",
+          "GH",
+          "GLENMARK.NS",
+          "GOLDBETA.NS",
+          "GVT&D.NS",
+          "HRTG",
+          "JNJ",
+          "KO",
+          "MNST",
+          "ONELIFECAP.NS",
+          "PM",
+          "RVMD",
+          "SENEA",
+          "SIGMAADV.NS",
+          "STLN",
+          "STX",
+          "TEN",
+          "TIGO",
+          "VENUSREM.NS",
+          "VLO"
+        ],
+        "policy_version": "owner-review-policy-v9",
+        "publication_id": "PUB-8C8690BE7A2F12FD7669567B",
+        "ready_at": "2026-11-02T04:00:00+00:00",
+        "reason": "AWAITING_MARKET_ENTRY",
+        "status": "AWAITING_MARKET_ENTRY",
+        "total_entries": 26,
+        "wait_reason": null,
+        "waiting_for": "AWAITING_MARKET_ENTRY"
+      },
+      "previous_hash": "eb4633fff3e6b958dcdf9d0306cb2270dc4ad0757170ab4180ee84a57aa88890",
+      "seq": 781
+    },
+    {
+      "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-01T18:08:40.616171+00:00",
+      "event_hash": "9195ece888aebc531ed113501dfc3c27993660ede3bbbf9c17d17c09afcf3423",
+      "event_key": "heartbeat:3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0:2026-11-01T18:08:31.430229+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-01T18:08:31.430229+00:00"
+      },
+      "previous_hash": "12d1a3d1536c7b8ed4835d14f7031da45225caddaa67ff3a89195e4af9578cea",
+      "seq": 782
+    },
+    {
+      "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-01T18:08:45.121181+00:00",
+      "event_hash": "1db4cd0bc65b77c1d5549a0b5dfcc2f04bdaa8942aaca9df4d4eaa4d5f32cea6",
+      "event_key": "heartbeat:9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942:2026-11-01T18:08:31.430229+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-01T18:08:31.430229+00:00"
+      },
+      "previous_hash": "9195ece888aebc531ed113501dfc3c27993660ede3bbbf9c17d17c09afcf3423",
+      "seq": 783
+    },
+    {
+      "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-01T18:08:48.768426+00:00",
+      "event_hash": "d458c9fce4f9ae4fd1c05fd0bef94e17f90a07abab2de6b04fe7e6dea96ef40c",
+      "event_key": "heartbeat:7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9:2026-11-01T18:08:31.430229+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-01T18:08:31.430229+00:00"
+      },
+      "previous_hash": "1db4cd0bc65b77c1d5549a0b5dfcc2f04bdaa8942aaca9df4d4eaa4d5f32cea6",
+      "seq": 784
+    },
+    {
+      "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-01T18:08:52.324409+00:00",
+      "event_hash": "00630c62df71b8859245eb8d6dfc9f10acd4c29a03ca9834ebbfdfa0bd335eb2",
+      "event_key": "heartbeat:9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60:2026-11-01T18:08:31.430229+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-01T18:08:31.430229+00:00"
+      },
+      "previous_hash": "d458c9fce4f9ae4fd1c05fd0bef94e17f90a07abab2de6b04fe7e6dea96ef40c",
+      "seq": 785
     }
   ],
   "schema": "public-portfolio-record-snapshot",
