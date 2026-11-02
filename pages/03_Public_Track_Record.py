@@ -13,7 +13,7 @@ import streamlit as st
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
 from public_evidence_navigation import rank_evidence_rows, render_evidence_picker
-from public_evidence_history import poll_portfolio_summaries, summary_progress_signature, watch_summary_progress
+from public_evidence_population import poll_portfolio_summaries, summary_progress_signature, watch_summary_progress
 from public_evidence_values import remember_card_outcome, reuse_card_outcomes, value_of_100
 from public_track_record import (
     BENCHMARK_LABEL,

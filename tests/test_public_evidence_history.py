@@ -1,7 +1,7 @@
 from threading import Event
 from concurrent.futures import ThreadPoolExecutor
 
-from public_evidence_history import EvidenceHistoryJobs, _load_summary_batches, summary_progress_signature
+from public_evidence_population import EvidenceHistoryJobs, _load_summary_batches, summary_progress_signature
 
 
 def test_slow_history_is_nonblocking_and_repeated_polls_share_one_job():
