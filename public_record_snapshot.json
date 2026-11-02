@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-02T22:38:56.108624+00:00",
-  "payload_sha256": "1e686aa9fbc7ab9732efc9540bc2ffde902855e671711e69babaa0002765fab7",
+  "generated_at": "2026-11-02T22:56:27.875558+00:00",
+  "payload_sha256": "a9495a7de1b0c96fe40de639da7cb4a69bf996587026c1f9fc78ed8fd82b4150",
   "record": {
     "active_forecast_realizations": [
       {
@@ -241957,6 +241957,84 @@
       },
       "previous_hash": "dc06303ff655058b5e24a28dc36582946eea9bc54d178ab232c5a540d44849c3",
       "seq": 850
+    },
+    {
+      "baseline_id": "a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T22:55:59.186092+00:00",
+      "event_hash": "970fcc065ade83e63343bc34682a671cd359705f73edfb656b1af6742dcde520",
+      "event_key": "failure:a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f:2026-11-02T22:55:39.553230+00:00:STALE_OR_INCOMPLETE_MARKET_HISTORY",
+      "kind": "FAILURE",
+      "payload": {
+        "checked_at": "2026-11-02T22:55:39.553230+00:00",
+        "model_only": true,
+        "publication_id": "PUB-8C8690BE7A2F12FD7669567B",
+        "reason": "STALE_OR_INCOMPLETE_MARKET_HISTORY",
+        "stage": "market_history",
+        "status": "CANNOT_ASSESS"
+      },
+      "previous_hash": "446763aa04910ff3ab903d2e95ac32add43961267fe11b6d68d70212fcc55ee8",
+      "seq": 851
+    },
+    {
+      "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T22:56:08.394509+00:00",
+      "event_hash": "d61d8dc462da64e98b649ad2e9ad356f867845cf7b2aa5bacfcd7dca2682f473",
+      "event_key": "heartbeat:3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0:2026-11-02T22:55:39.553230+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T22:55:39.553230+00:00"
+      },
+      "previous_hash": "970fcc065ade83e63343bc34682a671cd359705f73edfb656b1af6742dcde520",
+      "seq": 852
+    },
+    {
+      "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T22:56:14.570292+00:00",
+      "event_hash": "fa5fd56a1f58ad975d75505fc078e027f40e139e49b6b17e0f78c833e3603ffc",
+      "event_key": "heartbeat:9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942:2026-11-02T22:55:39.553230+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T22:55:39.553230+00:00"
+      },
+      "previous_hash": "d61d8dc462da64e98b649ad2e9ad356f867845cf7b2aa5bacfcd7dca2682f473",
+      "seq": 853
+    },
+    {
+      "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T22:56:20.057671+00:00",
+      "event_hash": "228ce8a5b426c243ddf170df8a9725cb9ae90a53404011f062adbdb7728d01fe",
+      "event_key": "heartbeat:7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9:2026-11-02T22:55:39.553230+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T22:55:39.553230+00:00"
+      },
+      "previous_hash": "fa5fd56a1f58ad975d75505fc078e027f40e139e49b6b17e0f78c833e3603ffc",
+      "seq": 854
+    },
+    {
+      "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T22:56:25.542832+00:00",
+      "event_hash": "5bd82f1432ef36909cef05548bc83f9f65e03c7a6b136142f5d2896b75ce33f4",
+      "event_key": "heartbeat:9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60:2026-11-02T22:55:39.553230+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T22:55:39.553230+00:00"
+      },
+      "previous_hash": "228ce8a5b426c243ddf170df8a9725cb9ae90a53404011f062adbdb7728d01fe",
+      "seq": 855
     }
   ],
   "schema": "public-portfolio-record-snapshot",
