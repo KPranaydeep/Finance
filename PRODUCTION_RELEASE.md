@@ -106,3 +106,14 @@ it never substitutes an entry price or an invented FX value. A widespread
 provider outage does not trigger per-security retry loops. “Refresh planning
 prices” clears only the planning-quote cache and performs no optimization,
 publication or ledger write. Unresolved prices and listings stay unavailable.
+
+## Private execution modes
+
+“Build your private execution plan” defaults to Global. INR only selects native
+INR-quoted securities, including India-listed overseas ETFs; Overseas only selects
+foreign-currency listings. Filtered target weights are rescaled to 100% for private
+planning. Buy plans, model withdrawals, entry estimates, images, prompts and JSON
+exports use the same selection. Exported prompts leave outside-scope holdings
+untouched and exclude their value from trade funding. The immutable global
+publication, its fingerprint and performance history are unchanged. All planning
+amounts remain INR-normalized, including in Overseas only mode.

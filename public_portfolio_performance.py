@@ -32,6 +32,7 @@ from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
+from public_execution_scope import EXECUTION_MODES, select_execution_target
 from public_portfolio_history import (
     build_allocation_change_rows,
     latest_entry_exit_changes,
@@ -269,7 +270,8 @@ def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
 def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str,
                                 calculated_plan: dict | None = None,
                                 entry_estimate: dict | None = None,
-                                withdrawal_amount: float | None = None) -> tuple[str, dict]:
+                                withdrawal_amount: float | None = None,
+                                execution_mode: str = "Global") -> tuple[str, dict]:
     """Build a version-bound prompt containing public data only."""
     public_target = {
         "basket_id": current["basket_id"],
@@ -280,16 +282,19 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict], prices:
         "calculation_version": current["calculation_version"],
         "as_of": str(current["as_of"]),
         "published_at": str(current["published_at"]),
+        "execution_mode": execution_mode,
+        "target_basis": ("Published global target" if execution_mode == "Global" else
+                         "Private subset, rescaled to 100%; source publication is unchanged"),
         "target_positions": [
             {
                 "ticker": row["ticker"],
-                "target_weight_pct": round(float(row["target_weight"]) * 100),
+                "target_weight_pct": round(float(row["target_weight"]) * 100, 8),
                 "planning_price": prices.get(row["ticker"], {}).get("price"),
                 "price_as_of": prices.get(row["ticker"], {}).get("price_as_of"),
             }
             for row in constituents
         ],
-        "cash_weight_pct": round(float(current["cash_weight"]) * 100),
+        "cash_weight_pct": round(float(current["cash_weight"]) * 100) if execution_mode == "Global" else 0,
         "price_source": "Yahoo Finance latest available unadjusted close; reference data, not part of the immutable portfolio fingerprint",
         "estimated_minimum_practical_entry": entry_estimate,
     }
@@ -302,10 +307,21 @@ def build_execution_plan_prompt(current: dict, constituents: list[dict], prices:
     scenario_instruction = EXECUTION_SCENARIOS[scenario]
     if scenario == "Raise cash from existing holdings" and withdrawal_amount is not None:
         scenario_instruction=withdrawal_instructions(withdrawal_amount)
+    scope_instruction = (
+        "Global mode: use the complete reported portfolio."
+        if execution_mode == "Global" else
+        f"{execution_mode}: apply every valuation, weight, cash-funding and trade rule only to "
+        "holdings in this scope. INR only means native quote currency INR (including India-listed "
+        "overseas ETFs); Overseas only means foreign quote currency. Leave all outside-scope "
+        "holdings untouched: do not sell them or use their value to fund scoped buys. "
+        "A holding outside this scope is not a zero-target exit. The scoped target is rescaled "
+        "to 100% for private planning and does not replace the immutable global publication."
+    )
     prompt = f"""Create a short, actionable, user-reviewed portfolio execution plan using the immutable public target below. Do not rerun or modify the public optimizer.
 
 SELECTED SCENARIO: {scenario}
 {scenario_instruction}
+EXECUTION SCOPE: {scope_instruction}
 
 PUBLIC TARGET SNAPSHOT
 {target_json}
@@ -314,7 +330,7 @@ PUBLIC TARGET SNAPSHOT
 WORKING RULES
 1. Follow only the selected scenario. Ask only for the missing investment or withdrawal amount described there, then proceed. Never ask the user to choose a cash reserve. Parse a broker report only when that scenario requires one. Use security name and ISIN to resolve exchange tickers from reliable public sources. A holding is not "unresolved" merely because it is absent from the target; a resolved non-target holding has target weight 0%.
 2. Do not repeat personal identifiers. Give only one short redaction warning if the report contains them.
-3. Treat the broker report as the complete stock portfolio unless it explicitly says otherwise. If cash is absent, assume opening cash is zero and fund buys from sale proceeds. State this assumption once; do not stop.
+3. Apply the selected execution scope first; all remaining rules apply only inside it. Treat the in-scope broker holdings as the planning portfolio. If cash is absent, assume opening cash is zero and fund buys from in-scope sale proceeds. State this assumption once; do not stop.
 4. For an existing portfolio, use the report's market value/closing value for every holding. Sum those values to obtain total reported portfolio value, then calculate current weight = holding market value ÷ total reported value. If report weights exist, use them only as a reconciliation check. Do not fetch live prices or historical returns.
 5. For rebalancing, calculate target value = total reported portfolio value × public target weight and value difference = target value − current market value. A positive difference is BUY, a negative difference is SELL, and a difference inside the tolerance is HOLD. For cash withdrawal, use the remaining value after withdrawal and costs, following the selected scenario. A resolved holding absent from the public target has target weight and target value zero.
 6. Use the broker-reported closing price for owned holdings. For a target not present in the report, use its embedded public planning price. Do not fetch another price. If a required price is absent, mark only that security REVIEW and continue with the rest.
@@ -710,6 +726,33 @@ with st.container(border=True):
     )
 
 st.subheader("Build your private execution plan")
+execution_mode = st.segmented_control(
+    "Investment mode", EXECUTION_MODES, default="Global", required=True,
+    key="private_execution_mode",
+)
+execution_constituents = select_execution_target(record["constituents"], price_snapshot, execution_mode)
+execution_prices = {row["ticker"]: price_snapshot[row["ticker"]]
+                    for row in execution_constituents if row["ticker"] in price_snapshot}
+execution_entry_estimate = entry_estimate if execution_mode == "Global" else None
+if execution_mode != "Global" and execution_constituents:
+    try:
+        execution_entry_estimate = estimate_minimum_entry_capital(execution_constituents, execution_prices)
+    except Exception:
+        pass
+mode_slug = execution_mode.lower().replace(" ", "-")
+st.caption(
+    f"{execution_mode} · {len(execution_constituents)} target securities · "
+    + ("Published global weights." if execution_mode == "Global" else
+       "Selected weights rescaled to 100%; other holdings stay untouched.")
+    + " All amounts and planning prices are in INR."
+)
+if not execution_constituents:
+    st.info("No published target securities are available in this mode. Choose another mode.")
+if execution_mode != "Global" and execution_entry_estimate:
+    st.caption(
+        f"{execution_mode} starter estimate ₹{execution_entry_estimate['minimum_viable_starter_inr']:,.0f}"
+        f" · Full selected basket ₹{execution_entry_estimate['minimum_capital_inr']:,.0f}."
+    )
 st.write(
     "Choose what you want to do. Fresh-cash and model-withdrawal plans are calculated here. "
     "Other personal-portfolio scenarios provide a private execution prompt."
@@ -728,27 +771,27 @@ st.markdown(
 execution_scenario = st.selectbox("What do you want to do?", list(EXECUTION_SCENARIOS))
 calculated_plan = None
 withdrawal_amount = None
-if execution_scenario == "Start fresh with cash":
-    default_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 1000.0
-    starter_amount=float(entry_estimate["minimum_viable_starter_inr"]) if entry_estimate else 100.0
+if execution_constituents and execution_scenario == "Start fresh with cash":
+    default_amount=float(execution_entry_estimate["minimum_viable_starter_inr"]) if execution_entry_estimate else 1000.0
+    starter_amount=float(execution_entry_estimate["minimum_viable_starter_inr"]) if execution_entry_estimate else 100.0
     investment_amount = st.number_input(
         "Amount to invest (₹)", min_value=1.0, value=max(1.0,default_amount), step=100.0, format="%.2f",
         help="The viable starter is a suggested starting amount, not a minimum. You can enter a smaller amount."
     )
     try:
         starter_asset_limit=None
-        if entry_estimate and starter_amount <= float(investment_amount)<entry_estimate["minimum_capital_inr"]:
-            starter_floor=float(entry_estimate["minimum_viable_starter_inr"])
-            practical_floor=float(entry_estimate["minimum_capital_inr"])
+        if execution_entry_estimate and starter_amount <= float(investment_amount)<execution_entry_estimate["minimum_capital_inr"]:
+            starter_floor=float(execution_entry_estimate["minimum_viable_starter_inr"])
+            practical_floor=float(execution_entry_estimate["minimum_capital_inr"])
             span=practical_floor-starter_floor
             progress=max(0.0,min(1.0,(float(investment_amount)-starter_floor)/span)) if span>0 else 1.0
-            minimum_assets=int(entry_estimate["assumptions"]["starter_required_coverage"])
+            minimum_assets=int(execution_entry_estimate["assumptions"]["starter_required_coverage"])
             starter_asset_limit=min(
-                int(entry_estimate["constituent_count"]),
-                minimum_assets+int(progress*(int(entry_estimate["constituent_count"])-minimum_assets)),
+                int(execution_entry_estimate["constituent_count"]),
+                minimum_assets+int(progress*(int(execution_entry_estimate["constituent_count"])-minimum_assets)),
             )
         calculated_plan = allocate_public_lumpsum(
-            record["constituents"], price_snapshot, float(investment_amount),
+            execution_constituents, execution_prices, float(investment_amount),
             starter_max_assets=starter_asset_limit,
         )
         p1,p2,p3=st.columns(3)
@@ -771,7 +814,7 @@ if execution_scenario == "Start fresh with cash":
             st.download_button(
                 "Download calculated buy plan CSV",
                 plan_frame[["Action","Ticker","Shares","Price","Approx. value"]].to_csv(index=False).encode("utf-8"),
-                file_name=f"{DEFAULT_BASKET_ID.lower()}-fresh-cash-buy-plan.csv",
+                file_name=f"{DEFAULT_BASKET_ID.lower()}-{mode_slug}-fresh-cash-buy-plan.csv",
                 mime="text/csv",width="stretch",
             )
             try:
@@ -789,14 +832,14 @@ if execution_scenario == "Start fresh with cash":
                             float(order["estimated_value"]),
                             listing_descriptor(
                                 str(order["ticker"]),
-                                price_snapshot.get(str(order["ticker"]), {}).get(
+                                execution_prices.get(str(order["ticker"]), {}).get(
                                     "source_currency"
                                 ),
                             ),
                         )
                         for order in calculated_plan["orders"]
                     ),
-                    mode_label=(
+                    mode_label=execution_mode + " · " + (
                         "Starter allocation"
                         if calculated_plan["mode"].startswith("STARTER")
                         else "Target-weight allocation"
@@ -807,7 +850,7 @@ if execution_scenario == "Start fresh with cash":
                     buy_plan_card,
                     file_name=(
                         f'{DEFAULT_BASKET_ID.lower()}-'
-                        f'p{int(current["portfolio_version"]):03d}-buy-plan.png'
+                        f'p{int(current["portfolio_version"]):03d}-{mode_slug}-buy-plan.png'
                     ),
                     mime="image/png",
                     icon=":material/download:",
@@ -826,24 +869,24 @@ if execution_scenario == "Start fresh with cash":
             st.caption("Unavailable prices excluded: "+", ".join(calculated_plan["missing_prices"]))
         if not calculated_plan["orders"]:
             st.info("No suitable whole-share allocation fits this amount under the current planning rules. The amount remains uninvested; increase it to obtain a buy plan.")
-        elif entry_estimate and float(investment_amount)<starter_amount:
+        elif execution_entry_estimate and float(investment_amount)<starter_amount:
             st.info("Small-amount plan: fewer holdings and greater differences from target weights are possible. The viable-starter diversification and cost conditions may not be met.")
-        elif entry_estimate and float(investment_amount)<entry_estimate["minimum_capital_inr"]:
+        elif execution_entry_estimate and float(investment_amount)<execution_entry_estimate["minimum_capital_inr"]:
             st.info("Starter allocation: diversified and cost-aware, but it will not contain every target security.")
-        elif entry_estimate:
-            st.success("This amount meets the estimated practical-entry conditions for the published portfolio.")
+        elif execution_entry_estimate:
+            st.success("This amount meets the estimated practical-entry conditions for the selected target basket.")
         st.caption("Starter-basket mode" if calculated_plan["mode"].startswith("STARTER") else "Target-weight mode")
     except Exception as exc:
         st.info(f"A fresh-cash plan cannot be calculated until prices are available: {exc}")
-if execution_scenario == "Raise cash from existing holdings":
+if execution_constituents and execution_scenario == "Raise cash from existing holdings":
     withdrawal_suggestion=None
     reference_plan=None
-    if entry_estimate:
+    if execution_entry_estimate:
         try:
             reference_plan=allocate_public_lumpsum(
-                record["constituents"],price_snapshot,float(entry_estimate["minimum_capital_inr"])
+                execution_constituents,execution_prices,float(execution_entry_estimate["minimum_capital_inr"])
             )
-            withdrawal_suggestion=suggested_withdrawal(reference_plan,entry_estimate,record["constituents"])
+            withdrawal_suggestion=suggested_withdrawal(reference_plan,execution_entry_estimate,execution_constituents)
         except Exception:
             LOGGER.warning("Illustrative withdrawal default is unavailable")
     withdrawal_amount=st.number_input(
@@ -860,9 +903,9 @@ if execution_scenario == "Raise cash from existing holdings":
     else:
         st.caption("Model suggestion unavailable. Enter the net cash you need, starting from ₹1.")
     st.caption("Model example: holdings are constructed at the current practical-entry capital using published weights and planning prices. These are not your personal holdings.")
-    if reference_plan is not None and entry_estimate:
+    if reference_plan is not None and execution_entry_estimate:
         try:
-            sale_plan=allocate_withdrawal(reference_plan,record["constituents"],withdrawal_amount,entry_estimate["assumptions"])
+            sale_plan=allocate_withdrawal(reference_plan,execution_constituents,withdrawal_amount,execution_entry_estimate["assumptions"])
             if sale_plan["status"]=="INSUFFICIENT":
                 st.info(f"The reference model can raise at most ₹{sale_plan['maximum_available']:,.2f} after estimated charges. Shortfall: ₹{sale_plan['shortfall']:,.2f}.")
             else:
@@ -876,7 +919,7 @@ if execution_scenario == "Raise cash from existing holdings":
                                  column_config={"Price":st.column_config.NumberColumn(format="₹%.2f"),
                                                 "Approx. value":st.column_config.NumberColumn(format="₹%.2f")})
                     st.download_button("Download model withdrawal CSV",sale_frame.to_csv(index=False).encode("utf-8"),
-                                       "model-withdrawal.csv","text/csv")
+                                       f"{mode_slug}-model-withdrawal.csv","text/csv")
                 else:
                     st.info("The reference model's residual cash covers this amount. No sales are required.")
                 st.caption(f"Available model cash ₹{sale_plan['available_cash']:,.2f} + gross sales ₹{sale_plan['gross_sales']:,.2f} − costs ₹{sale_plan['costs']:,.2f} − withdrawal ₹{sale_plan['requested']:,.2f} = remaining cash ₹{sale_plan['residual_cash']:,.2f}.")
@@ -886,14 +929,14 @@ if execution_scenario == "Raise cash from existing holdings":
     else:
         st.info("Complete model prices and a practical-entry estimate are needed to calculate sales.")
 
-if execution_scenario != "Raise cash from existing holdings":
+if execution_constituents and execution_scenario != "Raise cash from existing holdings":
     st.warning(
         "If you share a broker report, first remove your name, PAN, demat/account number, email, phone, "
         "address, and any credentials. Review the AI provider's privacy policy."
     )
     execution_prompt, public_target = build_execution_plan_prompt(
-        current, record["constituents"], price_snapshot, execution_scenario, calculated_plan, entry_estimate,
-        withdrawal_amount=withdrawal_amount,
+        current, execution_constituents, execution_prices, execution_scenario, calculated_plan, execution_entry_estimate,
+        withdrawal_amount=withdrawal_amount, execution_mode=execution_mode,
     )
     version_label = f"p{int(current['portfolio_version']):03d}"
     action_1, action_2, action_3, action_4 = st.columns(4)
@@ -904,14 +947,14 @@ if execution_scenario != "Raise cash from existing holdings":
     action_3.download_button(
         "Download prompt.txt",
         data=execution_prompt.encode("utf-8"),
-        file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-execution-prompt.txt",
+        file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-{mode_slug}-execution-prompt.txt",
         mime="text/plain",
         width="stretch",
     )
     action_4.download_button(
-        "Download public target JSON",
+        "Download selected target JSON",
         data=json.dumps(public_target, sort_keys=True, indent=2, default=str).encode("utf-8"),
-        file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-target.json",
+        file_name=f"{DEFAULT_BASKET_ID.lower()}-{version_label}-{mode_slug}-target.json",
         mime="application/json",
         width="stretch",
     )
