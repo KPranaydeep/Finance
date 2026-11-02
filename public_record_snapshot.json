@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-02T04:22:47.474927+00:00",
-  "payload_sha256": "6bc7e78f9e880df6a91a9c2ed3341e30107d313edd3389fe77ce9015a3a27cce",
+  "generated_at": "2026-11-02T09:31:17.284954+00:00",
+  "payload_sha256": "af6c43782a653914e67bb22790afbc021daf32321fc7c4f4b91f587ad395f75c",
   "record": {
     "active_forecast_realizations": [
       {
@@ -235521,6 +235521,146 @@
       },
       "previous_hash": "47d05db604efc318a34183fff23b35569a7c70d085833d2ee1d2f6c3a7f4720a",
       "seq": 800
+    },
+    {
+      "baseline_id": "PUB-8C8690BE7A2F12FD7669567B",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T09:30:48.151509+00:00",
+      "event_hash": "3a9174f928435ec99126c3486a43560e85e386755464e7f1e6d723d1926879b3",
+      "event_key": "security-entry:per-security-publication-or-open-plus-wait-v1:PUB-8C8690BE7A2F12FD7669567B:BAFNAPH.NS",
+      "kind": "SECURITY_ENTRY",
+      "payload": {
+        "basis": "NEXT_OPEN_PLUS_CONFIGURED_WAIT",
+        "entry_date": "2026-11-02",
+        "fx_quote_at": null,
+        "fx_quote_interval": null,
+        "fx_to_inr": 1.0,
+        "kind": "equity",
+        "market": "NSE",
+        "native_price": 438.95001220703125,
+        "price_inr": 438.95001220703125,
+        "publication_id": "PUB-8C8690BE7A2F12FD7669567B",
+        "quote_at": "2026-11-02T05:44:00+00:00",
+        "ready": true,
+        "requested_entry_at": "2026-11-02T04:00:00+00:00",
+        "security_quote_interval": "1m",
+        "session_close_at": "2026-11-02T10:00:00+00:00",
+        "session_open_at": "2026-11-02T03:45:00+00:00",
+        "source": "Yahoo Finance intraday security Open and latest policy-fresh FX Open observable at trade time; actual intervals recorded",
+        "ticker": "BAFNAPH.NS"
+      },
+      "previous_hash": "192104a125068c0c49e2d0eae3a4158016bc26641d7f87c0bbdbb425c54a8684",
+      "seq": 801
+    },
+    {
+      "baseline_id": "PUB-8C8690BE7A2F12FD7669567B",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T09:30:48.909936+00:00",
+      "event_hash": "9c84fc03e06d75082e7de3b99a20414126fab6961863806cd15b87c6b5285f97",
+      "event_key": "waiting:PUB-8C8690BE7A2F12FD7669567B:2026-11-02T09:30:46.881965+00:00",
+      "kind": "WAITING",
+      "payload": {
+        "captured_entries": 7,
+        "checked_at": "2026-11-02T09:30:46.881965+00:00",
+        "entry_date": "2026-11-02",
+        "entry_frozen": false,
+        "entry_model_version": "per-security-publication-or-open-plus-wait-v1",
+        "model_only": true,
+        "observation_rows": null,
+        "observation_sessions": null,
+        "pending_ticker": null,
+        "pending_tickers": [
+          "BTI",
+          "BTSG",
+          "CBOE",
+          "CVS",
+          "DG",
+          "ESLT",
+          "GH",
+          "HRTG",
+          "JNJ",
+          "KO",
+          "MNST",
+          "PM",
+          "RVMD",
+          "SENEA",
+          "STLN",
+          "STX",
+          "TEN",
+          "TIGO",
+          "VLO"
+        ],
+        "policy_version": "owner-review-policy-v9",
+        "publication_id": "PUB-8C8690BE7A2F12FD7669567B",
+        "ready_at": "2026-11-02T14:45:00+00:00",
+        "reason": "AWAITING_MARKET_ENTRY",
+        "status": "AWAITING_MARKET_ENTRY",
+        "total_entries": 26,
+        "wait_reason": null,
+        "waiting_for": "AWAITING_MARKET_ENTRY"
+      },
+      "previous_hash": "3a9174f928435ec99126c3486a43560e85e386755464e7f1e6d723d1926879b3",
+      "seq": 802
+    },
+    {
+      "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T09:30:58.535088+00:00",
+      "event_hash": "6ec76bbf626646ee3600dffa88191ae9595d753a430bec6a1b82d2a5d3744bc8",
+      "event_key": "heartbeat:3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0:2026-11-02T09:30:46.881965+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T09:30:46.881965+00:00"
+      },
+      "previous_hash": "9c84fc03e06d75082e7de3b99a20414126fab6961863806cd15b87c6b5285f97",
+      "seq": 803
+    },
+    {
+      "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T09:31:04.376962+00:00",
+      "event_hash": "170139439a4c3b712ebdf3f20657a7ff3cff999346deb2e6d7655a88966d8980",
+      "event_key": "heartbeat:9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942:2026-11-02T09:30:46.881965+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T09:30:46.881965+00:00"
+      },
+      "previous_hash": "6ec76bbf626646ee3600dffa88191ae9595d753a430bec6a1b82d2a5d3744bc8",
+      "seq": 804
+    },
+    {
+      "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T09:31:09.830702+00:00",
+      "event_hash": "13bc6ab4e23367758322f504a92bad7d077cd2abda90f975cf81f2e7c8b73414",
+      "event_key": "heartbeat:7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9:2026-11-02T09:30:46.881965+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T09:30:46.881965+00:00"
+      },
+      "previous_hash": "170139439a4c3b712ebdf3f20657a7ff3cff999346deb2e6d7655a88966d8980",
+      "seq": 805
+    },
+    {
+      "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-02T09:31:14.958536+00:00",
+      "event_hash": "dcbdb95c6fcf117aceaf2cb0ad63cc9902a2f0677a00ab1a2704b9142a41211b",
+      "event_key": "heartbeat:9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60:2026-11-02T09:30:46.881965+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-10-30",
+        "at": "2026-11-02T09:30:46.881965+00:00"
+      },
+      "previous_hash": "13bc6ab4e23367758322f504a92bad7d077cd2abda90f975cf81f2e7c8b73414",
+      "seq": 806
     }
   ],
   "schema": "public-portfolio-record-snapshot",
