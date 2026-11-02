@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from public_market_data import download
 
 
 def to_inr(closes, currencies, usd_inr=None):
@@ -46,7 +47,7 @@ def download_inr(tickers, *, start=None, end=None, period=None,
             raise ValueError("UNSUPPORTED_QUOTE_CURRENCY")
     requested = list(tickers) + (["INR=X"] if "USD" in currencies.values() else [])
     options = {"period": period} if period else {"start": start, "end": end}
-    data = yf.download(requested, interval="1d", auto_adjust=auto_adjust,
+    data = download(requested, interval="1d", auto_adjust=auto_adjust,
                        progress=False, threads=False, group_by="column",
                        timeout=timeout, **options)
     if data.empty:

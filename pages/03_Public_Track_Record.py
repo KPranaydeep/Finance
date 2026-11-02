@@ -13,6 +13,7 @@ import streamlit as st
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
 from public_evidence_navigation import rank_evidence_rows, render_evidence_picker
+from public_evidence_history import poll_portfolio_summaries
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
@@ -22,7 +23,6 @@ from public_track_record import (
     exited_symbol_rows,
     exited_symbols_csv,
     exited_symbols_text,
-    load_portfolio_summaries,
     load_security_evidence,
     percent,
     percentage_points,
@@ -113,19 +113,22 @@ summary_inputs = tuple(
     )
     for item in feed["securities"]
 )
-try:
-    with st.spinner("Loading return ranking…"):
-        summaries, summary_failures = load_portfolio_summaries(
-            str(feed["publication_id"]), summary_inputs, refresh_bucket.isoformat(),
-        )
-except Exception:
-    LOGGER.exception("Security return ranking is temporarily unavailable")
-    summaries, summary_failures = [], [str(item["ticker"]) for item in feed["securities"]]
-selection_rows = rank_evidence_rows(active if scope == "Current holdings" else exited, summaries)
-st.caption(
-    "Highest return first · INR · entry to latest completed session or exit · "
-    "holding periods differ; unavailable returns appear last."
+summary_state, summaries, summary_failures = poll_portfolio_summaries(
+    str(feed["publication_id"]), summary_inputs, refresh_bucket.isoformat(),
 )
+selection_rows = rank_evidence_rows(active if scope == "Current holdings" else exited, summaries)
+if summary_state == "ready" and summaries:
+    st.caption(
+        "Highest return first · INR · entry to latest completed session or exit · "
+        "holding periods differ; unavailable returns appear last."
+    )
+else:
+    st.caption(
+        "Return ranking is loading in the background; you can open a security now."
+        if summary_state == "loading" else
+        "Return ranking is unavailable; securities are listed alphabetically."
+    )
+    st.button("Refresh return ranking", icon=":material/refresh:")
 selected = render_evidence_picker(selection_rows, scope)
 
 if selected is None:
@@ -153,12 +156,13 @@ if selected is None:
                 "history was unavailable."
             )
     except Exception:
-        LOGGER.exception("Portfolio performance summary could not be built")
+        if summary_state != "loading":
+            LOGGER.exception("Portfolio performance summary could not be built")
         cover = portfolio_cover_card(feed, selection_rows, scope_label=scope)
         st.image(cover, width="stretch")
         st.caption(
-            "Live summary history is temporarily unavailable, so this slide "
-            "shows the immutable publication cover instead."
+            "The portfolio overview will appear when return history is ready. "
+            "The publication cover remains available meanwhile."
         )
 else:
     selected_ticker = selected["ticker"]

@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+from public_market_data import download
 from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
 from public_withdrawal_allocator import allocate_withdrawal
 from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
@@ -226,7 +227,7 @@ def copy_prompt_button(prompt: str) -> None:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_world_benchmark(start_date: str, end_date: str):
-    data=yf.download(["VT","INR=X"],start=start_date,end=end_date,
+    data=download(["VT","INR=X"],start=start_date,end=end_date,
                      auto_adjust=True,progress=False,threads=False,group_by="column")
     if data.empty or not isinstance(data.columns,pd.MultiIndex):
         raise ValueError("World benchmark history is unavailable")

@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import streamlit as st
 import yfinance as yf
+from public_market_data import download
 
 
 BENCHMARK_TICKER = "^NSEI"
@@ -117,7 +118,7 @@ def load_daily_history(ticker: str, start: date, requested_end: date,
                        refresh_bucket: str = "") -> pd.DataFrame:
     # Yahoo's end date is exclusive. The extra day lets a completed current
     # session appear when the provider has published it.
-    frame = yf.download(
+    frame = download(
         ticker,
         start=(start - timedelta(days=10)).isoformat(),
         end=(requested_end + timedelta(days=1)).isoformat(),
@@ -133,7 +134,7 @@ def load_daily_history(ticker: str, start: date, requested_end: date,
 @st.cache_data(ttl=60, max_entries=32, show_spinner=False)
 def load_latest_ltp(ticker: str) -> tuple[float | None, str | None]:
     """Return latest Yahoo intraday LTP separately from daily history."""
-    frame = yf.download(ticker, period="1d", interval="1m", auto_adjust=False,
+    frame = download(ticker, period="1d", interval="1m", auto_adjust=False,
                         actions=False, progress=False, threads=False)
     if frame.empty or "Close" not in frame:
         return None, None
@@ -441,7 +442,7 @@ def load_portfolio_summaries(
         {row[0] for row in securities}
         | {BENCHMARK_TICKER, WORLD_TICKER, FX_TICKER}
     )
-    frame = yf.download(
+    frame = download(
         symbols,
         start=start.isoformat(),
         end=end.isoformat(),

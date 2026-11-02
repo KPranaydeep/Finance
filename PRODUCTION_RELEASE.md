@@ -130,3 +130,14 @@ entry-to-latest/exit INR return. Returns are shown in the options; unavailable
 or non-finite evidence appears last, never as zero. Lifecycle dates must match
 before an outcome is attached to a security. Holding periods differ. No return
 calculation or immutable publication is changed.
+
+History ranking loads in a shared background job so a slow data provider cannot
+block the security picker. A loading view explicitly shows unavailable returns
+and alphabetical order; “Refresh return ranking” checks the existing job without
+starting a duplicate download. Jobs are keyed by publication, lifecycle inputs
+and the 15-minute refresh window, with at most two active downloads and eight
+retained results. Workers perform data calculation only, with no Streamlit UI or
+ledger writes. A new lifecycle never inherits the previous lifecycle's return.
+Public Yahoo batch calls also share a process lock: the installed client's shared
+batch dictionaries must not be reset by a concurrent page download. Individual
+batch threading is preserved; financial inputs and conversion rules are unchanged.
