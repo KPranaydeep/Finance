@@ -117,3 +117,13 @@ exports use the same selection. Exported prompts leave outside-scope holdings
 untouched and exclude their value from trade funding. The immutable global
 publication, its fingerprint and performance history are unchanged. All planning
 amounts remain INR-normalized, including in Overseas only mode.
+
+## Evidence navigation
+
+The public track-record page uses a searchable ticker picker instead of anonymous
+page numbers. Options show published target weight and tracking date; exited
+securities show last published weight and exit date. Named previous/next controls
+and the portfolio overview remain available. Each view retains its selection by
+ticker within the session, and a removed selection resets to the overview. The
+picker uses publication metadata only; it does not download every security's
+history to populate navigation or alter the evidence calculations.

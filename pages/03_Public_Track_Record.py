@@ -12,6 +12,7 @@ import streamlit as st
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
+from public_evidence_navigation import render_evidence_picker
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
@@ -82,10 +83,9 @@ with st.container(horizontal=True):
     st.metric("Recorded exits", len(exited))
     st.metric("Published", str(feed["publication_date"]))
 
-st.subheader("Evidence deck")
+st.subheader("Explore the evidence")
 st.write(
-    "Start with the portfolio summary, then move through one publication-linked "
-    "security card at a time."
+    "Choose a security by ticker, target weight and tracking date, or open the portfolio overview."
 )
 
 if not active:
@@ -99,21 +99,12 @@ if exited:
         ["Current holdings", "Exited holdings"],
         default="Current holdings",
         selection_mode="single",
+        required=True,
     )
 selection_rows = active if scope == "Current holdings" else exited
-slide_number = st.pagination(
-    len(selection_rows) + 1,
-    default=1,
-    max_visible_pages=5,
-    width="stretch",
-    key=f"track_record_slides_{scope}",
-)
-st.caption(
-    f"Slide {slide_number} of {len(selection_rows) + 1} · "
-    + ("Portfolio summary" if slide_number == 1 else selection_rows[slide_number - 2]["ticker"])
-)
+selected = render_evidence_picker(selection_rows, scope)
 
-if slide_number == 1:
+if selected is None:
     now = datetime.now(IST)
     refresh_bucket = now.replace(second=0, microsecond=0)
     refresh_bucket = refresh_bucket.replace(
@@ -166,7 +157,6 @@ if slide_number == 1:
             "shows the immutable publication cover instead."
         )
 else:
-    selected = selection_rows[slide_number - 2]
     selected_ticker = selected["ticker"]
     now = datetime.now(IST)
     refresh_bucket = now.replace(second=0, microsecond=0)
