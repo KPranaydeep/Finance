@@ -31,7 +31,7 @@ def to_inr(closes, currencies, usd_inr=None):
 
 
 def download_inr(tickers, *, start=None, end=None, period=None,
-                 auto_adjust=False, currencies=None):
+                 auto_adjust=False, currencies=None, timeout=10):
     if currencies is None:
         currencies = {}
         for ticker in tickers:
@@ -47,7 +47,8 @@ def download_inr(tickers, *, start=None, end=None, period=None,
     requested = list(tickers) + (["INR=X"] if "USD" in currencies.values() else [])
     options = {"period": period} if period else {"start": start, "end": end}
     data = yf.download(requested, interval="1d", auto_adjust=auto_adjust,
-                       progress=False, threads=False, group_by="column", **options)
+                       progress=False, threads=False, group_by="column",
+                       timeout=timeout, **options)
     if data.empty:
         raise ValueError("PRICE_HISTORY_UNAVAILABLE")
     close = data["Close"]

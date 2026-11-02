@@ -262,35 +262,8 @@ def investor_cash_flows(rows: list[dict], terminal_date, terminal_value: float) 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_latest_prices(tickers: tuple[str, ...]) -> dict[str, dict]:
     """Return the latest available unadjusted closes without blocking the page on failures."""
-    if not tickers:
-        return {}
-
-    try:
-        from public_price_currency import download_inr
-        known_currencies = {
-            ticker: "INR" if ticker.endswith(".NS") else "USD"
-            for ticker in tickers
-        }
-        close, currencies = download_inr(
-            list(tickers), period="7d", auto_adjust=False,
-            currencies=known_currencies,
-        )
-        result = {}
-        for ticker in tickers:
-            if close is None or ticker not in close.columns:
-                continue
-            series = pd.to_numeric(close[ticker], errors="coerce").dropna()
-            if not series.empty:
-                result[ticker] = {
-                    "price": float(series.iloc[-1]),
-                    "currency": "INR",
-                    "source_currency": currencies[ticker],
-                    "price_as_of": pd.Timestamp(series.index[-1]).date().isoformat(),
-                }
-        return result
-    except Exception:
-        LOGGER.exception("Latest public allocation prices could not be loaded")
-        return {}
+    from public_planning_prices import latest_planning_prices
+    return latest_planning_prices(tickers)
 
 
 def build_execution_plan_prompt(current: dict, constituents: list[dict], prices: dict[str, dict], scenario: str,
@@ -503,6 +476,8 @@ with st.container(border=True):
             st.markdown(f"[Tickertape]({MMI_SOURCE_URL}) · Display only")
 
 st.subheader("Target allocation")
+if st.button("Refresh planning prices", help="Retry quote data only; no optimization or publication."):
+    load_latest_prices.clear()
 allocation=pd.DataFrame(record["constituents"])
 price_snapshot=load_latest_prices(tuple(allocation["ticker"].astype(str)))
 try:
@@ -541,7 +516,7 @@ allocation_rows=[]
 for item in allocation[["Security","Allocation","Price","Listing"]].to_dict("records"):
     security=html.escape(str(item["Security"]))
     weight=float(item["Allocation"])
-    price="N/A" if pd.isna(item["Price"]) else f"₹{float(item['Price']):,.2f}"
+    price="Unavailable" if pd.isna(item["Price"]) else f"₹{float(item['Price']):,.2f}"
     allocation_rows.append(
         f'<tr><td class="ticker-cell" title="{security}">{security}</td>'
         f'<td><div class="weight-line"><span>{weight:.0f}%</span><span class="weight-track">'

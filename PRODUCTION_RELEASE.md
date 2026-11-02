@@ -96,3 +96,13 @@ immediately after use.
   records.
 - Restore a database snapshot only for a genuine disaster-recovery event with the
   exact target and consequences reviewed in advance.
+
+## Planning quote recovery
+
+The public allocation makes one bounded retry for up to five missing planning
+quotes, retaining successful quotes and requiring same-date USD/INR conversion.
+The retry uses a one-month history window and displays the actual quote date;
+it never substitutes an entry price or an invented FX value. A widespread
+provider outage does not trigger per-security retry loops. “Refresh planning
+prices” clears only the planning-quote cache and performs no optimization,
+publication or ledger write. Unresolved prices and listings stay unavailable.

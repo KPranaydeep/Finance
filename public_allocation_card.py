@@ -24,6 +24,8 @@ def listing_descriptor(ticker: str, source_currency: str | None) -> str:
         return "India · INR"
     if currency == "USD":
         return "U.S. · USD"
+    if currency == "—":
+        return "Listing unavailable"
     return f"Overseas · {currency}"
 
 

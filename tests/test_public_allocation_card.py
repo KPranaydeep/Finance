@@ -29,7 +29,7 @@ def test_listing_descriptor_distinguishes_indian_and_us_quotes():
     assert listing_descriptor("SBC.NS", "INR") == "India · INR"
     assert listing_descriptor("AXTI", "USD") == "U.S. · USD"
     assert listing_descriptor("CASH", "INR") == "Cash · INR"
-    assert listing_descriptor("UNKNOWN", None) == "Overseas · —"
+    assert listing_descriptor("UNKNOWN", None) == "Listing unavailable"
 
 
 @pytest.mark.parametrize(
