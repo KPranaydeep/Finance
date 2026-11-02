@@ -1,7 +1,7 @@
 from threading import Event
 from concurrent.futures import ThreadPoolExecutor
 
-from public_evidence_history import EvidenceHistoryJobs
+from public_evidence_history import EvidenceHistoryJobs, _load_summary_batches, summary_progress_signature
 
 
 def test_slow_history_is_nonblocking_and_repeated_polls_share_one_job():
@@ -92,3 +92,70 @@ def test_yahoo_batches_cannot_reset_each_others_shared_state(monkeypatch):
             release.set()
         assert first.result(timeout=1) == "first"
         assert second.result(timeout=1) == "second"
+
+
+def test_partial_batches_are_visible_without_waiting_for_the_full_job():
+    jobs, gate, published = EvidenceHistoryJobs(), Event(), Event()
+    row = {"ticker": "VENUSREM.NS", "entry_date": "2026-09-30", "return": .2}
+
+    def loader(*, publish):
+        publish([row], [])
+        published.set()
+        gate.wait(5)
+        return [row], []
+
+    try:
+        jobs.poll("partial", loader, progressive=True)
+        assert published.wait(1)
+        assert jobs.poll("partial", loader, progressive=True) == ("loading", [row], [])
+    finally:
+        gate.set()
+        jobs.executor.shutdown(wait=True)
+
+
+def test_refresh_preserves_previous_values_and_overlays_new_batches():
+    jobs, gate, published = EvidenceHistoryJobs(), Event(), Event()
+    old = {"ticker": "GOLDBETA.NS", "entry_date": "2026-09-15", "return": .1}
+    other = {"ticker": "VENUSREM.NS", "entry_date": "2026-09-30", "return": .2}
+    prefix = ("PUB", (("GOLDBETA.NS", "2026-09-15"), ("VENUSREM.NS", "2026-09-30")))
+    old_key, new_key = (*prefix, "2026-10-30T10"), (*prefix, "2026-10-30T11")
+
+    def loader(*, publish):
+        publish([{**old, "return": .15}], [])
+        published.set()
+        gate.wait(5)
+        return [], []
+
+    try:
+        jobs.poll(old_key, lambda: ([old, other], []))
+        jobs.jobs[old_key].result(timeout=1)
+        jobs.poll(new_key, loader, progressive=True)
+        assert published.wait(1)
+        state, rows, failures = jobs.poll(new_key, loader, progressive=True)
+        assert state == "refreshing"
+        assert {row["ticker"]: row["return"] for row in rows} == {"GOLDBETA.NS": .15, "VENUSREM.NS": .2}
+        assert summary_progress_signature(state, rows, []) != summary_progress_signature(state, [old, other], [])
+    finally:
+        gate.set()
+        jobs.executor.shutdown(wait=True)
+
+
+def test_small_batches_fill_every_security_without_opening_a_card(monkeypatch):
+    from public_track_record import load_portfolio_summaries
+    calls, progress = [], []
+    securities = tuple((f"S{i:02}.NS", "2026-09-15", None, "active" if i >= 2 else "removed", .1)
+                       for i in range(18))
+
+    def loader(publication_id, batch, refresh_bucket):
+        calls.append(batch)
+        return [{"ticker": row[0], "entry_date": row[1], "exit_date": row[2],
+                 "return": .2} for row in batch], []
+
+    monkeypatch.setattr(load_portfolio_summaries, "__wrapped__", loader)
+    rows, failed = _load_summary_batches("PUB", securities, "window",
+                                         publish=lambda rows, failures: progress.append(len(rows)))
+    assert [len(batch) for batch in calls] == [8, 8, 2]
+    assert calls[0][0][3] == "active"
+    assert progress == [8, 16, 18]
+    assert {row["ticker"] for row in rows} == {row[0] for row in securities}
+    assert failed == []

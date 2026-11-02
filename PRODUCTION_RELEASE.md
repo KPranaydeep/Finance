@@ -148,3 +148,12 @@ session, keyed by publication, ticker, entry date and exit date, and reused in t
 picker even when the bulk history refresh is pending. A newly available card
 causes one cached rerun to update the selection and ranking; identical results do
 not loop. Missing outcomes stay missing, rather than becoming ₹100 or zero.
+
+All holdings are now populated automatically in eight-security batches, with
+current holdings before historical exits. Each finished batch becomes available
+immediately. A three-second fragment watches only job progress and refreshes the
+picker when values change; it performs no duplicate downloads and stops polling
+when the job finishes. Previously completed values for the same publication and
+lifecycle set remain visible during refresh. A card no longer needs to be opened
+to make its outcome available in the picker. Truly unavailable market history
+remains blank, including new entries without a completed trading session.
