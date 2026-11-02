@@ -1082,7 +1082,7 @@ def portfolio_cover_card(
     for item in shown:
         ticker = str(item.get("ticker", ""))
         if current_scope:
-            detail = f"{float(item.get('target_weight') or 0):.0%} target"
+            detail = f"{float(item.get('target_weight') or 0):.0%} allocation"
         else:
             detail = f"exited {str(item.get('exit_date') or 'date unavailable')}"
         figure.text(0.095, y, ticker, color=ink, fontsize=18,

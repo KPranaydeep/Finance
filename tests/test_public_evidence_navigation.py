@@ -1,6 +1,6 @@
 from streamlit.testing.v1 import AppTest
 
-from public_evidence_navigation import evidence_option_label
+from public_evidence_navigation import evidence_option_label, rank_evidence_rows
 
 
 ROWS = [
@@ -25,7 +25,7 @@ def test_named_options_and_adjacent_buttons_select_the_actual_security():
     app = picker_app()
     assert not app.exception
     assert app.selectbox[0].options == ["Portfolio overview",
-        "LARGE.NS · target 12% · since 01 Oct 2026", "SMALL · target 3% · since 12 Oct 2026"]
+        "LARGE.NS · allocation 12% · since 01 Oct 2026", "SMALL · allocation 3% · since 12 Oct 2026"]
     assert app.button[0].disabled
     assert app.button[1].label == "Next: LARGE.NS"
     app.button[1].click().run()
@@ -57,7 +57,7 @@ def test_current_and_exited_views_keep_independent_selection():
     app.session_state["replacement_rows"] = [{"ticker": "EXIT", "target_weight": .05,
                                               "status": "removed", "exit_date": "2026-10-20"}]
     app.run()
-    assert app.selectbox[0].options[1] == "EXIT · last target 5% · exited 20 Oct 2026"
+    assert app.selectbox[0].options[1] == "EXIT · last allocation 5% · exited 20 Oct 2026"
     assert app.session_state["selected_ticker"] is None
     app.session_state["scope"] = "Current holdings"
     app.session_state["replacement_rows"] = ROWS
@@ -71,3 +71,21 @@ def test_empty_view_has_overview_without_navigation_errors():
     assert app.selectbox[0].options == ["Portfolio overview"]
     assert all(button.disabled for button in app.button)
     assert "date unavailable" in evidence_option_label({"ticker": "X", "entry_date": None})
+
+
+def test_returns_sort_numerically_highest_first_with_missing_after_losses():
+    rows = [{"ticker": ticker, "entry_date": "2026-10-01", "target_weight": .1}
+            for ticker in ("LOSS", "MISSING", "GAIN", "BEST", "INVALID")]
+    summaries = [{**row, "return": value} for row, value in zip(rows, (-.2, None, .1, 1.2, float("nan")))]
+    ranked = rank_evidence_rows(rows, summaries)
+    assert [row["ticker"] for row in ranked] == ["BEST", "GAIN", "LOSS", "INVALID", "MISSING"]
+    assert "return +120.0%" in evidence_option_label(ranked[0])
+    assert "return -20.0%" in evidence_option_label(ranked[2])
+    assert "return unavailable" in evidence_option_label(ranked[-1])
+    assert all("evidence_return" not in row for row in rows)
+
+
+def test_stale_return_from_a_different_lifecycle_is_not_reused():
+    summaries = [{"ticker": "LARGE.NS", "entry_date": "2026-09-01", "return": 4.}]
+    ranked = rank_evidence_rows(ROWS, summaries)
+    assert all(row["evidence_return"] is None for row in ranked)

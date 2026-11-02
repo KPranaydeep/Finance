@@ -121,9 +121,12 @@ amounts remain INR-normalized, including in Overseas only mode.
 ## Evidence navigation
 
 The public track-record page uses a searchable ticker picker instead of anonymous
-page numbers. Options show published target weight and tracking date; exited
-securities show last published weight and exit date. Named previous/next controls
+page numbers. Options show allocation and tracking date; exited
+securities show last allocation and exit date. Named previous/next controls
 and the portfolio overview remain available. Each view retains its selection by
 ticker within the session, and a removed selection resets to the overview. The
-picker uses publication metadata only; it does not download every security's
-history to populate navigation or alter the evidence calculations.
+picker reuses the cached bulk history used by the overview to sort by highest
+entry-to-latest/exit INR return. Returns are shown in the options; unavailable
+or non-finite evidence appears last, never as zero. Lifecycle dates must match
+before an outcome is attached to a security. Holding periods differ. No return
+calculation or immutable publication is changed.

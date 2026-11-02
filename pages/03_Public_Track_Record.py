@@ -12,7 +12,7 @@ import streamlit as st
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
-from public_evidence_navigation import render_evidence_picker
+from public_evidence_navigation import rank_evidence_rows, render_evidence_picker
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
@@ -85,7 +85,7 @@ with st.container(horizontal=True):
 
 st.subheader("Explore the evidence")
 st.write(
-    "Choose a security by ticker, target weight and tracking date, or open the portfolio overview."
+    "Choose a security by return, ticker or allocation, or open the portfolio overview."
 )
 
 if not active:
@@ -101,32 +101,36 @@ if exited:
         selection_mode="single",
         required=True,
     )
-selection_rows = active if scope == "Current holdings" else exited
+now = datetime.now(IST)
+refresh_bucket = now.replace(second=0, microsecond=0)
+refresh_bucket = refresh_bucket.replace(minute=refresh_bucket.minute // 15 * 15)
+summary_inputs = tuple(
+    (
+        str(item["ticker"]), str(item["entry_date"]),
+        str(item["exit_date"]) if item.get("exit_date") else None,
+        str(item.get("status", "active")).lower(),
+        float(item.get("target_weight") or 0.0),
+    )
+    for item in feed["securities"]
+)
+try:
+    with st.spinner("Loading return ranking…"):
+        summaries, summary_failures = load_portfolio_summaries(
+            str(feed["publication_id"]), summary_inputs, refresh_bucket.isoformat(),
+        )
+except Exception:
+    LOGGER.exception("Security return ranking is temporarily unavailable")
+    summaries, summary_failures = [], [str(item["ticker"]) for item in feed["securities"]]
+selection_rows = rank_evidence_rows(active if scope == "Current holdings" else exited, summaries)
+st.caption(
+    "Highest return first · INR · entry to latest completed session or exit · "
+    "holding periods differ; unavailable returns appear last."
+)
 selected = render_evidence_picker(selection_rows, scope)
 
 if selected is None:
-    now = datetime.now(IST)
-    refresh_bucket = now.replace(second=0, microsecond=0)
-    refresh_bucket = refresh_bucket.replace(
-        minute=refresh_bucket.minute // 15 * 15
-    )
-    summary_inputs = tuple(
-        (
-            str(item["ticker"]),
-            str(item["entry_date"]),
-            str(item["exit_date"]) if item.get("exit_date") else None,
-            str(item.get("status", "active")).lower(),
-            float(item.get("target_weight") or 0.0),
-        )
-        for item in feed["securities"]
-    )
     try:
         with st.skeleton(height=360):
-            summaries, summary_failures = load_portfolio_summaries(
-                str(feed["publication_id"]),
-                summary_inputs,
-                refresh_bucket.isoformat(),
-            )
             if not summaries:
                 raise ValueError("No security outcomes are currently available.")
             summary_card = batch_summary_card(
@@ -283,7 +287,7 @@ if composition_section.open:
             [
                 {
                     "Security": item["ticker"],
-                    "Target weight": float(item["target_weight"]),
+                    "Allocation": float(item["target_weight"]),
                     "Tracked since": item["entry_date"],
                 }
                 for item in active
@@ -297,7 +301,7 @@ if composition_section.open:
             hide_index=True,
             width="stretch",
             column_config={
-                "Target weight": st.column_config.NumberColumn(format="percent"),
+                "Allocation": st.column_config.NumberColumn(format="percent"),
                 "Tracked since": st.column_config.DateColumn(format="DD MMM YYYY"),
             },
         )
