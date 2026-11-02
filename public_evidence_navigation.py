@@ -1,9 +1,9 @@
 """Named, searchable navigation without loading every security's market history."""
 
 from datetime import date
-import math
 
 import streamlit as st
+from public_evidence_values import lifecycle_key, value_of_100
 
 
 OVERVIEW = "__portfolio_overview__"
@@ -18,9 +18,9 @@ def _date_label(value):
 
 def evidence_option_label(row):
     ticker = str(row["ticker"])
-    if "evidence_return" in row:
-        value = row["evidence_return"]
-        ticker += f" · return {value:+.1%}" if value is not None else " · return unavailable"
+    if "evidence_value_100" in row:
+        value = row["evidence_value_100"]
+        ticker += f" · ₹100 → ₹{value:,.2f}" if value is not None else " · ₹100 → —"
     weight = float(row.get("target_weight") or 0)
     if str(row.get("status", "active")).lower() == "removed":
         return f"{ticker} · last allocation {weight:.0%} · exited {_date_label(row.get('exit_date'))}"
@@ -29,24 +29,15 @@ def evidence_option_label(row):
 
 def rank_evidence_rows(rows, summaries):
     """Sort recorded lifecycle returns; missing evidence is never zero."""
-    def lifecycle(row):
-        return (str(row["ticker"]), str(row.get("entry_date") or "")[:10],
-                str(row.get("exit_date") or "")[:10])
-
-    evidence = {lifecycle(row): row for row in summaries}
+    evidence = {lifecycle_key(row): row for row in summaries}
     ranked = []
     for row in rows:
-        summary = evidence.get(lifecycle(row), {})
-        try:
-            value = float(summary["return"])
-            if not math.isfinite(value):
-                value = None
-        except (KeyError, TypeError, ValueError):
-            value = None
-        ranked.append({**row, "evidence_return": value})
+        value = value_of_100(evidence.get(lifecycle_key(row), {}))
+        ranked.append({**row, "evidence_value_100": value,
+                       "evidence_return": value / 100 - 1 if value is not None else None})
     return sorted(ranked, key=lambda row: (
-        row["evidence_return"] is None,
-        -row["evidence_return"] if row["evidence_return"] is not None else 0,
+        row["evidence_value_100"] is None,
+        -row["evidence_value_100"] if row["evidence_value_100"] is not None else 0,
         str(row["ticker"]),
     ))
 
@@ -66,7 +57,7 @@ def render_evidence_picker(rows, scope):
         "Open evidence", options, key=key, persist_state="session",
         format_func=lambda value: "Portfolio overview" if value == OVERVIEW
         else evidence_option_label(by_ticker[value]),
-        help="Search by ticker. Allocation and tracking dates come from the publication record; returns use recorded entry-to-endpoint INR evidence.",
+        help="Search by ticker. ₹100 → ₹… uses the same INR outcome as the evidence card, sorted highest first. Holding periods differ.",
     )
     index = options.index(chosen)
     previous = options[max(0, index - 1)]

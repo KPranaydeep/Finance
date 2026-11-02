@@ -14,6 +14,7 @@ from public_basket_postgres import DEFAULT_BASKET_ID
 from public_card_feed import build_card_feed, load_public_record
 from public_evidence_navigation import rank_evidence_rows, render_evidence_picker
 from public_evidence_history import poll_portfolio_summaries
+from public_evidence_values import remember_card_outcome, reuse_card_outcomes, value_of_100
 from public_track_record import (
     BENCHMARK_LABEL,
     WORLD_LABEL,
@@ -116,11 +117,15 @@ summary_inputs = tuple(
 summary_state, summaries, summary_failures = poll_portfolio_summaries(
     str(feed["publication_id"]), summary_inputs, refresh_bucket.isoformat(),
 )
-selection_rows = rank_evidence_rows(active if scope == "Current holdings" else exited, summaries)
-if summary_state == "ready" and summaries:
+saved_card_outcomes = st.session_state.setdefault("track_record_card_outcomes", {})
+ranking_outcomes = reuse_card_outcomes(
+    feed["securities"], summaries, saved_card_outcomes, feed["publication_id"],
+)
+selection_rows = rank_evidence_rows(active if scope == "Current holdings" else exited, ranking_outcomes)
+if ranking_outcomes:
     st.caption(
-        "Highest return first · INR · entry to latest completed session or exit · "
-        "holding periods differ; unavailable returns appear last."
+        "Largest ₹100 outcome first · same value as each card · "
+        "holding periods differ; missing values appear last."
     )
 else:
     st.caption(
@@ -128,6 +133,7 @@ else:
         if summary_state == "loading" else
         "Return ranking is unavailable; securities are listed alphabetically."
     )
+if summary_state != "ready":
     st.button("Refresh return ranking", icon=":material/refresh:")
 selected = render_evidence_picker(selection_rows, scope)
 
@@ -179,6 +185,8 @@ else:
                 ),
                 refresh_bucket=refresh_bucket.isoformat(),
             )
+        if remember_card_outcome(saved_card_outcomes, feed["publication_id"], selected, metrics):
+            st.rerun()
         share_card = whatsapp_card(selected_ticker, metrics, chart)
         st.image(share_card, width="stretch")
         st.caption(
@@ -198,7 +206,7 @@ else:
                 with st.container(horizontal=True):
                     st.metric(
                         "₹100 became",
-                        f"₹{100 * (1 + metrics['ticker_return']):,.2f}",
+                        f"₹{value_of_100(metrics):,.2f}",
                     )
                     st.metric("Return in INR", percent(metrics["ticker_return"]))
                     st.metric(

@@ -141,3 +141,10 @@ ledger writes. A new lifecycle never inherits the previous lifecycle's return.
 Public Yahoo batch calls also share a process lock: the installed client's shared
 batch dictionaries must not be reset by a concurrent page download. Individual
 batch threading is preserved; financial inputs and conversion rules are unchanged.
+
+The evidence picker displays “₹100 → ₹…” using the same value calculation as the
+card, caption and interactive metric. A card's computed result is retained in the
+session, keyed by publication, ticker, entry date and exit date, and reused in the
+picker even when the bulk history refresh is pending. A newly available card
+causes one cached rerun to update the selection and ranking; identical results do
+not loop. Missing outcomes stay missing, rather than becoming ₹100 or zero.

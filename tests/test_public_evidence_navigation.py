@@ -79,9 +79,9 @@ def test_returns_sort_numerically_highest_first_with_missing_after_losses():
     summaries = [{**row, "return": value} for row, value in zip(rows, (-.2, None, .1, 1.2, float("nan")))]
     ranked = rank_evidence_rows(rows, summaries)
     assert [row["ticker"] for row in ranked] == ["BEST", "GAIN", "LOSS", "INVALID", "MISSING"]
-    assert "return +120.0%" in evidence_option_label(ranked[0])
-    assert "return -20.0%" in evidence_option_label(ranked[2])
-    assert "return unavailable" in evidence_option_label(ranked[-1])
+    assert "₹100 → ₹220.00" in evidence_option_label(ranked[0])
+    assert "₹100 → ₹80.00" in evidence_option_label(ranked[2])
+    assert "₹100 → —" in evidence_option_label(ranked[-1])
     assert all("evidence_return" not in row for row in rows)
 
 

@@ -16,6 +16,7 @@ from matplotlib.patches import Ellipse
 import streamlit as st
 import yfinance as yf
 from public_market_data import download
+from public_evidence_values import value_of_100
 
 
 BENCHMARK_TICKER = "^NSEI"
@@ -574,7 +575,7 @@ def share_text(ticker: str, metrics: dict, chart: pd.DataFrame) -> str:
         f"First tradable session: {metrics['ticker_entry_date']}\n"
         f"Data through: {metrics['as_of']}\n"
         f"{metrics.get('endpoint_label', 'Latest LTP')}: {symbol}{metrics['endpoint_price']:,.2f} ({metrics['endpoint_as_of']})\n"
-        f"₹100 became ₹{100 * (1 + metrics['ticker_return']):.2f}\n"
+        f"₹100 became ₹{value_of_100(metrics):.2f}\n"
         f"Adjusted return: {percent(metrics['ticker_return'])}\n"
         f"{BENCHMARK_LABEL} return: {percent(metrics['benchmark_return'])}\n"
         f"{WORLD_LABEL} return: {percent(metrics['world_return'])}\n"
@@ -1136,7 +1137,7 @@ def whatsapp_card(ticker: str, metrics: dict, chart: pd.DataFrame) -> bytes:
     mono = "DejaVu Sans Mono"
 
     evidence_id = evidence_fingerprint(ticker, metrics, chart)[:16].upper()
-    ending_value = 100 * (1 + metrics["ticker_return"])
+    ending_value = value_of_100(metrics)
     nifty_value = 100 * (1 + metrics["benchmark_return"])
     world_value = 100 * (1 + metrics["world_return"])
     result_color = oxblood if metrics["ticker_return"] >= 0 else negative
