@@ -79,4 +79,4 @@ def test_holdings_summary_explains_suppressed_partial_sell():
 
     row = summary.set_index("Symbol").loc["A"]
     assert row["Action"] == "Hold"
-    assert "Partial sell suppressed" in row["Status"]
+    assert "No executable trim generated" in row["Status"]

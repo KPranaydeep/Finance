@@ -167,8 +167,27 @@ Integer positions and INR listings keep whole-unit sizing; fractional INR holdin
 can arise from corporate actions and do not establish fractional order support.
 Buys round down after the days-to-flip split. Zero-allocation exits use the held
 quantity without the previous extra one-share deduction, capped at the holding.
-The no-partial-sell policy for non-zero target allocations remains in force.
+Partial sells for non-zero target allocations follow the portfolio Sharpe check below.
 Plans, holding summaries and CSV values preserve decimals. A missing order is no
 longer described as necessarily less than one share from target. Existing saved
 plans are historical outputs; the corrected sizing applies when generating a new
 plan, without modifying publications or placing orders.
+
+### Sharpe-qualified partial sells
+
+Partial sells are eligible when the executable rounded portfolio improves the
+overall historical Sharpe ratio after estimated trading costs. The gate also
+compares with the same proposal without partial trims when that alternative has
+valid unlevered exposure, so an unnecessary trim cannot simply piggyback on other
+helpful trades. Trims are assessed together, including covariance effects.
+The calculation uses the configured annual risk-free rate and trading-day count,
+common log-return history for every owned and traded security (at least 30
+observations), and the actual proposed quantities. Paused orders are removed
+before the check; missing owned-security prices/history or undefined volatility
+withhold partial sells. Residual cash is assumed to earn zero. One-time costs use
+the configured per-side scenario assumption, amortized over 30 sessions as a
+return hurdle under the existing annualized log-return Sharpe convention.
+This is a historical eligibility comparison, not a confidence claim or permission
+to skip the existing funded-order and uncertainty review. Buys and zero-target
+exits retain their existing rules. The before/after Sharpe, cost assumption and
+decision are saved with the new plan and displayed again after restart.

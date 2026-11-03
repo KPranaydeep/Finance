@@ -26,6 +26,7 @@ from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from trade_quantities import format_quantity, plan_quantity, quantity_step
+from partial_sell_review import review_partial_sells, partial_sell_caption
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
 from election_reserve import pack_inr_history, history_from_market_cache
@@ -3102,6 +3103,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 )
 
         with st.expander("Saved rebalancing plan", expanded=True):
+            if payload.get("partial_sell_sharpe_check"):
+                st.caption(partial_sell_caption(payload["partial_sell_sharpe_check"]))
             saved_rebal_df = pd.DataFrame(rebalancing_plan)
             if not saved_rebal_df.empty:
                 saved_rebal_df = _sort_rebalance_df_for_priority(saved_rebal_df)
@@ -6676,7 +6679,8 @@ th, td {{ padding: 6px 4px; }}
 </html>"""
 
 
-def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip):
+def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip,
+                         *, transaction_cost_bps=22.0, excluded_trade_tickers=()):
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
     common_tickers = [t for t in lr_tickers if t in alloc_df.index and t in prices]
@@ -6751,19 +6755,30 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         "Executable Value": exec_val,
     })
 
-    # Turnover-control policy: keep buys and complete exits, but do not generate
-    # partial sell orders for securities that remain in the target portfolio.
-    # Their non-zero optimizer weight is still published and the next analysis
-    # can reassess them without realizing costs merely to trim the position.
-    partial_sell = (
-        rebal_df["Action"].eq("Sell")
-        & rebal_df["Optimal Weight"].gt(1e-12)
-    )
-    rebal_df = (
-        rebal_df[(rebal_df["Executable Quantity"] != 0) & ~partial_sell]
-        .sort_values(by="Expected Annual Return Lift (%)", ascending=False)
-        .reset_index(drop=True)
-    )
+    # Evaluate actual rounded quantities together, not isolated security scores.
+    blocked = {str(t).upper() for t in excluded_trade_tickers}
+    rebal_df = rebal_df.loc[
+        rebal_df["Executable Quantity"].gt(0)
+        & ~rebal_df["Yahoo Ticker"].str.upper().isin(blocked)
+    ].copy()
+    partial_sell = rebal_df["Action"].eq("Sell") & rebal_df["Optimal Weight"].gt(1e-12)
+    partial_check = {}
+    if partial_sell.any():
+        owned_values = {
+            str(t): float(row["Quantity"]) * float(prices.get(t, float("nan"))) * float(row["FX to INR"])
+            for t, row in alloc_df.iterrows() if float(row["Quantity"]) > 0
+        }
+        partial_check = review_partial_sells(
+            log_returns, owned_values, rebal_df,
+            cost_bps=float(transaction_cost_bps), risk_free_rate=RISK_FREE_RATE_ANNUAL,
+            trading_days=TRADING_DAYS_PER_YEAR,
+        )
+        if not partial_check["allowed"]:
+            rebal_df = rebal_df.loc[~partial_sell]
+    rebal_df = rebal_df.sort_values(
+        by="Expected Annual Return Lift (%)", ascending=False,
+    ).reset_index(drop=True)
+    rebal_df.attrs["partial_sell_sharpe_check"] = partial_check
     return rebal_df, missing_prices, missing_alloc
 
 
@@ -6857,7 +6872,12 @@ def build_holdings_action_summary(
             optimal_weight = float(optimal_weight_by_ticker.get(ticker, 0.0))
             current_weight = float(holding.get("Weight", 0.0))
             if optimal_weight > 1e-12 and current_weight > optimal_weight + 1e-12:
-                status = "Partial sell suppressed to reduce trading; target weight remains non-zero"
+                check = (getattr(rebal_df, "attrs", {}) or {}).get("partial_sell_sharpe_check")
+                status = (
+                    "Partial sell suppressed: " + check["reason"]
+                    if check and not check["allowed"]
+                    else "No executable trim generated at the recorded quantity precision"
+                )
             elif abs(current_weight - optimal_weight) <= 1e-12:
                 status = "Already at the optimal allocation"
             elif optimal_weight <= 1e-12 and float(holding["Quantity"]) < 1 and str(holding["Currency"]).upper() == "INR":
@@ -12109,15 +12129,18 @@ if run_btn:
             latest_prices = log_returns.columns.tolist()
             price_map = get_latest_price_map(latest_prices)
 
+        with get_db_connection() as conn:
+            active_deferrals = active_trade_deferrals(conn, CURRENT_USER)
         rebal_df, missing_prices, missing_alloc = rebalance_plan_multi(
             portfolio_df.copy(),
             optimal_weights,
             log_returns,
             price_map,
             days_to_flip,
+            transaction_cost_bps=float(security_forecast_cost_bps),
+            excluded_trade_tickers=active_deferrals["yahoo_ticker"].tolist() if not active_deferrals.empty else (),
         )
-        with get_db_connection() as conn:
-            active_deferrals = active_trade_deferrals(conn, CURRENT_USER)
+        partial_sell_sharpe_check = rebal_df.attrs.get("partial_sell_sharpe_check", {})
         rebal_df, deferred_rebal_df = split_deferred_trades(
             rebal_df,
             active_deferrals,
@@ -12324,11 +12347,12 @@ if run_btn:
             )
 
         if rebal_df.empty:
-            st.success("No trades to execute after filtering Executable Quantity = 0")
+            st.info("No executable trades after quantity rounding, pauses and the partial-sell Sharpe check")
+            if partial_sell_sharpe_check:
+                st.caption(partial_sell_caption(partial_sell_sharpe_check))
         else:
             st.caption(
-                "Buys and zero-target exits are shown. Partial sells are omitted when "
-                "the security remains in the optimal portfolio, reducing avoidable turnover and costs."
+                partial_sell_caption(partial_sell_sharpe_check)
             )
             ordered_rebal_df = _sort_rebalance_df_for_priority(rebal_df)
             st.dataframe(style_rebalance_df(ordered_rebal_df), width="stretch")
@@ -12519,6 +12543,7 @@ if run_btn:
             ),
             "current_allocation": portfolio_df.to_dict(orient="records"),
             "holdings_action_summary": holdings_action_df.to_dict(orient="records"),
+            "partial_sell_sharpe_check": partial_sell_sharpe_check,
             "rebalancing_plan": rebal_df.to_dict(orient="records"),
             "security_scenario_ranking": (
                 scenario_ranking.to_dict(orient="records")
