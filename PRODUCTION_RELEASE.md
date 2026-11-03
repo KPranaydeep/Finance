@@ -157,3 +157,18 @@ when the job finishes. Previously completed values for the same publication and
 lifecycle set remain visible during refresh. A card no longer needs to be opened
 to make its outcome available in the picker. Truly unavailable market history
 remains blank, including new entries without a completed trading session.
+
+### Fractional private rebalancing quantities
+
+The private rebalance planner preserves fractional trade quantities for an existing
+non-INR fractional position, using that position's recorded decimal precision
+(up to eight places). This is a planning inference, not a verified broker lot size.
+Integer positions and INR listings keep whole-unit sizing; fractional INR holdings
+can arise from corporate actions and do not establish fractional order support.
+Buys round down after the days-to-flip split. Zero-allocation exits use the held
+quantity without the previous extra one-share deduction, capped at the holding.
+The no-partial-sell policy for non-zero target allocations remains in force.
+Plans, holding summaries and CSV values preserve decimals. A missing order is no
+longer described as necessarily less than one share from target. Existing saved
+plans are historical outputs; the corrected sizing applies when generating a new
+plan, without modifying publications or placing orders.

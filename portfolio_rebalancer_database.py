@@ -25,6 +25,7 @@ import streamlit.components.v1 as components
 from pandas.tseries.offsets import BDay
 from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
+from trade_quantities import format_quantity, plan_quantity, quantity_step
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
 from election_reserve import pack_inr_history, history_from_market_cache
@@ -3014,7 +3015,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         rebalance_review = assess_rebalance(current_stats, optimal_stats, payload.get('rebalance_review_orders') or rebalancing_plan, base_value, review_cost_bps)
         with st.container(border=True):
             st.markdown("**Is rebalancing worthwhile?**")
-            if st.button("Update rebalance decision", key=f"rebalance_decision_{widget_scope}", help="Refresh relevant histories and compare saved whole-share orders with holding; no optimizer run."):
+            if st.button("Update rebalance decision", key=f"rebalance_decision_{widget_scope}", help="Refresh relevant histories and compare saved order quantities with holding; no optimizer run."):
                 try:
                     review_universe = pd.DataFrame(payload.get("current_allocation") or [])
                     trade_tickers = {str(t.get("Yahoo Ticker", "")) for t in rebalancing_plan}
@@ -3040,7 +3041,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 executable_review = {"decision": "Update rebalance decision to replace the saved 20-session assessment with 30 sessions"}
             st.info(executable_review.get("decision", "Hold / review — executable-portfolio uncertainty check unavailable for this saved run"))
             if executable_review.get("as_of"):
-                st.caption(f"Paired history through {executable_review['as_of']} · {executable_review.get('observations', 0)} observations · saved whole-share order quantities repriced for this comparison.")
+                st.caption(f"Paired history through {executable_review['as_of']} · {executable_review.get('observations', 0)} observations · saved order quantities repriced for this comparison.")
             review_estimate = payload.get("next_review_estimate") or {}
             if review_estimate and review_estimate.get("horizon_sessions", 20) != 30:
                 review_estimate = {}
@@ -6712,11 +6713,13 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
     action = np.where(change_weights > 0, "Buy", "Sell")
     abs_qty_change = np.abs(qty_change)
-    exec_qty = np.where(
-        action == "Sell",
-        np.maximum(0, np.floor(abs_qty_change).astype(int) - 1),
-        np.floor(abs_qty_change / days_to_flip).astype(int),
-    )
+    exec_qty = np.array([
+        plan_quantity(
+            float(alloc_df.loc[t, "Quantity"]) if a == "Sell" and w <= 1e-12 else gap,
+            alloc_df.loc[t, "Quantity"], alloc_df.loc[t, "Currency"], a, days_to_flip,
+        )
+        for t, a, w, gap in zip(common_tickers, action, aligned_optimal_weights, abs_qty_change)
+    ], dtype=float)
     exec_val = exec_qty * price_inr
 
     # Rank the trades by expected annual return lift from moving the portfolio
@@ -6826,7 +6829,7 @@ def build_holdings_action_summary(
             rows.append({
                 "Symbol": symbol,
                 "Action": str(trade["Action"]),
-                "Quantity": int(trade["Executable Quantity"]),
+                "Quantity": float(trade["Executable Quantity"]),
                 "Price INR": float(trade["Native Price"]) * float(trade["FX to INR"]),
                 "Trade Value INR": float(trade["Executable Value"]),
                 "Current Weight": float(trade["Current Weight"]),
@@ -6855,8 +6858,13 @@ def build_holdings_action_summary(
             current_weight = float(holding.get("Weight", 0.0))
             if optimal_weight > 1e-12 and current_weight > optimal_weight + 1e-12:
                 status = "Partial sell suppressed to reduce trading; target weight remains non-zero"
+            elif abs(current_weight - optimal_weight) <= 1e-12:
+                status = "Already at the optimal allocation"
+            elif optimal_weight <= 1e-12 and float(holding["Quantity"]) < 1 and str(holding["Currency"]).upper() == "INR":
+                status = "Fractional INR remainder; verify settlement with your broker"
             else:
-                status = "Optimal weight is less than one whole share away"
+                step = format_quantity(quantity_step(holding["Quantity"], holding["Currency"]))
+                status = f"No executable order generated; planning quantity step {step} unit(s)"
         elif ticker in merged_into:
             action = "Not analysed"
             status = f"Near-duplicate of {merged_into[ticker]}, which carries this exposure"
@@ -6907,7 +6915,7 @@ def style_holdings_action_summary(df):
         return [colors.get(row["Action"], "background-color: #fff3cd; color: #856404;")] * len(row)
 
     formatters = {
-        "Quantity": "{:,.0f}",
+        "Quantity": format_quantity,
         "Price INR": "₹{:,.2f}",
         "Trade Value INR": "₹{:,.0f}",
         "Current Weight": "{:.2%}",
@@ -6993,8 +7001,8 @@ def style_rebalance_df(df):
         "Optimal Weight": "{:.2%}",
         "Change": "{:.2%}",
         "Expected Annual Return Lift (%)": "{:.2f}",
-        "Quantity": "{:.2f}",
-        "Executable Quantity": "{:.0f}",
+        "Quantity": format_quantity,
+        "Executable Quantity": format_quantity,
         "Executable Value": "₹{:,.0f}",
     }
 
@@ -7005,6 +7013,10 @@ def style_rebalance_df(df):
 def render_trade_deferral_editor(plan_df, owner, key_prefix):
     """Render executable rows with a persistent 90-day pause control."""
     plan_df = _sort_rebalance_df_for_priority(plan_df)
+    if plan_df is not None and not plan_df.empty:
+        quantities = pd.to_numeric(plan_df["Executable Quantity"], errors="coerce")
+        if ((quantities - quantities.round()).abs() > 1e-8).any():
+            st.caption("Fractional quantities use the precision of existing non-INR holdings; confirm your broker's order increment.")
     with get_db_connection() as conn:
         deferrals = active_trade_deferrals(conn, owner)
     executable, deferred = split_deferred_trades(plan_df, deferrals)
@@ -7040,7 +7052,7 @@ def render_trade_deferral_editor(plan_df, owner, key_prefix):
                     ),
                     "Native Price": st.column_config.NumberColumn(format="%.2f"),
                     "FX to INR": st.column_config.NumberColumn(format="%.4f"),
-                    "Executable Quantity": st.column_config.NumberColumn(format="%.0f"),
+                    "Executable Quantity": st.column_config.NumberColumn(format="%.8f"),
                     "Executable Value": st.column_config.NumberColumn(format="₹%.0f"),
                 },
             )
