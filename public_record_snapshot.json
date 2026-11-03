@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-03T12:43:17.369185+00:00",
-  "payload_sha256": "311686191cc53d6ae24a5f512fd176c127a324c1024ed6937a19129c309f552d",
+  "generated_at": "2026-11-03T17:57:33.992776+00:00",
+  "payload_sha256": "f5d7bb358ce41f5a887bff6564988734f58bdc43ba58698834123251fddca86c",
   "record": {
     "active_forecast_realizations": [
       {
@@ -252113,6 +252113,81 @@
       },
       "previous_hash": "f5e19694d4fd8a284703e06fb5b2b9e7dc3dd2cf6db23f057b74ecd1cac52327",
       "seq": 879
+    },
+    {
+      "baseline_id": "a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-03T17:57:09.424984+00:00",
+      "event_hash": "36c4b6aead48e01599b6f28238e23f5b8eac6a6747fb66c35ffe02806e0ebb9b",
+      "event_key": "heartbeat:a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f:2026-11-03T17:56:58.913137+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-03T17:56:58.913137+00:00"
+      },
+      "previous_hash": "73441d6eb772da6c95514cbcc2be671e2dcd1ad28b65a9b1a2d622a49e97e8ec",
+      "seq": 880
+    },
+    {
+      "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-03T17:57:18.592570+00:00",
+      "event_hash": "09349065b09dba447a73c35f9b3bc07f7682b6d490b0393581eb7d91ad709f3d",
+      "event_key": "heartbeat:3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0:2026-11-03T17:56:58.913137+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-03T17:56:58.913137+00:00"
+      },
+      "previous_hash": "36c4b6aead48e01599b6f28238e23f5b8eac6a6747fb66c35ffe02806e0ebb9b",
+      "seq": 881
+    },
+    {
+      "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-03T17:57:24.402147+00:00",
+      "event_hash": "e4ad9d39719529302ec017f91ef1f7be01c15a6037ddf87292251fb52fda8805",
+      "event_key": "heartbeat:9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942:2026-11-03T17:56:58.913137+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-03T17:56:58.913137+00:00"
+      },
+      "previous_hash": "09349065b09dba447a73c35f9b3bc07f7682b6d490b0393581eb7d91ad709f3d",
+      "seq": 882
+    },
+    {
+      "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-03T17:57:28.240667+00:00",
+      "event_hash": "a39d5cafa20a877524c78f36d752a1204351470821685bd4a7b24607e64e65da",
+      "event_key": "heartbeat:7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9:2026-11-03T17:56:58.913137+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-03T17:56:58.913137+00:00"
+      },
+      "previous_hash": "e4ad9d39719529302ec017f91ef1f7be01c15a6037ddf87292251fb52fda8805",
+      "seq": 883
+    },
+    {
+      "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-03T17:57:32.224958+00:00",
+      "event_hash": "c809b1da10a02042134c6d8808fb5dfc8bf79c3a5b2b360d8c2c632d284e152c",
+      "event_key": "heartbeat:9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60:2026-11-03T17:56:58.913137+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-03T17:56:58.913137+00:00"
+      },
+      "previous_hash": "a39d5cafa20a877524c78f36d752a1204351470821685bd4a7b24607e64e65da",
+      "seq": 884
     }
   ],
   "schema": "public-portfolio-record-snapshot",
