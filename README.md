@@ -42,6 +42,16 @@ performance calculations are separate operations with separate audit records.
 - `pages/02_Public_Basket_Publisher.py` — authenticated publication preview and
   append-only publication action; it does not optimize.
 
+In the private saved analysis, **Update rebalance plan** sizes a new execution
+plan from current master holdings, current prices/FX and the saved optimal
+weights. It does not run candidate screening, X/Y discovery or the optimizer.
+Only owned securities and saved target securities need history refreshes. The
+same action refreshes 30-session research scores and the executable rebalance
+assessment. Pauses, fractional quantities and the partial-sell Sharpe check still
+apply. Missing quotes or concurrent holdings/target edits retain the previous
+plan. Saved weights and publication candidates are unchanged; rerun optimization
+when you want to reconsider the allocation itself.
+
 ## Scheduled jobs
 
 - `.github/workflows/public_portfolio_daily.yml` updates model NAV, creates or

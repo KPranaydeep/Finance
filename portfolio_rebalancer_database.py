@@ -27,6 +27,7 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from trade_quantities import format_quantity, plan_quantity, quantity_step
 from partial_sell_review import review_partial_sells, partial_sell_caption
+from fixed_weight_rebalance import prepare_fixed_universe, rebuild_saved_plan, holdings_fingerprint, target_fingerprint
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
 from election_reserve import pack_inr_history, history_from_market_cache
@@ -2708,6 +2709,68 @@ def refresh_portfolio_evidence(payload, *, download=False):
     return history
 
 
+def update_saved_rebalance_plan(payload, owner):
+    """Reprice and resize the saved target against current DB holdings only."""
+    started = time.perf_counter()
+    _app_run_log("rebalance_plan_refresh_started", optimizer_run=False)
+    current, invalid = build_current_allocation_from_db(owner)
+    raw_holdings = load_master_holdings(owner)
+    positive = pd.to_numeric(raw_holdings["Quantity"], errors="coerce").gt(0)
+    if current.empty or raw_holdings.loc[positive, "Symbol"].isin(invalid).any():
+        raise ValueError("Some owned holdings lack valid quantity, price or listing metadata; previous plan retained")
+    original_holdings = holdings_fingerprint(raw_holdings)
+    original_targets = target_fingerprint(payload)
+    review, targets = prepare_fixed_universe(payload, current)
+    review["Optimal Weight"] = review["Yahoo Ticker"].map(targets).fillna(0.)
+    review["Action"], review["Executable Quantity"] = "Buy", 1.
+    cost = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
+    start = str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10]
+    ranking, returns, _ = refresh_security_scenarios(review, start, 30, cost, include_history=True)
+    prices = get_latest_price_map(review["Yahoo Ticker"].tolist())
+    fx = get_fx_to_inr_map(review["Currency"].tolist())
+    with get_db_connection() as conn:
+        deferrals = active_trade_deferrals(conn, owner)
+    paused = deferrals["yahoo_ticker"].tolist() if not deferrals.empty else ()
+    candidate, allocation, plan = rebuild_saved_plan(
+        payload, current, returns, prices, fx, plan_builder=rebalance_plan_multi,
+        stats_builder=portfolio_stats, paused=paused,
+    )
+    # Research scores use one common run; position weights come from the new
+    # marked holdings rather than the stale snapshot passed to the forecaster.
+    if not ranking.empty:
+        marked_weights = allocation.set_index("Yahoo Ticker")["Weight"]
+        ranking["Current Weight (%)"] = ranking["Yahoo Ticker"].map(marked_weights).fillna(0.) * 100.
+        ranking["Optimized Weight (%)"] = ranking["Yahoo Ticker"].map(targets).fillna(0.) * 100.
+    expiry = dict(zip(deferrals["yahoo_ticker"], deferrals["expires_at"])) if not deferrals.empty else {}
+    candidate["holdings_action_summary"] = build_holdings_action_summary(
+        allocation, plan, targets, prices, {}, deferred_trade_expiry=expiry,
+    ).to_dict(orient="records")
+    owned = allocation.loc[allocation["Quantity"].gt(0), "Yahoo Ticker"]
+    candidate.update(
+        security_scenario_ranking=ranking.to_dict(orient="records"),
+        security_exit_ranking=zero_target_sell_ranking(ranking, owned, targets).to_dict(orient="records"),
+        security_scenario_ranking_error=None, security_exit_ranking_error=None,
+        scenario_updated_at=candidate["rebalance_plan_context"]["updated_at"],
+    )
+    candidate.setdefault("settings", {}).setdefault("security_scenario_forecast", {})["horizon_sessions"] = 30
+    if ranking.empty:
+        candidate["security_scenario_ranking_error"] = "No usable scenario histories; plan quantities refreshed independently."
+        candidate["security_exit_ranking_error"] = candidate["security_scenario_ranking_error"]
+    # Keep the quantities and target that this job actually read; do not overwrite
+    # a newer edit or an optimizer result completed in another app session.
+    if holdings_fingerprint(load_master_holdings(owner)) != original_holdings:
+        raise ValueError("Holdings changed during refresh; update the plan again")
+    latest = load_latest_analysis(owner)
+    if latest and (target_fingerprint(latest) != original_targets or latest.get("run_id") != payload.get("run_id")):
+        raise ValueError("A newer optimization was saved during refresh; update its plan instead")
+    candidate["rebalance_plan_context"]["holdings_fingerprint"] = original_holdings
+    saved = save_latest_analysis(candidate, owner)
+    _app_run_log("rebalance_plan_refresh_finished", status="completed", optimizer_run=False,
+                 elapsed_seconds=round(time.perf_counter()-started, 3), holdings_analyzed=int(len(owned)),
+                 trades=len(plan), target_count=len(targets))
+    return saved
+
+
 def render_saved_analysis(placeholder, owner, *, instance_key="page"):
     """Display the latest saved analysis immediately below the live banner."""
     placeholder.empty()
@@ -2740,6 +2803,25 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        context = payload.get("rebalance_plan_context") or {}
+        try:
+            current_signature = holdings_fingerprint(load_master_holdings(owner))
+            prior_signature = context.get("holdings_fingerprint") or holdings_fingerprint(payload.get("current_allocation") or [])
+            if current_signature != prior_signature:
+                st.warning("Holdings have changed since this plan. Update rebalance plan to resize trades using the saved optimal weights.")
+        except (TypeError, ValueError):
+            st.caption("Some holding quantities need review before the plan can be resized.")
+        if st.button("Update rebalance plan", key=f"update_saved_plan_{widget_scope}",
+                     help="Use current holdings, prices and FX with the saved optimal weights. Refreshes trades, checks and 30-session scenarios without optimizer search."):
+            try:
+                with st.spinner("Updating the plan at saved weights…"):
+                    update_saved_rebalance_plan(payload, owner)
+                st.rerun()
+            except Exception as exc:
+                _app_run_log("rebalance_plan_refresh_failed", status="failed", optimizer_run=False, error_type=type(exc).__name__)
+                st.warning(f"Plan update could not finish; previous saved plan retained: {exc}")
+        if context.get("updated_at"):
+            st.caption(f"Rebalance plan updated: {context['updated_at']} · fixed weights from {context.get('weights_saved_at', saved_at)} · optimizer not rerun.")
         evidence_refresh = st.button("Refresh portfolio evidence", key=f"portfolio_evidence_{widget_scope}",
                                      help="Update prices, FX, current/target metrics, reserve, debt and rebalance checks at fixed saved weights. No optimizer search.")
         cache_attempt = f"portfolio_evidence_cache_v3_{owner}_{saved_at}_{pd.Timestamp.now(tz='Asia/Kolkata').date()}"
