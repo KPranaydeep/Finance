@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-03T20:42:41.435150+00:00",
-  "payload_sha256": "67d1864e0528fe58101ba09273bfeb736a2c969956cf87d74f0f6d7d6f9ed8cc",
+  "generated_at": "2026-11-04T09:13:46.156941+00:00",
+  "payload_sha256": "f338c98464b737c729c55c39e97aca9e2b58a7d1c4b0b89e1cc2fffe1314e0f4",
   "record": {
     "active_forecast_realizations": [
       {
@@ -252454,6 +252454,5519 @@
       },
       "previous_hash": "044f314c465596a5a6d59f020669002210f5126e141b478f6ab469b0fd3819cf",
       "seq": 894
+    },
+    {
+      "baseline_id": "a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:20.114554+00:00",
+      "event_hash": "6c992422edc49500f4c1b8b998e2943607c041ccf5bb8f613eea8c4f7467bbcf",
+      "event_key": "assessment:a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f:a84b71ce2a6f6b7c8cc36b0a67d9ef78a8f060e2c1d34164d48ef6ddfd7c5f3b",
+      "kind": "ASSESSMENT",
+      "payload": {
+        "as_of": "2026-11-03",
+        "baseline_id": "a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f",
+        "calendar_coverage": {
+          "available_forecast_sessions": 37,
+          "complete": false,
+          "required_forecast_sessions": 40,
+          "verified_through": "2026-12-31"
+        },
+        "checked_at": "2026-11-04T09:13:10.902240+00:00",
+        "comparisons": [
+          {
+            "cash_raised": 0.0,
+            "fees": 0.0,
+            "option": "No trade",
+            "orders": [],
+            "tax": 0.0
+          },
+          {
+            "cash_raised": 3619654.88,
+            "fees": 10145.84,
+            "option": "Full exit",
+            "orders": [
+              {
+                "shares": 916,
+                "ticker": "BAFNAPH.NS"
+              },
+              {
+                "shares": 18,
+                "ticker": "BTI"
+              },
+              {
+                "shares": 5,
+                "ticker": "BTSG"
+              },
+              {
+                "shares": 4,
+                "ticker": "CBOE"
+              },
+              {
+                "shares": 13,
+                "ticker": "CVS"
+              },
+              {
+                "shares": 5,
+                "ticker": "DG"
+              },
+              {
+                "shares": 4,
+                "ticker": "GH"
+              },
+              {
+                "shares": 61,
+                "ticker": "GLENMARK.NS"
+              },
+              {
+                "shares": 955,
+                "ticker": "GOLDBETA.NS"
+              },
+              {
+                "shares": 96,
+                "ticker": "GVT&D.NS"
+              },
+              {
+                "shares": 21,
+                "ticker": "HRTG"
+              },
+              {
+                "shares": 7,
+                "ticker": "JNJ"
+              },
+              {
+                "shares": 4,
+                "ticker": "KO"
+              },
+              {
+                "shares": 15,
+                "ticker": "MNST"
+              },
+              {
+                "shares": 3317,
+                "ticker": "ONELIFECAP.NS"
+              },
+              {
+                "shares": 5,
+                "ticker": "PM"
+              },
+              {
+                "shares": 4,
+                "ticker": "RVMD"
+              },
+              {
+                "shares": 2,
+                "ticker": "SENEA"
+              },
+              {
+                "shares": 328,
+                "ticker": "SIGMAADV.NS"
+              },
+              {
+                "shares": 243,
+                "ticker": "STLN"
+              },
+              {
+                "shares": 1,
+                "ticker": "STX"
+              },
+              {
+                "shares": 21,
+                "ticker": "TEN"
+              },
+              {
+                "shares": 24,
+                "ticker": "TIGO"
+              },
+              {
+                "shares": 57,
+                "ticker": "VENUSREM.NS"
+              },
+              {
+                "shares": 7,
+                "ticker": "VLO"
+              }
+            ],
+            "tax": 4616.07
+          },
+          {
+            "option": "Recover initial capital",
+            "status": "INSUFFICIENT_NET_PROCEEDS"
+          },
+          {
+            "option": "Withdraw net profit",
+            "status": "NO_POSITIVE_PROFIT"
+          }
+        ],
+        "decision": {
+          "date_basis": "PROVISIONAL_OBSERVATION_WINDOW",
+          "drawdown": -0.012264672815586963,
+          "minimum_net_return": 0.0125,
+          "next_review": "2026-11-03",
+          "note": "No trigger is not a safety guarantee. Review signals do not submit trades.",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "reasons": [
+            "SECURITY_TARGET_REVIEW"
+          ],
+          "rebalance": {
+            "drift": 0.02,
+            "status": "NO_MATERIAL_DRIFT"
+          },
+          "review_acknowledged": false,
+          "review_required": true,
+          "status": "SECURITY_TARGET_REVIEW",
+          "target_crossed_securities": [
+            "BTSG",
+            "CVS",
+            "VENUSREM.NS"
+          ]
+        },
+        "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
+        "forecast": {
+          "next_review": null,
+          "status": "AWAITING_MINIMUM_OBSERVATION_SESSIONS"
+        },
+        "forecast_observation_pending": true,
+        "history_coverage": {
+          "end": "2026-11-03",
+          "method": "complete-adjacent-session-pairs-no-fill",
+          "missing_sessions": [
+            "2024-02-19",
+            "2024-05-27",
+            "2024-06-19",
+            "2024-07-04",
+            "2024-08-27",
+            "2024-09-02",
+            "2024-10-30",
+            "2024-11-05",
+            "2024-11-28",
+            "2025-01-01",
+            "2025-01-09",
+            "2025-01-20",
+            "2025-02-17",
+            "2025-04-21",
+            "2025-05-26",
+            "2025-06-19",
+            "2025-07-04",
+            "2025-09-01",
+            "2025-11-27",
+            "2026-01-01",
+            "2026-01-19",
+            "2026-02-16",
+            "2026-05-25",
+            "2026-06-19",
+            "2026-07-03",
+            "2026-09-07"
+          ],
+          "start": "2024-01-26",
+          "usable_daily_returns": 629
+        },
+        "metrics": {
+          "date": "2026-11-03",
+          "days_held": 1,
+          "estimated_tax": 4616.07,
+          "exit_costs": 10145.84,
+          "gross_value": 3634416.79,
+          "net_proceeds": 3619654.88,
+          "net_profit": -44945.12,
+          "net_total_return": -0.012264672815586963,
+          "rows": [
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 11.71,
+                "gst": 9.46,
+                "ipft": 0.4,
+                "sebi": 0.4,
+                "slippage": 394.07,
+                "stamp": 0.0,
+                "stt": 395.0,
+                "total": 851.04
+              },
+              "gross": 394063.22,
+              "net": 393212.18,
+              "net_profit": -9770.1,
+              "outlay": 402982.28,
+              "price": 430.20001220703125,
+              "shares": 916,
+              "tax": 0.0,
+              "ticker": "BAFNAPH.NS",
+              "xirr": -0.9998713324603169
+            },
+            {
+              "fees": {
+                "brokerage": 155.76,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 65.57,
+                "gst": 33.12,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 103.84,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 386.5,
+                "us_regulatory": 28.21
+              },
+              "gross": 103837.99,
+              "net": 103451.49,
+              "net_profit": -2310.17,
+              "outlay": 105761.66,
+              "price": 5768.777177010197,
+              "shares": 18,
+              "tax": 0.0,
+              "ticker": "BTI",
+              "xirr": -0.9996844273461079
+            },
+            {
+              "fees": {
+                "brokerage": 49.62,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 20.89,
+                "gst": 10.55,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 33.08,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 123.13,
+                "us_regulatory": 8.99
+              },
+              "gross": 33078.11,
+              "net": 32298.18,
+              "net_profit": 1215.21,
+              "outlay": 31082.97,
+              "price": 6615.621786894277,
+              "shares": 5,
+              "tax": 656.8,
+              "ticker": "BTSG",
+              "xirr": 1200251.3760530096
+            },
+            {
+              "fees": {
+                "brokerage": 195.68,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 82.37,
+                "gst": 41.6,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 130.45,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 485.53,
+                "us_regulatory": 35.43
+              },
+              "gross": 130448.25,
+              "net": 129894.43,
+              "net_profit": -793.0,
+              "outlay": 130687.43,
+              "price": 32612.061571380123,
+              "shares": 4,
+              "tax": 68.29,
+              "ticker": "CBOE",
+              "xirr": -0.8915575051893707
+            },
+            {
+              "fees": {
+                "brokerage": 168.85,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 71.08,
+                "gst": 35.9,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 112.57,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 418.98,
+                "us_regulatory": 30.58
+              },
+              "gross": 112565.05,
+              "net": 111138.81,
+              "net_profit": 1425.12,
+              "outlay": 109713.69,
+              "price": 8658.849419770762,
+              "shares": 13,
+              "tax": 1007.26,
+              "ticker": "CVS",
+              "xirr": 110.12095121913775
+            },
+            {
+              "fees": {
+                "brokerage": 92.73,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 39.03,
+                "gst": 19.72,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 61.82,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 230.09,
+                "us_regulatory": 16.79
+              },
+              "gross": 61817.8,
+              "net": 61587.71,
+              "net_profit": -1948.69,
+              "outlay": 63536.4,
+              "price": 12363.559982347302,
+              "shares": 5,
+              "tax": 0.0,
+              "ticker": "DG",
+              "xirr": -0.9999884633405366
+            },
+            {
+              "fees": {
+                "brokerage": 99.47,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 41.87,
+                "gst": 21.15,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 66.31,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 246.81,
+                "us_regulatory": 18.01
+              },
+              "gross": 66307.79,
+              "net": 66032.19,
+              "net_profit": -415.54,
+              "outlay": 66447.73,
+              "price": 16576.94549560547,
+              "shares": 4,
+              "tax": 28.79,
+              "ticker": "GH",
+              "xirr": -0.8987076816243136
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 4.37,
+                "gst": 8.05,
+                "ipft": 0.15,
+                "sebi": 0.15,
+                "slippage": 146.89,
+                "stamp": 0.0,
+                "stt": 147.0,
+                "total": 346.61
+              },
+              "gross": 146888.0,
+              "net": 146011.03,
+              "net_profit": 1332.81,
+              "outlay": 144678.22,
+              "price": 2408.0,
+              "shares": 61,
+              "tax": 530.36,
+              "ticker": "GLENMARK.NS",
+              "xirr": 27.419639510894342
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 3.26,
+                "gst": 7.83,
+                "ipft": 0.11,
+                "sebi": 0.11,
+                "slippage": 109.54,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 160.85
+              },
+              "gross": 109538.5,
+              "net": 109377.65,
+              "net_profit": -553.57,
+              "outlay": 109931.22,
+              "price": 114.69999694824219,
+              "shares": 955,
+              "tax": 0.0,
+              "ticker": "GOLDBETA.NS",
+              "xirr": -0.8415995220496866
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 11.55,
+                "gst": 9.42,
+                "ipft": 0.39,
+                "sebi": 0.39,
+                "slippage": 388.8,
+                "stamp": 0.0,
+                "stt": 389.0,
+                "total": 839.56
+              },
+              "gross": 388800.0,
+              "net": 387960.44,
+              "net_profit": -11835.05,
+              "outlay": 399795.49,
+              "price": 4050.0,
+              "shares": 96,
+              "tax": 0.0,
+              "ticker": "GVT&D.NS",
+              "xirr": -0.9999827580180896
+            },
+            {
+              "fees": {
+                "brokerage": 106.56,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 44.85,
+                "gst": 22.66,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 71.04,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 264.41,
+                "us_regulatory": 19.3
+              },
+              "gross": 71035.53,
+              "net": 70771.12,
+              "net_profit": -901.57,
+              "outlay": 71672.69,
+              "price": 3382.6440484081395,
+              "shares": 21,
+              "tax": 0.0,
+              "ticker": "HRTG",
+              "xirr": -0.9901516634393979
+            },
+            {
+              "fees": {
+                "brokerage": 264.74,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 111.44,
+                "gst": 56.29,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 176.5,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 656.91,
+                "us_regulatory": 47.94
+              },
+              "gross": 176491.44,
+              "net": 175834.53,
+              "net_profit": -3494.0,
+              "outlay": 179328.53,
+              "price": 25213.061743749306,
+              "shares": 7,
+              "tax": 0.0,
+              "ticker": "JNJ",
+              "xirr": -0.9992396852812634
+            },
+            {
+              "fees": {
+                "brokerage": 53.88,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 22.68,
+                "gst": 11.46,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 35.92,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 133.71,
+                "us_regulatory": 9.76
+              },
+              "gross": 35919.88,
+              "net": 35786.17,
+              "net_profit": -343.32,
+              "outlay": 36129.49,
+              "price": 8979.96847755555,
+              "shares": 4,
+              "tax": 0.0,
+              "ticker": "KO",
+              "xirr": -0.9693459981238971
+            },
+            {
+              "fees": {
+                "brokerage": 100.56,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 42.33,
+                "gst": 21.38,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 67.04,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 249.52,
+                "us_regulatory": 18.21
+              },
+              "gross": 67037.17,
+              "net": 66787.65,
+              "net_profit": -2007.03,
+              "outlay": 68794.68,
+              "price": 4469.144534523133,
+              "shares": 15,
+              "tax": 0.0,
+              "ticker": "MNST",
+              "xirr": -0.999979742897851
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 5.48,
+                "gst": 8.26,
+                "ipft": 0.19,
+                "sebi": 0.19,
+                "slippage": 184.33,
+                "stamp": 0.0,
+                "stt": 185.0,
+                "total": 423.45
+              },
+              "gross": 184325.69,
+              "net": 183577.96,
+              "net_profit": 387.61,
+              "outlay": 183190.35,
+              "price": 55.56999969482422,
+              "shares": 3317,
+              "tax": 324.28,
+              "ticker": "ONELIFECAP.NS",
+              "xirr": 1.1629496263491785
+            },
+            {
+              "fees": {
+                "brokerage": 147.8,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 62.21,
+                "gst": 31.43,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 98.53,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 366.75,
+                "us_regulatory": 26.77
+              },
+              "gross": 98528.63,
+              "net": 98161.88,
+              "net_profit": -942.47,
+              "outlay": 99104.35,
+              "price": 19705.725435515866,
+              "shares": 5,
+              "tax": 0.0,
+              "ticker": "PM",
+              "xirr": -0.9694293452018407
+            },
+            {
+              "fees": {
+                "brokerage": 110.4,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 46.47,
+                "gst": 23.48,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 73.6,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 273.94,
+                "us_regulatory": 19.99
+              },
+              "gross": 73594.06,
+              "net": 72688.54,
+              "net_profit": 871.19,
+              "outlay": 71817.35,
+              "price": 18398.514587354846,
+              "shares": 4,
+              "tax": 631.58,
+              "ticker": "RVMD",
+              "xirr": 80.53573616153705
+            },
+            {
+              "fees": {
+                "brokerage": 43.71,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 18.4,
+                "gst": 9.3,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 29.14,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 108.48,
+                "us_regulatory": 7.92
+              },
+              "gross": 29133.75,
+              "net": 29025.27,
+              "net_profit": -1765.05,
+              "outlay": 30790.32,
+              "price": 14566.87233187817,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "SENEA",
+              "xirr": -0.9999999995613137
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 8.72,
+                "gst": 8.88,
+                "ipft": 0.3,
+                "sebi": 0.3,
+                "slippage": 293.5,
+                "stamp": 0.0,
+                "stt": 294.0,
+                "total": 645.7
+              },
+              "gross": 293494.4,
+              "net": 292483.7,
+              "net_profit": 82.04,
+              "outlay": 292401.66,
+              "price": 894.7999877929688,
+              "shares": 328,
+              "tax": 365.0,
+              "ticker": "SIGMAADV.NS",
+              "xirr": 0.10781518003834348
+            },
+            {
+              "fees": {
+                "brokerage": 218.91,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 92.15,
+                "gst": 46.54,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 145.94,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 543.18,
+                "us_regulatory": 39.64
+              },
+              "gross": 145935.86,
+              "net": 145392.68,
+              "net_profit": -1084.8,
+              "outlay": 146477.48,
+              "price": 600.5590684090275,
+              "shares": 243,
+              "tax": 0.0,
+              "ticker": "STLN",
+              "xirr": -0.9336770270109291
+            },
+            {
+              "fees": {
+                "brokerage": 86.16,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 36.27,
+                "gst": 18.32,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 57.44,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 213.8,
+                "us_regulatory": 15.61
+              },
+              "gross": 57439.6,
+              "net": 57225.8,
+              "net_profit": -1648.24,
+              "outlay": 58874.04,
+              "price": 57439.59023181349,
+              "shares": 1,
+              "tax": 0.0,
+              "ticker": "STX",
+              "xirr": -0.9999684621233651
+            },
+            {
+              "fees": {
+                "brokerage": 146.81,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 61.8,
+                "gst": 31.22,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 97.88,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 364.3,
+                "us_regulatory": 26.59
+              },
+              "gross": 97870.29,
+              "net": 97505.99,
+              "net_profit": -7664.65,
+              "outlay": 105170.64,
+              "price": 4660.4898916056845,
+              "shares": 21,
+              "tax": 0.0,
+              "ticker": "TEN",
+              "xirr": -0.9999999999989886
+            },
+            {
+              "fees": {
+                "brokerage": 264.32,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 111.27,
+                "gst": 56.2,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 176.22,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 655.87,
+                "us_regulatory": 47.86
+              },
+              "gross": 176211.99,
+              "net": 175556.12,
+              "net_profit": -3705.52,
+              "outlay": 179261.64,
+              "price": 7342.166175866034,
+              "shares": 24,
+              "tax": 0.0,
+              "ticker": "TIGO",
+              "xirr": -0.9995114127626045
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.23,
+                "gst": 7.64,
+                "ipft": 0.08,
+                "sebi": 0.08,
+                "slippage": 74.97,
+                "stamp": 0.0,
+                "stt": 75.0,
+                "total": 200.0
+              },
+              "gross": 74966.4,
+              "net": 74172.41,
+              "net_profit": 1879.44,
+              "outlay": 72292.97,
+              "price": 1315.199951171875,
+              "shares": 57,
+              "tax": 593.99,
+              "ticker": "VENUSREM.NS",
+              "xirr": 11705.066568280963
+            },
+            {
+              "fees": {
+                "brokerage": 385.57,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 162.3,
+                "gst": 81.98,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 257.05,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 956.72,
+                "us_regulatory": 69.82
+              },
+              "gross": 257042.12,
+              "net": 255675.68,
+              "net_profit": -955.77,
+              "outlay": 256631.45,
+              "price": 36720.30182967894,
+              "shares": 7,
+              "tax": 409.72,
+              "ticker": "VLO",
+              "xirr": -0.7438273301756384
+            }
+          ],
+          "xirr": -0.9889384945388737
+        },
+        "mmi": {
+          "fetched_at": "2026-11-04T09:13:19.224775+00:00",
+          "older_reading": false,
+          "score": 68.69336215774364,
+          "source_at": "2026-11-04T09:12:00.295000+00:00",
+          "zone": "Greed"
+        },
+        "model_only": true,
+        "observation_ready_at": "2026-11-06T21:30:00+00:00",
+        "observation_rows": [
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "BAFNAPH.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "BTI"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "BTSG"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "CBOE"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "CVS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "DG"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "GH"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "GLENMARK.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "GOLDBETA.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "GVT&D.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "HRTG"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "JNJ"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "KO"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "MNST"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "ONELIFECAP.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "PM"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "RVMD"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "SENEA"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "SIGMAADV.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "STLN"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "STX"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "TEN"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "TIGO"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T10:30:00+00:00",
+            "ticker": "VENUSREM.NS"
+          },
+          {
+            "observation_session": "2026-11-06",
+            "ready_at": "2026-11-06T21:30:00+00:00",
+            "ticker": "VLO"
+          }
+        ],
+        "operational_review_window": {
+          "data_ready_at": "2026-11-04T03:00:00+05:30",
+          "date_label": "04 NOV",
+          "end_at": "2026-11-04T09:00:00+05:30",
+          "execution_windows": {
+            "NSE": "2026-11-04T09:30:00+05:30",
+            "NYSE": "2026-11-04T20:15:00+05:30"
+          },
+          "market_context": "Post NYSE | Pre NSE",
+          "model_review_date": "2026-11-03",
+          "selection_method": "equal-market-calendar-score-v6",
+          "start_at": "2026-11-04T08:00:00+05:30",
+          "time_label": "08:00-09:00 IST",
+          "timezone": "Asia/Kolkata"
+        },
+        "policy": {
+          "assessment_wait_after_close_minutes": 30,
+          "block_length": 5,
+          "calendar_verified_through": "2026-12-31",
+          "capital_inr": null,
+          "concentration_limit": 0.5,
+          "crossing_probability": 0.2,
+          "drawdown_limit": 0.15,
+          "drift_limit": 0.05,
+          "entry_max_quote_delay_minutes": 330,
+          "entry_quote_interval": "1m",
+          "entry_wait_after_open_minutes": 15,
+          "execution_wait_after_open_minutes": 15,
+          "fx_quote_max_age_minutes": 360,
+          "history_years": 3,
+          "instrument_kinds": {
+            "ABBV": "foreign_us_listing",
+            "ACUTAAS.NS": "equity",
+            "AETHER.NS": "equity",
+            "ASX": "foreign_us_listing",
+            "AXTI": "foreign_us_listing",
+            "BAFNAPH.NS": "equity",
+            "BLISSGVS.NS": "equity",
+            "BSE.NS": "equity",
+            "BTI": "foreign_us_listing",
+            "BTSG": "foreign_us_listing",
+            "CBOE": "foreign_us_listing",
+            "CEMPRO.NS": "equity",
+            "CHENNPETRO.NS": "equity",
+            "CLS": "foreign_us_listing",
+            "CVS": "foreign_us_listing",
+            "CWCO": "foreign_us_listing",
+            "CWT": "foreign_us_listing",
+            "DG": "foreign_us_listing",
+            "EPOL": "foreign_us_listing",
+            "ESLT": "foreign_us_listing",
+            "ETERNAL.NS": "equity",
+            "EWS": "foreign_us_listing",
+            "EWY": "foreign_us_listing",
+            "FTK": "foreign_us_listing",
+            "GH": "foreign_us_listing",
+            "GLENMARK.NS": "equity",
+            "GOLDBEES.NS": "listed_non_equity_etf",
+            "GOLDBETA.NS": "listed_non_equity_etf",
+            "GREK": "foreign_us_listing",
+            "GVT&D.NS": "equity",
+            "HCI": "foreign_us_listing",
+            "HRTG": "foreign_us_listing",
+            "INDOTECH.NS": "equity",
+            "INDSWFTLAB.NS": "equity",
+            "IRMD": "foreign_us_listing",
+            "JNJ": "foreign_us_listing",
+            "KGC": "foreign_us_listing",
+            "KNOP": "foreign_us_listing",
+            "KO": "foreign_us_listing",
+            "LAURUSLABS.NS": "equity",
+            "LUMAXTECH.NS": "equity",
+            "MACPOWER.NS": "equity",
+            "MAFANG.NS": "listed_non_equity_etf",
+            "MASPTOP50.NS": "listed_non_equity_etf",
+            "MNST": "foreign_us_listing",
+            "MONQ50.NS": "listed_non_equity_etf",
+            "MTARTECH.NS": "equity",
+            "MU": "foreign_us_listing",
+            "NAVINFLUOR.NS": "equity",
+            "NEULANDLAB.NS": "equity",
+            "NVDA": "foreign_us_listing",
+            "ONELIFECAP.NS": "equity",
+            "PARR": "foreign_us_listing",
+            "PBR": "foreign_us_listing",
+            "PGIL.NS": "equity",
+            "PM": "foreign_us_listing",
+            "RADICO.NS": "equity",
+            "RVMD": "foreign_us_listing",
+            "SAKAR.NS": "equity",
+            "SBC.NS": "equity",
+            "SENEA": "foreign_us_listing",
+            "SIGMAADV.NS": "equity",
+            "SKYW": "foreign_us_listing",
+            "STLN": "foreign_us_listing",
+            "STX": "foreign_us_listing",
+            "TEN": "foreign_us_listing",
+            "THANGAMAYL.NS": "equity",
+            "TIGO": "foreign_us_listing",
+            "TMB.NS": "equity",
+            "TRMD": "foreign_us_listing",
+            "TSEM": "foreign_us_listing",
+            "UVE": "foreign_us_listing",
+            "VENUSREM.NS": "equity",
+            "VEON": "foreign_us_listing",
+            "VLO": "foreign_us_listing",
+            "VNM": "foreign_us_listing",
+            "WELCORP.NS": "equity"
+          },
+          "max_review_sessions": 40,
+          "min_annual_improvement": 0.06,
+          "minimum_forecast_review_sessions": 4,
+          "minimum_net_return": 0.0125,
+          "owner_review_day_end": "22:00",
+          "owner_review_day_start": "08:00",
+          "owner_review_duration_minutes": 60,
+          "policy_approved": true,
+          "policy_version": "owner-review-policy-v9",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "review_timezone": "Asia/Kolkata",
+          "review_window_step_minutes": 15,
+          "seed": 19473,
+          "simulation_paths": 3000,
+          "slab_rate": 0.3,
+          "slippage_bps": 10,
+          "surcharge_rate": 0,
+          "target_xirr": 1,
+          "tariff_max_age_days": 90,
+          "tariff_verified_on": "2026-09-09",
+          "tax_profile": "resident_individual_regular_delivery",
+          "validation_horizon": 40,
+          "validation_max_brier": 0.2,
+          "validation_min_folds": 20,
+          "validation_train": 252
+        },
+        "price_hash": "1a8d3b9355c237a8082c350fda4f82206dd085364d2e9a1069fe9d9772bdb0a0",
+        "validation": {
+          "passed": false,
+          "reason": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "version": "public-review-v2"
+      },
+      "previous_hash": "be9145afe25b55a6d0a11524161babf7156222be0d06b008ec6cc3ed0b3dfe92",
+      "seq": 895
+    },
+    {
+      "baseline_id": "a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:20.326994+00:00",
+      "event_hash": "7a89c313e8c665b5e8f75e52bf4c6683b8c6fed0f7da7113db9039c065bd353d",
+      "event_key": "heartbeat:a8e8704fad54ad10c888376d6e89a6365895b5803ee127d34df149beea625b4f:2026-11-04T09:13:10.902240+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-03",
+        "at": "2026-11-04T09:13:10.902240+00:00"
+      },
+      "previous_hash": "6c992422edc49500f4c1b8b998e2943607c041ccf5bb8f613eea8c4f7467bbcf",
+      "seq": 896
+    },
+    {
+      "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:28.313194+00:00",
+      "event_hash": "5d382ac63bf952bc48ae8b862930e983e7b605033e65bf29a690e9e34b7e805d",
+      "event_key": "assessment:3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0:c7aca130b9bfdad0e04b65ef5887bb064f996de064156b03fb14119649a3e34d",
+      "kind": "ASSESSMENT",
+      "payload": {
+        "as_of": "2026-11-02",
+        "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+        "calendar_coverage": {
+          "available_forecast_sessions": 37,
+          "complete": false,
+          "required_forecast_sessions": 40,
+          "verified_through": "2026-12-31"
+        },
+        "checked_at": "2026-11-04T09:13:10.902240+00:00",
+        "comparisons": [
+          {
+            "cash_raised": 0.0,
+            "fees": 0.0,
+            "option": "No trade",
+            "orders": [],
+            "tax": 0.0
+          },
+          {
+            "cash_raised": 4956776.45,
+            "fees": 12711.83,
+            "option": "Full exit",
+            "orders": [
+              {
+                "shares": 10,
+                "ticker": "ABBV"
+              },
+              {
+                "shares": 414,
+                "ticker": "BAFNAPH.NS"
+              },
+              {
+                "shares": 66,
+                "ticker": "BSE.NS"
+              },
+              {
+                "shares": 41,
+                "ticker": "CEMPRO.NS"
+              },
+              {
+                "shares": 2,
+                "ticker": "CLS"
+              },
+              {
+                "shares": 158,
+                "ticker": "ETERNAL.NS"
+              },
+              {
+                "shares": 85,
+                "ticker": "GLENMARK.NS"
+              },
+              {
+                "shares": 1656,
+                "ticker": "GOLDBETA.NS"
+              },
+              {
+                "shares": 110,
+                "ticker": "GVT&D.NS"
+              },
+              {
+                "shares": 12,
+                "ticker": "HCI"
+              },
+              {
+                "shares": 15,
+                "ticker": "INDOTECH.NS"
+              },
+              {
+                "shares": 66,
+                "ticker": "KGC"
+              },
+              {
+                "shares": 23,
+                "ticker": "MACPOWER.NS"
+              },
+              {
+                "shares": 2144,
+                "ticker": "MAFANG.NS"
+              },
+              {
+                "shares": 514,
+                "ticker": "MASPTOP50.NS"
+              },
+              {
+                "shares": 9,
+                "ticker": "NEULANDLAB.NS"
+              },
+              {
+                "shares": 6,
+                "ticker": "NVDA"
+              },
+              {
+                "shares": 13,
+                "ticker": "PARR"
+              },
+              {
+                "shares": 127,
+                "ticker": "PBR"
+              },
+              {
+                "shares": 78,
+                "ticker": "PGIL.NS"
+              },
+              {
+                "shares": 11,
+                "ticker": "RADICO.NS"
+              },
+              {
+                "shares": 6172,
+                "ticker": "SBC.NS"
+              },
+              {
+                "shares": 249,
+                "ticker": "SIGMAADV.NS"
+              },
+              {
+                "shares": 5,
+                "ticker": "SKYW"
+              },
+              {
+                "shares": 29,
+                "ticker": "THANGAMAYL.NS"
+              },
+              {
+                "shares": 13,
+                "ticker": "TRMD"
+              },
+              {
+                "shares": 37,
+                "ticker": "UVE"
+              },
+              {
+                "shares": 114,
+                "ticker": "VENUSREM.NS"
+              },
+              {
+                "shares": 21,
+                "ticker": "VEON"
+              },
+              {
+                "shares": 18,
+                "ticker": "WELCORP.NS"
+              }
+            ],
+            "tax": 47585.17
+          },
+          {
+            "option": "Recover initial capital",
+            "status": "INSUFFICIENT_NET_PROCEEDS"
+          },
+          {
+            "option": "Withdraw net profit",
+            "status": "NO_POSITIVE_PROFIT"
+          }
+        ],
+        "decision": {
+          "date_basis": "CONTINUOUS_MONITORING",
+          "drawdown": -0.06407608425397504,
+          "minimum_net_return": 0.0125,
+          "next_review": "2026-11-02",
+          "note": "No trigger is not a safety guarantee. Review signals do not submit trades.",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "reasons": [
+            "SECURITY_TARGET_REVIEW"
+          ],
+          "rebalance": {
+            "drift": 0.0935149813284077,
+            "status": "BENEFIT_NOT_ESTABLISHED"
+          },
+          "review_acknowledged": false,
+          "review_required": true,
+          "status": "SECURITY_TARGET_REVIEW",
+          "target_crossed_securities": [
+            "BAFNAPH.NS",
+            "BSE.NS",
+            "HCI",
+            "SBC.NS",
+            "UVE"
+          ]
+        },
+        "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
+        "forecast": {
+          "next_review": null,
+          "status": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "forecast_observation_pending": false,
+        "history_coverage": {
+          "end": "2026-11-02",
+          "method": "complete-adjacent-session-pairs-no-fill",
+          "missing_sessions": [
+            "2023-11-23",
+            "2024-01-01",
+            "2024-01-15",
+            "2024-01-18",
+            "2024-02-19",
+            "2024-05-27",
+            "2024-06-19",
+            "2024-07-04",
+            "2024-08-27",
+            "2024-09-02",
+            "2024-10-30",
+            "2024-11-05",
+            "2024-11-28",
+            "2025-01-01",
+            "2025-01-09",
+            "2025-01-20",
+            "2025-02-17",
+            "2025-04-21",
+            "2025-05-26",
+            "2025-06-19",
+            "2025-07-04",
+            "2025-09-01",
+            "2025-10-24",
+            "2025-11-27",
+            "2025-12-19",
+            "2026-01-01",
+            "2026-01-19",
+            "2026-02-16",
+            "2026-03-06",
+            "2026-05-25",
+            "2026-06-19",
+            "2026-07-03",
+            "2026-09-07"
+          ],
+          "start": "2023-11-03",
+          "usable_daily_returns": 670
+        },
+        "metrics": {
+          "date": "2026-11-02",
+          "days_held": 33,
+          "estimated_tax": 47585.17,
+          "exit_costs": 12711.83,
+          "gross_value": 5017073.45,
+          "net_proceeds": 4956776.45,
+          "net_profit": -182423.55,
+          "net_total_return": -0.035496487780199204,
+          "rows": [
+            {
+              "fees": {
+                "brokerage": 411.19,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 191.94,
+                "gst": 87.42,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 274.13,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 1039.14,
+                "us_regulatory": 74.46
+              },
+              "gross": 274123.6,
+              "net": 266605.48,
+              "net_profit": 13487.75,
+              "outlay": 254250.26,
+              "price": 27412.359499859624,
+              "shares": 10,
+              "tax": 6478.98,
+              "ticker": "ABBV",
+              "xirr": 0.7736902791957473
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 5.4,
+                "gst": 8.25,
+                "ipft": 0.19,
+                "sebi": 0.19,
+                "slippage": 181.73,
+                "stamp": 0.0,
+                "stt": 182.0,
+                "total": 417.76
+              },
+              "gross": 181725.31,
+              "net": 175490.68,
+              "net_profit": 21370.87,
+              "outlay": 154119.81,
+              "price": 438.95001220703125,
+              "shares": 414,
+              "tax": 5816.87,
+              "ticker": "BAFNAPH.NS",
+              "xirr": 3.2050339248207864
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 6.85,
+                "gst": 8.52,
+                "ipft": 0.24,
+                "sebi": 0.24,
+                "slippage": 230.34,
+                "stamp": 0.0,
+                "stt": 231.0,
+                "total": 517.19
+              },
+              "gross": 230340.0,
+              "net": 224532.04,
+              "net_profit": 19156.49,
+              "outlay": 205375.55,
+              "price": 3490.0,
+              "shares": 66,
+              "tax": 5290.77,
+              "ticker": "BSE.NS",
+              "xirr": 1.6814687510172641
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.58,
+                "gst": 7.51,
+                "ipft": 0.06,
+                "sebi": 0.06,
+                "slippage": 52.88,
+                "stamp": 0.0,
+                "stt": 53.0,
+                "total": 155.09
+              },
+              "gross": 52873.6,
+              "net": 52159.92,
+              "net_profit": 1837.58,
+              "outlay": 50322.34,
+              "price": 1289.5999755859375,
+              "shares": 41,
+              "tax": 558.59,
+              "ticker": "CEMPRO.NS",
+              "xirr": 0.486897664078587
+            },
+            {
+              "fees": {
+                "brokerage": 70.96,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 33.12,
+                "gst": 15.09,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 47.31,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 179.33,
+                "us_regulatory": 12.85
+              },
+              "gross": 47304.45,
+              "net": 47125.12,
+              "net_profit": -23839.96,
+              "outlay": 70965.08,
+              "price": 23652.223911627196,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "CLS",
+              "xirr": -0.9891978498405043
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.62,
+                "gst": 7.52,
+                "ipft": 0.06,
+                "sebi": 0.06,
+                "slippage": 54.36,
+                "stamp": 0.0,
+                "stt": 55.0,
+                "total": 158.62
+              },
+              "gross": 54352.0,
+              "net": 53491.73,
+              "net_profit": 2377.86,
+              "outlay": 51113.87,
+              "price": 344.0,
+              "shares": 158,
+              "tax": 701.65,
+              "ticker": "ETERNAL.NS",
+              "xirr": 0.6535739017469147
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 6.02,
+                "gst": 8.36,
+                "ipft": 0.21,
+                "sebi": 0.21,
+                "slippage": 202.47,
+                "stamp": 0.0,
+                "stt": 203.0,
+                "total": 460.27
+              },
+              "gross": 202470.0,
+              "net": 202009.73,
+              "net_profit": -1301.76,
+              "outlay": 203311.49,
+              "price": 2382.0,
+              "shares": 85,
+              "tax": 0.0,
+              "ticker": "GLENMARK.NS",
+              "xirr": -0.06858140034240162
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 5.65,
+                "gst": 8.29,
+                "ipft": 0.2,
+                "sebi": 0.2,
+                "slippage": 190.2,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 244.54
+              },
+              "gross": 190191.6,
+              "net": 189947.06,
+              "net_profit": -15498.6,
+              "outlay": 205445.66,
+              "price": 114.8499984741211,
+              "shares": 1656,
+              "tax": 0.0,
+              "ticker": "GOLDBETA.NS",
+              "xirr": -0.5800214759072556
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 13.65,
+                "gst": 9.83,
+                "ipft": 0.46,
+                "sebi": 0.46,
+                "slippage": 459.31,
+                "stamp": 0.0,
+                "stt": 460.0,
+                "total": 983.71
+              },
+              "gross": 459305.0,
+              "net": 458321.29,
+              "net_profit": -4041.12,
+              "outlay": 462362.41,
+              "price": 4175.5,
+              "shares": 110,
+              "tax": 0.0,
+              "ticker": "GVT&D.NS",
+              "xirr": -0.09253143631500645
+            },
+            {
+              "fees": {
+                "brokerage": 344.11,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 160.62,
+                "gst": 73.16,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 229.41,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 869.61,
+                "us_regulatory": 62.31
+              },
+              "gross": 229400.56,
+              "net": 220049.56,
+              "net_profit": 17120.2,
+              "outlay": 202929.36,
+              "price": 19116.713209008798,
+              "shares": 12,
+              "tax": 8481.39,
+              "ticker": "HCI",
+              "xirr": 1.4494222731450308
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.18,
+                "gst": 7.43,
+                "ipft": 0.04,
+                "sebi": 0.04,
+                "slippage": 39.6,
+                "stamp": 0.0,
+                "stt": 40.0,
+                "total": 128.29
+              },
+              "gross": 39600.0,
+              "net": 39471.71,
+              "net_profit": -8959.77,
+              "outlay": 48431.48,
+              "price": 2640.0,
+              "shares": 15,
+              "tax": 0.0,
+              "ticker": "INDOTECH.NS",
+              "xirr": -0.8959227734165112
+            },
+            {
+              "fees": {
+                "brokerage": 193.18,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 90.17,
+                "gst": 41.07,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 128.79,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 488.19,
+                "us_regulatory": 34.98
+              },
+              "gross": 128782.29,
+              "net": 128294.1,
+              "net_profit": -25858.93,
+              "outlay": 154153.03,
+              "price": 1951.2467242176062,
+              "shares": 66,
+              "tax": 0.0,
+              "ticker": "KGC",
+              "xirr": -0.868789752513077
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.44,
+                "gst": 7.48,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 48.27,
+                "stamp": 0.0,
+                "stt": 49.0,
+                "total": 146.29
+              },
+              "gross": 48263.2,
+              "net": 48116.91,
+              "net_profit": -1893.74,
+              "outlay": 50010.65,
+              "price": 2098.39990234375,
+              "shares": 23,
+              "tax": 0.0,
+              "ticker": "MACPOWER.NS",
+              "xirr": -0.3475138854613877
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 13.94,
+                "gst": 9.88,
+                "ipft": 0.47,
+                "sebi": 0.47,
+                "slippage": 469.18,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 533.94
+              },
+              "gross": 469171.53,
+              "net": 468637.59,
+              "net_profit": -45247.65,
+              "outlay": 513885.24,
+              "price": 218.8300018310547,
+              "shares": 2144,
+              "tax": 0.0,
+              "ticker": "MAFANG.NS",
+              "xirr": -0.6392097784067359
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.47,
+                "gst": 7.49,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 49.25,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 98.31
+              },
+              "gross": 49246.34,
+              "net": 49148.03,
+              "net_profit": -2156.54,
+              "outlay": 51304.57,
+              "price": 95.80999755859375,
+              "shares": 514,
+              "tax": 0.0,
+              "ticker": "MASPTOP50.NS",
+              "xirr": -0.37810034343061544
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 5.24,
+                "gst": 8.21,
+                "ipft": 0.18,
+                "sebi": 0.18,
+                "slippage": 176.18,
+                "stamp": 0.0,
+                "stt": 177.0,
+                "total": 406.99
+              },
+              "gross": 176175.0,
+              "net": 175768.01,
+              "net_profit": -17547.65,
+              "outlay": 193315.66,
+              "price": 19575.0,
+              "shares": 9,
+              "tax": 0.0,
+              "ticker": "NEULANDLAB.NS",
+              "xirr": -0.6509431918758518
+            },
+            {
+              "fees": {
+                "brokerage": 172.59,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 80.56,
+                "gst": 36.7,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 115.06,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 436.17,
+                "us_regulatory": 31.26
+              },
+              "gross": 115059.03,
+              "net": 114622.86,
+              "net_profit": -18413.28,
+              "outlay": 133036.14,
+              "price": 19176.50382164307,
+              "shares": 6,
+              "tax": 0.0,
+              "ticker": "NVDA",
+              "xirr": -0.8075151555448572
+            },
+            {
+              "fees": {
+                "brokerage": 133.55,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 62.34,
+                "gst": 28.4,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 89.03,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 337.51,
+                "us_regulatory": 24.19
+              },
+              "gross": 89028.49,
+              "net": 88690.98,
+              "net_profit": -12113.53,
+              "outlay": 100804.51,
+              "price": 6848.345059466548,
+              "shares": 13,
+              "tax": 0.0,
+              "ticker": "PARR",
+              "xirr": -0.7573252052598909
+            },
+            {
+              "fees": {
+                "brokerage": 382.57,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 178.57,
+                "gst": 81.34,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 255.05,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 966.8,
+                "us_regulatory": 69.27
+              },
+              "gross": 255040.1,
+              "net": 253834.33,
+              "net_profit": -1335.1,
+              "outlay": 255169.43,
+              "price": 2008.1897596885683,
+              "shares": 127,
+              "tax": 238.97,
+              "ticker": "PBR",
+              "xirr": -0.05637207673719948
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.91,
+                "gst": 7.76,
+                "ipft": 0.1,
+                "sebi": 0.1,
+                "slippage": 97.83,
+                "stamp": 0.0,
+                "stt": 98.0,
+                "total": 246.7
+              },
+              "gross": 97827.6,
+              "net": 97580.9,
+              "net_profit": -4143.25,
+              "outlay": 101724.15,
+              "price": 1254.199951171875,
+              "shares": 78,
+              "tax": 0.0,
+              "ticker": "PGIL.NS",
+              "xirr": -0.36867389565059244
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.34,
+                "gst": 7.46,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 45.1,
+                "stamp": 0.0,
+                "stt": 46.0,
+                "total": 140.0
+              },
+              "gross": 45100.0,
+              "net": 44960.0,
+              "net_profit": -4295.75,
+              "outlay": 49255.75,
+              "price": 4100.0,
+              "shares": 11,
+              "tax": 0.0,
+              "ticker": "RADICO.NS",
+              "xirr": -0.6355303399216421
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 11.98,
+                "gst": 9.51,
+                "ipft": 0.41,
+                "sebi": 0.41,
+                "slippage": 403.28,
+                "stamp": 0.0,
+                "stt": 404.0,
+                "total": 869.59
+              },
+              "gross": 403278.46,
+              "net": 393178.52,
+              "net_profit": 33467.93,
+              "outlay": 359710.59,
+              "price": 65.33999633789062,
+              "shares": 6172,
+              "tax": 9230.35,
+              "ticker": "SBC.NS",
+              "xirr": 1.6751231223093686
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 6.67,
+                "gst": 8.49,
+                "ipft": 0.23,
+                "sebi": 0.23,
+                "slippage": 224.37,
+                "stamp": 0.0,
+                "stt": 225.0,
+                "total": 504.99
+              },
+              "gross": 224361.45,
+              "net": 223856.46,
+              "net_profit": -32125.71,
+              "outlay": 255982.17,
+              "price": 901.0499877929688,
+              "shares": 249,
+              "tax": 0.0,
+              "ticker": "SIGMAADV.NS",
+              "xirr": -0.7731026585892325
+            },
+            {
+              "fees": {
+                "brokerage": 58.14,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 27.14,
+                "gst": 12.37,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 38.76,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 146.94,
+                "us_regulatory": 10.53
+              },
+              "gross": 38759.21,
+              "net": 38612.27,
+              "net_profit": -9057.54,
+              "outlay": 47669.81,
+              "price": 7751.840329255676,
+              "shares": 5,
+              "tax": 0.0,
+              "ticker": "SKYW",
+              "xirr": -0.9027802506456675
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 3.9,
+                "gst": 7.96,
+                "ipft": 0.14,
+                "sebi": 0.14,
+                "slippage": 130.99,
+                "stamp": 0.0,
+                "stt": 131.0,
+                "total": 314.13
+              },
+              "gross": 130987.2,
+              "net": 130673.07,
+              "net_profit": -19376.3,
+              "outlay": 150049.37,
+              "price": 4516.7998046875,
+              "shares": 29,
+              "tax": 0.0,
+              "ticker": "THANGAMAYL.NS",
+              "xirr": -0.7833135166545099
+            },
+            {
+              "fees": {
+                "brokerage": 73.7,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 34.4,
+                "gst": 15.67,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 49.13,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 186.25,
+                "us_regulatory": 13.35
+              },
+              "gross": 49128.53,
+              "net": 48650.89,
+              "net_profit": 284.88,
+              "outlay": 48366.01,
+              "price": 3779.1170224288944,
+              "shares": 13,
+              "tax": 291.39,
+              "ticker": "TRMD",
+              "xirr": 0.06711294227844605
+            },
+            {
+              "fees": {
+                "brokerage": 258.26,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 120.55,
+                "gst": 54.91,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 172.17,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 652.66,
+                "us_regulatory": 46.77
+              },
+              "gross": 172168.11,
+              "net": 164611.1,
+              "net_profit": 14042.42,
+              "outlay": 150568.68,
+              "price": 4653.191974298097,
+              "shares": 37,
+              "tax": 6904.35,
+              "ticker": "UVE",
+              "xirr": 1.6811193796306219
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 4.41,
+                "gst": 8.05,
+                "ipft": 0.15,
+                "sebi": 0.15,
+                "slippage": 148.26,
+                "stamp": 0.0,
+                "stt": 149.0,
+                "total": 350.02
+              },
+              "gross": 148257.0,
+              "net": 147906.98,
+              "net_profit": -57320.19,
+              "outlay": 205227.17,
+              "price": 1300.5,
+              "shares": 114,
+              "tax": 0.0,
+              "ticker": "VENUSREM.NS",
+              "xirr": -0.9732901758223964
+            },
+            {
+              "fees": {
+                "brokerage": 237.55,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 110.88,
+                "gst": 50.51,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 158.37,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 600.34,
+                "us_regulatory": 43.02
+              },
+              "gross": 158364.18,
+              "net": 154171.98,
+              "net_profit": 6799.4,
+              "outlay": 147372.58,
+              "price": 7541.151116114808,
+              "shares": 21,
+              "tax": 3591.86,
+              "ticker": "VEON",
+              "xirr": 0.6468862168586873
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.24,
+                "gst": 7.45,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 41.67,
+                "stamp": 0.0,
+                "stt": 42.0,
+                "total": 132.46
+              },
+              "gross": 41670.0,
+              "net": 41537.54,
+              "net_profit": -7842.56,
+              "outlay": 49380.1,
+              "price": 2315.0,
+              "shares": 18,
+              "tax": 0.0,
+              "ticker": "WELCORP.NS",
+              "xirr": -0.8523529792586729
+            }
+          ],
+          "xirr": -0.3295125334220296
+        },
+        "mmi": {
+          "fetched_at": "2026-11-04T09:13:27.601833+00:00",
+          "older_reading": false,
+          "score": 68.69336215774364,
+          "source_at": "2026-11-04T09:12:00.295000+00:00",
+          "zone": "Greed"
+        },
+        "model_only": true,
+        "observation_ready_at": null,
+        "observation_rows": [
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "ABBV"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "BAFNAPH.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "BSE.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "CEMPRO.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "CLS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "ETERNAL.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "GLENMARK.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "GOLDBETA.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "GVT&D.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "HCI"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "INDOTECH.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "KGC"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "MACPOWER.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "MAFANG.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "MASPTOP50.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "NEULANDLAB.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "NVDA"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "PARR"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "PBR"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "PGIL.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "RADICO.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "SBC.NS"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "SIGMAADV.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "SKYW"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "THANGAMAYL.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "TRMD"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "UVE"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "VENUSREM.NS"
+          },
+          {
+            "observation_session": "2026-10-06",
+            "ready_at": "2026-10-06T20:30:00+00:00",
+            "ticker": "VEON"
+          },
+          {
+            "observation_session": "2026-10-07",
+            "ready_at": "2026-10-07T10:30:00+00:00",
+            "ticker": "WELCORP.NS"
+          }
+        ],
+        "operational_review_window": {
+          "data_ready_at": "2026-11-03T03:00:00+05:30",
+          "date_label": "03 NOV",
+          "end_at": "2026-11-03T09:00:00+05:30",
+          "execution_windows": {
+            "NSE": "2026-11-03T09:30:00+05:30",
+            "NYSE": "2026-11-03T20:15:00+05:30"
+          },
+          "market_context": "Post NYSE | Pre NSE",
+          "model_review_date": "2026-11-02",
+          "selection_method": "equal-market-calendar-score-v6",
+          "start_at": "2026-11-03T08:00:00+05:30",
+          "time_label": "08:00-09:00 IST",
+          "timezone": "Asia/Kolkata"
+        },
+        "policy": {
+          "assessment_wait_after_close_minutes": 30,
+          "block_length": 5,
+          "calendar_verified_through": "2026-12-31",
+          "capital_inr": null,
+          "concentration_limit": 0.5,
+          "crossing_probability": 0.2,
+          "drawdown_limit": 0.15,
+          "drift_limit": 0.05,
+          "entry_max_quote_delay_minutes": 330,
+          "entry_quote_interval": "1m",
+          "entry_wait_after_open_minutes": 15,
+          "execution_wait_after_open_minutes": 15,
+          "fx_quote_max_age_minutes": 360,
+          "history_years": 3,
+          "instrument_kinds": {
+            "ABBV": "foreign_us_listing",
+            "ACUTAAS.NS": "equity",
+            "AETHER.NS": "equity",
+            "ASX": "foreign_us_listing",
+            "AXTI": "foreign_us_listing",
+            "BAFNAPH.NS": "equity",
+            "BLISSGVS.NS": "equity",
+            "BSE.NS": "equity",
+            "BTI": "foreign_us_listing",
+            "BTSG": "foreign_us_listing",
+            "CBOE": "foreign_us_listing",
+            "CEMPRO.NS": "equity",
+            "CHENNPETRO.NS": "equity",
+            "CLS": "foreign_us_listing",
+            "CVS": "foreign_us_listing",
+            "CWCO": "foreign_us_listing",
+            "CWT": "foreign_us_listing",
+            "DG": "foreign_us_listing",
+            "EPOL": "foreign_us_listing",
+            "ESLT": "foreign_us_listing",
+            "ETERNAL.NS": "equity",
+            "EWS": "foreign_us_listing",
+            "EWY": "foreign_us_listing",
+            "FTK": "foreign_us_listing",
+            "GH": "foreign_us_listing",
+            "GLENMARK.NS": "equity",
+            "GOLDBEES.NS": "listed_non_equity_etf",
+            "GOLDBETA.NS": "listed_non_equity_etf",
+            "GREK": "foreign_us_listing",
+            "GVT&D.NS": "equity",
+            "HCI": "foreign_us_listing",
+            "HRTG": "foreign_us_listing",
+            "INDOTECH.NS": "equity",
+            "INDSWFTLAB.NS": "equity",
+            "IRMD": "foreign_us_listing",
+            "JNJ": "foreign_us_listing",
+            "KGC": "foreign_us_listing",
+            "KNOP": "foreign_us_listing",
+            "KO": "foreign_us_listing",
+            "LAURUSLABS.NS": "equity",
+            "LUMAXTECH.NS": "equity",
+            "MACPOWER.NS": "equity",
+            "MAFANG.NS": "listed_non_equity_etf",
+            "MASPTOP50.NS": "listed_non_equity_etf",
+            "MNST": "foreign_us_listing",
+            "MONQ50.NS": "listed_non_equity_etf",
+            "MTARTECH.NS": "equity",
+            "MU": "foreign_us_listing",
+            "NAVINFLUOR.NS": "equity",
+            "NEULANDLAB.NS": "equity",
+            "NVDA": "foreign_us_listing",
+            "ONELIFECAP.NS": "equity",
+            "PARR": "foreign_us_listing",
+            "PBR": "foreign_us_listing",
+            "PGIL.NS": "equity",
+            "PM": "foreign_us_listing",
+            "RADICO.NS": "equity",
+            "RVMD": "foreign_us_listing",
+            "SAKAR.NS": "equity",
+            "SBC.NS": "equity",
+            "SENEA": "foreign_us_listing",
+            "SIGMAADV.NS": "equity",
+            "SKYW": "foreign_us_listing",
+            "STLN": "foreign_us_listing",
+            "STX": "foreign_us_listing",
+            "TEN": "foreign_us_listing",
+            "THANGAMAYL.NS": "equity",
+            "TIGO": "foreign_us_listing",
+            "TMB.NS": "equity",
+            "TRMD": "foreign_us_listing",
+            "TSEM": "foreign_us_listing",
+            "UVE": "foreign_us_listing",
+            "VENUSREM.NS": "equity",
+            "VEON": "foreign_us_listing",
+            "VLO": "foreign_us_listing",
+            "VNM": "foreign_us_listing",
+            "WELCORP.NS": "equity"
+          },
+          "max_review_sessions": 40,
+          "min_annual_improvement": 0.06,
+          "minimum_forecast_review_sessions": 4,
+          "minimum_net_return": 0.0125,
+          "owner_review_day_end": "22:00",
+          "owner_review_day_start": "08:00",
+          "owner_review_duration_minutes": 60,
+          "policy_approved": true,
+          "policy_version": "owner-review-policy-v9",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "review_timezone": "Asia/Kolkata",
+          "review_window_step_minutes": 15,
+          "seed": 19473,
+          "simulation_paths": 3000,
+          "slab_rate": 0.3,
+          "slippage_bps": 10,
+          "surcharge_rate": 0,
+          "target_xirr": 1,
+          "tariff_max_age_days": 90,
+          "tariff_verified_on": "2026-09-09",
+          "tax_profile": "resident_individual_regular_delivery",
+          "validation_horizon": 40,
+          "validation_max_brier": 0.2,
+          "validation_min_folds": 20,
+          "validation_train": 252
+        },
+        "price_hash": "34d2db81057c90d0c0540d86879e26b32a7b67da8086614f5e9a057ef1aa9a08",
+        "validation": {
+          "passed": false,
+          "reason": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "version": "public-review-v2"
+      },
+      "previous_hash": "7a89c313e8c665b5e8f75e52bf4c6683b8c6fed0f7da7113db9039c065bd353d",
+      "seq": 897
+    },
+    {
+      "baseline_id": "3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:28.522881+00:00",
+      "event_hash": "0fe2bef48c6bb34c3333b515925fe706dd4557ed9c159135a033d113b53cde27",
+      "event_key": "heartbeat:3e6cd29b14a488e367cb0bfc14890333902b9f450dd959f0d36041e0ed8d46b0:2026-11-04T09:13:10.902240+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-04T09:13:10.902240+00:00"
+      },
+      "previous_hash": "5d382ac63bf952bc48ae8b862930e983e7b605033e65bf29a690e9e34b7e805d",
+      "seq": 898
+    },
+    {
+      "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:33.884816+00:00",
+      "event_hash": "b0b9de40ef9d49f112ce706cf7c25fdd9e90f64e2c11b8bacb075bd595bf17a7",
+      "event_key": "assessment:9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942:03f6ab67710e20b70432175a065f774ac88df1b3b59d011a684607d47c10970e",
+      "kind": "ASSESSMENT",
+      "payload": {
+        "as_of": "2026-11-02",
+        "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+        "calendar_coverage": {
+          "available_forecast_sessions": 37,
+          "complete": false,
+          "required_forecast_sessions": 40,
+          "verified_through": "2026-12-31"
+        },
+        "checked_at": "2026-11-04T09:13:10.902240+00:00",
+        "comparisons": [
+          {
+            "cash_raised": 0.0,
+            "fees": 0.0,
+            "option": "No trade",
+            "orders": [],
+            "tax": 0.0
+          },
+          {
+            "cash_raised": 865872.94,
+            "fees": 2598.66,
+            "option": "Full exit",
+            "orders": [
+              {
+                "shares": 2,
+                "ticker": "ACUTAAS.NS"
+              },
+              {
+                "shares": 3,
+                "ticker": "AXTI"
+              },
+              {
+                "shares": 238,
+                "ticker": "BAFNAPH.NS"
+              },
+              {
+                "shares": 24,
+                "ticker": "BLISSGVS.NS"
+              },
+              {
+                "shares": 7,
+                "ticker": "CWT"
+              },
+              {
+                "shares": 10,
+                "ticker": "EPOL"
+              },
+              {
+                "shares": 6,
+                "ticker": "FTK"
+              },
+              {
+                "shares": 769,
+                "ticker": "GOLDBETA.NS"
+              },
+              {
+                "shares": 11,
+                "ticker": "GREK"
+              },
+              {
+                "shares": 2,
+                "ticker": "IRMD"
+              },
+              {
+                "shares": 34,
+                "ticker": "KNOP"
+              },
+              {
+                "shares": 22,
+                "ticker": "LAURUSLABS.NS"
+              },
+              {
+                "shares": 226,
+                "ticker": "MAFANG.NS"
+              },
+              {
+                "shares": 379,
+                "ticker": "MONQ50.NS"
+              },
+              {
+                "shares": 1,
+                "ticker": "MTARTECH.NS"
+              },
+              {
+                "shares": 2,
+                "ticker": "NAVINFLUOR.NS"
+              },
+              {
+                "shares": 22,
+                "ticker": "SAKAR.NS"
+              },
+              {
+                "shares": 721,
+                "ticker": "SBC.NS"
+              },
+              {
+                "shares": 114,
+                "ticker": "SIGMAADV.NS"
+              },
+              {
+                "shares": 9,
+                "ticker": "WELCORP.NS"
+              }
+            ],
+            "tax": 9998.38
+          },
+          {
+            "option": "Recover initial capital",
+            "status": "INSUFFICIENT_NET_PROCEEDS"
+          },
+          {
+            "option": "Withdraw net profit",
+            "status": "NO_POSITIVE_PROFIT"
+          }
+        ],
+        "decision": {
+          "date_basis": "CONTINUOUS_MONITORING",
+          "drawdown": -0.06926539386836661,
+          "minimum_net_return": 0.0125,
+          "next_review": "2026-11-02",
+          "note": "No trigger is not a safety guarantee. Review signals do not submit trades.",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "reasons": [
+            "SECURITY_TARGET_REVIEW"
+          ],
+          "rebalance": {
+            "drift": 0.11,
+            "status": "BENEFIT_NOT_ESTABLISHED"
+          },
+          "review_acknowledged": false,
+          "review_required": true,
+          "status": "SECURITY_TARGET_REVIEW",
+          "target_crossed_securities": [
+            "ACUTAAS.NS",
+            "BAFNAPH.NS",
+            "LAURUSLABS.NS",
+            "SBC.NS"
+          ]
+        },
+        "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
+        "forecast": {
+          "next_review": null,
+          "status": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "forecast_observation_pending": false,
+        "history_coverage": {
+          "end": "2026-11-02",
+          "method": "complete-adjacent-session-pairs-no-fill",
+          "missing_sessions": [
+            "2023-11-23",
+            "2024-01-01",
+            "2024-01-15",
+            "2024-01-18",
+            "2024-02-19",
+            "2024-05-27",
+            "2024-06-19",
+            "2024-07-04",
+            "2024-08-27",
+            "2024-09-02",
+            "2024-10-30",
+            "2024-11-05",
+            "2024-11-28",
+            "2025-01-01",
+            "2025-01-09",
+            "2025-01-20",
+            "2025-02-17",
+            "2025-04-21",
+            "2025-05-26",
+            "2025-06-19",
+            "2025-07-04",
+            "2025-09-01",
+            "2025-10-24",
+            "2025-11-27",
+            "2025-12-19",
+            "2026-01-01",
+            "2026-01-19",
+            "2026-02-16",
+            "2026-03-06",
+            "2026-05-25",
+            "2026-06-19",
+            "2026-07-03",
+            "2026-09-07"
+          ],
+          "start": "2023-11-03",
+          "usable_daily_returns": 670
+        },
+        "metrics": {
+          "date": "2026-11-02",
+          "days_held": 40,
+          "estimated_tax": 9998.38,
+          "exit_costs": 2598.66,
+          "gross_value": 878469.98,
+          "net_proceeds": 865872.94,
+          "net_profit": -27627.06,
+          "net_total_return": -0.03092004476776722,
+          "rows": [
+            {
+              "fees": {
+                "brokerage": 7.79,
+                "dp": 20.0,
+                "exchange": 0.24,
+                "gst": 5.05,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 7.79,
+                "stamp": 0.0,
+                "stt": 8.0,
+                "total": 48.89
+              },
+              "gross": 7785.21,
+              "net": 7472.53,
+              "net_profit": 933.07,
+              "outlay": 6539.46,
+              "price": 3892.60009765625,
+              "shares": 2,
+              "tax": 263.79,
+              "ticker": "ACUTAAS.NS",
+              "xirr": 2.3773240991425375
+            },
+            {
+              "fees": {
+                "brokerage": 20.59,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 17.81,
+                "gst": 4.38,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 13.73,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 60.24,
+                "us_regulatory": 3.73
+              },
+              "gross": 13723.27,
+              "net": 13663.03,
+              "net_profit": -8097.36,
+              "outlay": 21760.39,
+              "price": 4574.421013568877,
+              "shares": 3,
+              "tax": 0.0,
+              "ticker": "AXTI",
+              "xirr": -0.9856893892796296
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 3.11,
+                "gst": 7.8,
+                "ipft": 0.11,
+                "sebi": 0.11,
+                "slippage": 104.48,
+                "stamp": 0.0,
+                "stt": 105.0,
+                "total": 260.61
+              },
+              "gross": 104470.11,
+              "net": 99137.81,
+              "net_profit": 18851.07,
+              "outlay": 80286.74,
+              "price": 438.95001220703125,
+              "shares": 238,
+              "tax": 5071.69,
+              "ticker": "BAFNAPH.NS",
+              "xirr": 5.851866764977292
+            },
+            {
+              "fees": {
+                "brokerage": 14.82,
+                "dp": 20.0,
+                "exchange": 0.44,
+                "gst": 6.36,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 14.82,
+                "stamp": 0.0,
+                "stt": 15.0,
+                "total": 71.48
+              },
+              "gross": 14812.81,
+              "net": 14741.33,
+              "net_profit": -2501.4,
+              "outlay": 17242.73,
+              "price": 617.2000122070312,
+              "shares": 24,
+              "tax": 0.0,
+              "ticker": "BLISSGVS.NS",
+              "xirr": -0.7607416538475087
+            },
+            {
+              "fees": {
+                "brokerage": 49.31,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 42.66,
+                "gst": 10.49,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 32.88,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 144.27,
+                "us_regulatory": 8.93
+              },
+              "gross": 32871.3,
+              "net": 32264.22,
+              "net_profit": 742.74,
+              "outlay": 31521.48,
+              "price": 4695.899296155549,
+              "shares": 7,
+              "tax": 462.81,
+              "ticker": "CWT",
+              "xirr": 0.23678853643861333
+            },
+            {
+              "fees": {
+                "brokerage": 60.78,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 52.58,
+                "gst": 12.93,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 40.52,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 177.83,
+                "us_regulatory": 11.01
+              },
+              "gross": 40514.95,
+              "net": 40337.12,
+              "net_profit": -2444.1,
+              "outlay": 42781.22,
+              "price": 4051.4942675560014,
+              "shares": 10,
+              "tax": 0.0,
+              "ticker": "EPOL",
+              "xirr": -0.415382297514918
+            },
+            {
+              "fees": {
+                "brokerage": 20.05,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 17.34,
+                "gst": 4.27,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 13.37,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 58.66,
+                "us_regulatory": 3.63
+              },
+              "gross": 13364.53,
+              "net": 13305.87,
+              "net_profit": -3967.93,
+              "outlay": 17273.8,
+              "price": 2227.4202561840066,
+              "shares": 6,
+              "tax": 0.0,
+              "ticker": "FTK",
+              "xirr": -0.9075875625090377
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.63,
+                "gst": 7.71,
+                "ipft": 0.09,
+                "sebi": 0.09,
+                "slippage": 88.32,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 138.84
+              },
+              "gross": 88319.65,
+              "net": 88180.81,
+              "net_profit": -10083.73,
+              "outlay": 98264.54,
+              "price": 114.8499984741211,
+              "shares": 769,
+              "tax": 0.0,
+              "ticker": "GOLDBETA.NS",
+              "xirr": -0.6276790023321095
+            },
+            {
+              "fees": {
+                "brokerage": 123.04,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 106.45,
+                "gst": 26.16,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 82.03,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 359.97,
+                "us_regulatory": 22.28
+              },
+              "gross": 82023.55,
+              "net": 81663.58,
+              "net_profit": -6773.21,
+              "outlay": 88436.79,
+              "price": 7456.685725126648,
+              "shares": 11,
+              "tax": 0.0,
+              "ticker": "GREK",
+              "xirr": -0.5166814893960785
+            },
+            {
+              "fees": {
+                "brokerage": 22.62,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 19.56,
+                "gst": 4.81,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 15.08,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 66.17,
+                "us_regulatory": 4.1
+              },
+              "gross": 15074.71,
+              "net": 15008.54,
+              "net_profit": -1649.86,
+              "outlay": 16658.4,
+              "price": 7537.354829275515,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "IRMD",
+              "xirr": -0.6139135204097669
+            },
+            {
+              "fees": {
+                "brokerage": 42.99,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 37.19,
+                "gst": 9.15,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 28.66,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 125.78,
+                "us_regulatory": 7.79
+              },
+              "gross": 28653.72,
+              "net": 28527.94,
+              "net_profit": -6872.79,
+              "outlay": 35622.81,
+              "price": 842.7564000211714,
+              "shares": 34,
+              "tax": 0.0,
+              "ticker": "KNOP",
+              "xirr": -0.8589331714760834
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.54,
+                "gst": 7.5,
+                "ipft": 0.06,
+                "sebi": 0.06,
+                "slippage": 51.66,
+                "stamp": 0.0,
+                "stt": 52.0,
+                "total": 152.82
+              },
+              "gross": 51656.0,
+              "net": 49982.11,
+              "net_profit": 5517.62,
+              "outlay": 44464.49,
+              "price": 2348.0,
+              "shares": 22,
+              "tax": 1521.07,
+              "ticker": "LAURUSLABS.NS",
+              "xirr": 1.90778064736548
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.47,
+                "gst": 7.49,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 49.46,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 98.52
+              },
+              "gross": 49455.59,
+              "net": 49357.07,
+              "net_profit": -4167.71,
+              "outlay": 53524.78,
+              "price": 218.8300018310547,
+              "shares": 226,
+              "tax": 0.0,
+              "ticker": "MAFANG.NS",
+              "xirr": -0.5227458885675896
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.41,
+                "gst": 7.67,
+                "ipft": 0.09,
+                "sebi": 0.09,
+                "slippage": 81.04,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 131.3
+              },
+              "gross": 81030.21,
+              "net": 80610.38,
+              "net_profit": 386.18,
+              "outlay": 80224.2,
+              "price": 213.8000030517578,
+              "shares": 379,
+              "tax": 288.53,
+              "ticker": "MONQ50.NS",
+              "xirr": 0.044794424511225575
+            },
+            {
+              "fees": {
+                "brokerage": 6.51,
+                "dp": 20.0,
+                "exchange": 0.2,
+                "gst": 4.82,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 6.51,
+                "stamp": 0.0,
+                "stt": 7.0,
+                "total": 45.06
+              },
+              "gross": 6508.5,
+              "net": 6463.44,
+              "net_profit": -804.74,
+              "outlay": 7268.18,
+              "price": 6508.5,
+              "shares": 1,
+              "tax": 0.0,
+              "ticker": "MTARTECH.NS",
+              "xirr": -0.6572541682362063
+            },
+            {
+              "fees": {
+                "brokerage": 16.82,
+                "dp": 20.0,
+                "exchange": 0.5,
+                "gst": 6.73,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 16.82,
+                "stamp": 0.0,
+                "stt": 17.0,
+                "total": 77.91
+              },
+              "gross": 16812.0,
+              "net": 16734.09,
+              "net_profit": -205.92,
+              "outlay": 16940.01,
+              "price": 8406.0,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "NAVINFLUOR.NS",
+              "xirr": -0.10559957475848467
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 0.62,
+                "gst": 7.33,
+                "ipft": 0.03,
+                "sebi": 0.03,
+                "slippage": 20.56,
+                "stamp": 0.0,
+                "stt": 21.0,
+                "total": 89.57
+              },
+              "gross": 20557.91,
+              "net": 20468.34,
+              "net_profit": -6259.23,
+              "outlay": 26727.57,
+              "price": 934.4500122070312,
+              "shares": 22,
+              "tax": 0.0,
+              "ticker": "SAKAR.NS",
+              "xirr": -0.9123758869831812
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.4,
+                "gst": 7.47,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 47.12,
+                "stamp": 0.0,
+                "stt": 48.0,
+                "total": 144.09
+              },
+              "gross": 47110.14,
+              "net": 44575.56,
+              "net_profit": 8856.24,
+              "outlay": 35719.32,
+              "price": 65.33999633789062,
+              "shares": 721,
+              "tax": 2390.49,
+              "ticker": "SBC.NS",
+              "xirr": 6.546867231866125
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 3.06,
+                "gst": 7.8,
+                "ipft": 0.11,
+                "sebi": 0.11,
+                "slippage": 102.72,
+                "stamp": 0.0,
+                "stt": 103.0,
+                "total": 256.8
+              },
+              "gross": 102719.7,
+              "net": 102462.9,
+              "net_profit": -4498.43,
+              "outlay": 106961.33,
+              "price": 901.0499877929688,
+              "shares": 114,
+              "tax": 0.0,
+              "ticker": "SIGMAADV.NS",
+              "xirr": -0.3243432458810345
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 0.62,
+                "gst": 7.33,
+                "ipft": 0.03,
+                "sebi": 0.03,
+                "slippage": 20.84,
+                "stamp": 0.0,
+                "stt": 21.0,
+                "total": 89.85
+              },
+              "gross": 20835.0,
+              "net": 20745.15,
+              "net_profit": -4587.57,
+              "outlay": 25332.72,
+              "price": 2315.0,
+              "shares": 9,
+              "tax": 0.0,
+              "ticker": "WELCORP.NS",
+              "xirr": -0.8384647567065436
+            }
+          ],
+          "xirr": -0.24918758286825193
+        },
+        "mmi": {
+          "fetched_at": "2026-11-04T09:13:33.251077+00:00",
+          "older_reading": false,
+          "score": 68.69336215774364,
+          "source_at": "2026-11-04T09:12:00.295000+00:00",
+          "zone": "Greed"
+        },
+        "model_only": true,
+        "observation_ready_at": null,
+        "observation_rows": [
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "ACUTAAS.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "AXTI"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "BAFNAPH.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "BLISSGVS.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "CWT"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "EPOL"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "FTK"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "GOLDBETA.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "GREK"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "IRMD"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T20:30:00+00:00",
+            "ticker": "KNOP"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "LAURUSLABS.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "MAFANG.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "MONQ50.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "MTARTECH.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "NAVINFLUOR.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "SAKAR.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "SBC.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "SIGMAADV.NS"
+          },
+          {
+            "observation_session": "2026-09-29",
+            "ready_at": "2026-09-29T10:30:00+00:00",
+            "ticker": "WELCORP.NS"
+          }
+        ],
+        "operational_review_window": {
+          "data_ready_at": "2026-11-03T03:00:00+05:30",
+          "date_label": "03 NOV",
+          "end_at": "2026-11-03T09:00:00+05:30",
+          "execution_windows": {
+            "NSE": "2026-11-03T09:30:00+05:30",
+            "NYSE": "2026-11-03T20:15:00+05:30"
+          },
+          "market_context": "Post NYSE | Pre NSE",
+          "model_review_date": "2026-11-02",
+          "selection_method": "equal-market-calendar-score-v6",
+          "start_at": "2026-11-03T08:00:00+05:30",
+          "time_label": "08:00-09:00 IST",
+          "timezone": "Asia/Kolkata"
+        },
+        "policy": {
+          "assessment_wait_after_close_minutes": 30,
+          "block_length": 5,
+          "calendar_verified_through": "2026-12-31",
+          "capital_inr": null,
+          "concentration_limit": 0.5,
+          "crossing_probability": 0.2,
+          "drawdown_limit": 0.15,
+          "drift_limit": 0.05,
+          "entry_max_quote_delay_minutes": 330,
+          "entry_quote_interval": "1m",
+          "entry_wait_after_open_minutes": 15,
+          "execution_wait_after_open_minutes": 15,
+          "fx_quote_max_age_minutes": 360,
+          "history_years": 3,
+          "instrument_kinds": {
+            "ABBV": "foreign_us_listing",
+            "ACUTAAS.NS": "equity",
+            "AETHER.NS": "equity",
+            "ASX": "foreign_us_listing",
+            "AXTI": "foreign_us_listing",
+            "BAFNAPH.NS": "equity",
+            "BLISSGVS.NS": "equity",
+            "BSE.NS": "equity",
+            "BTI": "foreign_us_listing",
+            "BTSG": "foreign_us_listing",
+            "CBOE": "foreign_us_listing",
+            "CEMPRO.NS": "equity",
+            "CHENNPETRO.NS": "equity",
+            "CLS": "foreign_us_listing",
+            "CVS": "foreign_us_listing",
+            "CWCO": "foreign_us_listing",
+            "CWT": "foreign_us_listing",
+            "DG": "foreign_us_listing",
+            "EPOL": "foreign_us_listing",
+            "ESLT": "foreign_us_listing",
+            "ETERNAL.NS": "equity",
+            "EWS": "foreign_us_listing",
+            "EWY": "foreign_us_listing",
+            "FTK": "foreign_us_listing",
+            "GH": "foreign_us_listing",
+            "GLENMARK.NS": "equity",
+            "GOLDBEES.NS": "listed_non_equity_etf",
+            "GOLDBETA.NS": "listed_non_equity_etf",
+            "GREK": "foreign_us_listing",
+            "GVT&D.NS": "equity",
+            "HCI": "foreign_us_listing",
+            "HRTG": "foreign_us_listing",
+            "INDOTECH.NS": "equity",
+            "INDSWFTLAB.NS": "equity",
+            "IRMD": "foreign_us_listing",
+            "JNJ": "foreign_us_listing",
+            "KGC": "foreign_us_listing",
+            "KNOP": "foreign_us_listing",
+            "KO": "foreign_us_listing",
+            "LAURUSLABS.NS": "equity",
+            "LUMAXTECH.NS": "equity",
+            "MACPOWER.NS": "equity",
+            "MAFANG.NS": "listed_non_equity_etf",
+            "MASPTOP50.NS": "listed_non_equity_etf",
+            "MNST": "foreign_us_listing",
+            "MONQ50.NS": "listed_non_equity_etf",
+            "MTARTECH.NS": "equity",
+            "MU": "foreign_us_listing",
+            "NAVINFLUOR.NS": "equity",
+            "NEULANDLAB.NS": "equity",
+            "NVDA": "foreign_us_listing",
+            "ONELIFECAP.NS": "equity",
+            "PARR": "foreign_us_listing",
+            "PBR": "foreign_us_listing",
+            "PGIL.NS": "equity",
+            "PM": "foreign_us_listing",
+            "RADICO.NS": "equity",
+            "RVMD": "foreign_us_listing",
+            "SAKAR.NS": "equity",
+            "SBC.NS": "equity",
+            "SENEA": "foreign_us_listing",
+            "SIGMAADV.NS": "equity",
+            "SKYW": "foreign_us_listing",
+            "STLN": "foreign_us_listing",
+            "STX": "foreign_us_listing",
+            "TEN": "foreign_us_listing",
+            "THANGAMAYL.NS": "equity",
+            "TIGO": "foreign_us_listing",
+            "TMB.NS": "equity",
+            "TRMD": "foreign_us_listing",
+            "TSEM": "foreign_us_listing",
+            "UVE": "foreign_us_listing",
+            "VENUSREM.NS": "equity",
+            "VEON": "foreign_us_listing",
+            "VLO": "foreign_us_listing",
+            "VNM": "foreign_us_listing",
+            "WELCORP.NS": "equity"
+          },
+          "max_review_sessions": 40,
+          "min_annual_improvement": 0.06,
+          "minimum_forecast_review_sessions": 4,
+          "minimum_net_return": 0.0125,
+          "owner_review_day_end": "22:00",
+          "owner_review_day_start": "08:00",
+          "owner_review_duration_minutes": 60,
+          "policy_approved": true,
+          "policy_version": "owner-review-policy-v9",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "review_timezone": "Asia/Kolkata",
+          "review_window_step_minutes": 15,
+          "seed": 19473,
+          "simulation_paths": 3000,
+          "slab_rate": 0.3,
+          "slippage_bps": 10,
+          "surcharge_rate": 0,
+          "target_xirr": 1,
+          "tariff_max_age_days": 90,
+          "tariff_verified_on": "2026-09-09",
+          "tax_profile": "resident_individual_regular_delivery",
+          "validation_horizon": 40,
+          "validation_max_brier": 0.2,
+          "validation_min_folds": 20,
+          "validation_train": 252
+        },
+        "price_hash": "50ef351b162619dd5bb0f76b66df3cdb6ef9e68e417debf7f1284c1fe68ec4b8",
+        "validation": {
+          "passed": false,
+          "reason": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "version": "public-review-v2"
+      },
+      "previous_hash": "0fe2bef48c6bb34c3333b515925fe706dd4557ed9c159135a033d113b53cde27",
+      "seq": 899
+    },
+    {
+      "baseline_id": "9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:34.118378+00:00",
+      "event_hash": "3c3b71cbd71b5b25f8f2b9436e6460d4ec3b2d6e7e24aa60753f0039ce09acb4",
+      "event_key": "heartbeat:9062b39c26055b1f71968de9e11a632d3ae549842008b88a3ef7c5099d294942:2026-11-04T09:13:10.902240+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-04T09:13:10.902240+00:00"
+      },
+      "previous_hash": "b0b9de40ef9d49f112ce706cf7c25fdd9e90f64e2c11b8bacb075bd595bf17a7",
+      "seq": 900
+    },
+    {
+      "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:38.951038+00:00",
+      "event_hash": "0469d451842f75f4debc19541bad59eaab4035673ca5c7278ea6823a676034da",
+      "event_key": "assessment:7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9:0e6b205f13aea129a1189357a1e07d4c18be8fb5011bb778924abf62b3f14c0f",
+      "kind": "ASSESSMENT",
+      "payload": {
+        "as_of": "2026-11-02",
+        "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+        "calendar_coverage": {
+          "available_forecast_sessions": 37,
+          "complete": false,
+          "required_forecast_sessions": 40,
+          "verified_through": "2026-12-31"
+        },
+        "checked_at": "2026-11-04T09:13:10.902240+00:00",
+        "comparisons": [
+          {
+            "cash_raised": 0.0,
+            "fees": 0.0,
+            "option": "No trade",
+            "orders": [],
+            "tax": 0.0
+          },
+          {
+            "cash_raised": 663142.59,
+            "fees": 2185.48,
+            "option": "Full exit",
+            "orders": [
+              {
+                "shares": 2,
+                "ticker": "ACUTAAS.NS"
+              },
+              {
+                "shares": 4,
+                "ticker": "AETHER.NS"
+              },
+              {
+                "shares": 3,
+                "ticker": "AXTI"
+              },
+              {
+                "shares": 172,
+                "ticker": "BAFNAPH.NS"
+              },
+              {
+                "shares": 30,
+                "ticker": "BLISSGVS.NS"
+              },
+              {
+                "shares": 5,
+                "ticker": "CWT"
+              },
+              {
+                "shares": 2,
+                "ticker": "EWS"
+              },
+              {
+                "shares": 1,
+                "ticker": "EWY"
+              },
+              {
+                "shares": 5,
+                "ticker": "FTK"
+              },
+              {
+                "shares": 576,
+                "ticker": "GOLDBETA.NS"
+              },
+              {
+                "shares": 8,
+                "ticker": "GREK"
+              },
+              {
+                "shares": 19,
+                "ticker": "INDSWFTLAB.NS"
+              },
+              {
+                "shares": 1,
+                "ticker": "IRMD"
+              },
+              {
+                "shares": 24,
+                "ticker": "KNOP"
+              },
+              {
+                "shares": 17,
+                "ticker": "LAURUSLABS.NS"
+              },
+              {
+                "shares": 198,
+                "ticker": "MAFANG.NS"
+              },
+              {
+                "shares": 245,
+                "ticker": "MONQ50.NS"
+              },
+              {
+                "shares": 1,
+                "ticker": "MTARTECH.NS"
+              },
+              {
+                "shares": 2,
+                "ticker": "NAVINFLUOR.NS"
+              },
+              {
+                "shares": 12,
+                "ticker": "SAKAR.NS"
+              },
+              {
+                "shares": 429,
+                "ticker": "SBC.NS"
+              },
+              {
+                "shares": 94,
+                "ticker": "SIGMAADV.NS"
+              },
+              {
+                "shares": 3,
+                "ticker": "VNM"
+              },
+              {
+                "shares": 8,
+                "ticker": "WELCORP.NS"
+              }
+            ],
+            "tax": 11080.56
+          },
+          {
+            "option": "Recover initial capital",
+            "status": "INSUFFICIENT_NET_PROCEEDS"
+          },
+          {
+            "option": "Withdraw net profit",
+            "status": "NO_POSITIVE_PROFIT"
+          }
+        ],
+        "decision": {
+          "date_basis": "CONTINUOUS_MONITORING",
+          "drawdown": -0.07762829079934963,
+          "minimum_net_return": 0.0125,
+          "next_review": "2026-11-02",
+          "note": "No trigger is not a safety guarantee. Review signals do not submit trades.",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "reasons": [
+            "SECURITY_TARGET_REVIEW"
+          ],
+          "rebalance": {
+            "drift": 0.11,
+            "status": "BENEFIT_NOT_ESTABLISHED"
+          },
+          "review_acknowledged": false,
+          "review_required": true,
+          "status": "SECURITY_TARGET_REVIEW",
+          "target_crossed_securities": [
+            "ACUTAAS.NS",
+            "BAFNAPH.NS",
+            "LAURUSLABS.NS",
+            "SBC.NS",
+            "SIGMAADV.NS"
+          ]
+        },
+        "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
+        "forecast": {
+          "next_review": null,
+          "status": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "forecast_observation_pending": false,
+        "history_coverage": {
+          "end": "2026-11-02",
+          "method": "complete-adjacent-session-pairs-no-fill",
+          "missing_sessions": [
+            "2023-11-23",
+            "2024-01-01",
+            "2024-01-15",
+            "2024-01-18",
+            "2024-02-19",
+            "2024-05-27",
+            "2024-06-19",
+            "2024-07-04",
+            "2024-08-27",
+            "2024-09-02",
+            "2024-10-30",
+            "2024-11-05",
+            "2024-11-28",
+            "2025-01-01",
+            "2025-01-09",
+            "2025-01-20",
+            "2025-02-17",
+            "2025-04-21",
+            "2025-05-26",
+            "2025-06-19",
+            "2025-07-04",
+            "2025-09-01",
+            "2025-10-24",
+            "2025-11-27",
+            "2025-12-19",
+            "2026-01-01",
+            "2026-01-19",
+            "2026-02-16",
+            "2026-03-06",
+            "2026-05-25",
+            "2026-06-19",
+            "2026-07-03",
+            "2026-09-07"
+          ],
+          "start": "2023-11-03",
+          "usable_daily_returns": 670
+        },
+        "metrics": {
+          "date": "2026-11-02",
+          "days_held": 48,
+          "estimated_tax": 11080.56,
+          "exit_costs": 2185.48,
+          "gross_value": 676408.63,
+          "net_proceeds": 663142.59,
+          "net_profit": -2857.41,
+          "net_total_return": -0.004290405405405484,
+          "rows": [
+            {
+              "fees": {
+                "brokerage": 7.79,
+                "dp": 20.0,
+                "exchange": 0.24,
+                "gst": 5.05,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 7.79,
+                "stamp": 0.0,
+                "stt": 8.0,
+                "total": 48.89
+              },
+              "gross": 7785.21,
+              "net": 7458.14,
+              "net_profit": 991.48,
+              "outlay": 6470.1,
+              "price": 3892.60009765625,
+              "shares": 2,
+              "tax": 278.18,
+              "ticker": "ACUTAAS.NS",
+              "xirr": 2.0276079878289233
+            },
+            {
+              "fees": {
+                "brokerage": 6.09,
+                "dp": 20.0,
+                "exchange": 0.19,
+                "gst": 4.74,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 6.09,
+                "stamp": 0.0,
+                "stt": 7.0,
+                "total": 44.13
+              },
+              "gross": 6087.21,
+              "net": 6043.08,
+              "net_profit": -233.56,
+              "outlay": 6276.64,
+              "price": 1521.800048828125,
+              "shares": 4,
+              "tax": 0.0,
+              "ticker": "AETHER.NS",
+              "xirr": -0.25509050463745786
+            },
+            {
+              "fees": {
+                "brokerage": 20.59,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 20.04,
+                "gst": 4.38,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 13.73,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 62.47,
+                "us_regulatory": 3.73
+              },
+              "gross": 13723.27,
+              "net": 13660.8,
+              "net_profit": -3346.4,
+              "outlay": 17007.2,
+              "price": 4574.421013568877,
+              "shares": 3,
+              "tax": 0.0,
+              "ticker": "AXTI",
+              "xirr": -0.8110213676171059
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.25,
+                "gst": 7.64,
+                "ipft": 0.08,
+                "sebi": 0.08,
+                "slippage": 75.5,
+                "stamp": 0.0,
+                "stt": 76.0,
+                "total": 201.55
+              },
+              "gross": 75499.41,
+              "net": 70616.57,
+              "net_profit": 17483.81,
+              "outlay": 53132.76,
+              "price": 438.95001220703125,
+              "shares": 172,
+              "tax": 4681.29,
+              "ticker": "BAFNAPH.NS",
+              "xirr": 8.108340709268836
+            },
+            {
+              "fees": {
+                "brokerage": 18.52,
+                "dp": 20.0,
+                "exchange": 0.55,
+                "gst": 7.04,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 18.52,
+                "stamp": 0.0,
+                "stt": 19.0,
+                "total": 83.67
+              },
+              "gross": 18516.01,
+              "net": 18432.34,
+              "net_profit": -1314.27,
+              "outlay": 19746.61,
+              "price": 617.2000122070312,
+              "shares": 30,
+              "tax": 0.0,
+              "ticker": "BLISSGVS.NS",
+              "xirr": -0.4142610695131753
+            },
+            {
+              "fees": {
+                "brokerage": 35.22,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 34.29,
+                "gst": 7.49,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 23.48,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 106.86,
+                "us_regulatory": 6.38
+              },
+              "gross": 23479.5,
+              "net": 23300.24,
+              "net_profit": -49.57,
+              "outlay": 23349.81,
+              "price": 4695.899296155549,
+              "shares": 5,
+              "tax": 72.4,
+              "ticker": "CWT",
+              "xirr": -0.016030392622877337
+            },
+            {
+              "fees": {
+                "brokerage": 8.63,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 8.39,
+                "gst": 1.84,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 5.75,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 26.18,
+                "us_regulatory": 1.57
+              },
+              "gross": 5747.45,
+              "net": 5721.27,
+              "net_profit": -668.03,
+              "outlay": 6389.3,
+              "price": 2873.7234282032005,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "EWS",
+              "xirr": -0.5681849201616653
+            },
+            {
+              "fees": {
+                "brokerage": 21.59,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 21.02,
+                "gst": 4.59,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 14.39,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 65.51,
+                "us_regulatory": 3.91
+              },
+              "gross": 14389.5,
+              "net": 14323.99,
+              "net_profit": -2777.02,
+              "outlay": 17101.01,
+              "price": 14389.495451513678,
+              "shares": 1,
+              "tax": 0.0,
+              "ticker": "EWY",
+              "xirr": -0.7401035011485464
+            },
+            {
+              "fees": {
+                "brokerage": 16.71,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 16.27,
+                "gst": 3.56,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 11.14,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 50.71,
+                "us_regulatory": 3.03
+              },
+              "gross": 11137.11,
+              "net": 11086.4,
+              "net_profit": -1613.25,
+              "outlay": 12699.65,
+              "price": 2227.4202561840066,
+              "shares": 5,
+              "tax": 0.0,
+              "ticker": "FTK",
+              "xirr": -0.6440860746229418
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.97,
+                "gst": 7.58,
+                "ipft": 0.07,
+                "sebi": 0.07,
+                "slippage": 66.16,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 115.85
+              },
+              "gross": 66153.6,
+              "net": 66037.75,
+              "net_profit": -7167.09,
+              "outlay": 73204.84,
+              "price": 114.8499984741211,
+              "shares": 576,
+              "tax": 0.0,
+              "ticker": "GOLDBETA.NS",
+              "xirr": -0.5507453699695513
+            },
+            {
+              "fees": {
+                "brokerage": 89.49,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 87.13,
+                "gst": 19.03,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 59.66,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 271.52,
+                "us_regulatory": 16.21
+              },
+              "gross": 59653.49,
+              "net": 59381.97,
+              "net_profit": -6800.09,
+              "outlay": 66182.06,
+              "price": 7456.685725126648,
+              "shares": 8,
+              "tax": 0.0,
+              "ticker": "GREK",
+              "xirr": -0.5615171180202256
+            },
+            {
+              "fees": {
+                "brokerage": 6.72,
+                "dp": 20.0,
+                "exchange": 0.2,
+                "gst": 4.85,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 6.72,
+                "stamp": 0.0,
+                "stt": 7.0,
+                "total": 45.51
+              },
+              "gross": 6711.75,
+              "net": 6622.37,
+              "net_profit": 99.08,
+              "outlay": 6523.29,
+              "price": 353.25,
+              "shares": 19,
+              "tax": 43.87,
+              "ticker": "INDSWFTLAB.NS",
+              "xirr": 0.1241956123608685
+            },
+            {
+              "fees": {
+                "brokerage": 11.31,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 11.01,
+                "gst": 2.41,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 7.54,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 34.33,
+                "us_regulatory": 2.05
+              },
+              "gross": 7537.36,
+              "net": 7503.03,
+              "net_profit": -395.23,
+              "outlay": 7898.26,
+              "price": 7537.354829275515,
+              "shares": 1,
+              "tax": 0.0,
+              "ticker": "IRMD",
+              "xirr": -0.32318954668376026
+            },
+            {
+              "fees": {
+                "brokerage": 30.34,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 29.54,
+                "gst": 6.46,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 20.23,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 92.07,
+                "us_regulatory": 5.5
+              },
+              "gross": 20226.16,
+              "net": 20134.09,
+              "net_profit": -5816.63,
+              "outlay": 26107.48,
+              "price": 842.7564000211714,
+              "shares": 24,
+              "tax": 0.0,
+              "ticker": "KNOP",
+              "xirr": -0.8532121347888451
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.19,
+                "gst": 7.43,
+                "ipft": 0.04,
+                "sebi": 0.04,
+                "slippage": 39.92,
+                "stamp": 0.0,
+                "stt": 40.0,
+                "total": 128.62
+              },
+              "gross": 39916.0,
+              "net": 38093.98,
+              "net_profit": 6225.91,
+              "outlay": 31868.07,
+              "price": 2348.0,
+              "shares": 17,
+              "tax": 1693.4,
+              "ticker": "LAURUSLABS.NS",
+              "xirr": 2.998216477632457
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.29,
+                "gst": 7.46,
+                "ipft": 0.05,
+                "sebi": 0.05,
+                "slippage": 43.33,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 92.18
+              },
+              "gross": 43328.35,
+              "net": 43236.17,
+              "net_profit": -3309.27,
+              "outlay": 46545.44,
+              "price": 218.8300018310547,
+              "shares": 198,
+              "tax": 0.0,
+              "ticker": "MAFANG.NS",
+              "xirr": -0.4360286064416481
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.56,
+                "gst": 7.51,
+                "ipft": 0.06,
+                "sebi": 0.06,
+                "slippage": 52.39,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 101.58
+              },
+              "gross": 52381.01,
+              "net": 52279.43,
+              "net_profit": -7521.59,
+              "outlay": 59801.02,
+              "price": 213.8000030517578,
+              "shares": 245,
+              "tax": 0.0,
+              "ticker": "MONQ50.NS",
+              "xirr": -0.6479203392666999
+            },
+            {
+              "fees": {
+                "brokerage": 6.51,
+                "dp": 20.0,
+                "exchange": 0.2,
+                "gst": 4.82,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 6.51,
+                "stamp": 0.0,
+                "stt": 7.0,
+                "total": 45.06
+              },
+              "gross": 6508.5,
+              "net": 6463.44,
+              "net_profit": -159.21,
+              "outlay": 6622.65,
+              "price": 6508.5,
+              "shares": 1,
+              "tax": 0.0,
+              "ticker": "MTARTECH.NS",
+              "xirr": -0.17219370507917356
+            },
+            {
+              "fees": {
+                "brokerage": 16.82,
+                "dp": 20.0,
+                "exchange": 0.5,
+                "gst": 6.73,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 16.82,
+                "stamp": 0.0,
+                "stt": 17.0,
+                "total": 77.91
+              },
+              "gross": 16812.0,
+              "net": 16652.97,
+              "net_profit": 175.05,
+              "outlay": 16477.92,
+              "price": 8406.0,
+              "shares": 2,
+              "tax": 81.12,
+              "ticker": "NAVINFLUOR.NS",
+              "xirr": 0.08552638362076942
+            },
+            {
+              "fees": {
+                "brokerage": 11.22,
+                "dp": 20.0,
+                "exchange": 0.34,
+                "gst": 5.69,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 11.22,
+                "stamp": 0.0,
+                "stt": 12.0,
+                "total": 60.52
+              },
+              "gross": 11213.41,
+              "net": 11152.89,
+              "net_profit": -1645.15,
+              "outlay": 12798.04,
+              "price": 934.4500122070312,
+              "shares": 12,
+              "tax": 0.0,
+              "ticker": "SAKAR.NS",
+              "xirr": -0.6564918663806644
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 0.84,
+                "gst": 7.37,
+                "ipft": 0.03,
+                "sebi": 0.03,
+                "slippage": 28.04,
+                "stamp": 0.0,
+                "stt": 29.0,
+                "total": 105.31
+              },
+              "gross": 28030.86,
+              "net": 26228.35,
+              "net_profit": 6289.98,
+              "outlay": 19938.37,
+              "price": 65.33999633789062,
+              "shares": 429,
+              "tax": 1697.2,
+              "ticker": "SBC.NS",
+              "xirr": 7.409699569395292
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.52,
+                "gst": 7.69,
+                "ipft": 0.09,
+                "sebi": 0.09,
+                "slippage": 84.7,
+                "stamp": 0.0,
+                "stt": 85.0,
+                "total": 220.09
+              },
+              "gross": 84698.7,
+              "net": 81974.97,
+              "net_profit": 9130.06,
+              "outlay": 72844.91,
+              "price": 901.0499877929688,
+              "shares": 94,
+              "tax": 2503.64,
+              "ticker": "SIGMAADV.NS",
+              "xirr": 1.5018096280607043
+            },
+            {
+              "fees": {
+                "brokerage": 7.01,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 6.82,
+                "gst": 1.5,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 4.67,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 21.27,
+                "us_regulatory": 1.27
+              },
+              "gross": 4669.33,
+              "net": 4648.06,
+              "net_profit": -402.33,
+              "outlay": 5050.39,
+              "price": 1556.4419437770848,
+              "shares": 3,
+              "tax": 0.0,
+              "ticker": "VNM",
+              "xirr": -0.46808096998285526
+            },
+            {
+              "fees": {
+                "brokerage": 18.52,
+                "dp": 20.0,
+                "exchange": 0.56,
+                "gst": 7.05,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 18.52,
+                "stamp": 0.0,
+                "stt": 19.0,
+                "total": 83.69
+              },
+              "gross": 18520.0,
+              "net": 18406.85,
+              "net_profit": -34.08,
+              "outlay": 18440.93,
+              "price": 2315.0,
+              "shares": 8,
+              "tax": 29.46,
+              "ticker": "WELCORP.NS",
+              "xirr": -0.014262730642822834
+            }
+          ],
+          "xirr": -0.032166437201327995
+        },
+        "mmi": {
+          "fetched_at": "2026-11-04T09:13:38.310153+00:00",
+          "older_reading": false,
+          "score": 68.69336215774364,
+          "source_at": "2026-11-04T09:12:00.295000+00:00",
+          "zone": "Greed"
+        },
+        "model_only": true,
+        "observation_ready_at": null,
+        "observation_rows": [
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "ACUTAAS.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "AETHER.NS"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "AXTI"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "BAFNAPH.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "BLISSGVS.NS"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "CWT"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "EWS"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "EWY"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "FTK"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "GOLDBETA.NS"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "GREK"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "INDSWFTLAB.NS"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "IRMD"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "KNOP"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "LAURUSLABS.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "MAFANG.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "MONQ50.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "MTARTECH.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "NAVINFLUOR.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "SAKAR.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "SBC.NS"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "SIGMAADV.NS"
+          },
+          {
+            "observation_session": "2026-09-21",
+            "ready_at": "2026-09-21T20:30:00+00:00",
+            "ticker": "VNM"
+          },
+          {
+            "observation_session": "2026-09-22",
+            "ready_at": "2026-09-22T10:30:00+00:00",
+            "ticker": "WELCORP.NS"
+          }
+        ],
+        "operational_review_window": {
+          "data_ready_at": "2026-11-03T03:00:00+05:30",
+          "date_label": "03 NOV",
+          "end_at": "2026-11-03T09:00:00+05:30",
+          "execution_windows": {
+            "NSE": "2026-11-03T09:30:00+05:30",
+            "NYSE": "2026-11-03T20:15:00+05:30"
+          },
+          "market_context": "Post NYSE | Pre NSE",
+          "model_review_date": "2026-11-02",
+          "selection_method": "equal-market-calendar-score-v6",
+          "start_at": "2026-11-03T08:00:00+05:30",
+          "time_label": "08:00-09:00 IST",
+          "timezone": "Asia/Kolkata"
+        },
+        "policy": {
+          "assessment_wait_after_close_minutes": 30,
+          "block_length": 5,
+          "calendar_verified_through": "2026-12-31",
+          "capital_inr": null,
+          "concentration_limit": 0.5,
+          "crossing_probability": 0.2,
+          "drawdown_limit": 0.15,
+          "drift_limit": 0.05,
+          "entry_max_quote_delay_minutes": 330,
+          "entry_quote_interval": "1m",
+          "entry_wait_after_open_minutes": 15,
+          "execution_wait_after_open_minutes": 15,
+          "fx_quote_max_age_minutes": 360,
+          "history_years": 3,
+          "instrument_kinds": {
+            "ABBV": "foreign_us_listing",
+            "ACUTAAS.NS": "equity",
+            "AETHER.NS": "equity",
+            "ASX": "foreign_us_listing",
+            "AXTI": "foreign_us_listing",
+            "BAFNAPH.NS": "equity",
+            "BLISSGVS.NS": "equity",
+            "BSE.NS": "equity",
+            "BTI": "foreign_us_listing",
+            "BTSG": "foreign_us_listing",
+            "CBOE": "foreign_us_listing",
+            "CEMPRO.NS": "equity",
+            "CHENNPETRO.NS": "equity",
+            "CLS": "foreign_us_listing",
+            "CVS": "foreign_us_listing",
+            "CWCO": "foreign_us_listing",
+            "CWT": "foreign_us_listing",
+            "DG": "foreign_us_listing",
+            "EPOL": "foreign_us_listing",
+            "ESLT": "foreign_us_listing",
+            "ETERNAL.NS": "equity",
+            "EWS": "foreign_us_listing",
+            "EWY": "foreign_us_listing",
+            "FTK": "foreign_us_listing",
+            "GH": "foreign_us_listing",
+            "GLENMARK.NS": "equity",
+            "GOLDBEES.NS": "listed_non_equity_etf",
+            "GOLDBETA.NS": "listed_non_equity_etf",
+            "GREK": "foreign_us_listing",
+            "GVT&D.NS": "equity",
+            "HCI": "foreign_us_listing",
+            "HRTG": "foreign_us_listing",
+            "INDOTECH.NS": "equity",
+            "INDSWFTLAB.NS": "equity",
+            "IRMD": "foreign_us_listing",
+            "JNJ": "foreign_us_listing",
+            "KGC": "foreign_us_listing",
+            "KNOP": "foreign_us_listing",
+            "KO": "foreign_us_listing",
+            "LAURUSLABS.NS": "equity",
+            "LUMAXTECH.NS": "equity",
+            "MACPOWER.NS": "equity",
+            "MAFANG.NS": "listed_non_equity_etf",
+            "MASPTOP50.NS": "listed_non_equity_etf",
+            "MNST": "foreign_us_listing",
+            "MONQ50.NS": "listed_non_equity_etf",
+            "MTARTECH.NS": "equity",
+            "MU": "foreign_us_listing",
+            "NAVINFLUOR.NS": "equity",
+            "NEULANDLAB.NS": "equity",
+            "NVDA": "foreign_us_listing",
+            "ONELIFECAP.NS": "equity",
+            "PARR": "foreign_us_listing",
+            "PBR": "foreign_us_listing",
+            "PGIL.NS": "equity",
+            "PM": "foreign_us_listing",
+            "RADICO.NS": "equity",
+            "RVMD": "foreign_us_listing",
+            "SAKAR.NS": "equity",
+            "SBC.NS": "equity",
+            "SENEA": "foreign_us_listing",
+            "SIGMAADV.NS": "equity",
+            "SKYW": "foreign_us_listing",
+            "STLN": "foreign_us_listing",
+            "STX": "foreign_us_listing",
+            "TEN": "foreign_us_listing",
+            "THANGAMAYL.NS": "equity",
+            "TIGO": "foreign_us_listing",
+            "TMB.NS": "equity",
+            "TRMD": "foreign_us_listing",
+            "TSEM": "foreign_us_listing",
+            "UVE": "foreign_us_listing",
+            "VENUSREM.NS": "equity",
+            "VEON": "foreign_us_listing",
+            "VLO": "foreign_us_listing",
+            "VNM": "foreign_us_listing",
+            "WELCORP.NS": "equity"
+          },
+          "max_review_sessions": 40,
+          "min_annual_improvement": 0.06,
+          "minimum_forecast_review_sessions": 4,
+          "minimum_net_return": 0.0125,
+          "owner_review_day_end": "22:00",
+          "owner_review_day_start": "08:00",
+          "owner_review_duration_minutes": 60,
+          "policy_approved": true,
+          "policy_version": "owner-review-policy-v9",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "review_timezone": "Asia/Kolkata",
+          "review_window_step_minutes": 15,
+          "seed": 19473,
+          "simulation_paths": 3000,
+          "slab_rate": 0.3,
+          "slippage_bps": 10,
+          "surcharge_rate": 0,
+          "target_xirr": 1,
+          "tariff_max_age_days": 90,
+          "tariff_verified_on": "2026-09-09",
+          "tax_profile": "resident_individual_regular_delivery",
+          "validation_horizon": 40,
+          "validation_max_brier": 0.2,
+          "validation_min_folds": 20,
+          "validation_train": 252
+        },
+        "price_hash": "8c4f00dbfd1778d6d87b494e4d3428b4190c4762b11ed8db61432d95f9f3bf84",
+        "validation": {
+          "passed": false,
+          "reason": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "version": "public-review-v2"
+      },
+      "previous_hash": "3c3b71cbd71b5b25f8f2b9436e6460d4ec3b2d6e7e24aa60753f0039ce09acb4",
+      "seq": 901
+    },
+    {
+      "baseline_id": "7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:39.166159+00:00",
+      "event_hash": "6fee56d07d6c8cc219599bcdf2b130afc50755e6c16015d987edbb775f53b722",
+      "event_key": "heartbeat:7145fce88699af25542c9b576a8c17dccfe12008f9abcb4108c9a360d751d9c9:2026-11-04T09:13:10.902240+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-04T09:13:10.902240+00:00"
+      },
+      "previous_hash": "0469d451842f75f4debc19541bad59eaab4035673ca5c7278ea6823a676034da",
+      "seq": 902
+    },
+    {
+      "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:43.937879+00:00",
+      "event_hash": "5f7cea65a4126b492fbd0b3f9481ed228cf38847df2a4a73d925d5b0e073ad72",
+      "event_key": "assessment:9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60:47290450b91d7bb483a09dfdec6ea8e5cdc46b817f01839d4e478295504bbde0",
+      "kind": "ASSESSMENT",
+      "payload": {
+        "as_of": "2026-11-02",
+        "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+        "calendar_coverage": {
+          "available_forecast_sessions": 37,
+          "complete": false,
+          "required_forecast_sessions": 40,
+          "verified_through": "2026-12-31"
+        },
+        "checked_at": "2026-11-04T09:13:10.902240+00:00",
+        "comparisons": [
+          {
+            "cash_raised": 0.0,
+            "fees": 0.0,
+            "option": "No trade",
+            "orders": [],
+            "tax": 0.0
+          },
+          {
+            "cash_raised": 986311.18,
+            "fees": 2868.77,
+            "option": "Full exit",
+            "orders": [
+              {
+                "shares": 2,
+                "ticker": "ACUTAAS.NS"
+              },
+              {
+                "shares": 6,
+                "ticker": "AETHER.NS"
+              },
+              {
+                "shares": 2,
+                "ticker": "ASX"
+              },
+              {
+                "shares": 6,
+                "ticker": "AXTI"
+              },
+              {
+                "shares": 43,
+                "ticker": "BLISSGVS.NS"
+              },
+              {
+                "shares": 6,
+                "ticker": "CHENNPETRO.NS"
+              },
+              {
+                "shares": 3,
+                "ticker": "CWCO"
+              },
+              {
+                "shares": 10,
+                "ticker": "CWT"
+              },
+              {
+                "shares": 11,
+                "ticker": "FTK"
+              },
+              {
+                "shares": 811,
+                "ticker": "GOLDBEES.NS"
+              },
+              {
+                "shares": 26,
+                "ticker": "INDSWFTLAB.NS"
+              },
+              {
+                "shares": 5,
+                "ticker": "IRMD"
+              },
+              {
+                "shares": 56,
+                "ticker": "KNOP"
+              },
+              {
+                "shares": 36,
+                "ticker": "LAURUSLABS.NS"
+              },
+              {
+                "shares": 5,
+                "ticker": "LUMAXTECH.NS"
+              },
+              {
+                "shares": 397,
+                "ticker": "MAFANG.NS"
+              },
+              {
+                "shares": 398,
+                "ticker": "MONQ50.NS"
+              },
+              {
+                "shares": 2,
+                "ticker": "MTARTECH.NS"
+              },
+              {
+                "shares": 4,
+                "ticker": "NAVINFLUOR.NS"
+              },
+              {
+                "shares": 27,
+                "ticker": "SAKAR.NS"
+              },
+              {
+                "shares": 1055,
+                "ticker": "SBC.NS"
+              },
+              {
+                "shares": 162,
+                "ticker": "SIGMAADV.NS"
+              },
+              {
+                "shares": 11,
+                "ticker": "TMB.NS"
+              },
+              {
+                "shares": 14,
+                "ticker": "WELCORP.NS"
+              }
+            ],
+            "tax": 11580.42
+          },
+          {
+            "option": "Recover initial capital",
+            "status": "INSUFFICIENT_NET_PROCEEDS"
+          },
+          {
+            "option": "Withdraw net profit",
+            "status": "NO_POSITIVE_PROFIT"
+          }
+        ],
+        "decision": {
+          "date_basis": "CONTINUOUS_MONITORING",
+          "drawdown": -0.09219626775862277,
+          "minimum_net_return": 0.0125,
+          "next_review": "2026-11-02",
+          "note": "No trigger is not a safety guarantee. Review signals do not submit trades.",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "reasons": [
+            "SECURITY_TARGET_REVIEW"
+          ],
+          "rebalance": {
+            "drift": 0.11,
+            "status": "BENEFIT_NOT_ESTABLISHED"
+          },
+          "review_acknowledged": false,
+          "review_required": true,
+          "status": "SECURITY_TARGET_REVIEW",
+          "target_crossed_securities": [
+            "LAURUSLABS.NS",
+            "SBC.NS"
+          ]
+        },
+        "dividend_assumption": "Net distributions credited as model cash on ex-date, not verified broker payment dates",
+        "forecast": {
+          "next_review": null,
+          "status": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "forecast_observation_pending": false,
+        "history_coverage": {
+          "end": "2026-11-02",
+          "method": "complete-adjacent-session-pairs-no-fill",
+          "missing_sessions": [
+            "2023-11-23",
+            "2024-01-01",
+            "2024-01-15",
+            "2024-02-19",
+            "2024-05-27",
+            "2024-06-19",
+            "2024-07-04",
+            "2024-09-02",
+            "2024-11-28",
+            "2025-01-01",
+            "2025-01-09",
+            "2025-01-20",
+            "2025-02-17",
+            "2025-04-21",
+            "2025-05-26",
+            "2025-06-19",
+            "2025-07-04",
+            "2025-09-01",
+            "2025-10-24",
+            "2025-11-27",
+            "2025-12-19",
+            "2026-01-01",
+            "2026-01-19",
+            "2026-02-16",
+            "2026-03-06",
+            "2026-05-25",
+            "2026-06-19",
+            "2026-07-03",
+            "2026-09-07"
+          ],
+          "start": "2023-11-03",
+          "usable_daily_returns": 678
+        },
+        "metrics": {
+          "date": "2026-11-02",
+          "days_held": 53,
+          "estimated_tax": 11580.42,
+          "exit_costs": 2868.77,
+          "gross_value": 1000760.3700000001,
+          "net_proceeds": 986311.18,
+          "net_profit": -27588.82,
+          "net_total_return": -0.027210592760627206,
+          "rows": [
+            {
+              "fees": {
+                "brokerage": 7.79,
+                "dp": 20.0,
+                "exchange": 0.24,
+                "gst": 5.05,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 7.79,
+                "stamp": 0.0,
+                "stt": 8.0,
+                "total": 48.89
+              },
+              "gross": 7785.21,
+              "net": 7540.42,
+              "net_profit": 677.22,
+              "outlay": 6866.64,
+              "price": 3892.60009765625,
+              "shares": 2,
+              "tax": 195.9,
+              "ticker": "ACUTAAS.NS",
+              "xirr": 0.9357606463267827
+            },
+            {
+              "fees": {
+                "brokerage": 9.14,
+                "dp": 20.0,
+                "exchange": 0.28,
+                "gst": 5.3,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 9.14,
+                "stamp": 0.0,
+                "stt": 10.0,
+                "total": 53.88
+              },
+              "gross": 9130.81,
+              "net": 9076.93,
+              "net_profit": -608.75,
+              "outlay": 9685.68,
+              "price": 1521.800048828125,
+              "shares": 6,
+              "tax": 0.0,
+              "ticker": "AETHER.NS",
+              "xirr": -0.36595532618087956
+            },
+            {
+              "fees": {
+                "brokerage": 11.16,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 10.05,
+                "gst": 2.38,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 7.44,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 33.05,
+                "us_regulatory": 2.02
+              },
+              "gross": 7434.86,
+              "net": 7401.81,
+              "net_profit": -247.97,
+              "outlay": 7649.78,
+              "price": 3717.4286284088157,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "ASX",
+              "xirr": -0.20302806865375772
+            },
+            {
+              "fees": {
+                "brokerage": 41.17,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 37.11,
+                "gst": 8.76,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 27.45,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 121.95,
+                "us_regulatory": 7.46
+              },
+              "gross": 27446.53,
+              "net": 27324.58,
+              "net_profit": -11882.09,
+              "outlay": 39206.67,
+              "price": 4574.421013568877,
+              "shares": 6,
+              "tax": 0.0,
+              "ticker": "AXTI",
+              "xirr": -0.9168032348017255
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 0.79,
+                "gst": 7.36,
+                "ipft": 0.03,
+                "sebi": 0.03,
+                "slippage": 26.54,
+                "stamp": 0.0,
+                "stt": 27.0,
+                "total": 101.75
+              },
+              "gross": 26539.61,
+              "net": 26437.86,
+              "net_profit": -3536.25,
+              "outlay": 29974.11,
+              "price": 617.2000122070312,
+              "shares": 43,
+              "tax": 0.0,
+              "ticker": "BLISSGVS.NS",
+              "xirr": -0.5857032270662147
+            },
+            {
+              "fees": {
+                "brokerage": 9.28,
+                "dp": 20.0,
+                "exchange": 0.28,
+                "gst": 5.33,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 9.28,
+                "stamp": 0.0,
+                "stt": 10.0,
+                "total": 54.19
+              },
+              "gross": 9276.0,
+              "net": 9221.81,
+              "net_profit": -485.76,
+              "outlay": 9810.77,
+              "price": 1546.0,
+              "shares": 6,
+              "tax": 0.0,
+              "ticker": "CHENNPETRO.NS",
+              "xirr": -0.29999577742556205
+            },
+            {
+              "fees": {
+                "brokerage": 11.71,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 10.55,
+                "gst": 2.49,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 7.81,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 34.69,
+                "us_regulatory": 2.12
+              },
+              "gross": 7804.04,
+              "net": 7769.35,
+              "net_profit": -388.64,
+              "outlay": 8157.99,
+              "price": 2601.3460020591738,
+              "shares": 3,
+              "tax": 0.0,
+              "ticker": "CWCO",
+              "xirr": -0.2854864779155907
+            },
+            {
+              "fees": {
+                "brokerage": 70.44,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 63.5,
+                "gst": 14.98,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 46.96,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 208.64,
+                "us_regulatory": 12.76
+              },
+              "gross": 46959.0,
+              "net": 46750.36,
+              "net_profit": -599.89,
+              "outlay": 47350.25,
+              "price": 4695.899296155549,
+              "shares": 10,
+              "tax": 0.0,
+              "ticker": "CWT",
+              "xirr": -0.0840629047984817
+            },
+            {
+              "fees": {
+                "brokerage": 36.76,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 33.13,
+                "gst": 7.82,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 24.51,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 108.88,
+                "us_regulatory": 6.66
+              },
+              "gross": 24501.63,
+              "net": 24392.75,
+              "net_profit": -4348.08,
+              "outlay": 28740.83,
+              "price": 2227.4202561840066,
+              "shares": 11,
+              "tax": 0.0,
+              "ticker": "FTK",
+              "xirr": -0.6768568511515904
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.72,
+                "gst": 7.73,
+                "ipft": 0.1,
+                "sebi": 0.1,
+                "slippage": 91.27,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 141.92
+              },
+              "gross": 91261.83,
+              "net": 91119.91,
+              "net_profit": -10236.72,
+              "outlay": 101356.63,
+              "price": 112.52999877929688,
+              "shares": 811,
+              "tax": 0.0,
+              "ticker": "GOLDBEES.NS",
+              "xirr": -0.5263707066114091
+            },
+            {
+              "fees": {
+                "brokerage": 9.19,
+                "dp": 20.0,
+                "exchange": 0.28,
+                "gst": 5.31,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 9.19,
+                "stamp": 0.0,
+                "stt": 10.0,
+                "total": 53.99
+              },
+              "gross": 9184.5,
+              "net": 9130.51,
+              "net_profit": -788.12,
+              "outlay": 9918.63,
+              "price": 353.25,
+              "shares": 26,
+              "tax": 0.0,
+              "ticker": "INDSWFTLAB.NS",
+              "xirr": -0.44074245144680124
+            },
+            {
+              "fees": {
+                "brokerage": 56.54,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 50.96,
+                "gst": 12.03,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 37.69,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 167.46,
+                "us_regulatory": 10.24
+              },
+              "gross": 37686.78,
+              "net": 37519.32,
+              "net_profit": -2343.87,
+              "outlay": 39863.19,
+              "price": 7537.354829275515,
+              "shares": 5,
+              "tax": 0.0,
+              "ticker": "IRMD",
+              "xirr": -0.3411907982179756
+            },
+            {
+              "fees": {
+                "brokerage": 70.8,
+                "dp": 0.0,
+                "exchange": 0.0,
+                "fx_gst": 63.82,
+                "gst": 15.06,
+                "ipft": 0.0,
+                "sebi": 0.0,
+                "slippage": 47.2,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 209.7,
+                "us_regulatory": 12.82
+              },
+              "gross": 47194.36,
+              "net": 46984.66,
+              "net_profit": -13447.32,
+              "outlay": 60797.76,
+              "price": 842.7564000211714,
+              "shares": 56,
+              "tax": 0.0,
+              "ticker": "KNOP",
+              "xirr": -0.8215181326777485
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.52,
+                "gst": 7.69,
+                "ipft": 0.09,
+                "sebi": 0.09,
+                "slippage": 84.53,
+                "stamp": 0.0,
+                "stt": 85.0,
+                "total": 219.92
+              },
+              "gross": 84528.0,
+              "net": 81235.75,
+              "net_profit": 11302.09,
+              "outlay": 69933.66,
+              "price": 2348.0,
+              "shares": 36,
+              "tax": 3072.33,
+              "ticker": "LAURUSLABS.NS",
+              "xirr": 1.862053876702385
+            },
+            {
+              "fees": {
+                "brokerage": 10.08,
+                "dp": 20.0,
+                "exchange": 0.3,
+                "gst": 5.48,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 10.08,
+                "stamp": 0.0,
+                "stt": 11.0,
+                "total": 56.99
+              },
+              "gross": 10072.01,
+              "net": 9934.62,
+              "net_profit": 216.17,
+              "outlay": 9718.45,
+              "price": 2014.4000244140625,
+              "shares": 5,
+              "tax": 80.4,
+              "ticker": "LUMAXTECH.NS",
+              "xirr": 0.16698039846431897
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.59,
+                "gst": 7.7,
+                "ipft": 0.09,
+                "sebi": 0.09,
+                "slippage": 86.88,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 137.35
+              },
+              "gross": 86875.52,
+              "net": 86738.17,
+              "net_profit": -4497.21,
+              "outlay": 91235.38,
+              "price": 218.8300018310547,
+              "shares": 397,
+              "tax": 0.0,
+              "ticker": "MAFANG.NS",
+              "xirr": -0.2986954242862364
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.53,
+                "gst": 7.69,
+                "ipft": 0.09,
+                "sebi": 0.09,
+                "slippage": 85.1,
+                "stamp": 0.0,
+                "stt": 0.0,
+                "total": 135.5
+              },
+              "gross": 85092.41,
+              "net": 83615.8,
+              "net_profit": 2702.23,
+              "outlay": 80913.57,
+              "price": 213.8000030517578,
+              "shares": 398,
+              "tax": 1341.11,
+              "ticker": "MONQ50.NS",
+              "xirr": 0.25934078248251957
+            },
+            {
+              "fees": {
+                "brokerage": 13.02,
+                "dp": 20.0,
+                "exchange": 0.39,
+                "gst": 6.03,
+                "ipft": 0.02,
+                "sebi": 0.02,
+                "slippage": 13.02,
+                "stamp": 0.0,
+                "stt": 14.0,
+                "total": 66.5
+              },
+              "gross": 13017.0,
+              "net": 12950.5,
+              "net_profit": -1308.18,
+              "outlay": 14258.68,
+              "price": 6508.5,
+              "shares": 2,
+              "tax": 0.0,
+              "ticker": "MTARTECH.NS",
+              "xirr": -0.4910831988247226
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 1.0,
+                "gst": 7.4,
+                "ipft": 0.04,
+                "sebi": 0.04,
+                "slippage": 33.63,
+                "stamp": 0.0,
+                "stt": 34.0,
+                "total": 116.11
+              },
+              "gross": 33624.0,
+              "net": 33507.89,
+              "net_profit": -977.57,
+              "outlay": 34485.46,
+              "price": 8406.0,
+              "shares": 4,
+              "tax": 0.0,
+              "ticker": "NAVINFLUOR.NS",
+              "xirr": -0.18278330233227083
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 0.75,
+                "gst": 7.35,
+                "ipft": 0.03,
+                "sebi": 0.03,
+                "slippage": 25.24,
+                "stamp": 0.0,
+                "stt": 26.0,
+                "total": 99.4
+              },
+              "gross": 25230.16,
+              "net": 25130.76,
+              "net_profit": -5025.43,
+              "outlay": 30156.19,
+              "price": 934.4500122070312,
+              "shares": 27,
+              "tax": 0.0,
+              "ticker": "SAKAR.NS",
+              "xirr": -0.7218484960996633
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 2.05,
+                "gst": 7.6,
+                "ipft": 0.07,
+                "sebi": 0.07,
+                "slippage": 68.94,
+                "stamp": 0.0,
+                "stt": 69.0,
+                "total": 187.73
+              },
+              "gross": 68933.7,
+              "net": 64923.32,
+              "net_profit": 14233.04,
+              "outlay": 50690.28,
+              "price": 65.33999633789062,
+              "shares": 1055,
+              "tax": 3822.65,
+              "ticker": "SBC.NS",
+              "xirr": 4.680664939603632
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 4.34,
+                "gst": 8.04,
+                "ipft": 0.15,
+                "sebi": 0.15,
+                "slippage": 145.98,
+                "stamp": 0.0,
+                "stt": 146.0,
+                "total": 344.66
+              },
+              "gross": 145970.1,
+              "net": 142557.41,
+              "net_profit": 11025.96,
+              "outlay": 131531.45,
+              "price": 901.0499877929688,
+              "shares": 162,
+              "tax": 3068.03,
+              "ticker": "SIGMAADV.NS",
+              "xirr": 0.7595176671886189
+            },
+            {
+              "fees": {
+                "brokerage": 8.64,
+                "dp": 20.0,
+                "exchange": 0.26,
+                "gst": 5.21,
+                "ipft": 0.01,
+                "sebi": 0.01,
+                "slippage": 8.64,
+                "stamp": 0.0,
+                "stt": 9.0,
+                "total": 51.77
+              },
+              "gross": 8633.35,
+              "net": 8581.58,
+              "net_profit": -1432.94,
+              "outlay": 10014.52,
+              "price": 784.8499755859375,
+              "shares": 11,
+              "tax": 0.0,
+              "ticker": "TMB.NS",
+              "xirr": -0.6617247438111734
+            },
+            {
+              "fees": {
+                "brokerage": 20.0,
+                "dp": 20.0,
+                "exchange": 0.97,
+                "gst": 7.39,
+                "ipft": 0.04,
+                "sebi": 0.04,
+                "slippage": 32.41,
+                "stamp": 0.0,
+                "stt": 33.0,
+                "total": 113.85
+              },
+              "gross": 32410.0,
+              "net": 32296.15,
+              "net_profit": -5590.74,
+              "outlay": 37886.89,
+              "price": 2315.0,
+              "shares": 14,
+              "tax": 0.0,
+              "ticker": "WELCORP.NS",
+              "xirr": -0.6739388633838757
+            }
+          ],
+          "xirr": -0.17303298214638754
+        },
+        "mmi": {
+          "fetched_at": "2026-11-04T09:13:43.286411+00:00",
+          "older_reading": false,
+          "score": 68.69336215774364,
+          "source_at": "2026-11-04T09:12:00.295000+00:00",
+          "zone": "Greed"
+        },
+        "model_only": true,
+        "observation_ready_at": null,
+        "observation_rows": [
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "ACUTAAS.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "AETHER.NS"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "ASX"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "AXTI"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "BLISSGVS.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "CHENNPETRO.NS"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "CWCO"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "CWT"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "FTK"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "GOLDBEES.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "INDSWFTLAB.NS"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "IRMD"
+          },
+          {
+            "observation_session": "2026-09-16",
+            "ready_at": "2026-09-16T20:30:00+00:00",
+            "ticker": "KNOP"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "LAURUSLABS.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "LUMAXTECH.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "MAFANG.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "MONQ50.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "MTARTECH.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "NAVINFLUOR.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "SAKAR.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "SBC.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "SIGMAADV.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "TMB.NS"
+          },
+          {
+            "observation_session": "2026-09-18",
+            "ready_at": "2026-09-18T10:30:00+00:00",
+            "ticker": "WELCORP.NS"
+          }
+        ],
+        "operational_review_window": {
+          "data_ready_at": "2026-11-03T03:00:00+05:30",
+          "date_label": "03 NOV",
+          "end_at": "2026-11-03T09:00:00+05:30",
+          "execution_windows": {
+            "NSE": "2026-11-03T09:30:00+05:30",
+            "NYSE": "2026-11-03T20:15:00+05:30"
+          },
+          "market_context": "Post NYSE | Pre NSE",
+          "model_review_date": "2026-11-02",
+          "selection_method": "equal-market-calendar-score-v6",
+          "start_at": "2026-11-03T08:00:00+05:30",
+          "time_label": "08:00-09:00 IST",
+          "timezone": "Asia/Kolkata"
+        },
+        "policy": {
+          "assessment_wait_after_close_minutes": 30,
+          "block_length": 5,
+          "calendar_verified_through": "2026-12-31",
+          "capital_inr": null,
+          "concentration_limit": 0.5,
+          "crossing_probability": 0.2,
+          "drawdown_limit": 0.15,
+          "drift_limit": 0.05,
+          "entry_max_quote_delay_minutes": 330,
+          "entry_quote_interval": "1m",
+          "entry_wait_after_open_minutes": 15,
+          "execution_wait_after_open_minutes": 15,
+          "fx_quote_max_age_minutes": 360,
+          "history_years": 3,
+          "instrument_kinds": {
+            "ABBV": "foreign_us_listing",
+            "ACUTAAS.NS": "equity",
+            "AETHER.NS": "equity",
+            "ASX": "foreign_us_listing",
+            "AXTI": "foreign_us_listing",
+            "BAFNAPH.NS": "equity",
+            "BLISSGVS.NS": "equity",
+            "BSE.NS": "equity",
+            "BTI": "foreign_us_listing",
+            "BTSG": "foreign_us_listing",
+            "CBOE": "foreign_us_listing",
+            "CEMPRO.NS": "equity",
+            "CHENNPETRO.NS": "equity",
+            "CLS": "foreign_us_listing",
+            "CVS": "foreign_us_listing",
+            "CWCO": "foreign_us_listing",
+            "CWT": "foreign_us_listing",
+            "DG": "foreign_us_listing",
+            "EPOL": "foreign_us_listing",
+            "ESLT": "foreign_us_listing",
+            "ETERNAL.NS": "equity",
+            "EWS": "foreign_us_listing",
+            "EWY": "foreign_us_listing",
+            "FTK": "foreign_us_listing",
+            "GH": "foreign_us_listing",
+            "GLENMARK.NS": "equity",
+            "GOLDBEES.NS": "listed_non_equity_etf",
+            "GOLDBETA.NS": "listed_non_equity_etf",
+            "GREK": "foreign_us_listing",
+            "GVT&D.NS": "equity",
+            "HCI": "foreign_us_listing",
+            "HRTG": "foreign_us_listing",
+            "INDOTECH.NS": "equity",
+            "INDSWFTLAB.NS": "equity",
+            "IRMD": "foreign_us_listing",
+            "JNJ": "foreign_us_listing",
+            "KGC": "foreign_us_listing",
+            "KNOP": "foreign_us_listing",
+            "KO": "foreign_us_listing",
+            "LAURUSLABS.NS": "equity",
+            "LUMAXTECH.NS": "equity",
+            "MACPOWER.NS": "equity",
+            "MAFANG.NS": "listed_non_equity_etf",
+            "MASPTOP50.NS": "listed_non_equity_etf",
+            "MNST": "foreign_us_listing",
+            "MONQ50.NS": "listed_non_equity_etf",
+            "MTARTECH.NS": "equity",
+            "MU": "foreign_us_listing",
+            "NAVINFLUOR.NS": "equity",
+            "NEULANDLAB.NS": "equity",
+            "NVDA": "foreign_us_listing",
+            "ONELIFECAP.NS": "equity",
+            "PARR": "foreign_us_listing",
+            "PBR": "foreign_us_listing",
+            "PGIL.NS": "equity",
+            "PM": "foreign_us_listing",
+            "RADICO.NS": "equity",
+            "RVMD": "foreign_us_listing",
+            "SAKAR.NS": "equity",
+            "SBC.NS": "equity",
+            "SENEA": "foreign_us_listing",
+            "SIGMAADV.NS": "equity",
+            "SKYW": "foreign_us_listing",
+            "STLN": "foreign_us_listing",
+            "STX": "foreign_us_listing",
+            "TEN": "foreign_us_listing",
+            "THANGAMAYL.NS": "equity",
+            "TIGO": "foreign_us_listing",
+            "TMB.NS": "equity",
+            "TRMD": "foreign_us_listing",
+            "TSEM": "foreign_us_listing",
+            "UVE": "foreign_us_listing",
+            "VENUSREM.NS": "equity",
+            "VEON": "foreign_us_listing",
+            "VLO": "foreign_us_listing",
+            "VNM": "foreign_us_listing",
+            "WELCORP.NS": "equity"
+          },
+          "max_review_sessions": 40,
+          "min_annual_improvement": 0.06,
+          "minimum_forecast_review_sessions": 4,
+          "minimum_net_return": 0.0125,
+          "owner_review_day_end": "22:00",
+          "owner_review_day_start": "08:00",
+          "owner_review_duration_minutes": 60,
+          "policy_approved": true,
+          "policy_version": "owner-review-policy-v9",
+          "profit_review_rule": "ROUND_TRIP_FRICTION_PLUS_MINIMUM_NET_RETURN_AND_TARGET_XIRR",
+          "review_timezone": "Asia/Kolkata",
+          "review_window_step_minutes": 15,
+          "seed": 19473,
+          "simulation_paths": 3000,
+          "slab_rate": 0.3,
+          "slippage_bps": 10,
+          "surcharge_rate": 0,
+          "target_xirr": 1,
+          "tariff_max_age_days": 90,
+          "tariff_verified_on": "2026-09-09",
+          "tax_profile": "resident_individual_regular_delivery",
+          "validation_horizon": 40,
+          "validation_max_brier": 0.2,
+          "validation_min_folds": 20,
+          "validation_train": 252
+        },
+        "price_hash": "21464fa0e8255ba6f4e067f564166ad243dee6599eda035524eeabe81f2dae04",
+        "validation": {
+          "passed": false,
+          "reason": "CALENDAR_HORIZON_INCOMPLETE"
+        },
+        "version": "public-review-v2"
+      },
+      "previous_hash": "6fee56d07d6c8cc219599bcdf2b130afc50755e6c16015d987edbb775f53b722",
+      "seq": 903
+    },
+    {
+      "baseline_id": "9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60",
+      "basket_id": "PUBLIC-01",
+      "created_at": "2026-11-04T09:13:44.153911+00:00",
+      "event_hash": "ec0f7ef5988b58b3030f8cb58dbfb1f943def2d041ce1863e9dcdfb69007dc18",
+      "event_key": "heartbeat:9eff98fee8a2d89365b36927d10030cf26eb77e42f72b19ecb88b30dd6e65d60:2026-11-04T09:13:10.902240+00:00",
+      "kind": "HEARTBEAT",
+      "payload": {
+        "alerts_enabled": false,
+        "as_of": "2026-11-02",
+        "at": "2026-11-04T09:13:10.902240+00:00"
+      },
+      "previous_hash": "5f7cea65a4126b492fbd0b3f9481ed228cf38847df2a4a73d925d5b0e073ad72",
+      "seq": 904
     }
   ],
   "schema": "public-portfolio-record-snapshot",
