@@ -1108,8 +1108,6 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     m, d = p["metrics"], p["decision"]
     calendar_coverage = p.get("calendar_coverage", {})
     coverage_message = calendar_coverage_message(calendar_coverage)
-    if coverage_message:
-        st.info(coverage_message)
     status = d["status"].replace("_", " ").capitalize()
     review_required = d.get(
         "review_required",
@@ -1131,6 +1129,11 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
     timing_message = timing_check_message(p, now)
     if timing_message:
         st.info(timing_message)
+    if coverage_message:
+        if calendar_coverage.get("forecast_usable"):
+            st.caption(coverage_message)
+        else:
+            st.info(coverage_message)
     with st.container(horizontal=True):
         review_value = (
             "Now" if review_required
