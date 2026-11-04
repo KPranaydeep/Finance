@@ -191,3 +191,26 @@ This is a historical eligibility comparison, not a confidence claim or permissio
 to skip the existing funded-order and uncertainty review. Buys and zero-target
 exits retain their existing rules. The before/after Sharpe, cost assumption and
 decision are saved with the new plan and displayed again after restart.
+
+### Calendar-bounded review forecasts
+
+The configured 40-session review horizon is a maximum. When fewer future exchange
+sessions are verified, the observed assessment and provisional previews can use a
+shorter window with at least five sessions (or the configured observation minimum,
+whichever is larger). The five-session floor follows the validation engine's
+supported minimum. Validation's test horizon is capped to the same available
+window; its policy hash must match the effective forecast policy before a date can
+pass the validation gate. Approved policy settings are retained unchanged, with
+the effective policy and calendar coverage stored alongside new evidence.
+The UI distinguishes a shorter forecast from an unavailable forecast. Missing,
+duplicated or out-of-order dates never fill the configured horizon; no dates beyond
+the calendar's verified-through boundary are generated. Optional follow-up dates
+do not become a requirement for any of these forecast paths. Forecast method v8
+and captured-security method v3 make changed results append-only under new keys.
+
+On 4 November 2026, the retained NSE verification boundary remains 31 December
+2026. The official NSE holiday page did not supply a verified 2027 equity schedule
+in this review, so the boundary was not extended. NYSE publishes its 2027 schedule
+separately; that does not establish NSE dates for a mixed-market portfolio.
+Sources: https://www.nseindia.com/resources/exchange-communication-holidays and
+https://www.nyse.com/markets/hours-calendars.

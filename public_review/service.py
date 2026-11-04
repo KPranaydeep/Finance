@@ -8,6 +8,7 @@ from . import VERSION
 from . import store, market
 from .core import freeze, evaluate, compare_exits, decision, digest
 from .forecast import estimate, validate, METHOD
+from .calendar_horizon import verified_forecast_policy
 from .notifications import send
 from .windows import estimate_review_window
 
@@ -205,26 +206,21 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
         peak = max(peak, m["net_proceeds"])
     validation = {"passed": False, "reason": "INSUFFICIENT_COMMON_HISTORY"}
     forecast = {"status": "INSUFFICIENT_COMMON_HISTORY", "next_review": None}
-    calendar_coverage = {
-        "required_forecast_sessions": int(policy["max_review_sessions"]),
-        "available_forecast_sessions": len(future),
-        "verified_through": policy["calendar_verified_through"],
-        "complete": len(future) >= int(policy["max_review_sessions"]),
-    }
-    if not calendar_coverage["complete"]:
+    forecast_policy, calendar_coverage = verified_forecast_policy(policy, future)
+    if forecast_policy is None:
         validation = {"passed": False, "reason": "CALENDAR_HORIZON_INCOMPLETE"}
         forecast = {"status": "CALENDAR_HORIZON_INCOMPLETE", "next_review": None}
-    if len(returns) >= 126 and calendar_coverage["complete"]:
+    if len(returns) >= 126 and forecast_policy is not None:
         try:
             validation = validate(
-                returns, baseline, prices, list(returns.index), policy)
+                returns, baseline, prices, list(returns.index), forecast_policy)
         except ValueError:
             raise ValueError("ASSESSMENT_VALIDATION_VALUE_ERROR") from None
         future_baseline = deepcopy(baseline)
         future_baseline["cash"] += sum(x["net"] for x in dividends)
         try:
             forecast = estimate(
-                future_baseline, prices, returns, future, policy, peak,
+                future_baseline, prices, returns, future, forecast_policy, peak,
                 validation, dividends=dividends)
         except ValueError:
             raise ValueError("ASSESSMENT_FORECAST_VALUE_ERROR") from None
@@ -304,7 +300,7 @@ def build_assessment(baseline, histories, as_of, future, policy, prior,
     return {"version": VERSION, "baseline_id": baseline["baseline_id"], "as_of": as_of,
             "checked_at": now.isoformat(), "policy": policy, "metrics": metrics,
             "decision": assessed, "forecast": forecast, "validation": validation, "history_coverage": coverage,
-            "calendar_coverage": calendar_coverage,
+            "calendar_coverage": calendar_coverage, "forecast_policy": forecast_policy,
             "comparisons": exit_comparisons,
             "operational_review_window": operational_window,
             "forecast_observation_pending": not forecast_ready,

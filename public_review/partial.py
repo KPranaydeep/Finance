@@ -8,9 +8,10 @@ from . import market
 from .core import digest
 from .costs import charges
 from .forecast import estimate
+from .calendar_horizon import verified_forecast_policy
 
 
-METHOD = "captured-security-one-share-net-xirr-v2"
+METHOD = "captured-security-one-share-net-xirr-v3"
 
 
 def _one_share_baseline(publication, entry, policy):
@@ -51,7 +52,7 @@ def _security_dates(now, entry_date, market_name, policy):
     required_future = policy["max_review_sessions"] + 5
     future = [str(day.date()) for day in schedule.index
               if str(day.date()) > max(as_of, entry_date)][:required_future]
-    if len(future) < required_future:
+    if verified_forecast_policy(policy, future)[0] is None:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
     return as_of, future
 
@@ -83,10 +84,12 @@ def estimate_captured_security(publication, entry, policy, now):
         raise ValueError("INSUFFICIENT_COMMON_HISTORY")
     current = float(history.loc[as_of, "Close"]) if as_of in history.index else float(entry["price_inr"])
     baseline = _one_share_baseline(publication, entry, policy)
-    forecast = estimate(baseline, {ticker: current}, returns, future, policy,
+    forecast_policy, calendar_coverage = verified_forecast_policy(policy, future)
+    forecast = estimate(baseline, {ticker: current}, returns, future, forecast_policy,
                         baseline["capital"], validation=None)
     crossing = forecast["security_crossings"][0]
     payload = {"status": "PROVISIONAL_RESEARCH", "method": METHOD,
+               "calendar_coverage": calendar_coverage, "forecast_policy": forecast_policy,
                "publication_id": publication["publication_id"], "ticker": ticker,
                "entry_at": entry.get("requested_entry_at"), "entry_quote_at": entry.get("quote_at"),
                "entry_price_inr": float(entry["price_inr"]), "as_of": as_of,

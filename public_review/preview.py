@@ -5,6 +5,7 @@ import pandas as pd
 from . import market
 from .core import digest, evaluate, freeze
 from .forecast import estimate, validate
+from .calendar_horizon import verified_forecast_policy
 from .windows import estimate_review_window
 
 
@@ -108,10 +109,11 @@ def _immediate_baseline_preview(
     future_after = max(observation_ready_at, pd.Timestamp(now))
     future = [str(day.date()) for day, session in schedule.iterrows()
               if session.market_open > future_after][:required_future]
-    if len(future) < required_future:
+    forecast_policy, calendar_coverage = verified_forecast_policy(policy, future)
+    if forecast_policy is None:
         raise ValueError("INCOMPLETE_SESSION_CALENDAR")
-    validation = validate(returns, baseline, marks, list(returns.index), policy)
-    forecast = estimate(baseline, marks, returns, future, policy,
+    validation = validate(returns, baseline, marks, list(returns.index), forecast_policy)
+    forecast = estimate(baseline, marks, returns, future, forecast_policy,
                         baseline["capital"], validation)
     candidate = forecast.get("next_review") or forecast.get("research_candidate") or future[0]
     try:
@@ -149,6 +151,7 @@ def _immediate_baseline_preview(
             "policy_version": policy.get("policy_version"),
             "policy_digest": digest(policy),
             "history_coverage": coverage, "ack_epoch": ack_epoch,
+            "calendar_coverage": calendar_coverage, "forecast_policy": forecast_policy,
             "as_of": history_as_of, "checked_at": pd.Timestamp(now).isoformat(),
             "observation_ready_at": observation_ready_at.isoformat(),
             "observation_rows": observation_rows,

@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 from . import store
 from .forecast import TIMING_MODEL
+from .calendar_horizon import calendar_coverage_message
 from .market import ENTRY_MODEL_VERSION
 from .windows import REVIEW_WINDOW_MODEL
 
@@ -1099,15 +1100,9 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         return
     m, d = p["metrics"], p["decision"]
     calendar_coverage = p.get("calendar_coverage", {})
-    if calendar_coverage.get("complete") is False:
-        st.info(
-            "Observed performance and risk checks are current; the review-date "
-            "forecast is unavailable. "
-            f"{calendar_coverage['available_forecast_sessions']} of "
-            f"{calendar_coverage['required_forecast_sessions']} future sessions "
-            f"are verified through {calendar_coverage['verified_through']}. "
-            "Reverify the calendar to restore the full forecast horizon."
-        )
+    coverage_message = calendar_coverage_message(calendar_coverage)
+    if coverage_message:
+        st.info(coverage_message)
     status = d["status"].replace("_", " ").capitalize()
     review_required = d.get(
         "review_required",

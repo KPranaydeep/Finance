@@ -3,7 +3,7 @@ import numpy as np
 from .costs import tax_rate
 from .core import digest
 
-METHOD = "allocation-probability-weighted-review-net-floor-v7"
+METHOD = "allocation-probability-weighted-review-net-floor-v8"
 TIMING_MODEL = "allocation-weighted-consecutive-review-net-floor-v4"
 
 
@@ -231,7 +231,7 @@ def estimate(baseline, prices, returns, future_dates, policy, peak, validation=N
     approved = bool(validation and validation.get("passed") and
                     validation.get("policy_hash") == digest(policy) and
                     validation.get("tickers") == tickers and validation.get("method") == METHOD)
-    return {"method": METHOD,
+    return {"method": METHOD, "horizon_sessions": len(future_dates),
             "status": "WALK_FORWARD_CHECKS_PASSED_EXPERIMENTAL" if approved else "RESEARCH_ONLY",
             "next_review": candidate if approved else None, "research_candidate": candidate,
             "unadjusted_research_candidate": model_candidate,
