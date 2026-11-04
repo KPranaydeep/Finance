@@ -44,15 +44,19 @@ def calendar_coverage_message(coverage):
     if not coverage or coverage.get("complete") is not False:
         return None
     if coverage.get("forecast_usable"):
+        missing = coverage["required_forecast_sessions"] - coverage["effective_forecast_sessions"]
         return (
             f"Review forecast uses {coverage['effective_forecast_sessions']} verified sessions "
             f"through {coverage['forecast_through']} (configured maximum "
-            f"{coverage['required_forecast_sessions']}). Validation is capped to this window. "
-            "The forecast will extend when more exchange dates are verified."
+            f"{coverage['required_forecast_sessions']}). The remaining {missing} need later "
+            "verified exchange dates; they are not missing observed prices. "
+            "Validation uses the available window."
         )
+    missing = max(0, coverage['required_forecast_sessions'] - coverage['available_forecast_sessions'])
     return (
         "Observed performance and risk checks are current; the review-date forecast is unavailable. "
         f"{coverage['available_forecast_sessions']} of {coverage['required_forecast_sessions']} future sessions "
-        f"are verified through {coverage['verified_through']}. "
+        f"are verified through {coverage['verified_through']}; {missing} need later verified dates, "
+        "not additional observed prices. "
         "Reverify the calendar to restore the full forecast horizon."
     )

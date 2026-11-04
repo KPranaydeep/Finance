@@ -214,3 +214,19 @@ in this review, so the boundary was not extended. NYSE publishes its 2027 schedu
 separately; that does not establish NSE dates for a mixed-market portfolio.
 Sources: https://www.nseindia.com/resources/exchange-communication-holidays and
 https://www.nyse.com/markets/hours-calendars.
+
+### Current trigger versus next timing check
+
+While a new basket is collecting its required post-entry observations, the review
+panel shows the next scheduled timing update separately from an active review
+flag. It reads the workflow cron entries and applies the existing US DST guard;
+it does not assume data-ready time is when the app will publish new evidence.
+For the current four-session window, data is ready on 7 November at 03:00 IST and
+the next scheduled weekend update begins at 18:15 IST. Scheduling delays and job
+completion still govern actual publication. An elapsed observation window does
+not automatically pass validation. Previous operational windows remain in the
+evidence expander while this next-check explanation is active.
+Calendar notices explain how many future dates remain unverified and distinguish
+them from missing observed prices. The public refresh button clears only the
+basket's cached static record and rereads published evidence; it does not run the
+optimizer, wake the database or publish an assessment.

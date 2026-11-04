@@ -8,6 +8,7 @@ import streamlit as st
 from . import store
 from .forecast import TIMING_MODEL
 from .calendar_horizon import calendar_coverage_message
+from .check_in import timing_check_message
 from .market import ENTRY_MODEL_VERSION
 from .windows import REVIEW_WINDOW_MODEL
 
@@ -741,6 +742,12 @@ def snapshot_review_card_summary(events, publication_id, now=None):
 def render_snapshot_review_panel(active_publications, events):
     """Render stored review evidence without waking the database or providers."""
     st.subheader("Your next portfolio review")
+    if st.button("Refresh review status", key="refresh_snapshot_review_status",
+                 help="Reload the latest published evidence; no optimizer or database run."):
+        from public_card_feed import load_public_record
+        if active_publications:
+            load_public_record.clear(active_publications[0].get("basket_id") or "PUBLIC-01")
+        st.rerun()
     publication_id = (
         active_publications[0].get("publication_id")
         if active_publications else None
@@ -1109,11 +1116,21 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         bool(d["reasons"]) and not d.get("review_acknowledged"),
     )
     if review_required:
-        st.warning(status + " — review the estimates before acting. No trades have been submitted.")
+        crossed = d.get("target_crossed_securities") or []
+        if set(d.get("reasons") or []) == {"SECURITY_TARGET_REVIEW"} and crossed:
+            message = "Review now · individual profit-review thresholds crossed: " + ", ".join(crossed) + "."
+            if m["net_total_return"] < 0:
+                message += " Individual triggers can occur while the basket's net return is negative."
+            st.warning(message)
+        else:
+            st.warning(status + " — review the estimates before acting. No trades have been submitted.")
     elif d.get("review_acknowledged"):
         st.info("Owner review completed. No trade or portfolio change was recorded; monitoring continues.")
     else:
         st.info("No configured trigger detected. This is not a guarantee against losses.")
+    timing_message = timing_check_message(p, now)
+    if timing_message:
+        st.info(timing_message)
     with st.container(horizontal=True):
         review_value = (
             "Now" if review_required
@@ -1121,11 +1138,12 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
                 "Review completed" if d.get("review_acknowledged") else "Not validated"
             )
         )
-        st.metric("Next suggested review", review_value)
+        st.metric("Review status" if review_required else "Next suggested review", review_value)
         st.metric("Estimated net XIRR", percent(m["xirr"]))
         st.metric("Estimated net profit", f"₹{m['net_profit']:,.2f}")
         st.metric("Estimated exit proceeds", f"₹{m['net_proceeds']:,.2f}")
-    render_operational_window(p, now=now)
+    if not timing_message:
+        render_operational_window(p, now=now)
     forecast_review = p.get("forecast", {}).get("next_review")
     if p.get("forecast_observation_pending"):
         forecast_review = d.get("planning_review")
@@ -1134,14 +1152,6 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.caption(
             f"Review window: {forecast_review}, then {followup} if follow-up is needed. "
             "The second date is the next verified common trading session across the basket's represented markets."
-        )
-    if p.get("forecast_observation_pending") and p.get("observation_ready_at"):
-        ready = datetime.fromisoformat(p["observation_ready_at"]).astimezone(
-            ZoneInfo("Asia/Kolkata"))
-        st.caption(
-            f"Net performance is observed through {p.get('as_of')}. "
-            f"The planning review remains provisional until "
-            f"{ready:%d %b %Y, %H:%M IST}."
         )
     checked = datetime.fromisoformat(checked_at).astimezone(ZoneInfo("Asia/Kolkata"))
     st.caption(f"{m['days_held']} days held · Absolute net return {percent(m['net_total_return'])} · Prices through {p['as_of']} · Checked {checked:%d %b %Y %H:%M IST}")
@@ -1165,6 +1175,8 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
         st.download_button("Download model comparison (.json)", json.dumps(p["comparisons"], indent=2),
                            file_name=f"model-exit-comparison-P{baseline['portfolio_version']:03d}.json", mime="application/json")
     with st.expander("Review-date evidence and assumptions", expanded=False):
+        if timing_message:
+            render_operational_window(p, now=now)
         forecast = p["forecast"]
         render_crossings(forecast, f"assessment_security_crossings_sort_{bid}")
         st.write("Forecast status: " + forecast["status"].replace("_", " ").lower())
