@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 import pandas as pd
-from public_outlook import calendar_outlook, calendar_realization, pending_outlook_note
+from public_outlook import calendar_outlook, calendar_realization, pending_outlook_note, pending_outlook_status
 
 
 class CalendarOutlookTests(unittest.TestCase):
@@ -33,6 +33,10 @@ class CalendarOutlookTests(unittest.TestCase):
     def test_ready_history_is_pending_calculation_not_insufficient_history(self):
         self.assertEqual(pending_outlook_note(self.rows,self.origin,12),
                          'Awaiting P012 outlook calculation')
+        ready=pending_outlook_status(self.rows,self.origin,12)
+        self.assertEqual(ready['status'],'pending_calculation')
+        self.assertEqual(ready['observation_count'],len(self.rows))
+        self.assertGreaterEqual(ready['scenario_count'],20)
         self.assertIn('sufficient usable model history',pending_outlook_note(self.rows[:30],self.origin,12))
         invalid=[dict(row) for row in self.rows]
         invalid[-1]['nav']=float('nan')

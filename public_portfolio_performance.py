@@ -29,7 +29,7 @@ from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
 from public_withdrawal_allocator import allocate_withdrawal
 from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
 from public_world_benchmark import compare_world_benchmark, LABEL as WORLD_BENCHMARK_LABEL
-from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD, pending_outlook_note
+from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD, pending_outlook_status
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
@@ -421,12 +421,13 @@ if (not current_forecast_values and planning_review_summary
         "provisional": True,
     }
 median_outcome=pct(current_forecast_values.get("median_return"))
+pending_outlook = pending_outlook_status(record.get("nav", []), datetime.now(IST).date(), current["portfolio_version"]) if not current_forecast else {}
 forecast_note=(
     "28 calendar days · estimated"
     if current_forecast
     else ("28 calendar days · provisional last-close model"
           if current_forecast_values.get("provisional")
-          else pending_outlook_note(record.get("nav", []), datetime.now(IST).date(), current["portfolio_version"]))
+          else pending_outlook["note"])
 )
 
 st.markdown(
@@ -1046,9 +1047,14 @@ if nav:
 st.subheader("28-Day Outlook — statistical estimate")
 forecasts=current_forecasts
 if not forecasts:
-    collected=min(len(nav),MINIMUM_NAV_ROWS)
-    st.info(f"Awaiting a 28-day outlook: {collected} of {MINIMUM_NAV_ROWS} minimum NAV observations collected; at least 20 complete four-week scenarios are also required. Run the daily update after sufficient history is available.")
-    st.progress(collected/MINIMUM_NAV_ROWS)
+    if pending_outlook.get('status') == 'pending_calculation':
+        st.info(f"History is ready: {pending_outlook['observation_count']} NAV observations and {pending_outlook['scenario_count']} usable four-week scenarios. P{int(current['portfolio_version']):03d} is awaiting its outlook update.")
+    elif pending_outlook.get('status') == 'invalid_history':
+        st.warning(pending_outlook['note'])
+    else:
+        collected=min(len(nav),MINIMUM_NAV_ROWS)
+        st.info(f"Awaiting a 28-day outlook: {collected} of {MINIMUM_NAV_ROWS} minimum NAV observations collected; at least 20 complete four-week scenarios are also required.")
+        st.progress(collected/MINIMUM_NAV_ROWS)
 else:
     forecast=forecasts[0]; values=forecast["forecast_json"]
     o1,o2,o3,o4=st.columns(4)

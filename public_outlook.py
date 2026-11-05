@@ -10,14 +10,19 @@ VERSION = "forecast-v3-28calendar"
 
 
 def pending_outlook_note(rows, forecast_date, portfolio_version):
+    return pending_outlook_status(rows, forecast_date, portfolio_version)["note"]
+
+
+def pending_outlook_status(rows, forecast_date, portfolio_version):
     """Do not confuse an unrun forecast job with missing usable history."""
     try:
-        ready = calendar_outlook(rows, forecast_date) is not None
+        ready = calendar_outlook(rows, forecast_date)
     except (ValueError, TypeError, KeyError):
-        return "Model history needs validation"
-    if ready:
-        return f"Awaiting P{int(portfolio_version):03d} outlook calculation"
-    return "Awaiting sufficient usable model history"
+        return {"status":"invalid_history","note":"Model history needs validation"}
+    if ready is not None:
+        return {"status":"pending_calculation", "note":f"Awaiting P{int(portfolio_version):03d} outlook calculation",
+                "observation_count":ready['observation_count'],"scenario_count":ready['scenario_count']}
+    return {"status":"insufficient_history","note":"Awaiting sufficient usable model history"}
 
 
 def calendar_outlook(rows, forecast_date):
