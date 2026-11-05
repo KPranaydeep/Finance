@@ -4,7 +4,7 @@ import sqlite3
 
 import streamlit as st
 
-from trade_deferrals_ui import render_optimal_weight_pause_editor
+from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
 
 
 @contextmanager
@@ -19,6 +19,14 @@ weights = [
     {'ticker': 'NOORDER', 'target_weight': .4},
 ]
 st.title('Optimal weights · synthetic preview')
-render_optimal_weight_pause_editor(weights, 'synthetic-owner', 'saved-test', connection)
+st.session_state['full_app_runs'] = st.session_state.get('full_app_runs', 0) + 1
+st.caption(f"Full app executions: {st.session_state['full_app_runs']}")
+if st.session_state.get('registry_only'):
+    render_active_security_pauses('synthetic-owner', connection, 'registry-test')
+    st.stop()
+if not st.session_state.get('one_shot_results') or st.button('Run synthetic analysis'):
+    st.metric('Saved analysis metric', '12.34%')
+    render_optimal_weight_pause_editor(weights, 'synthetic-owner', 'saved-test', connection)
+    st.markdown('Analysis results remain visible below the pause controls.')
 if st.session_state.get('show_second_view'):
     render_optimal_weight_pause_editor(weights, 'synthetic-owner', 'live-test', connection)

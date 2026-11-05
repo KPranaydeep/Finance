@@ -107,7 +107,7 @@ from trade_deferrals import (
     exclude_deferred_candidates,
     split_deferred_trades,
 )
-from trade_deferrals_ui import render_optimal_weight_pause_editor
+from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -2779,6 +2779,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
     with placeholder.container():
         payload = load_latest_analysis(owner)
 
+        with st.expander("Security pause status · 90 days", expanded=False):
+            render_active_security_pauses(
+                owner, get_db_connection, key_prefix=f"pause_status_{instance_key}",
+            )
+
         if payload is None:
             st.info(
                 "No saved analysis yet. Run analysis once or upload an analysis backup."
@@ -3185,7 +3190,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     "Historical estimates do not establish statistical significance. Orders remain available for review."
                 )
 
-        with st.expander("Saved optimal weights · pause securities", expanded=False):
+        with st.expander("Saved optimal weights · pause securities", expanded=True):
             render_optimal_weight_pause_editor(
                 payload.get("optimal_allocation") or [], owner,
                 key_prefix=f"saved_optimal_weights_{widget_scope}",

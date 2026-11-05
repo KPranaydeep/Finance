@@ -111,6 +111,10 @@ optimal weights (including saved weights after restart), even when no trade is
 executable. These use the same owner-scoped registry as trade-row pauses, block
 trades and future solver inclusion until expiry, and leave saved analysis weights
 and holdings records intact.
+Pause submission refreshes only its own controls, preserving the analysis on
+screen. Saved optimal weights open without another optimizer run, and the
+independent **Security pause status · 90 days** panel lists all active pauses
+and expiry dates even when no saved analysis is available.
 
 The public model-review selector defaults to the latest publication even while
 its entry evidence is pending. Earlier frozen model investments remain selectable;
