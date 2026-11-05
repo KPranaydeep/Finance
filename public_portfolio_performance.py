@@ -29,7 +29,7 @@ from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
 from public_withdrawal_allocator import allocate_withdrawal
 from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
 from public_world_benchmark import compare_world_benchmark, LABEL as WORLD_BENCHMARK_LABEL
-from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD
+from public_outlook import HORIZON_DAYS, MINIMUM_NAV_ROWS, METHOD, pending_outlook_note
 
 from public_basket_postgres import DEFAULT_BASKET_ID
 from public_lumpsum_allocator import allocate_public_lumpsum, estimate_minimum_entry_capital
@@ -426,7 +426,7 @@ forecast_note=(
     if current_forecast
     else ("28 calendar days · provisional last-close model"
           if current_forecast_values.get("provisional")
-          else "Awaiting sufficient model history")
+          else pending_outlook_note(record.get("nav", []), datetime.now(IST).date(), current["portfolio_version"]))
 )
 
 st.markdown(

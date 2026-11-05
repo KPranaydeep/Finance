@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "30 12 * * 1-5"
   workflow_dispatch:
+    inputs:
+      refresh_scope:
+        description: "Full daily update, or outlook from existing NAV only (no price downloads/NAV rebuild)"
+        type: choice
+        required: true
+        default: full
+        options:
+          - full
+          - outlook_only
 
 permissions:
   contents: write
@@ -26,7 +35,9 @@ jobs:
       - name: Check review-policy maintenance horizon
         run: python check_public_review_maintenance.py
       - run: pip install -r requirements.txt
-      - run: python update_public_nav.py
+      - name: Update observed model NAV
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.refresh_scope != 'outlook_only' }}
+        run: python update_public_nav.py
         env:
           PUBLIC_BASKET_DATABASE_URL: ${{ secrets.PUBLIC_BASKET_DATABASE_URL }}
           PUBLIC_PORTFOLIO_ENV: PRODUCTION

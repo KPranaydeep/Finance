@@ -9,6 +9,17 @@ METHOD = "historical-calendar-block-28d-v1"
 VERSION = "forecast-v3-28calendar"
 
 
+def pending_outlook_note(rows, forecast_date, portfolio_version):
+    """Do not confuse an unrun forecast job with missing usable history."""
+    try:
+        ready = calendar_outlook(rows, forecast_date) is not None
+    except (ValueError, TypeError, KeyError):
+        return "Model history needs validation"
+    if ready:
+        return f"Awaiting P{int(portfolio_version):03d} outlook calculation"
+    return "Awaiting sufficient usable model history"
+
+
 def calendar_outlook(rows, forecast_date):
     """Use complete four-week historical blocks aligned to issuance weekday.
 

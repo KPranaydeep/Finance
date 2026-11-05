@@ -78,6 +78,10 @@ if the update cannot finish.
 
 - `.github/workflows/public_portfolio_daily.yml` updates model NAV, creates or
   evaluates the 28-calendar-day outlook, and runs the production smoke test.
+  For a newly published version with sufficient existing NAV history, its manual
+  `refresh_scope=outlook_only` mode creates the version-linked outlook, runs the
+  same acceptance checks and republishes the verified snapshot, while skipping
+  price downloads and NAV rebuilding. It does not publish a new allocation.
 - `.github/workflows/public_portfolio_review.yml` performs mixed-market entry,
   monitoring and planning checks without submitting trades. Its manual inputs can
   append an acknowledgement that the owner completed a review.

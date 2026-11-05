@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 import pandas as pd
-from public_outlook import calendar_outlook, calendar_realization
+from public_outlook import calendar_outlook, calendar_realization, pending_outlook_note
 
 
 class CalendarOutlookTests(unittest.TestCase):
@@ -29,6 +29,14 @@ class CalendarOutlookTests(unittest.TestCase):
         rows[50]["nav"]=float("nan")
         with self.assertRaises(ValueError):
             calendar_outlook(rows,self.origin)
+
+    def test_ready_history_is_pending_calculation_not_insufficient_history(self):
+        self.assertEqual(pending_outlook_note(self.rows,self.origin,12),
+                         'Awaiting P012 outlook calculation')
+        self.assertIn('sufficient usable model history',pending_outlook_note(self.rows[:30],self.origin,12))
+        invalid=[dict(row) for row in self.rows]
+        invalid[-1]['nav']=float('nan')
+        self.assertEqual(pending_outlook_note(invalid,self.origin,12),'Model history needs validation')
 
     def test_weekend_expiry_uses_friday_and_frozen_reference(self):
         payload=dict(target_date="2026-10-04",reference_date="2026-09-04",reference_nav=100)
