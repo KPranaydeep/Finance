@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-05T04:38:46.263502+00:00",
-  "payload_sha256": "8baef402a5eaa607bdb0219ef794a668cc4b3e4249fa7555efcb96d1f440bde2",
+  "generated_at": "2026-11-05T05:07:25.504178+00:00",
+  "payload_sha256": "c21560146dc468ec31e0832da083198f2dd25ba2e8d31a49950aafaf41a2656f",
   "record": {
     "active_forecast_realizations": [
       {
@@ -534,6 +534,53 @@
       }
     ],
     "active_forecasts": [
+      {
+        "basket_id": "PUBLIC-01",
+        "calculation_version": "forecast-v3-28calendar-nav-dbd72fc7bcdc",
+        "forecast_date": "2026-11-05",
+        "forecast_id": "FCST-A145BC42A253A0ABC6316CDC",
+        "forecast_json": {
+          "history_source": "DEVELOPMENT_BACKFILL",
+          "horizon_days": 28,
+          "horizon_unit": "calendar_days",
+          "loss_threshold": -0.05,
+          "lower_50": 0.01099322655232371,
+          "lower_90": -0.043230831920408205,
+          "median_return": 0.04951641876810797,
+          "method": "historical-calendar-block-28d-v1",
+          "nav_snapshot_sha256": "dbd72fc7bcdcfdf92d1246ea0295fd8ae9f7c7def7922fba8e15cbcc8558d1c3",
+          "observation_count": 491,
+          "overlapping_scenarios": true,
+          "probability_loss_gt_threshold": 0.0425531914893617,
+          "probability_negative": 0.22340425531914893,
+          "probability_positive": 0.776595744680851,
+          "reference_date": "2026-11-03",
+          "reference_nav": 302.7439783868214,
+          "sample_end": "2026-11-03",
+          "sample_start": "2024-12-16",
+          "scenario_count": 94,
+          "target_date": "2026-12-03",
+          "upper_50": 0.0811651210181441,
+          "upper_90": 0.1640655631526526
+        },
+        "forecast_timestamp": "2026-11-05T05:07:20.088439+00:00",
+        "horizon_days": 28,
+        "loss_threshold": -0.05,
+        "lower_50": 0.01099322655232371,
+        "lower_90": -0.043230831920408205,
+        "median_return": 0.04951641876810797,
+        "methodology": "historical-calendar-block-28d-v1",
+        "observation_count": 491,
+        "payload_sha256": "a145bc42a253a0abc6316cdc62f785319b487bad539417b5b71dbe8f07b47155",
+        "probability_loss_gt_threshold": 0.0425531914893617,
+        "probability_negative": 0.22340425531914893,
+        "probability_positive": 0.776595744680851,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "sample_end": "2026-11-03",
+        "sample_start": "2024-12-16",
+        "upper_50": 0.0811651210181441,
+        "upper_90": 0.1640655631526526
+      },
       {
         "basket_id": "PUBLIC-01",
         "calculation_version": "forecast-v3-28calendar-nav-dbd72fc7bcdc",
@@ -7172,6 +7219,28 @@
         },
         "previous_hash": "f1a0b3fd2933dbcdb5185a8b0a76a7c3fb4e920b0fb3bd72741c19e7c3a57fdf",
         "sequence_number": 117
+      },
+      {
+        "audit_id": 118,
+        "basket_id": "PUBLIC-01",
+        "entity_id": "FCST-A145BC42A253A0ABC6316CDC",
+        "entity_type": "forecast",
+        "event_at": "2026-11-05T05:07:20.258938+00:00",
+        "event_hash": "728888a98f164cea50507335ec30462aa8353f6d5d2fba56b11400b34784a3b7",
+        "event_type": "FORECAST_RECORDED",
+        "payload_json": {
+          "basket_id": "PUBLIC-01",
+          "entity_id": "FCST-A145BC42A253A0ABC6316CDC",
+          "entity_type": "forecast",
+          "event_type": "FORECAST_RECORDED",
+          "payload": {
+            "forecast_date": "2026-11-05",
+            "payload_sha256": "a145bc42a253a0abc6316cdc62f785319b487bad539417b5b71dbe8f07b47155"
+          },
+          "sequence_number": 118
+        },
+        "previous_hash": "d8e3acaf136ecfee7add7b101dbe9f18fd018f8b086ee586c4c5f5b4a568fb21",
+        "sequence_number": 118
       }
     ],
     "basket": {
@@ -7977,6 +8046,53 @@
       }
     ],
     "forecasts": [
+      {
+        "basket_id": "PUBLIC-01",
+        "calculation_version": "forecast-v3-28calendar-nav-dbd72fc7bcdc",
+        "forecast_date": "2026-11-05",
+        "forecast_id": "FCST-A145BC42A253A0ABC6316CDC",
+        "forecast_json": {
+          "history_source": "DEVELOPMENT_BACKFILL",
+          "horizon_days": 28,
+          "horizon_unit": "calendar_days",
+          "loss_threshold": -0.05,
+          "lower_50": 0.01099322655232371,
+          "lower_90": -0.043230831920408205,
+          "median_return": 0.04951641876810797,
+          "method": "historical-calendar-block-28d-v1",
+          "nav_snapshot_sha256": "dbd72fc7bcdcfdf92d1246ea0295fd8ae9f7c7def7922fba8e15cbcc8558d1c3",
+          "observation_count": 491,
+          "overlapping_scenarios": true,
+          "probability_loss_gt_threshold": 0.0425531914893617,
+          "probability_negative": 0.22340425531914893,
+          "probability_positive": 0.776595744680851,
+          "reference_date": "2026-11-03",
+          "reference_nav": 302.7439783868214,
+          "sample_end": "2026-11-03",
+          "sample_start": "2024-12-16",
+          "scenario_count": 94,
+          "target_date": "2026-12-03",
+          "upper_50": 0.0811651210181441,
+          "upper_90": 0.1640655631526526
+        },
+        "forecast_timestamp": "2026-11-05T05:07:20.088439+00:00",
+        "horizon_days": 28,
+        "loss_threshold": -0.05,
+        "lower_50": 0.01099322655232371,
+        "lower_90": -0.043230831920408205,
+        "median_return": 0.04951641876810797,
+        "methodology": "historical-calendar-block-28d-v1",
+        "observation_count": 491,
+        "payload_sha256": "a145bc42a253a0abc6316cdc62f785319b487bad539417b5b71dbe8f07b47155",
+        "probability_loss_gt_threshold": 0.0425531914893617,
+        "probability_negative": 0.22340425531914893,
+        "probability_positive": 0.776595744680851,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "sample_end": "2026-11-03",
+        "sample_start": "2024-12-16",
+        "upper_50": 0.0811651210181441,
+        "upper_90": 0.1640655631526526
+      },
       {
         "basket_id": "PUBLIC-01",
         "calculation_version": "forecast-v3-28calendar-nav-dbd72fc7bcdc",
