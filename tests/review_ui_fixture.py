@@ -26,5 +26,10 @@ if mode=='second':
     from copy import deepcopy
     other=deepcopy(b); other['baseline_id']='other'; other['portfolio_version']=3; other['publication_id']='PUB-OTHER'
     events.append({'kind':'BASELINE','baseline_id':'other','seq':3,'payload':other})
+if mode=='latest_frozen':
+    from copy import deepcopy
+    other=deepcopy(b); other['baseline_id']='new'; other['portfolio_version']=12; other['publication_id']='PUB-NEW'
+    events.append({'kind':'BASELINE','baseline_id':'new','seq':3,'payload':other})
 render_events(events,now=now,
-              latest_publication_id='PUB-NEW' if mode=='latest_pending' else None)
+              latest_publication_id='PUB-NEW' if mode in {'latest_pending', 'latest_frozen'} else None,
+              latest_publication_version=12 if mode in {'latest_pending', 'latest_frozen'} else None)

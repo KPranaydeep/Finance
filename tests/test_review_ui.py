@@ -75,6 +75,12 @@ class UiTests(unittest.TestCase):
 
     def test_pending_publication_does_not_claim_older_model_performance(self):
         app = self.app('latest_pending')
+        self.assertEqual(len(app.metric), 0)
+        self.assertEqual(app.selectbox[0].options[0], 'P012 · entry pending')
+        self.assertEqual(app.selectbox[0].value, 0)
+        self.assertEqual(len(app.selectbox[0].options), 2)
+        app.selectbox[0].set_value(1).run()
+        self.assertFalse(app.exception)
         self.assertEqual(len(app.metric), 4)
         self.assertTrue(any('Earlier model investment · P001' in item.value
                             for item in app.markdown))
@@ -86,6 +92,19 @@ class UiTests(unittest.TestCase):
         app.selectbox[0].set_value(1).run()
         self.assertFalse(app.exception)
         self.assertEqual(len(app.metric),4)
+
+    def test_new_entry_resets_earlier_investment_selection(self):
+        app = self.app('latest_pending')
+        app.selectbox[0].set_value(1).run()
+        self.assertEqual(len(app.metric), 4)
+        app.session_state['fixture_mode'] = 'latest_frozen'
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.selectbox[0].value, 0)
+        self.assertTrue(app.selectbox[0].options[0].startswith('P012 · entry '))
+        self.assertNotIn('pending', app.selectbox[0].options[0])
+        self.assertFalse(any('Earlier model investment' in item.value
+                             for item in app.markdown))
 
     def test_security_estimates_default_to_numeric_probability_order(self):
         from public_review.ui import sort_security_estimates

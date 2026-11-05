@@ -106,6 +106,10 @@ tests before widening this compatibility constraint.
 
 ## Development and release
 
+The public model-review selector defaults to the latest publication even while
+its entry evidence is pending. Earlier frozen model investments remain selectable;
+their entry dates, capital and performance are never reused for the new version.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

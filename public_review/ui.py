@@ -761,6 +761,8 @@ def render_snapshot_review_panel(active_publications, events):
             events,
             {row["publication_id"] for row in active_publications},
             latest_publication_id=publication_id,
+            latest_publication_version=(active_publications[0].get("portfolio_version")
+                                        if active_publications else None),
         )
     except Exception:
         st.warning(
@@ -1019,7 +1021,8 @@ def render_partial_security_reviews(events, publication_id):
 
 
 def render_events(events, active_ids=None, now=None, latest_publication_id=None,
-                  suppress_latest_failure=False, suppress_durable_preview=False):
+                  suppress_latest_failure=False, suppress_durable_preview=False,
+                  latest_publication_version=None):
     now = now or datetime.now(timezone.utc)
     # A fresh current-policy preview is the authoritative page result. Older
     # durable assessments remain in the append-only evidence ledger but must
@@ -1033,7 +1036,9 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
             baseline_by_publication[row["payload"]["publication_id"]] = row
     baseline_rows = list(baseline_by_publication.values())
     pending_shown = False
-    if latest_publication_id and not any(r["payload"]["publication_id"] == latest_publication_id for r in baseline_rows):
+    latest_pending = bool(latest_publication_id and not any(
+        r["payload"]["publication_id"] == latest_publication_id for r in baseline_rows))
+    if latest_pending:
         pending = next((r for r in reversed(events) if r["kind"] in {"WAITING", "FAILURE"} and
                         (not suppress_latest_failure or r["kind"] != "FAILURE") and
                         (r["kind"] != "WAITING" or r["payload"].get("entry_model_version") == ENTRY_MODEL_VERSION) and
@@ -1055,10 +1060,19 @@ def render_events(events, active_ids=None, now=None, latest_publication_id=None,
             render_partial_security_reviews(events, latest_publication_id)
         return
     baselines = sorted([r["payload"] for r in baseline_rows], key=lambda b: b["portfolio_version"], reverse=True)
-    selected = st.selectbox("Model investment publication", range(len(baselines)),
-                            format_func=lambda i: f'P{baselines[i]["portfolio_version"]:03d} · entry {baselines[i]["entry_date"]}',
-                            key="review_publication")
-    baseline = baselines[selected]
+    # A new publication must not silently inherit the older investment's entry
+    # or selected index. Keep the pending current version visible by default.
+    choices = [None, *baselines] if latest_pending else baselines
+    current_label = (f"P{int(latest_publication_version):03d}"
+                     if latest_publication_version is not None else "Latest publication")
+    selected = st.selectbox("Model investment publication", range(len(choices)),
+                            format_func=lambda i: (
+                                f"{current_label} · entry pending" if choices[i] is None
+                                else f'P{choices[i]["portfolio_version"]:03d} · entry {choices[i]["entry_date"]}'),
+                            key=f"review_publication_{latest_publication_id or 'history'}_{'pending' if latest_pending else 'frozen'}")
+    baseline = choices[selected]
+    if baseline is None:
+        return
     if (latest_publication_id is not None
             and baseline["publication_id"] != latest_publication_id):
         st.markdown(f"**Earlier model investment · P{baseline['portfolio_version']:03d}**")
@@ -1269,6 +1283,7 @@ def render_review_panel(basket_id, active_publications):
             )
         render_events(events, {p["publication_id"] for p in active_publications},
                       latest_publication_id=active_publications[0]["publication_id"] if active_publications else None,
+                      latest_publication_version=active_publications[0].get("portfolio_version") if active_publications else None,
                       suppress_latest_failure=fresh_waiting,
                       suppress_durable_preview=fresh_preview_shown or fresh_waiting)
     except Exception:
