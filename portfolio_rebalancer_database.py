@@ -107,6 +107,7 @@ from trade_deferrals import (
     exclude_deferred_candidates,
     split_deferred_trades,
 )
+from trade_deferrals_ui import render_optimal_weight_pause_editor
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -3183,6 +3184,13 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                     "Risk measures are reviewed separately; correlated metrics are not counted as independent votes. "
                     "Historical estimates do not establish statistical significance. Orders remain available for review."
                 )
+
+        with st.expander("Saved optimal weights · pause securities", expanded=False):
+            render_optimal_weight_pause_editor(
+                payload.get("optimal_allocation") or [], owner,
+                key_prefix=f"saved_optimal_weights_{widget_scope}",
+                get_connection=get_db_connection,
+            )
 
         with st.expander("Saved rebalancing plan", expanded=True):
             if payload.get("partial_sell_sharpe_check"):
@@ -12087,10 +12095,10 @@ if run_btn:
             "Optimal Weight", ascending=False
         ).reset_index(drop=True)
         
-        st.dataframe(
-            optimal_portfolio_df.style.format({"Optimal Weight": "{:.2%}"}),
-            width="stretch",
-            hide_index=True,
+        render_optimal_weight_pause_editor(
+            optimal_portfolio_df, CURRENT_USER,
+            key_prefix="live_optimal_weights",
+            get_connection=get_db_connection,
         )
         
         st.download_button(

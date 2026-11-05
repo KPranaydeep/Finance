@@ -1,4 +1,4 @@
-"""Persistent, owner-scoped pauses for executable rebalancing trades."""
+"""Persistent, owner-scoped security pauses for allocation and trade views."""
 
 from __future__ import annotations
 
@@ -22,6 +22,28 @@ CREATE TABLE IF NOT EXISTS trade_deferrals (
 
 def ensure_trade_deferral_schema(conn) -> None:
     conn.execute(TRADE_DEFERRALS_DDL)
+
+
+def optimal_weight_pause_rows(weights) -> pd.DataFrame:
+    """Adapt live or saved optimal weights without requiring an executable plan."""
+    frame = pd.DataFrame(weights).copy()
+    columns = ["Yahoo Ticker", "Optimal Weight"]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    ticker_column = next((c for c in ("Yahoo Ticker", "Ticker", "ticker") if c in frame), None)
+    weight_column = next((c for c in ("Optimal Weight", "target_weight") if c in frame), None)
+    if ticker_column is None or weight_column is None:
+        raise ValueError("Optimal weight tickers and weights are required.")
+    rows = pd.DataFrame({
+        "Yahoo Ticker": frame[ticker_column].fillna("").astype(str).str.strip().str.upper(),
+        "Optimal Weight": pd.to_numeric(frame[weight_column], errors="coerce"),
+    })
+    rows = rows.loc[
+        rows["Yahoo Ticker"].ne("") & rows["Optimal Weight"].gt(0)
+        & rows["Optimal Weight"].le(1)
+    ]
+    return (rows.sort_values("Optimal Weight", ascending=False, kind="stable")
+            .drop_duplicates("Yahoo Ticker").reset_index(drop=True))
 
 
 def _as_utc(value: datetime | str | None = None) -> datetime:

@@ -8,6 +8,7 @@ from trade_deferrals import (
     active_trade_deferrals,
     defer_trades_for_quarter,
     exclude_deferred_candidates,
+    optimal_weight_pause_rows,
     split_deferred_trades,
 )
 
@@ -92,3 +93,31 @@ def test_action_row_style_tints_buy_and_sell_without_recoloring_other_rows():
     assert all("46, 125, 50" in value for value in buy_style)
     assert all("198, 40, 40" in value for value in sell_style)
     assert hold_style == ["", ""]
+
+
+def test_optimal_weight_pause_needs_no_trade_and_preserves_listing_identity():
+    weights = [
+        {"ticker": "same.ns", "target_weight": .4},
+        {"ticker": "SAME", "target_weight": .2},
+        {"ticker": "same.ns", "target_weight": .4},
+        {"ticker": "EXIT", "target_weight": 0},
+    ]
+    rows = optimal_weight_pause_rows(weights)
+    assert rows["Yahoo Ticker"].tolist() == ["SAME.NS", "SAME"]
+    assert rows["Optimal Weight"].tolist() == [.4, .2]
+    conn = connection()
+    now = datetime(2026, 11, 5, tzinfo=timezone.utc)
+    defer_trades_for_quarter(conn, "owner", rows.iloc[:1].to_dict("records"), now=now)
+    active = active_trade_deferrals(conn, "owner", now=now)
+    kept, count = exclude_deferred_candidates(rows, active)
+    assert count == 1 and kept["Yahoo Ticker"].tolist() == ["SAME"]
+    assert weights[0]["target_weight"] == .4
+    assert active_trade_deferrals(conn, "different-owner", now=now).empty
+
+
+def test_live_weight_rows_reject_missing_and_invalid_allocations():
+    rows = optimal_weight_pause_rows(pd.DataFrame({
+        "Ticker": ["HOLD", None, "ZERO", "INF", "NEGATIVE", "MISSING"],
+        "Optimal Weight": [.25, .2, 0, float("inf"), -.2, None],
+    }))
+    assert rows.to_dict("records") == [{"Yahoo Ticker": "HOLD", "Optimal Weight": .25}]
