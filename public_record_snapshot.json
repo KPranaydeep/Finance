@@ -1,7 +1,7 @@
 {
   "basket_id": "PUBLIC-01",
-  "generated_at": "2026-11-04T20:58:12.117461+00:00",
-  "payload_sha256": "9df10499694ba4ea4eb35f0671cf436bb4ef6e3c86ab4948d745894df6ca6519",
+  "generated_at": "2026-11-05T04:38:46.263502+00:00",
+  "payload_sha256": "8baef402a5eaa607bdb0219ef794a668cc4b3e4249fa7555efcb96d1f440bde2",
   "record": {
     "active_forecast_realizations": [
       {
@@ -3155,6 +3155,140 @@
       }
     ],
     "active_publications": [
+      {
+        "allocation_fingerprint": "c17b81c4ddc844b459a40f2ccbf0a5bf22ffdbffa5e9d6d0f4680a598b09aa89",
+        "as_of": "2026-11-05T04:08:52+00:00",
+        "basket_id": "PUBLIC-01",
+        "calculation_version": "private-rebalancer-v1",
+        "cash_weight": 0.0,
+        "correction_reason": null,
+        "effective_status": "ACTIVE",
+        "payload_json": {
+          "as_of": "2026-11-05T04:08:52+00:00",
+          "basket_id": "PUBLIC-01",
+          "calculation_version": "private-rebalancer-v1",
+          "cash_weight": 0.0,
+          "constituents": [
+            {
+              "target_weight": 0.1,
+              "ticker": "BAFNAPH.NS"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "BLTE"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "BTI"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "BTSG"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "CBOE"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "CDNA"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "DG"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "GLENMARK.NS"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "GOLDBETA.NS"
+            },
+            {
+              "target_weight": 0.12,
+              "ticker": "GVT&D.NS"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "HRTG"
+            },
+            {
+              "target_weight": 0.05,
+              "ticker": "JNJ"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "KO"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "LAURUSLABS.NS"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "MKTW"
+            },
+            {
+              "target_weight": 0.05,
+              "ticker": "ONELIFECAP.NS"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "PM"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "RVMD"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "SENEA"
+            },
+            {
+              "target_weight": 0.09,
+              "ticker": "SIGMAADV.NS"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "STLN"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "STX"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "TEN"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "TIGO"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "VENUSREM.NS"
+            },
+            {
+              "target_weight": 0.06,
+              "ticker": "VLO"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "YOU"
+            }
+          ],
+          "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64",
+          "strategy_version": "portfolio-rebalancer-v1"
+        },
+        "portfolio_fingerprint": "64854163fe1a64eeffefc6b99dc5c5bb170e7f72a1f89e8a73b4d71e566e1c0c",
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "publication_status": "PUBLISHED",
+        "published_at": "2026-11-05T04:21:29.454876+00:00",
+        "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64",
+        "strategy_version": "portfolio-rebalancer-v1"
+      },
       {
         "allocation_fingerprint": "cc07e745b669e5af8352dd3d04d356b700dd5701bb0c0c1bf6c792faa7823fb4",
         "as_of": "2026-10-31T13:57:08+00:00",
@@ -7015,6 +7149,29 @@
         },
         "previous_hash": "4470c460e722f684584df2a32bf518ec8a0e904acf6832e08268a23358acc7a5",
         "sequence_number": 116
+      },
+      {
+        "audit_id": 117,
+        "basket_id": "PUBLIC-01",
+        "entity_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "entity_type": "portfolio_publication",
+        "event_at": "2026-11-05T04:21:31.295199+00:00",
+        "event_hash": "d8e3acaf136ecfee7add7b101dbe9f18fd018f8b086ee586c4c5f5b4a568fb21",
+        "event_type": "PORTFOLIO_PUBLISHED",
+        "payload_json": {
+          "basket_id": "PUBLIC-01",
+          "entity_id": "PUB-64854163FE1A64EEFFEFC6B9",
+          "entity_type": "portfolio_publication",
+          "event_type": "PORTFOLIO_PUBLISHED",
+          "payload": {
+            "portfolio_fingerprint": "64854163fe1a64eeffefc6b99dc5c5bb170e7f72a1f89e8a73b4d71e566e1c0c",
+            "portfolio_version": 12,
+            "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64"
+          },
+          "sequence_number": 117
+        },
+        "previous_hash": "f1a0b3fd2933dbcdb5185a8b0a76a7c3fb4e920b0fb3bd72741c19e7c3a57fdf",
+        "sequence_number": 117
       }
     ],
     "basket": {
@@ -7029,19 +7186,19 @@
     "cash_flows": [],
     "constituents": [
       {
-        "target_weight": 0.11,
-        "ticker": "BAFNAPH.NS"
-      },
-      {
-        "target_weight": 0.11,
+        "target_weight": 0.12,
         "ticker": "GVT&D.NS"
       },
       {
-        "target_weight": 0.08,
+        "target_weight": 0.1,
+        "ticker": "BAFNAPH.NS"
+      },
+      {
+        "target_weight": 0.09,
         "ticker": "SIGMAADV.NS"
       },
       {
-        "target_weight": 0.08,
+        "target_weight": 0.06,
         "ticker": "VLO"
       },
       {
@@ -7053,10 +7210,6 @@
         "ticker": "ONELIFECAP.NS"
       },
       {
-        "target_weight": 0.05,
-        "ticker": "TIGO"
-      },
-      {
         "target_weight": 0.04,
         "ticker": "CBOE"
       },
@@ -7066,7 +7219,15 @@
       },
       {
         "target_weight": 0.04,
-        "ticker": "STLN"
+        "ticker": "HRTG"
+      },
+      {
+        "target_weight": 0.04,
+        "ticker": "RVMD"
+      },
+      {
+        "target_weight": 0.04,
+        "ticker": "TIGO"
       },
       {
         "target_weight": 0.03,
@@ -7074,15 +7235,11 @@
       },
       {
         "target_weight": 0.03,
-        "ticker": "CVS"
+        "ticker": "LAURUSLABS.NS"
       },
       {
         "target_weight": 0.03,
-        "ticker": "GOLDBETA.NS"
-      },
-      {
-        "target_weight": 0.03,
-        "ticker": "PM"
+        "ticker": "STLN"
       },
       {
         "target_weight": 0.03,
@@ -7090,7 +7247,15 @@
       },
       {
         "target_weight": 0.03,
-        "ticker": "TEN"
+        "ticker": "VENUSREM.NS"
+      },
+      {
+        "target_weight": 0.02,
+        "ticker": "BLTE"
+      },
+      {
+        "target_weight": 0.02,
+        "ticker": "BTSG"
       },
       {
         "target_weight": 0.02,
@@ -7098,39 +7263,35 @@
       },
       {
         "target_weight": 0.02,
-        "ticker": "ESLT"
-      },
-      {
-        "target_weight": 0.02,
-        "ticker": "GH"
-      },
-      {
-        "target_weight": 0.02,
-        "ticker": "HRTG"
-      },
-      {
-        "target_weight": 0.02,
-        "ticker": "MNST"
-      },
-      {
-        "target_weight": 0.02,
-        "ticker": "RVMD"
-      },
-      {
-        "target_weight": 0.02,
-        "ticker": "VENUSREM.NS"
-      },
-      {
-        "target_weight": 0.01,
-        "ticker": "BTSG"
-      },
-      {
-        "target_weight": 0.01,
         "ticker": "KO"
       },
       {
-        "target_weight": 0.01,
+        "target_weight": 0.02,
+        "ticker": "PM"
+      },
+      {
+        "target_weight": 0.02,
         "ticker": "SENEA"
+      },
+      {
+        "target_weight": 0.02,
+        "ticker": "TEN"
+      },
+      {
+        "target_weight": 0.01,
+        "ticker": "CDNA"
+      },
+      {
+        "target_weight": 0.01,
+        "ticker": "GOLDBETA.NS"
+      },
+      {
+        "target_weight": 0.01,
+        "ticker": "MKTW"
+      },
+      {
+        "target_weight": 0.01,
+        "ticker": "YOU"
       }
     ],
     "corrections": [
@@ -7154,27 +7315,31 @@
       }
     ],
     "current": {
-      "allocation_fingerprint": "cc07e745b669e5af8352dd3d04d356b700dd5701bb0c0c1bf6c792faa7823fb4",
-      "as_of": "2026-10-31T13:57:08+00:00",
+      "allocation_fingerprint": "c17b81c4ddc844b459a40f2ccbf0a5bf22ffdbffa5e9d6d0f4680a598b09aa89",
+      "as_of": "2026-11-05T04:08:52+00:00",
       "basket_id": "PUBLIC-01",
       "calculation_version": "private-rebalancer-v1",
       "cash_weight": 0.0,
       "payload_json": {
-        "as_of": "2026-10-31T13:57:08+00:00",
+        "as_of": "2026-11-05T04:08:52+00:00",
         "basket_id": "PUBLIC-01",
         "calculation_version": "private-rebalancer-v1",
         "cash_weight": 0.0,
         "constituents": [
           {
-            "target_weight": 0.11,
+            "target_weight": 0.1,
             "ticker": "BAFNAPH.NS"
+          },
+          {
+            "target_weight": 0.02,
+            "ticker": "BLTE"
           },
           {
             "target_weight": 0.03,
             "ticker": "BTI"
           },
           {
-            "target_weight": 0.01,
+            "target_weight": 0.02,
             "ticker": "BTSG"
           },
           {
@@ -7182,35 +7347,27 @@
             "ticker": "CBOE"
           },
           {
-            "target_weight": 0.03,
-            "ticker": "CVS"
+            "target_weight": 0.01,
+            "ticker": "CDNA"
           },
           {
             "target_weight": 0.02,
             "ticker": "DG"
           },
           {
-            "target_weight": 0.02,
-            "ticker": "ESLT"
-          },
-          {
-            "target_weight": 0.02,
-            "ticker": "GH"
-          },
-          {
             "target_weight": 0.04,
             "ticker": "GLENMARK.NS"
           },
           {
-            "target_weight": 0.03,
+            "target_weight": 0.01,
             "ticker": "GOLDBETA.NS"
           },
           {
-            "target_weight": 0.11,
+            "target_weight": 0.12,
             "ticker": "GVT&D.NS"
           },
           {
-            "target_weight": 0.02,
+            "target_weight": 0.04,
             "ticker": "HRTG"
           },
           {
@@ -7218,35 +7375,39 @@
             "ticker": "JNJ"
           },
           {
-            "target_weight": 0.01,
+            "target_weight": 0.02,
             "ticker": "KO"
           },
           {
-            "target_weight": 0.02,
-            "ticker": "MNST"
+            "target_weight": 0.03,
+            "ticker": "LAURUSLABS.NS"
+          },
+          {
+            "target_weight": 0.01,
+            "ticker": "MKTW"
           },
           {
             "target_weight": 0.05,
             "ticker": "ONELIFECAP.NS"
           },
           {
-            "target_weight": 0.03,
+            "target_weight": 0.02,
             "ticker": "PM"
           },
           {
-            "target_weight": 0.02,
+            "target_weight": 0.04,
             "ticker": "RVMD"
           },
           {
-            "target_weight": 0.01,
+            "target_weight": 0.02,
             "ticker": "SENEA"
           },
           {
-            "target_weight": 0.08,
+            "target_weight": 0.09,
             "ticker": "SIGMAADV.NS"
           },
           {
-            "target_weight": 0.04,
+            "target_weight": 0.03,
             "ticker": "STLN"
           },
           {
@@ -7254,31 +7415,35 @@
             "ticker": "STX"
           },
           {
-            "target_weight": 0.03,
+            "target_weight": 0.02,
             "ticker": "TEN"
           },
           {
-            "target_weight": 0.05,
+            "target_weight": 0.04,
             "ticker": "TIGO"
           },
           {
-            "target_weight": 0.02,
+            "target_weight": 0.03,
             "ticker": "VENUSREM.NS"
           },
           {
-            "target_weight": 0.08,
+            "target_weight": 0.06,
             "ticker": "VLO"
+          },
+          {
+            "target_weight": 0.01,
+            "ticker": "YOU"
           }
         ],
-        "run_id": "RUN-3C32FDAFCDFD4788A23E387F9A71CE68",
+        "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64",
         "strategy_version": "portfolio-rebalancer-v1"
       },
-      "portfolio_fingerprint": "8c8690be7a2f12fd7669567b9bdbd895e64258f88de5f17d08e450446c66b1af",
-      "portfolio_version": 11,
-      "publication_id": "PUB-8C8690BE7A2F12FD7669567B",
+      "portfolio_fingerprint": "64854163fe1a64eeffefc6b99dc5c5bb170e7f72a1f89e8a73b4d71e566e1c0c",
+      "portfolio_version": 12,
+      "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
       "publication_status": "PUBLISHED",
-      "published_at": "2026-11-01T03:30:07.034940+00:00",
-      "run_id": "RUN-3C32FDAFCDFD4788A23E387F9A71CE68",
+      "published_at": "2026-11-05T04:21:29.454876+00:00",
+      "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64",
       "strategy_version": "portfolio-rebalancer-v1"
     },
     "forecast_realizations": [
@@ -18203,9 +18368,305 @@
         "publication_id": "PUB-8C8690BE7A2F12FD7669567B",
         "target_weight": 0.08,
         "ticker": "VLO"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.1,
+        "ticker": "BAFNAPH.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "BLTE"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.03,
+        "ticker": "BTI"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "BTSG"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.04,
+        "ticker": "CBOE"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.01,
+        "ticker": "CDNA"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "DG"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.04,
+        "ticker": "GLENMARK.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.01,
+        "ticker": "GOLDBETA.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.12,
+        "ticker": "GVT&D.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.04,
+        "ticker": "HRTG"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.05,
+        "ticker": "JNJ"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "KO"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.03,
+        "ticker": "LAURUSLABS.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.01,
+        "ticker": "MKTW"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.05,
+        "ticker": "ONELIFECAP.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "PM"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.04,
+        "ticker": "RVMD"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "SENEA"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.09,
+        "ticker": "SIGMAADV.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.03,
+        "ticker": "STLN"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.03,
+        "ticker": "STX"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.02,
+        "ticker": "TEN"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.04,
+        "ticker": "TIGO"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.03,
+        "ticker": "VENUSREM.NS"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.06,
+        "ticker": "VLO"
+      },
+      {
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "target_weight": 0.01,
+        "ticker": "YOU"
       }
     ],
     "publications": [
+      {
+        "allocation_fingerprint": "c17b81c4ddc844b459a40f2ccbf0a5bf22ffdbffa5e9d6d0f4680a598b09aa89",
+        "as_of": "2026-11-05T04:08:52+00:00",
+        "basket_id": "PUBLIC-01",
+        "calculation_version": "private-rebalancer-v1",
+        "cash_weight": 0.0,
+        "correction_reason": null,
+        "effective_status": "ACTIVE",
+        "payload_json": {
+          "as_of": "2026-11-05T04:08:52+00:00",
+          "basket_id": "PUBLIC-01",
+          "calculation_version": "private-rebalancer-v1",
+          "cash_weight": 0.0,
+          "constituents": [
+            {
+              "target_weight": 0.1,
+              "ticker": "BAFNAPH.NS"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "BLTE"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "BTI"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "BTSG"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "CBOE"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "CDNA"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "DG"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "GLENMARK.NS"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "GOLDBETA.NS"
+            },
+            {
+              "target_weight": 0.12,
+              "ticker": "GVT&D.NS"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "HRTG"
+            },
+            {
+              "target_weight": 0.05,
+              "ticker": "JNJ"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "KO"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "LAURUSLABS.NS"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "MKTW"
+            },
+            {
+              "target_weight": 0.05,
+              "ticker": "ONELIFECAP.NS"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "PM"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "RVMD"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "SENEA"
+            },
+            {
+              "target_weight": 0.09,
+              "ticker": "SIGMAADV.NS"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "STLN"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "STX"
+            },
+            {
+              "target_weight": 0.02,
+              "ticker": "TEN"
+            },
+            {
+              "target_weight": 0.04,
+              "ticker": "TIGO"
+            },
+            {
+              "target_weight": 0.03,
+              "ticker": "VENUSREM.NS"
+            },
+            {
+              "target_weight": 0.06,
+              "ticker": "VLO"
+            },
+            {
+              "target_weight": 0.01,
+              "ticker": "YOU"
+            }
+          ],
+          "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64",
+          "strategy_version": "portfolio-rebalancer-v1"
+        },
+        "portfolio_fingerprint": "64854163fe1a64eeffefc6b99dc5c5bb170e7f72a1f89e8a73b4d71e566e1c0c",
+        "portfolio_version": 12,
+        "publication_id": "PUB-64854163FE1A64EEFFEFC6B9",
+        "publication_status": "PUBLISHED",
+        "published_at": "2026-11-05T04:21:29.454876+00:00",
+        "run_id": "RUN-E2617BC73A2B4EC483FB8D3A5E4C6A64",
+        "strategy_version": "portfolio-rebalancer-v1"
+      },
       {
         "allocation_fingerprint": "cc07e745b669e5af8352dd3d04d356b700dd5701bb0c0c1bf6c792faa7823fb4",
         "as_of": "2026-10-31T13:57:08+00:00",
