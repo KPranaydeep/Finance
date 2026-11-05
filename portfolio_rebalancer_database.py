@@ -2624,9 +2624,9 @@ def refresh_security_scenarios(review_universe, start_date, horizon_sessions, on
 
 
 def refresh_election_inr_history(payload):
-    weights = (payload.get("election_reserve_history") or {}).get("weights") or {
+    weights = {
         str(r["ticker"]): float(r.get("target_weight") or 0) for r in payload.get("optimal_allocation") or []
-    }
+    } or (payload.get("election_reserve_history") or {}).get("weights") or {}
     currencies = {str(r["Yahoo Ticker"]): str(r["Currency"]).upper() for r in payload.get("current_allocation") or [] if r.get("Currency")}
     unknown = [t for t, w in weights.items() if w > 0 and t not in currencies]
     if unknown:

@@ -4,6 +4,7 @@ import pandas_market_calendars as mcal
 import pytest
 from market_history_cache import sync_market_history
 from us_election_risk import portfolio_prices_from_cache, us_election_reference, latest_joint_session, listing_calendar, next_us_event_review
+from us_election_risk import us_event_context, us_federal_events, allocation_inputs
 
 
 def fixture_history(tmp_path):
@@ -61,3 +62,41 @@ def test_quote_currency_does_not_supply_calendar():
     assert latest_joint_session('2026-10-31')=='2026-10-30'
     assert next_us_event_review('2026-10-31')=='2026-11-02'
     assert next_us_event_review('2026-01-01') is None
+
+
+def test_midterms_move_to_post_event_watch_then_expire():
+    context=us_event_context('2026-11-05')
+    assert context['active_events'][0]['phase']=='post_election'
+    assert context['active_events'][0]['event_date']=='2026-11-03'
+    assert context['active_events'][0]['watch_ends']=='2026-11-22'
+    assert context['next_event']['event_date']=='2028-11-07'
+    assert next_us_event_review('2026-11-05') is None
+    assert us_event_context('2026-11-23')['active_events']==[]
+    r=us_election_reference(None,'2026-11-23')
+    assert r['status']=='no_active_us_event'
+    assert 'covers through 2026' not in r['reason']
+
+
+def test_future_statutory_dates_do_not_stop_in_2026():
+    events=us_federal_events('2031-01-01')
+    assert next(e for e in events if e['event_date'].startswith('2032'))['event_date']=='2032-11-02'
+    assert us_event_context('2030-10-25')['active_events'][0]['phase']=='upcoming'
+    assert all(e['date_basis']=='statutory regular federal schedule' for e in events)
+
+
+def test_old_snapshot_expected_date_does_not_make_stale_prices_current(tmp_path):
+    h=fixture_history(tmp_path)
+    assert h['expected_through']=='2026-10-30'
+    result=us_election_reference(h,'2026-11-05')
+    assert result['status']=='stale_or_incomplete_prices'
+    assert result['event_reserve_fraction'] is None
+
+
+def test_current_optimal_weights_override_cached_election_weights(tmp_path):
+    h=fixture_history(tmp_path)
+    result=us_election_reference(h,'2026-10-31',current_weights={'INDIA':.8,'FOREIGN_ADR':.2})
+    assert result['status']=='stale_or_incomplete_prices'
+    assert result['event_reserve_fraction'] is None
+    weights,_=allocation_inputs({'election_reserve_history':{'weights':{'OLD':1}},
+                                'optimal_allocation':[{'ticker':'NEW','target_weight':1}]})
+    assert weights=={'NEW':1}

@@ -52,6 +52,16 @@ def test_history_roundtrip_and_currency_gap():
     assert election_reserve_reference(frame, weights, {}, events, "2025-06-06")["status"] == "incomplete_currency_or_weights"
 
 
+def test_current_mix_reuses_history_without_reusing_old_weights():
+    frame, weights, currencies, events = example()
+    payload = {"election_reserve_history":pack_inr_history(frame, weights, currencies),
+               "optimal_allocation":[{"ticker":"INDIA","target_weight":.8},{"ticker":"US","target_weight":.2}],
+               "current_allocation":[{"Yahoo Ticker":t,"Currency":c} for t,c in currencies.items()]}
+    result=saved_event_reference(payload,events,'2025-06-06')
+    assert result['inr_weight']==.8
+    assert result['event_reserve_fraction']==pytest.approx(.08)
+
+
 def test_no_inr_and_ongoing_polling_window():
     frame, weights, currencies, events = example()
     assert election_reserve_reference(frame, weights, {"INDIA":"USD", "US":"USD"}, events, "2025-06-06")["event_reserve_fraction"] == 0

@@ -5,6 +5,7 @@ from html.parser import HTMLParser
 import json
 import os
 import tempfile
+import time
 import pandas as pd
 import requests
 
@@ -131,7 +132,20 @@ def _atomic_save(path, snapshot):
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as handle:
         json.dump(snapshot, handle, ensure_ascii=False, indent=2)
         temporary = handle.name
-    os.replace(temporary, path)
+    try:
+        for attempt in range(4):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                # Windows scanners can briefly lock a just-written JSON file.
+                # Retry the atomic replace; never truncate the retained file.
+                if attempt == 3:
+                    raise
+                time.sleep(.05 * 2**attempt)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def monthly_snapshot(path, today=None, force=False, fetch=None):

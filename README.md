@@ -52,6 +52,28 @@ apply. Missing quotes or concurrent holdings/target edits retain the previous
 plan. Saved weights and publication candidates are unchanged; rerun optimization
 when you want to reconsider the allocation itself.
 
+Election reserve combines components with `max()`: the portfolio buffer,
+India's selected seat-exposure policy, active India historical stress and active
+US whole-portfolio stress. The seat policy uses the next **20 calendar days**
+(today through today+19): sum actual verified contests separately for Assembly,
+Lok Sabha and Rajya Sabha, divide by their dated house totals, take the maximum
+percentage, then scale it by the current optimal INR allocation. It is a liquidity
+policy, not a statistical loss forecast. Term ends and geographic LS/RS allocations
+are excluded; missing schedule/count coverage is explicit. Official duplicate
+notices and multi-phase polling do not multiply seat counts.
+
+US regular federal dates follow the statutory calendar beyond 2026. After voting,
+the panel shows a post-election watch that expires after the 20-calendar-day
+aftermath window; it does not imply certification or track all special/runoff
+elections. Historical stress still uses complete 30-session price episodes and
+current optimal weights. Outdated prices/FX cannot qualify merely because an old
+snapshot's own expected date matches. Election refreshes do not optimize or trade.
+Schedule discovery runs monthly, daily near a known counting date, or on demand;
+ECI and English PIB checks share a bounded request budget. The dashboard exposes
+incomplete national schedule/count coverage rather than calling missing data zero
+risk. Snapshot replacement retries brief Windows locks and retains the old file
+if the update cannot finish.
+
 ## Scheduled jobs
 
 - `.github/workflows/public_portfolio_daily.yml` updates model NAV, creates or

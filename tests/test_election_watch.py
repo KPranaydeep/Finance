@@ -98,3 +98,32 @@ def test_partial_snapshot_does_not_invent_national_assembly_denominator():
     context = representation_context(snapshot, date(2026,10,30))
     assert context["assembly_total"] is None
     assert context["assembly_share"] is None
+
+
+def test_atomic_snapshot_replace_retries_transient_windows_lock(tmp_path,monkeypatch):
+    import election_watch
+    path=tmp_path/'snapshot.json'
+    path.write_text('{"old": true}')
+    replace=election_watch.os.replace
+    calls=[]
+    def locked(source,target):
+        calls.append(1)
+        if len(calls)<3:
+            raise PermissionError('temporary file scanner lock')
+        replace(source,target)
+    monkeypatch.setattr(election_watch.os,'replace',locked)
+    monkeypatch.setattr(election_watch.time,'sleep',lambda seconds:None)
+    election_watch._atomic_save(path,{'new':True})
+    assert len(calls)==3 and json.loads(path.read_text())=={'new':True}
+
+
+def test_failed_snapshot_replace_retains_previous_file(tmp_path,monkeypatch):
+    import election_watch
+    path=tmp_path/'snapshot.json'
+    path.write_text('{"old": true}')
+    def denied(*args): raise PermissionError('locked')
+    monkeypatch.setattr(election_watch.os,'replace',denied)
+    monkeypatch.setattr(election_watch.time,'sleep',lambda seconds:None)
+    with pytest.raises(PermissionError): election_watch._atomic_save(path,{'new':True})
+    assert json.loads(path.read_text())=={'old':True}
+    assert len(list(tmp_path.iterdir()))==1

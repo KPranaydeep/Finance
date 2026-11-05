@@ -7,9 +7,9 @@ import pandas_market_calendars as mcal
 def history_from_market_cache(payload, path, today):
     """Migrate older saved analyses using their existing local INR prices."""
     from market_history_cache import load_cached_market_history
-    weights = (payload.get("election_reserve_history") or {}).get("weights") or {
+    weights = {
         str(r["ticker"]): float(r.get("target_weight") or 0) for r in payload.get("optimal_allocation") or []
-    }
+    } or (payload.get("election_reserve_history") or {}).get("weights") or {}
     currencies = {str(r["Yahoo Ticker"]): str(r["Currency"]).upper() for r in payload.get("current_allocation") or [] if r.get("Currency")}
     if not weights or any(w > 0 and t not in currencies for t, w in weights.items()):
         raise ValueError("Saved allocation lacks complete listing currency metadata")
@@ -40,7 +40,10 @@ def saved_event_reference(payload, events, today):
         if not weights:
             return dict(status="missing_inr_history", event_reserve_fraction=None, active_events=[], windows=[])
         return election_reserve_reference(frame, weights, currencies, events, today)
-    return election_reserve_reference(frame, history["weights"], history["currencies"], events, today)
+    # Histories are reusable data, not the authority for the current allocation.
+    weights = {str(r["ticker"]): float(r.get("target_weight") or 0) for r in payload.get("optimal_allocation") or []} or history["weights"]
+    currencies = {str(r["Yahoo Ticker"]): str(r["Currency"]).upper() for r in payload.get("current_allocation") or [] if r.get("Currency")} or history["currencies"]
+    return election_reserve_reference(frame, weights, currencies, events, today)
 
 
 def election_reserve_reference(log_returns, weights, currencies, events, today):
@@ -115,13 +118,19 @@ def combined_reserve(base_fraction, reference):
     return max(float(base_fraction), float(event) if event is not None else 0.0)
 
 
-def reserve_decision_summary(base_fraction, india, us):
+def reserve_decision_summary(base_fraction, india, us, seat_policy=None):
     """One selection and explanation for the saved optimal portfolio's card/panel."""
     base = float(base_fraction)
     if not np.isfinite(base) or base < 0:
         raise ValueError("A finite non-negative portfolio buffer is required")
     components = {"portfolio buffer": base}
     pending = []
+    if seat_policy:
+        amount = float(seat_policy["reserve_fraction"])
+        if np.isfinite(amount) and amount > 0:
+            components["India 20-day seat policy"] = amount
+        if not seat_policy.get("coverage_complete"):
+            pending.append("India seat counts incomplete")
     for label, evidence, active_status in (
         ("India election stress", india, "active_event_stress"),
         ("US whole-portfolio stress", us, "historical_scenario"),

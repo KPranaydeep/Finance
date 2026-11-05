@@ -3,8 +3,10 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from election_schedule import monthly_schedule
+from election_watch import monthly_snapshot
 from election_reserve import saved_event_reference, reserve_decision_summary
-from us_election_risk import us_election_reference, US_EVENTS, allocation_inputs, next_us_event_review
+from election_seat_reserve import rolling_seat_reserve, LABELS
+from us_election_risk import us_election_reference, us_federal_events, us_event_context, allocation_inputs, next_us_event_review
 
 
 def render_election_reserve(payload, base_fraction, base_value, scope, refresh_history, save, *, hydrate_history=None, refresh_portfolio=None):
@@ -23,7 +25,8 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
             except Exception as exc:
                 history_error = str(exc)
         try:
-            schedule = monthly_schedule(Path.home()/".portfolio_rebalancer"/"election_schedule.json", today, force=refresh)
+            houses = monthly_snapshot(Path.home()/".portfolio_rebalancer"/"election_watch.json", today, force=refresh)
+            schedule = monthly_schedule(Path.home()/".portfolio_rebalancer"/"election_schedule.json", today, force=refresh, assembly_snapshot=houses)
             if refresh:
                 # Calculate successfully before replacing the previous history.
                 try:
@@ -45,40 +48,61 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
         except Exception as exc:
             st.caption(f"Election reserve update unavailable; portfolio reserve retained. {exc}")
             return float(base_fraction), None
+        weights, metadata = allocation_inputs(payload)
+        seat_policy = rolling_seat_reserve(schedule['events'], today, reference.get('inr_weight', 0.), assembly_snapshot=houses)
+        if not schedule.get('coverage_complete') or reference.get('status') == 'incomplete_currency_or_weights':
+            seat_policy['coverage_complete'] = False
+        reference['seat_policy'] = seat_policy
         try:
-            us = us_election_reference(payload.get('portfolio_evidence_history'), today, schedule['events'])
+            us = us_election_reference(payload.get('portfolio_evidence_history'), today, schedule['events'], current_weights=weights)
         except Exception as exc:
             us = dict(status='not_assessed', coverage_complete=False, active_events=[], windows=[],
                       event_reserve_fraction=None, reason='US election risk not assessed: '+str(exc))
         reference['us'] = us
-        reference['coverage_complete'] = bool(us.get('coverage_complete')) and not bool(schedule.get('refresh_error'))
-        summary = reserve_decision_summary(base_fraction, reference, us)
+        reference['coverage_complete'] = bool(us.get('coverage_complete')) and seat_policy['coverage_complete']
+        summary = reserve_decision_summary(base_fraction, reference, us, seat_policy)
         reference['reserve_summary'] = summary
         final = summary['fraction']
-        upcoming_us = next((e for e in US_EVENTS if e['event_date'] >= str(today)), None)
+        st.markdown(f"**Reserve reference: {final:.2%} · ₹{base_value*final:,.0f}** of total invested base")
+        st.caption(summary['driver'] + ' · ' + summary['comparison'])
+        st.markdown(f"**India · rolling 20 days: {seat_policy['window_start']} → {seat_policy['window_end']}**")
+        with st.container(horizontal=True):
+            for house, label in LABELS.items():
+                fraction = seat_policy['fractions'][house]
+                st.metric(label, f"{fraction:.2%}" if fraction is not None else "Unavailable",
+                          help=f"{seat_policy['totals'][house]} verified contested seats / {seat_policy['denominators'][house]}; separate house denominator.")
+        st.caption(f"Seat-policy reserve: {seat_policy['reserve_fraction']:.2%} of total base = INR allocation {seat_policy['inr_weight']:.1%} × largest house percentage. A chosen liquidity policy, not an estimated drawdown.")
+        st.caption(f"House counts dated {seat_policy['denominator_verified_at']} · counting-date window, not assembly term ends.")
+        if not seat_policy['coverage_complete']:
+            st.caption("Seat schedule/count coverage incomplete; only known verified contests contribute. Unknown does not mean no elections.")
+        if seat_policy['missing_counts']:
+            st.caption("Counts unavailable: " + "; ".join(seat_policy['missing_counts']))
+        timing = us_event_context(today)
+        for event in timing['active_events']:
+            if event['phase'] == 'post_election':
+                st.markdown(f"**US · voting date passed {event['event_date']} · post-election watch through {event['watch_ends']}**")
+                st.caption(event['name'] + " voting is no longer upcoming. Result certification and any remaining special/runoff elections are not inferred.")
+            else:
+                days = (pd.Timestamp(event['event_date']).date()-today).days
+                st.markdown(f"**{event['name']} · {event['event_date']} · {days} calendar days away**")
+        upcoming_us = timing['next_event']
         if upcoming_us:
-            days = (pd.Timestamp(upcoming_us['event_date']).date()-today).days
-            st.markdown(f"**US election · {upcoming_us['event_date']} · {days} calendar days away**")
-            st.caption('House: 435/435 seats (100%) · Senate: 33/100 regular-cycle seats (33%), plus specials not included in this count. Congressional control is at stake; this is not a presidential election.')
+            st.caption(f"Next regular US federal election: {upcoming_us['event_date']} · statutory date; separate from specials/runoffs.")
         if us.get('active_events'):
-            st.caption('Active US watch: 30 NYSE sessions before/after election day. Results may emerge over multiple days; no fixed certification/counting day is assumed.')
+            st.caption('US watch expires automatically after the 20-calendar-day aftermath window. Historical stress uses complete 30-session price episodes, not a seat-percentage reserve.')
         event_review=next_us_event_review(today)
         if event_review:
             st.markdown(f"**US event review: {event_review} · NYSE session before/at election day**")
         if us.get('event_reserve_fraction') is None:
-            st.warning(us['reason'])
+            (st.caption if us.get('status') == 'no_active_us_event' else st.warning)(us['reason'])
             if payload.get('portfolio_evidence_error'):
                 st.caption('Evidence refresh could not finish: '+payload['portfolio_evidence_error'])
         else:
             st.markdown(f"**US whole-portfolio historical stress: {us['event_reserve_fraction']:.2%} of total base** · {len(us['windows'])} complete episodes · data {us.get('data_through')}")
             st.caption(us['reason'])
-        weights, metadata = allocation_inputs(payload)
         quoted_usd = sum(w for t,w in weights.items() if metadata.get(t,{}).get('Currency') == 'USD')
         crypto = sum(w for t,w in weights.items() if metadata.get(t,{}).get('Exchange') == 'CCC')
         st.caption(f"USD quoted: {quoted_usd:.1%} · crypto: {crypto:.1%} of total base. US stress replays the complete INR-valued mix, including FX and INR holdings. Issuer domicile/sector sensitivity is not inferred from quote currency; foreign-listing classification remains unverified.")
-        st.markdown(f"**Reserve reference: {final:.2%} · ₹{base_value*final:,.0f}** of total invested base · saved optimal mix")
-        st.caption(summary['driver'])
-        st.caption(summary['comparison'])
         if not reference['coverage_complete']:
             st.caption('Partial event coverage: this is a limited reserve reference, not a complete or optimal portfolio protection amount. Country amounts are never summed.')
         for event in reference.get("active_events", []):
@@ -98,7 +122,8 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
         if schedule.get("refresh_error"):
             st.caption("Schedule refresh incomplete · retained verified dates; coverage may be incomplete.")
         with st.expander("Method, historical windows & source status", expanded=False):
-            st.caption("Stress reference = INR allocation × largest observed drawdown of that INR mix across 30 NSE sessions centred on verified past counting dates (15 before, 15 from counting). The same current weights are replayed; this is an in-sample scenario, not an election-causal estimate or a loss limit. Applies from 30 NSE sessions before counting (or ongoing polls) through 30 sessions afterwards. Combined reserve uses max(), never a sum or seat percentage; no trades are changed.")
+            st.caption("Seat policy: sum verified seats with counting dates from today through today+19 separately for Assembly / LS / RS; divide by the dated national assembly total / 543 / 233, take max(), then multiply by current optimal INR allocation. Multi-phase polling counts each contest once. Term ends and state LS/RS geographic allocations never count as contests. Past results drop out immediately. This is the selected liquidity policy, not a calibrated risk model.")
+            st.caption("Combined reserve = max(portfolio buffer, INR-scaled seat policy, active India historical stress, active US whole-portfolio stress). Amounts are not added and no orders are changed. India historical stress replays the current INR mix across complete 30-session episodes centred on prior counting dates; US stress replays the whole INR-valued mix including FX. Historical stress is not an election-causal estimate or a loss limit.")
             if history_error:
                 st.caption("History refresh: " + history_error + ". Previous saved history retained.")
             if schedule.get("refresh_error"):
@@ -107,7 +132,7 @@ def render_election_reserve(payload, base_fraction, base_value, scope, refresh_h
                 st.caption(f"{window['counting_date']} · INR drawdown {window['loss']:.2%} · {window['start']} → {window['end']}")
             for event in schedule["events"]:
                 st.markdown(f"[{event['name']} · {event['counting_date']}]({event['source']})")
-            for event in US_EVENTS:
+            for event in us_federal_events(today):
                 st.markdown(f"[{event['name']} · {event['event_date']}]({event['source']})")
             for window in us.get('windows', []):
                 st.caption(f"US {window['event_date']} · full-mix drawdown {window['loss']:.2%} · {window['start']} → {window['end']}")
