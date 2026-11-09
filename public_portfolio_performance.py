@@ -25,6 +25,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 from public_market_data import download
+from portfolio_ui import render_metric_strip, render_portfolio_heading
 from public_cash_withdrawal import suggested_withdrawal, withdrawal_instructions
 from public_withdrawal_allocator import allocate_withdrawal
 from public_market_mood import fetch_mmi, SOURCE_URL as MMI_SOURCE_URL
@@ -76,77 +77,26 @@ EXECUTION_SCENARIOS = {
 
 st.set_page_config(page_title="Public Portfolio", page_icon="📈", layout="wide")
 
-st.markdown(
-    """<style>
-    .block-container {max-width: 1220px; padding-top: 4.5rem; padding-bottom: 5rem;}
-    .trust-hero {
-        padding: 2.2rem 2.4rem; margin-bottom: 1.5rem; border-radius: 24px;
-        background: radial-gradient(circle at 85% 15%, rgba(45,212,191,.22), transparent 32%),
-                    linear-gradient(135deg, #12213c 0%, #172554 48%, #0f3b46 100%);
-        border: 1px solid rgba(148,163,184,.2); box-shadow: 0 18px 55px rgba(2,6,23,.28);
-    }
-    .trust-kicker {color:#5eead4; font-size:.75rem; font-weight:800; letter-spacing:.16em; text-transform:uppercase;}
-    .trust-title {color:#f8fafc; font-size:clamp(2.1rem,5vw,4rem); line-height:1.02; font-weight:800; margin:.55rem 0 .8rem;}
-    .trust-subtitle {color:#cbd5e1; max-width:760px; font-size:1.05rem; line-height:1.65; margin:0;}
-    .trust-badge {display:inline-block; margin-top:1.25rem; padding:.42rem .78rem; border-radius:999px;
-        color:#ccfbf1; background:rgba(20,184,166,.14); border:1px solid rgba(94,234,212,.32); font-size:.82rem;}
-    .metric-card {padding:1.15rem 1.25rem; border-radius:17px; min-height:112px;
-        background:linear-gradient(145deg,rgba(30,41,59,.72),rgba(15,23,42,.42));
-        border:1px solid rgba(148,163,184,.18); box-shadow:0 8px 24px rgba(2,6,23,.12);}
-    .metric-label {color:#94a3b8; font-size:.78rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;}
-    .metric-value {color:#f8fafc; font-size:1.75rem; font-weight:750; margin-top:.4rem;}
-    .metric-note {color:#94a3b8; font-size:.75rem; margin-top:.28rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-    .metric-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin:.5rem 0 1.35rem;}
-    div[data-testid="stDownloadButton"] button {border-radius:12px; min-height:3rem; font-weight:700;}
-    div[data-testid="stSelectbox"] > div {border-radius:12px;}
-    h2 {padding-top:1.25rem !important; letter-spacing:-.025em;}
-    [data-testid="stDataFrame"] {border:1px solid rgba(148,163,184,.16); border-radius:16px; overflow:hidden;}
-    .allocation-wrap {overflow-x:auto; border:1px solid rgba(148,163,184,.18); border-radius:16px;
-        background:rgba(15,23,42,.22); -webkit-overflow-scrolling:touch;}
-    .allocation-table {width:100%; border-collapse:collapse; min-width:540px;}
-    .allocation-table th {padding:.8rem 1rem; text-align:left; color:#94a3b8; font-size:.75rem;
-        letter-spacing:.06em; text-transform:uppercase; background:rgba(30,41,59,.68);}
-    .allocation-table td {padding:.72rem 1rem; border-top:1px solid rgba(148,163,184,.13); color:#e2e8f0;}
-    .allocation-table tr:hover td {background:rgba(45,212,191,.045);}
-    .ticker-cell {font-weight:700; color:#f8fafc !important; white-space:nowrap;}
-    .weight-line {display:flex; align-items:center; gap:.7rem; min-width:180px;}
-    .weight-track {width:110px; height:7px; overflow:hidden; border-radius:99px; background:rgba(148,163,184,.18);}
-    .weight-fill {height:100%; border-radius:99px; background:linear-gradient(90deg,#14b8a6,#5eead4);}
-    .price-cell {font-variant-numeric:tabular-nums; white-space:nowrap;}
-    @media (max-width:640px) {
-      .block-container {padding-left:.85rem; padding-right:.85rem; padding-top:4rem;}
-      .trust-hero {padding:1.15rem 1rem; margin-bottom:1rem; border-radius:16px;}
-      .trust-kicker {font-size:.62rem; letter-spacing:.12em;}
-      .trust-title {font-size:1.72rem; line-height:1.08; margin:.4rem 0 .55rem;}
-      .trust-subtitle {font-size:.88rem; line-height:1.45;}
-      .trust-badge {font-size:.68rem; margin-top:.8rem; padding:.3rem .55rem;}
-      .metric-grid {grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem; margin:.35rem 0 1rem;}
-      .metric-card {padding:.75rem .8rem; border-radius:13px; min-height:86px; box-shadow:none;}
-      .metric-label {font-size:.62rem; letter-spacing:.045em;}
-      .metric-value {font-size:1.18rem; margin-top:.22rem;}
-      .metric-note {font-size:.64rem; margin-top:.18rem;}
-      h2 {font-size:1.32rem !important; padding-top:.7rem !important;}
-      .allocation-table {min-width:680px; table-layout:fixed;}
-      .allocation-table th,.allocation-table td {padding:.65rem .62rem; font-size:.82rem;}
-      .allocation-table th:nth-child(1),.allocation-table td:nth-child(1) {width:29%;}
-      .allocation-table th:nth-child(2),.allocation-table td:nth-child(2) {width:29%;}
-      .allocation-table th:nth-child(3),.allocation-table td:nth-child(3) {width:20%; text-align:right;}
-      .allocation-table th:nth-child(4),.allocation-table td:nth-child(4) {width:22%; white-space:nowrap;}
-      .weight-track {width:58px;}
-      .weight-line {min-width:0; gap:.4rem;}
-      .ticker-cell {overflow:hidden; text-overflow:ellipsis;}
-    }
-    </style>""",
-    unsafe_allow_html=True,
-)
-
-
-def metric_card(label: str, value: str, note: str) -> None:
-    st.markdown(
-        f'<div class="metric-card"><div class="metric-label">{label}</div>'
-        f'<div class="metric-value">{value}</div><div class="metric-note">{note}</div></div>',
-        unsafe_allow_html=True,
-    )
+# Only the allocation table needs scoped HTML; controls and headings are native.
+st.html("""<style>
+.allocation-wrap {overflow-x:auto; border:1px solid color-mix(in srgb,currentColor 20%,transparent);
+  border-radius:8px; -webkit-overflow-scrolling:touch;}
+.allocation-table {width:100%; border-collapse:collapse; min-width:540px; color:inherit;}
+.allocation-table th {padding:.75rem 1rem; text-align:left; font-size:.875rem; font-weight:600;
+  background:color-mix(in srgb,currentColor 5%,transparent);}
+.allocation-table td {padding:.7rem 1rem; border-top:1px solid color-mix(in srgb,currentColor 15%,transparent);}
+.ticker-cell {font-weight:600; white-space:nowrap;}
+.weight-line {display:flex; align-items:center; gap:.7rem; min-width:160px;}
+.weight-track {width:110px; height:6px; overflow:hidden; border-radius:3px;
+  background:color-mix(in srgb,currentColor 15%,transparent);}
+.weight-fill {height:100%; border-radius:3px; background:#2563eb;}
+.price-cell {font-variant-numeric:tabular-nums; white-space:nowrap;}
+@media (max-width:640px) {
+  .allocation-table th,.allocation-table td {padding:.65rem .6rem;}
+  .weight-track {width:58px;}
+  .weight-line {min-width:120px; gap:.4rem;}
+}
+</style>""")
 
 
 def share_prompt_button(prompt: str, version: str) -> None:
@@ -157,10 +107,10 @@ def share_prompt_button(prompt: str, version: str) -> None:
         f"""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>
         * {{box-sizing:border-box}} body {{margin:0;background:transparent;font-family:system-ui,-apple-system,sans-serif}}
-        button {{width:100%;height:48px;border:1px solid rgba(45,212,191,.55);border-radius:12px;
-          background:linear-gradient(135deg,#0f766e,#0d9488);color:white;font-size:15px;font-weight:750;
-          cursor:pointer;box-shadow:0 7px 18px rgba(13,148,136,.22)}}
-        button:hover {{filter:brightness(1.08);transform:translateY(-1px)}}
+        button {{width:100%;height:48px;border:1px solid #2563eb;border-radius:6px;
+          background:#2563eb;color:white;font-size:15px;font-weight:600;cursor:pointer}}
+        button:hover {{filter:brightness(1.08)}}
+        button:focus-visible {{outline:3px solid #93c5fd;outline-offset:2px}}
         #status {{height:18px;margin-top:5px;color:#94a3b8;text-align:center;font-size:12px}}
         </style></head><body>
         <button id="share" type="button">↗&nbsp;&nbsp;Share execution prompt</button><div id="status"></div>
@@ -200,9 +150,10 @@ def copy_prompt_button(prompt: str) -> None:
         f"""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>
         * {{box-sizing:border-box}} body {{margin:0;background:transparent;font-family:system-ui,-apple-system,sans-serif}}
-        button {{width:100%;height:48px;border:1px solid rgba(148,163,184,.35);border-radius:12px;
+        button {{width:100%;height:48px;border:1px solid rgba(148,163,184,.35);border-radius:6px;
           background:rgba(30,41,59,.82);color:#f8fafc;font-size:15px;font-weight:750;cursor:pointer}}
-        button:hover {{border-color:#5eead4;background:rgba(30,41,59,.98);transform:translateY(-1px)}}
+        button:hover {{border-color:#93c5fd;background:rgba(30,41,59,.98)}}
+        button:focus-visible {{outline:3px solid #93c5fd;outline-offset:2px}}
         #status {{height:18px;margin-top:5px;color:#94a3b8;text-align:center;font-size:12px}}
         </style></head><body>
         <button id="copy" type="button">⧉&nbsp;&nbsp;Copy prompt</button><div id="status"></div>
@@ -430,26 +381,19 @@ forecast_note=(
           else pending_outlook["note"])
 )
 
-st.markdown(
-    f"""<section class="trust-hero">
-      <div class="trust-kicker">PUBLIC-01 · VERIFIED MODEL PORTFOLIO</div>
-      <div class="trust-title">A risk-aware model portfolio.</div>
-      <p class="trust-subtitle">Transparent allocation, observed performance, and practical guidance to invest or rebalance.</p>
-      <span class="trust-badge">✓ Immutable publication · P{int(current['portfolio_version']):03d}</span>
-    </section>""",
-    unsafe_allow_html=True,
+render_portfolio_heading(
+    "A risk-aware model portfolio.",
+    "Transparent allocation, observed performance, and practical guidance to invest or rebalance.",
+    context="PUBLIC-01 · VERIFIED MODEL PORTFOLIO",
+    publication=f"Immutable publication · P{int(current['portfolio_version']):03d}",
 )
 
 st.subheader("Portfolio at a glance")
-st.markdown(
-    '<div class="metric-grid">'
-    f'<div class="metric-card"><div class="metric-label">Version</div><div class="metric-value">P{int(current["portfolio_version"]):03d}</div><div class="metric-note">Immutable snapshot</div></div>'
-    f'<div class="metric-card"><div class="metric-label">Constituents</div><div class="metric-value">{len(record["constituents"])}</div><div class="metric-note">Target holdings</div></div>'
-    f'<div class="metric-card"><div class="metric-label">Median outcome</div><div class="metric-value">{median_outcome}</div><div class="metric-note">{forecast_note}</div></div>'
-    f'<div class="metric-card"><div class="metric-label">Data as of</div><div class="metric-value">{current["as_of"].astimezone(IST):%d %b %Y}</div><div class="metric-note">Asia/Kolkata</div></div>'
-    '</div>',
-    unsafe_allow_html=True,
-)
+render_metric_strip([
+    ("Constituents", len(record["constituents"]), "Allocated securities"),
+    ("Median outcome", median_outcome, forecast_note),
+    ("Data as of", f'{current["as_of"].astimezone(IST):%d %b %Y}', "Asia/Kolkata"),
+])
 
 rendered_review_summary=(
     render_snapshot_review_panel(
@@ -544,7 +488,7 @@ for item in allocation[["Security","Allocation","Price","Listing"]].to_dict("rec
     )
 st.markdown(
     '<div class="allocation-wrap"><table class="allocation-table"><thead><tr>'
-    '<th>Security</th><th>Target weight</th><th>Planning price</th><th>Listing</th></tr></thead><tbody>'
+    '<th>Security</th><th>Allocation</th><th>Planning price</th><th>Listing</th></tr></thead><tbody>'
     + ''.join(allocation_rows) + '</tbody></table></div>',
     unsafe_allow_html=True,
 )

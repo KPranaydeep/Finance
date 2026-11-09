@@ -106,6 +106,13 @@ tests before widening this compatibility constraint.
 
 ## Development and release
 
+Public and private pages share native Streamlit headings and summary cards in
+`portfolio_ui.py`, with light/dark colors and typography in
+`.streamlit/config.toml`. Cards stack on narrow screens so full currency values,
+dates and unavailable-state notes stay readable. Diagnostics remain available in
+a collapsed panel. No external fonts, React runtime or additional UI package is
+required; calculations, publication evidence and pause persistence are unchanged.
+
 In the private rebalancer, 90-day security pauses can be applied directly from
 optimal weights (including saved weights after restart), even when no trade is
 executable. These use the same owner-scoped registry as trade-row pauses, block

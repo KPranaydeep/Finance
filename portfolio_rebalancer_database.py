@@ -108,6 +108,7 @@ from trade_deferrals import (
     split_deferred_trades,
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
+from portfolio_ui import render_metric_strip, render_portfolio_heading
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -297,36 +298,7 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Portfolio Rebalancer", layout="wide")
 
-# Mobile-friendly tweaks: stack side-by-side columns vertically on narrow
-# screens, enlarge tap targets, and let wide tables scroll horizontally
-# instead of being clipped. No widgets/features are removed by this CSS.
-st.markdown(
-    """
-    <style>
-    @media (max-width: 768px) {
-        .block-container { padding: 1rem 0.6rem 2rem 0.6rem; }
-        [data-testid="stHorizontalBlock"] { flex-direction: column; }
-        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-            width: 100% !important;
-            flex: 1 1 100% !important;
-            min-width: 100% !important;
-        }
-        [data-testid="stMetric"] { padding: 0.4rem 0; }
-        h1 { font-size: 1.5rem !important; }
-        h2 { font-size: 1.2rem !important; }
-        h3 { font-size: 1.05rem !important; }
-        [data-testid="stVerticalBlockBorderWrapper"] { padding: 0.75rem !important; }
-    }
-    button[kind="primary"], button[kind="secondary"] { min-height: 2.75rem; }
-    [data-testid="stDataFrame"], [data-testid="stTable"] {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-    [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# Native theme and responsive components are shared by public/private pages.
 
 APP_BUILD = "2026-10-02-run-to-plan-timer-v2"
 OPTIMIZATION_TIMER_KEY = "optimization_run_to_plan_timer_v2"
@@ -1998,26 +1970,7 @@ def render_live_holdings_banner(placeholder, owner):
         )
         return 0
 
-    placeholder.markdown(
-        f"""
-        <div style="
-            border: 2px solid #22c55e;
-            border-radius: 14px;
-            padding: 16px 20px;
-            margin: 10px 0 18px 0;
-            background: rgba(34, 197, 94, 0.12);
-            text-align: center;
-        ">
-            <div style="font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; color: #16a34a;">
-                ● LIVE DATABASE STATUS
-            </div>
-            <div style="font-size: 1.45rem; font-weight: 800; margin-top: 4px;">
-                Current unique holdings count: {unique_count}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    placeholder.badge(f"{unique_count} holdings", icon=":material/account_balance_wallet:", color="gray")
     return unique_count
 
 
@@ -2807,7 +2760,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         current_stats = payload.get("current_stats") or {}
         optimal_stats = payload.get("optimal_stats") or {}
 
-        st.subheader("💾 Last Saved Analysis", anchor="saved-analysis")
+        st.subheader("Last saved analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
         context = payload.get("rebalance_plan_context") or {}
         try:
@@ -2817,7 +2770,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 st.warning("Holdings have changed since this plan. Update rebalance plan to resize trades using the saved optimal weights.")
         except (TypeError, ValueError):
             st.caption("Some holding quantities need review before the plan can be resized.")
-        if st.button("Update rebalance plan", key=f"update_saved_plan_{widget_scope}",
+        action_bar = st.container(horizontal=True, gap="small")
+        if action_bar.button("Update rebalance plan", key=f"update_saved_plan_{widget_scope}", icon=":material/sync:",
                      help="Use current holdings, prices and FX with the saved optimal weights. Refreshes trades, checks and 30-session scenarios without optimizer search."):
             try:
                 with st.spinner("Updating the plan at saved weights…"):
@@ -2828,7 +2782,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 st.warning(f"Plan update could not finish; previous saved plan retained: {exc}")
         if context.get("updated_at"):
             st.caption(f"Rebalance plan updated: {context['updated_at']} · fixed weights from {context.get('weights_saved_at', saved_at)} · optimizer not rerun.")
-        evidence_refresh = st.button("Refresh portfolio evidence", key=f"portfolio_evidence_{widget_scope}",
+        evidence_refresh = action_bar.button("Refresh portfolio evidence", key=f"portfolio_evidence_{widget_scope}", icon=":material/monitoring:",
                                      help="Update prices, FX, current/target metrics, reserve, debt and rebalance checks at fixed saved weights. No optimizer search.")
         cache_attempt = f"portfolio_evidence_cache_v3_{owner}_{saved_at}_{pd.Timestamp.now(tz='Asia/Kolkata').date()}"
         if evidence_refresh or not st.session_state.get(cache_attempt):
@@ -2891,7 +2845,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             st.caption("Buy/sell scores below rank research candidates; they do not override this rebalance assessment.")
         if any("(20 Sessions)" in str(key) for key in optimal_stats):
             st.info("This saved portfolio contains historical 20-session risk metrics. Refresh scenarios for 30-session probabilities; a full optimization recalculates portfolio risk at 30 sessions. Existing 20-session values have not been relabeled.")
-        if st.button("Refresh buy / sell scenarios", key=f"refresh_scenarios_{widget_scope}", help="Refresh daily histories and recompute scenarios for saved owned and optimal securities."):
+        if action_bar.button("Refresh buy / sell scenarios", key=f"refresh_scenarios_{widget_scope}", icon=":material/refresh:", help="Refresh daily histories and recompute scenarios for saved owned and optimal securities."):
             try:
                 review = pd.DataFrame(payload.get("current_allocation") or [])
                 targets = {str(row["ticker"]): float(row.get("target_weight") or 0) for row in payload.get("optimal_allocation") or []}
@@ -3087,10 +3041,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 analysis_parts.append(f"**Assets in return matrix:** {int(assets_in_analysis):,}")
             st.caption("  |  ".join(analysis_parts))
 
-        summary_col1, summary_col2, summary_col3 = st.columns(3)
-        summary_col1.metric("Holdings analysed", holdings_analyzed)
-        summary_col2.metric("Total invested", f"₹{total_invested:,.2f}")
-        summary_col3.metric("Executable trades", executable_trade_count)
+        render_metric_strip([
+            ("Holdings analysed", holdings_analyzed, "Saved analysis"),
+            ("Total invested", f"₹{total_invested:,.2f}", "Saved invested base"),
+            ("Executable trades", executable_trade_count, "Review before execution"),
+        ])
 
         run_timing = payload.get("run_to_rebalancing_plan_timing") or {}
         if run_timing.get("status") == "finished":
@@ -8555,11 +8510,14 @@ except sqlite3.Error as exc:
     )
     st.stop()
 
-st.title("📊 Portfolio Rebalancer")
-st.caption("Holdings are stored in a local SQLite master table with multi-market ticker and currency metadata.")
-st.caption(f"Active SQLite file: `{DB_PATH}`")
-st.caption(f"App build: `{APP_BUILD}`")
-with st.expander("🧾 Run diagnostics", expanded=False):
+render_portfolio_heading(
+    "Portfolio Rebalancer",
+    "Review your allocation, compare risk, and prepare a rebalance.",
+    context="PRIVATE WORKSPACE",
+)
+with st.expander("Run diagnostics", expanded=False, icon=":material/troubleshoot:"):
+    st.caption(f"Active SQLite file: `{DB_PATH}`")
+    st.caption(f"App build: `{APP_BUILD}`")
     st.caption(
         "The app records lifecycle, stage, timing, and error-type events only. "
         "It does not record holdings, credentials, or downloaded price data."
