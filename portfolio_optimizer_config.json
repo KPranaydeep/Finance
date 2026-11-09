@@ -1,9 +1,26 @@
 {
-  "config_version": "portfolio-optimizer-config-v5-final-allocation",
+  "config_version": "portfolio-optimizer-config-v6-risk-allocation",
   "risk_free_rate_annual": 0.08225,
   "trading_days_per_year": 250,
   "max_weight_per_asset": 0.5,
   "history_start_date": "2000-01-01",
+  "allocation_policy": {
+    "enabled": true,
+    "method_version": "joint-block-cvar-cost-shock-v1",
+    "horizon_sessions": 30,
+    "confidence": 0.95,
+    "block_sessions": 5,
+    "scenario_paths": 1024,
+    "random_seed": 20261109,
+    "minimum_history_sessions": 126,
+    "single_name_loss_budget": 0.02,
+    "single_name_shock_floor": 0.50,
+    "group_correlation": 0.90,
+    "group_weight_limit": 0.25,
+    "return_shrinkage": 0.50,
+    "cost_stress_multiple": 2.0,
+    "solver_time_limit_seconds": 10.0
+  },
   "momentum_filter": {
     "enabled": true,
     "method_version": "robust-momentum-v1",

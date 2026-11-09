@@ -196,11 +196,12 @@ def _validated_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("days_to_flip must be positive and history_buffer_days cannot be negative")
     if settings["use_target_volatility"] and settings["target_volatility"] is None:
         raise ValueError("target_volatility is required when enabled")
-
-    # Preserve the existing application's sign convention.
-    settings["internal_max_dd"] = -abs(
-        settings["max_drawdown_input_pct"] / 100.0
-    )
+    if not math.isfinite(settings["max_drawdown_input_pct"]) or not 0 <= settings["max_drawdown_input_pct"] <= 100:
+        raise ValueError("max_drawdown_input_pct must be finite and between 0 and 100")
+    if settings["use_target_volatility"] and (not math.isfinite(settings["target_volatility"]) or settings["target_volatility"] <= 0):
+        raise ValueError("target_volatility must be finite and positive")
+    # The core constrains a non-negative loss magnitude, as does the private UI.
+    settings["internal_max_dd"] = settings["max_drawdown_input_pct"] / 100.0
     return settings
 
 
@@ -295,6 +296,8 @@ def build_public_signal(
             log_returns,
             price_map,
             settings["days_to_flip"],
+            max_drawdown=settings["internal_max_dd"], target_volatility=target_volatility,
+            policy_limits=(meta.get("allocation_policy") or {}).get("limits"),
         )
     if missing_prices or missing_alloc:
         raise RuntimeError(
@@ -303,6 +306,9 @@ def build_public_signal(
             + "; missing allocations: "
             + ", ".join(sorted(missing_alloc))
         )
+    execution_validation = rebalance_df.attrs.get("execution_validation") or {}
+    if execution_validation and not execution_validation.get("passed"):
+        raise RuntimeError("Final allocation check withheld the plan: " + "; ".join(execution_validation.get("violations") or []))
 
     allocation = [
         {"yahoo_ticker": ticker, "target_weight": float(weight)}
@@ -334,6 +340,10 @@ def build_public_signal(
                 "target_allocation": allocation,
                 "current_stats": current_stats or {},
                 "optimal_stats": optimal_stats or {},
+                "allocation_policy": {
+                    key:(meta.get("allocation_policy") or {}).get(key)
+                    for key in ("method","status","selected","constraints_applied","elapsed_seconds")
+                },
                 "history_start": str(meta.get("valid_start")),
                 "history_end": str(meta.get("valid_end")),
                 "history_rows": int(log_returns.shape[0]),

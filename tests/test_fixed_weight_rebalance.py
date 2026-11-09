@@ -8,7 +8,15 @@ import pandas as pd
 import pytest
 
 import portfolio_optimizer_core as core
+import fixed_weight_rebalance
 from fixed_weight_rebalance import holdings_fingerprint, prepare_fixed_universe, rebuild_saved_plan, target_fingerprint
+
+
+@pytest.fixture(autouse=True)
+def legacy_policy_fixture(monkeypatch):
+    # These small synthetic portfolios characterize plan refresh/precision.
+    # Risk-budget activation has dedicated multi-asset integration tests.
+    monkeypatch.setattr(fixed_weight_rebalance,"ALLOCATION_POLICY",{"enabled":False})
 
 
 def fixtures():

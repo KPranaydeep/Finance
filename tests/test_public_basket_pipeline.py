@@ -133,7 +133,7 @@ class TestAdapterContract:
 
         def fake_analysis(symbols, current_alloc, **kwargs):
             assert symbols == tickers
-            assert kwargs["max_dd"] == pytest.approx(-0.20)
+            assert kwargs["max_dd"] == pytest.approx(0.20)
             return (
                 np.array([0.60, 0.40]),
                 log_returns,
@@ -144,6 +144,7 @@ class TestAdapterContract:
                     "valid_end": index[-1],
                     "dropped_df": pd.DataFrame(),
                     "redundant_df": pd.DataFrame(),
+                    "allocation_policy":{"limits":{"test_policy":"forwarded"},"selected":"risk-aware","constraints_applied":True},
                 },
             )
 
@@ -151,8 +152,11 @@ class TestAdapterContract:
             assert symbols == tickers
             return {"ALPHA.NS": 110.0, "BETA.NS": 210.0}
 
-        def fake_rebalance(current_alloc, weights, returns, prices, days_to_flip):
+        def fake_rebalance(current_alloc, weights, returns, prices, days_to_flip, **kwargs):
             assert days_to_flip == 10
+            assert kwargs["max_drawdown"] == pytest.approx(.20)
+            assert kwargs["target_volatility"] is None
+            assert kwargs["policy_limits"] == {"test_policy":"forwarded"}
             return (
                 pd.DataFrame(
                     [
@@ -190,7 +194,20 @@ class TestAdapterContract:
         }
         assert result["decision_status"] == "REBALANCED"
         assert result["signal_output"][0]["Executable Quantity"] == 1
+        assert "limits" not in result["optimizer_output"]["allocation_policy"]
         json.dumps(result, allow_nan=False)
+
+    def test_withheld_plan_is_not_reported_as_no_change(self,monkeypatch):
+        payload=valid_input_payload()
+        frame=pd.DataFrame({"ALPHA.NS":[.01,.02],"BETA.NS":[.02,.01]})
+        withheld=pd.DataFrame()
+        withheld.attrs["execution_validation"]={"passed":False,"violations":["Tail budget exceeded"]}
+        monkeypatch.setattr(adapter,"_load_core_functions",lambda:(
+            lambda *a,**k:(np.array([.5,.5]),frame,{},{},{}),
+            lambda *a,**k:(withheld,[],[]),
+            lambda *a,**k:{"ALPHA.NS":110.,"BETA.NS":210.}))
+        with pytest.raises(RuntimeError,match="Tail budget exceeded"):
+            adapter.build_public_signal(payload=payload,data_as_of=datetime(2026,1,27,tzinfo=timezone.utc))
 
     def test_missing_latest_price_prevents_publication(self, monkeypatch):
         payload = valid_input_payload()

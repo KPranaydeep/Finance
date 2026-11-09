@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 
 from rebalance_review import assess_executable_rebalance, estimate_review_window
-from portfolio_optimizer_config import RISK_FREE_RATE_ANNUAL, MAX_WEIGHT_PER_ASSET
+from portfolio_optimizer_config import RISK_FREE_RATE_ANNUAL, MAX_WEIGHT_PER_ASSET, ALLOCATION_POLICY
+from risk_aware_allocator import build_policy_limits, current_weights
 
 
 def saved_targets(payload):
@@ -102,19 +103,46 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         raise ValueError("Positive current holdings value is required")
     allocation["Weight"] = allocation["Current Value INR"] / base
     returns = pd.DataFrame(log_returns).reindex(columns=tickers)
+    # Independent security histories can contain different exchange holidays or
+    # listing starts. Use observed common returns; never fill an unknown return.
+    returns = returns.replace([np.inf,-np.inf],np.nan).dropna(how="any")
     weights = np.array([targets.get(t, 0.) for t in tickers])
     cost = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22.))
     days = int((payload.get("settings") or {}).get("days_to_flip", 1))
     settings = payload.get("settings") or {}
+    allocation_policy = {"status":"disabled", "constraints_applied":False}
+    policy_limits = None
+    if ALLOCATION_POLICY["enabled"]:
+        try:
+            initial = current_weights(allocation,returns.columns)
+            _, policy_limits = build_policy_limits(
+                returns,initial,[(0.,MAX_WEIGHT_PER_ASSET)]*len(tickers),ALLOCATION_POLICY,cost)
+            allocation_policy = {"status":"saved-weights-recheck", "limits":policy_limits,
+                                 "policy":dict(ALLOCATION_POLICY), "constraints_applied":True}
+        except (ValueError,TypeError,KeyError) as exc:
+            allocation_policy = {"status":"unavailable", "constraints_applied":False,
+                                 "policy":dict(ALLOCATION_POLICY), "reason":str(exc)}
     plan, missing_prices, missing_alloc = plan_builder(
         allocation, weights, returns, native_prices, days,
         transaction_cost_bps=cost, excluded_trade_tickers=paused,
         max_drawdown=settings.get("internal_max_dd"),
         target_volatility=settings.get("target_volatility_daily"),
         maximum_weight=MAX_WEIGHT_PER_ASSET,
+        policy_limits=policy_limits,
     )
     if missing_prices or missing_alloc:
         raise ValueError("Incomplete rebalance coverage; previous plan retained")
+    if policy_limits:
+        allocation_policy["candidate"] = plan.attrs.get("execution_validation",{}).get("allocation_policy",{})
+    if ALLOCATION_POLICY["enabled"] and policy_limits is None:
+        attributes = dict(plan.attrs)
+        attributes["proposed_rebalancing_plan"] = attributes.get("proposed_rebalancing_plan") or plan.to_dict(orient="records")
+        validation = dict(attributes.get("execution_validation") or {})
+        validation.update(passed=False,violations=list(validation.get("violations") or []) + [
+            "Allocation policy unavailable: " + allocation_policy.get("reason","missing evidence")])
+        attributes["execution_validation"] = validation
+        plan = plan.iloc[:0].copy()
+        plan.attrs.update(attributes)
     candidate = deepcopy(payload)
     owned_values = dict(zip(allocation["Yahoo Ticker"], allocation["Current Value INR"]))
     orders = plan.to_dict(orient="records")
@@ -128,6 +156,7 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         execution_validation=plan.attrs.get("execution_validation", {}),
         proposed_rebalancing_plan=plan.attrs.get("proposed_rebalancing_plan", []),
         funding_adjustments=plan.attrs.get("funding_adjustments", []),
+        allocation_policy=allocation_policy,
         executable_rebalance_review=assess_executable_rebalance(common, owned_values, orders, cost_bps=cost),
         next_review_estimate=estimate_review_window(common, owned_values, targets, cost_bps=cost,
                                                   risk_free_rate=RISK_FREE_RATE_ANNUAL),

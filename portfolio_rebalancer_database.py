@@ -28,6 +28,7 @@ from public_lumpsum_allocator import allocate_public_lumpsum
 from trade_quantities import format_quantity, plan_quantity, quantity_step
 from partial_sell_review import review_partial_sells, partial_sell_caption
 from allocation_integrity import finalize_weights, fund_buy_orders, execution_check
+from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
 from price_move_confirmation import download_confirmation
 from fixed_weight_rebalance import prepare_fixed_universe, rebuild_saved_plan, holdings_fingerprint, target_fingerprint
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
@@ -110,7 +111,7 @@ from trade_deferrals import (
     split_deferred_trades,
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
-from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation
+from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -166,12 +167,13 @@ from universal_portfolio_cleaner import (
 # Streamlit may retain an already-imported helper module across a hot deploy.
 # Reload only when the running process still has the pre-momentum configuration;
 # a fresh process takes the normal single-import path.
-if not hasattr(_optimizer_config, "MOMENTUM_FILTER_CONFIG"):
+if not hasattr(_optimizer_config, "ALLOCATION_POLICY"):
     _optimizer_config = importlib.reload(_optimizer_config)
 
 DEFAULT_HISTORY_START_DATE = _optimizer_config.DEFAULT_HISTORY_START_DATE
 MAX_WEIGHT_PER_ASSET = _optimizer_config.MAX_WEIGHT_PER_ASSET
 MOMENTUM_FILTER_CONFIG = _optimizer_config.MOMENTUM_FILTER_CONFIG
+ALLOCATION_POLICY = _optimizer_config.ALLOCATION_POLICY
 OPTIMIZER_CONFIG = _optimizer_config.OPTIMIZER_CONFIG
 OPTIMIZER_CONFIG_VERSION = _optimizer_config.OPTIMIZER_CONFIG_VERSION
 RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
@@ -3072,6 +3074,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             )
 
         review_cost_bps = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
+        render_allocation_policy(payload.get("allocation_policy"))
         render_execution_validation(execution_validation, proposed_rebalancing_plan)
         if payload.get("funding_adjustments"):
             st.caption(f"{len(payload['funding_adjustments'])} proposed buys were reduced or withheld to fit recorded cash and net sale proceeds after costs.")
@@ -5830,7 +5833,7 @@ def enforce_min_weight_postprocess(weights, min_weight=0.01, frozen_positions=No
 
 
 def validate_optimizer_allocation(weights, log_returns, *, frozen_weights=None,
-                                  max_dd=None, target_volatility=None):
+                                  max_dd=None, target_volatility=None, policy_limits=None):
     """Validate cleanup and every solver fallback against the requested policy."""
     frozen_positions = {
         int(log_returns.columns.get_loc(ticker)): weight
@@ -5843,7 +5846,42 @@ def validate_optimizer_allocation(weights, log_returns, *, frozen_weights=None,
         max_drawdown=max_dd,
         target_volatility=target_volatility,
         covariance=shrunk_covariance(log_returns) if target_volatility is not None else None,
+        policy_limits=policy_limits,
     )
+
+
+def apply_allocation_policy(incumbent, log_returns, current_alloc, *, frozen_weights=None,
+                            max_dd=None, target_volatility=None, transaction_cost_bps=22.):
+    """Compare two allocators under the same explicit policy; no permissive fallback."""
+    if not ALLOCATION_POLICY["enabled"]:
+        return incumbent, {"status":"disabled", "constraints_applied":False}
+    challenger, report = solve_risk_aware_allocation(
+        log_returns, current_alloc,
+        weight_bounds(len(log_returns.columns),log_returns.columns,frozen_weights),
+        ALLOCATION_POLICY, cost_bps=transaction_cost_bps,
+    )
+    limits = report.get("limits")
+    viable = []
+    for label, weights in (("risk-aware",challenger),("incumbent",incumbent)):
+        if weights is None or not limits:
+            continue
+        checked, validation = validate_optimizer_allocation(
+            weights, log_returns, frozen_weights=frozen_weights, max_dd=max_dd,
+            target_volatility=target_volatility, policy_limits=limits,
+        )
+        report[label + "_validation"] = validation
+        if checked is not None:
+            metrics = check_policy_weights(checked,log_returns,limits)
+            report[label + "_comparison"] = metrics
+            if metrics["passed"]:
+                viable.append((metrics["objective_net_return"],label,checked))
+    if not viable:
+        report.update(selected="none",constraints_applied=False)
+        return None, report
+    # Deterministic comparison; prefer the existing solution on an exact tie.
+    _, selected, weights = max(viable,key=lambda item:(round(item[0],10),item[1]=="incumbent"))
+    report.update(selected=selected,status="selected",constraints_applied=True)
+    return weights, report
 
 class OptimizerTimeBudgetExceeded(RuntimeError):
     """Raised from a SciPy callback when one exact solve exceeds its budget."""
@@ -6130,6 +6168,7 @@ def optimize_prepared_return_matrix(
     target_volatility=None,
     integrity_report=None,
     timeout_seconds=None,
+    transaction_cost_bps=22.,
 ):
     """Solve one exact-asset limit without rebuilding market history.
 
@@ -6203,16 +6242,25 @@ def optimize_prepared_return_matrix(
     except OptimizerTimeBudgetExceeded:
         solver_screen = dict(solver_screen or {})
         solver_screen["timed_out"] = True
-        return None, log_returns, None, None, solver_screen
-    if optimal_weights is None:
-        return None, log_returns, None, None, solver_screen
+        optimal_weights = None
 
-    optimal_weights, allocation_validation = validate_optimizer_allocation(
-        optimal_weights, log_returns, frozen_weights=frozen_weights,
+    allocation_validation = {}
+    if optimal_weights is not None:
+        optimal_weights, allocation_validation = validate_optimizer_allocation(
+            optimal_weights, log_returns, frozen_weights=frozen_weights,
+            max_dd=max_dd, target_volatility=target_volatility,
+        )
+    optimal_weights, allocation_policy = apply_allocation_policy(
+        optimal_weights, log_returns, current_alloc, frozen_weights=frozen_weights,
         max_dd=max_dd, target_volatility=target_volatility,
+        transaction_cost_bps=transaction_cost_bps,
     )
+    if allocation_policy.get("selected") in {"risk-aware", "incumbent"}:
+        allocation_validation = allocation_policy[allocation_policy["selected"] + "_validation"]
     solver_screen = dict(solver_screen or {}, allocation_validation=allocation_validation,
-                         frozen_weights=frozen_weights)
+                         frozen_weights=frozen_weights, allocation_policy=allocation_policy)
+    if optimal_weights is not None and solver_screen.get("timed_out"):
+        solver_screen.update(incumbent_timed_out=True,timed_out=False)
     if optimal_weights is None:
         return None, log_returns, None, None, solver_screen
     current_stats, optimal_stats = portfolio_stats_comparison(
@@ -6230,6 +6278,7 @@ def solve_prepared_search_finalist(
     maximum_assets,
     max_dd,
     target_volatility,
+    transaction_cost_bps=22.,
 ):
     """Run the selected final solve against the matrix already built by search.
 
@@ -6251,11 +6300,13 @@ def solve_prepared_search_finalist(
             max_dd=max_dd,
             target_volatility=target_volatility,
             integrity_report=(prepared_meta or {}).get("price_integrity_report"),
+            transaction_cost_bps=transaction_cost_bps,
         )
     )
     meta = dict(prepared_meta or {})
     meta["exact_optimizer_screen"] = solver_screen or {}
     meta["allocation_validation"] = (solver_screen or {}).get("allocation_validation", {})
+    meta["allocation_policy"] = (solver_screen or {}).get("allocation_policy", {})
     meta["price_integrity_frozen_owned_weights"] = (solver_screen or {}).get("frozen_weights", {})
     if weights is None:
         return None, selected_returns, current_stats, optimal_stats, meta
@@ -6450,6 +6501,7 @@ def validate_search_finalists_walk_forward(
                 target_volatility=target_volatility,
                 integrity_report=(meta or {}).get("price_integrity_report"),
                 timeout_seconds=solver_timeout_seconds,
+                transaction_cost_bps=transaction_cost_bps,
             )
             if weights is None or selected_train is None or selected_train.empty:
                 failure = "Training optimizer infeasible or timed out"
@@ -6473,6 +6525,8 @@ def validate_search_finalists_walk_forward(
             if current_total > 0:
                 current_weights = current_weights.clip(lower=0.0) / current_total
             current_map = current_weights.to_dict()
+            if current_weights.sum() > 0:
+                current_map = (current_weights/current_weights.sum()).to_dict()
             optimal_map = dict(zip(selected_train.columns, weights.tolist()))
             turnover_tickers = set(current_map) | set(optimal_map)
             one_way_turnover = 0.5 * sum(
@@ -6480,7 +6534,7 @@ def validate_search_finalists_walk_forward(
                 for ticker in turnover_tickers
             )
             cost_drag_daily = (
-                np.log1p(-min(cost_rate * one_way_turnover, 0.999999))
+                np.log1p(-min(cost_rate * 2 * one_way_turnover, 0.999999))
                 / len(test_returns)
             )
             net_annual = float((gross_daily.mean() + cost_drag_daily) * TRADING_DAYS_PER_YEAR)
@@ -6515,7 +6569,7 @@ def validate_search_finalists_walk_forward(
         "pairs_without_reusable_matrix": len(finalist_pairs - reusable_pairs),
         "method_note": (
             "Expanding chronological folds; weights fit on prior sessions only; "
-            "estimated one-way-turnover cost applied to each test fold. Finalists "
+            "estimated per-side costs applied to gross buys plus sells in each test fold. Finalists "
             "were nominated by full-history search results and the current candidate "
             "universe is reused, so this is a finalist robustness gate—not an "
             "unbiased point-in-time backtest."
@@ -6534,6 +6588,7 @@ def run_portfolio_analysis_multi(
     progress_callback=None,
     solve_portfolio=True,
     optimizer_timeout_seconds=None,
+    transaction_cost_bps=22.,
 ):
     ticker_currency_pairs = tuple(
         sorted(
@@ -6644,17 +6699,27 @@ def run_portfolio_analysis_multi(
     except OptimizerTimeBudgetExceeded as exc:
         meta["optimizer_timed_out"] = True
         meta["optimizer_timeout_reason"] = str(exc)
-        return None, log_returns, None, None, meta
-    if optimal_weights is None:
-        return None, log_returns, None, None, meta
+        optimal_weights = None
     meta.setdefault("pipeline_timings_seconds", {})["optimizer_solver"] = round(
         float(time.perf_counter() - solver_started), 3
     )
 
-    optimal_weights, allocation_validation = validate_optimizer_allocation(
-        optimal_weights, log_returns, frozen_weights=frozen_weights,
+    allocation_validation = {}
+    if optimal_weights is not None:
+        optimal_weights, allocation_validation = validate_optimizer_allocation(
+            optimal_weights, log_returns, frozen_weights=frozen_weights,
+            max_dd=max_dd, target_volatility=target_volatility,
+        )
+    optimal_weights, allocation_policy = apply_allocation_policy(
+        optimal_weights, log_returns, current_alloc, frozen_weights=frozen_weights,
         max_dd=max_dd, target_volatility=target_volatility,
+        transaction_cost_bps=transaction_cost_bps,
     )
+    meta["allocation_policy"] = allocation_policy
+    if optimal_weights is not None and meta.get("optimizer_timed_out"):
+        meta.update(incumbent_optimizer_timed_out=True,optimizer_timed_out=False)
+    if allocation_policy.get("selected") in {"risk-aware", "incumbent"}:
+        allocation_validation = allocation_policy[allocation_policy["selected"] + "_validation"]
     meta["allocation_validation"] = allocation_validation
     if optimal_weights is None:
         return None, log_returns, None, None, meta
@@ -6787,7 +6852,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
                          *, transaction_cost_bps=22.0, excluded_trade_tickers=(),
                          available_cash_inr=0., max_drawdown=None,
                          target_volatility=None, maximum_weight=MAX_WEIGHT_PER_ASSET,
-                         frozen_weights=None):
+                         frozen_weights=None, policy_limits=None):
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
     common_tickers = [t for t in lr_tickers if t in alloc_df.index and t in prices]
@@ -6916,6 +6981,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         frozen_weights=frozen_weights, max_weight=maximum_weight,
         max_drawdown=max_drawdown, target_volatility=target_volatility,
         covariance=shrunk_covariance(log_returns) if target_volatility is not None else None,
+        policy_limits=policy_limits,
     )
     if not validation["passed"]:
         proposed = rebal_df.to_dict(orient="records") or proposed
@@ -7476,6 +7542,7 @@ def search_universal_shortlist_caps(
     gradient_return_scale=0.001,
     runtime_brake_seconds=900,
     solver_timeout_seconds=600,
+    transaction_cost_bps=22.,
     prior_results=(),
     prepared_matrix_store=None,
     on_result=None,
@@ -7667,6 +7734,7 @@ def search_universal_shortlist_caps(
                     progress_callback=report_cap_analysis,
                     solve_portfolio=not prepare_without_largest_solve,
                     optimizer_timeout_seconds=solver_timeout_seconds,
+                    transaction_cost_bps=transaction_cost_bps,
                 )
             )
         else:
@@ -7724,6 +7792,7 @@ def search_universal_shortlist_caps(
                             "price_integrity_report"
                         ),
                         timeout_seconds=solver_timeout_seconds,
+                        transaction_cost_bps=transaction_cost_bps,
                     )
                 )
                 solved_by_effective_limit[effective_limit] = (
@@ -7961,6 +8030,7 @@ def search_universal_shortlist_caps(
                 minimum_trading_days=minimum_trading_days, step=step,
                 adaptive=False, asset_evaluation_order=asset_evaluation_order,
                 alternating_refinement=False,
+                transaction_cost_bps=transaction_cost_bps,
             )
             for new_row in refined:
                 pair = (int(new_row["Shortlist cap"]), int(new_row["Maximum assets"]))
@@ -8018,6 +8088,7 @@ def search_universal_shortlist_caps(
                 minimum_cap=int(candidate_x),
                 maximum_cap=int(candidate_x),
                 starting_asset_limit=int(candidate_y),
+                transaction_cost_bps=transaction_cost_bps,
                 max_dd=max_dd,
                 target_volatility=target_volatility,
                 drop_bottom_pct=drop_bottom_pct,
@@ -8584,6 +8655,8 @@ def _search_results_are_compatible(previous_config, current_config):
         "snapshot_date_ist",
         "optimizer_config_version",
         "risk_free_rate_annual",
+        "allocation_policy",
+        "transaction_cost_bps",
     )
     if not previous_config or not current_config:
         return False
@@ -9267,13 +9340,13 @@ with st.sidebar:
             help=(
             "After the adaptive search saturates, re-fit the top two feasible "
                 "pairs on expanding historical windows, score later sessions after "
-                "an estimated one-way-turnover cost, and auto-run only a consistent "
+                "estimated trading costs on both sides, and auto-run only a consistent "
                 "winner. Adds several optimizer solves and may take minutes."
             ),
         )
         if validate_finalists:
             finalist_transaction_cost_bps = float(st.number_input(
-                "Estimated cost per one-way turnover (basis points)",
+                "Estimated trading cost per side (basis points)",
                 min_value=0.0,
                 max_value=500.0,
                 value=22.0,
@@ -9457,6 +9530,8 @@ cap_search_config = {
     "return_equivalence_pp": float(return_equivalence_pp),
     "skip_recent_best_search": bool(skip_recent_best_search),
     "optimizer_config_version": OPTIMIZER_CONFIG_VERSION,
+    "allocation_policy": dict(ALLOCATION_POLICY),
+    "transaction_cost_bps": float(finalist_transaction_cost_bps),
     "risk_free_rate_annual": float(RISK_FREE_RATE_ANNUAL),
     "snapshot_date_ist": datetime.now(
         timezone(timedelta(hours=5, minutes=30))
@@ -9710,6 +9785,7 @@ if run_cap_search_btn:
 
     try:
         search_kwargs = {
+            "transaction_cost_bps": float(finalist_transaction_cost_bps),
             "max_dd": max_dd,
             "target_volatility": target_volatility,
             "drop_bottom_pct": drop_bottom_pct,
@@ -10044,7 +10120,7 @@ if cap_search_results:
                     "Up to two finalists are scored across three expanding training windows. "
                     "Each fold is scored on the immediately following sessions. Net annual "
                     f"{float(walk_forward_result.get('transaction_cost_bps', 22.0)):.0f} bp "
-                    "per one-way turnover. This is a finalist stability check, not an "
+                    "per side on buys plus sells. This is a finalist stability check, not an "
                     "unbiased point-in-time backtest: finalists and the exact optimizer "
                     "screen were formed using full-history data, and the current candidate "
                     "universe is reused."
@@ -10321,6 +10397,7 @@ if cap_search_results:
                                 starting_cap=int(candidate_cap),
                                 maximum_cap=int(candidate_cap),
                                 adaptive=False,
+                                transaction_cost_bps=float(saved_search_config.get("transaction_cost_bps",22.)),
                                 step=refinement_step,
                                 max_dd=float(saved_search_config["max_dd"]),
                                 target_volatility=saved_search_config.get(
@@ -12054,6 +12131,7 @@ if run_btn:
                     maximum_assets=exact_optimizer_asset_cap,
                     max_dd=max_dd,
                     target_volatility=target_volatility,
+                    transaction_cost_bps=float(security_forecast_cost_bps),
                 )
             )
         else:
@@ -12068,6 +12146,7 @@ if run_btn:
                     redundancy_corr_threshold=redundancy_corr_threshold,
                     exact_optimizer_asset_cap=exact_optimizer_asset_cap,
                     progress_callback=report_analysis_progress,
+                    transaction_cost_bps=float(security_forecast_cost_bps),
                 )
 
         _display_optimization_stage(
@@ -12075,12 +12154,20 @@ if run_btn:
             "Optimization complete; preparing execution plan",
             0.88,
         )
+        policy_log = meta.get("allocation_policy") or {}
+        _app_run_log("allocation_policy_checked", status=policy_log.get("status","unavailable"),
+                     selected=policy_log.get("selected","none"),
+                     solver_seconds=policy_log.get("elapsed_seconds"),
+                     constraints_applied=bool(policy_log.get("constraints_applied")))
 
         if optimal_weights is None:
             stopped_timer = _abort_optimization_plan_timer("no usable allocation")
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             validation = meta.get("allocation_validation") or {}
             reasons = "; ".join(validation.get("violations") or [])
+            policy_result = meta.get("allocation_policy") or {}
+            if policy_result:
+                render_allocation_policy(policy_result)
             st.error("Portfolio optimization did not return a usable allocation."
                      + (" Final constraint check: " + reasons if reasons else ""))
             st.stop()
@@ -12296,6 +12383,7 @@ if run_btn:
             excluded_trade_tickers=active_deferrals["yahoo_ticker"].tolist() if not active_deferrals.empty else (),
             max_drawdown=max_dd, target_volatility=target_volatility,
             frozen_weights=meta.get("price_integrity_frozen_owned_weights"),
+            policy_limits=(meta.get("allocation_policy") or {}).get("limits"),
         )
         partial_sell_sharpe_check = rebal_df.attrs.get("partial_sell_sharpe_check", {})
         execution_validation = rebal_df.attrs.get("execution_validation", {})
@@ -12710,6 +12798,7 @@ if run_btn:
             "holdings_action_summary": holdings_action_df.to_dict(orient="records"),
             "partial_sell_sharpe_check": partial_sell_sharpe_check,
             "allocation_validation": meta.get("allocation_validation", {}),
+            "allocation_policy": meta.get("allocation_policy", {}),
             "execution_validation": execution_validation,
             "proposed_rebalancing_plan": proposed_rebalancing_plan,
             "funding_adjustments": funding_adjustments,

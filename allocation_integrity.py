@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from trade_quantities import plan_quantity, quantity_step
+from risk_aware_allocator import check_policy_weights
 
 
 VERSION = "allocation-integrity-v1"
@@ -13,7 +14,7 @@ TOLERANCE = 1e-7
 
 
 def allocation_check(weights, log_returns, *, bounds=None, max_drawdown=None,
-                     target_volatility=None, covariance=None):
+                     target_volatility=None, covariance=None, policy_limits=None):
     """Check final weights against the requested limits, including the initial peak.
 
     Drawdown replays daily-rebalanced simple returns from the input log returns.
@@ -67,6 +68,10 @@ def allocation_check(weights, log_returns, *, bounds=None, max_drawdown=None,
             report.update(daily_volatility=volatility, daily_volatility_limit=limit)
             if volatility > limit + TOLERANCE:
                 errors.append("Final allocation exceeds the requested volatility limit")
+    if policy_limits:
+        policy = check_policy_weights(w, history, policy_limits)
+        errors.extend(policy["violations"])
+        report["allocation_policy"] = policy
     report["passed"] = not errors
     return report
 
@@ -132,7 +137,7 @@ def fund_buy_orders(orders, holdings, *, cost_bps, available_cash_inr=0.):
 def execution_check(holdings, orders, prices, log_returns, *, cost_bps,
                     available_cash_inr=0., excluded_tickers=(), frozen_weights=None,
                     max_weight=1., max_drawdown=None, target_volatility=None,
-                    covariance=None):
+                    covariance=None, policy_limits=None):
     """Replay every marked holding, cash, fees and order; unavailable is not passed."""
     report = {"version": VERSION, "passed": False, "violations": []}
     errors = report["violations"]
@@ -214,6 +219,14 @@ def execution_check(holdings, orders, prices, log_returns, *, cost_bps,
                                     target_volatility=target_volatility, covariance=covariance)
             errors.extend(risk["violations"])
             report["risk"] = risk
+            if policy_limits:
+                policy_check = check_policy_weights(
+                    w, history, policy_limits,
+                    scenario_weights=w * net_capital / base,
+                    cost_fraction=rate * gross / base * policy_limits["settings"]["cost_stress_multiple"],
+                )
+                errors.extend(policy_check["violations"])
+                report["allocation_policy"] = policy_check
     except (ValueError, TypeError, KeyError, OverflowError) as exc:
         errors.append(str(exc))
     report["passed"] = not errors

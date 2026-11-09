@@ -88,3 +88,32 @@ def test_ui_free_optimizer_uses_the_shared_configuration():
     assert core._CORE["TRADING_DAYS_PER_YEAR"] == 250
     assert core._CORE["MAX_WEIGHT_PER_ASSET"] == 0.5
     assert core._CORE["DEFAULT_HISTORY_START_DATE"] == "2000-01-01"
+    assert core._CORE["ALLOCATION_POLICY"]["enabled"]
+
+
+def test_old_external_config_does_not_silently_enable_new_risk_assumptions(tmp_path):
+    result = load_optimizer_config(write(tmp_path,valid_config()))
+    assert result["allocation_policy"]["enabled"] is False
+
+
+def test_explicit_allocation_policy_is_validated(tmp_path):
+    from allocation_policy_config import DEFAULT_ALLOCATION_POLICY
+    payload=valid_config()
+    payload["allocation_policy"]=dict(DEFAULT_ALLOCATION_POLICY)
+    result=load_optimizer_config(write(tmp_path,payload))
+    assert result["allocation_policy"]["single_name_loss_budget"] == .02
+    payload["allocation_policy"]["confidence"] = 1.
+    with pytest.raises(ValueError,match="ALLOCATION_POLICY"):
+        load_optimizer_config(write(tmp_path,payload))
+
+
+@pytest.mark.parametrize("value",[-20.,101.,float("nan"),float("inf")])
+def test_event_adapter_rejects_invalid_drawdown_magnitudes(value):
+    from public_basket_optimizer_adapter import _validated_settings
+    with pytest.raises(ValueError,match="max_drawdown_input_pct"):
+        _validated_settings({"settings":{"max_drawdown_input_pct":value}})
+
+
+def test_event_adapter_uses_same_positive_drawdown_magnitude_as_core():
+    from public_basket_optimizer_adapter import _validated_settings
+    assert _validated_settings({"settings":{"max_drawdown_input_pct":20}})["internal_max_dd"] == .2

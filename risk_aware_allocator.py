@@ -1,0 +1,258 @@
+"""Joint-scenario CVaR allocation with self-funded costs and explicit risk budgets.
+
+Only existing adjusted-price returns are used. Scenario draws are shared across
+all securities; neither a bootstrap sample nor a fitted optimum is a forecast.
+"""
+
+import math
+import time
+
+import numpy as np
+import pandas as pd
+from scipy.optimize import linprog
+from scipy import sparse
+from scipy.sparse.csgraph import connected_components
+
+from allocation_policy_config import validate_allocation_policy
+
+
+def joint_block_scenarios(log_returns, policy):
+    policy = validate_allocation_policy(policy)
+    frame = pd.DataFrame(log_returns).apply(pd.to_numeric, errors="coerce")
+    matrix = frame.to_numpy(dtype=float)
+    if (not len(frame.columns) or frame.columns.duplicated().any()
+            or frame.index.duplicated().any() or not frame.index.is_monotonic_increasing
+            or len(frame) < policy["minimum_history_sessions"]
+            or not np.isfinite(matrix).all()):
+        raise ValueError("Complete chronological history is required for joint tail scenarios")
+    cumulative = np.vstack([np.zeros((1, matrix.shape[1])), np.cumsum(matrix, axis=0)])
+    rng = np.random.default_rng(policy["random_seed"])
+    total = np.zeros((policy["scenario_paths"], matrix.shape[1]))
+    remaining = policy["horizon_sessions"]
+    while remaining:
+        block = min(policy["block_sessions"], remaining)
+        starts = rng.integers(0, len(matrix) - block + 1, size=len(total))
+        total += cumulative[starts + block] - cumulative[starts]
+        remaining -= block
+    scenarios = np.expm1(total)
+    if not np.isfinite(scenarios).all() or (scenarios < -1).any():
+        raise ValueError("Invalid joint scenario returns")
+    return scenarios
+
+
+def scenario_cvar(net_returns, confidence):
+    """Exact fractional empirical tail, matching the linear-program CVaR."""
+    losses = np.sort(-np.asarray(net_returns, dtype=float))[::-1]
+    if not len(losses) or not np.isfinite(losses).all() or not 0 < confidence < 1:
+        raise ValueError("Invalid tail-loss evidence")
+    mass = len(losses) * (1 - confidence)
+    whole = int(math.floor(mass))
+    fraction = mass - whole
+    total = losses[:whole].sum()
+    if fraction > 1e-12:
+        total += fraction * losses[min(whole, len(losses) - 1)]
+    return max(float(total / mass), 0.)
+
+
+def current_weights(allocation, columns):
+    frame = pd.DataFrame(allocation).copy()
+    names = frame["Yahoo Ticker"].astype(str).str.strip().str.upper()
+    quantity = pd.to_numeric(frame["Quantity"], errors="coerce")
+    weight = pd.to_numeric(frame["Weight"], errors="coerce")
+    if (names.duplicated().any() or not np.isfinite(quantity).all() or quantity.lt(0).any()
+            or not np.isfinite(weight).all() or weight.lt(0).any()):
+        raise ValueError("Invalid current allocation for cost/tail comparison")
+    missing = set(names[quantity.gt(0)]) - set(columns)
+    if missing:
+        raise ValueError("Owned history missing from allocation policy: " + ", ".join(sorted(missing)))
+    mapped = pd.Series(np.where(quantity.gt(0), weight, 0.), index=names)
+    result = mapped.reindex(columns).fillna(0.).to_numpy()
+    if result.sum() <= 0:
+        raise ValueError("Positive current allocation required for funding costs")
+    # Pauses define a separately excluded sleeve. Never normalize missing owned
+    # history away: every owned row in this active sleeve was checked above.
+    return result / result.sum()
+
+
+def correlated_groups(log_returns, threshold, block_sessions=5):
+    frame = pd.DataFrame(log_returns)
+    aggregated = frame.groupby(np.arange(len(frame)) // block_sessions).sum()
+    correlation = aggregated.corr().to_numpy()
+    adjacency = np.nan_to_num(correlation, nan=0.) >= threshold
+    np.fill_diagonal(adjacency, False)
+    _, labels = connected_components(sparse.csr_matrix(adjacency), directed=False)
+    return [np.flatnonzero(labels == group).tolist() for group in sorted(set(labels))
+            if np.sum(labels == group) > 1]
+
+
+def funded_target(weights, initial, rate):
+    """Convert post-fee weights to amounts/base satisfying capital + fees = 1."""
+    wealth = 1.
+    for _ in range(100):
+        cost = rate * float(np.abs(wealth * weights - initial).sum())
+        updated = 1 - cost
+        if updated <= 0 or not math.isfinite(updated):
+            raise ValueError("Funding costs exhaust capital")
+        if abs(updated - wealth) < 1e-12:
+            return updated * weights, cost
+        wealth = updated
+    raise ValueError("Self-funding calculation did not converge")
+
+
+def build_policy_limits(log_returns, initial, bounds, policy, cost_bps):
+    policy = validate_allocation_policy(policy)
+    frame = pd.DataFrame(log_returns)
+    columns = list(frame.columns)
+    rate = float(cost_bps) / 10000 * policy["cost_stress_multiple"]
+    if not math.isfinite(rate) or not 0 <= rate < .25:
+        raise ValueError("Invalid modeled cost rate for allocation policy")
+    scenarios = joint_block_scenarios(frame, policy)
+    shocks = np.maximum(policy["single_name_shock_floor"],
+                        np.maximum(-np.expm1(frame.min().to_numpy(dtype=float)), 0.))
+    caps = np.minimum([b[1] for b in bounds], policy["single_name_loss_budget"] / shocks)
+    groups = correlated_groups(frame, policy["group_correlation"], policy["block_sessions"])
+    limits = {
+        "method": policy["method_version"], "settings": policy,
+        "position_caps": dict(zip(columns, map(float, caps))),
+        "stress_losses": dict(zip(columns, map(float, shocks))),
+        "groups": [{"tickers":[columns[i] for i in members], "cap":policy["group_weight_limit"]}
+                   for members in groups],
+        "tail_limit": scenario_cvar(scenarios @ initial, policy["confidence"]),
+        "current_weights": dict(zip(columns, map(float, initial))),
+        "cost_rate": rate,
+        "history_through": str(frame.index[-1])[:10],
+        "scenario_convention": f"Joint moving-block {policy['horizon_sessions']}-session buy-and-hold returns; costs funded from portfolio",
+    }
+    return scenarios, limits
+
+
+def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
+                         scenario_weights=None, cost_fraction=None):
+    """Check target or actual executable exposures against saved policy limits."""
+    frame = pd.DataFrame(log_returns)
+    columns = list(frame.columns)
+    w = np.asarray(weights, dtype=float)
+    errors = []
+    result = {"passed":False, "violations":errors}
+    try:
+        policy = validate_allocation_policy(limits["settings"])
+        if (not math.isfinite(float(limits["tail_limit"])) or not 0 <= float(limits["tail_limit"]) <= 1
+                or any(not math.isfinite(float(cap)) or not 0 <= float(cap) <= 1
+                       for cap in limits["position_caps"].values())
+                or any(not math.isfinite(float(g["cap"])) or not 0 < float(g["cap"]) <= 1
+                       for g in limits["groups"])):
+            raise ValueError("Invalid saved allocation policy limits")
+        if (w.shape != (len(columns),) or not np.isfinite(w).all()
+                or w.min() < -1e-8 or w.sum() > 1 + 1e-7):
+            raise ValueError("Invalid policy allocation weights")
+        missing = [t for t, value in zip(columns,w) if value > 1e-9 and t not in limits["position_caps"]]
+        if missing:
+            raise ValueError("No saved shock budget for " + ", ".join(missing))
+        daily_shocks = np.maximum(-np.expm1(frame.min().to_numpy(dtype=float)), 0.)
+        shocks = np.maximum(policy["single_name_shock_floor"], daily_shocks)
+        for i, ticker in enumerate(columns):
+            cap = min(float(limits["position_caps"].get(ticker, 0.)),
+                      policy["single_name_loss_budget"] / max(shocks[i], 1e-12))
+            if w[i] > cap + 1e-7:
+                errors.append("Single-security shock budget exceeded: " + str(ticker))
+        weights_by_ticker = dict(zip(columns,w))
+        group_checks = list(limits["groups"])
+        # New positive correlations can tighten, never silently loosen, a saved policy.
+        group_checks += [{"tickers":[columns[i] for i in group], "cap":policy["group_weight_limit"]}
+                         for group in correlated_groups(frame, policy["group_correlation"],policy["block_sessions"])]
+        if any(sum(weights_by_ticker.get(t,0.) for t in g["tickers"]) > float(g["cap"]) + 1e-7 for g in group_checks):
+            errors.append("Correlated-group exposure limit exceeded")
+        samples = scenarios if scenarios is not None else joint_block_scenarios(frame, policy)
+        if scenario_weights is None:
+            initial = np.array([limits["current_weights"].get(t,0.) for t in columns])
+            exposure, cost = funded_target(w, initial, limits["cost_rate"])
+        else:
+            exposure, cost = np.asarray(scenario_weights, dtype=float), float(cost_fraction)
+        if exposure.shape != w.shape or not np.isfinite(exposure).all() or not math.isfinite(cost) or cost < 0:
+            raise ValueError("Invalid policy funding exposure")
+        cvar = scenario_cvar(samples @ exposure - cost, policy["confidence"])
+        if cvar > float(limits["tail_limit"]) + 1e-7:
+            errors.append("Joint-scenario tail loss exceeds the current-portfolio budget")
+        result.update(cvar=cvar, tail_limit=limits["tail_limit"], cost_fraction=cost,
+                      mean_net_scenario_return=float(np.mean(samples @ exposure - cost)))
+        means = np.mean(samples, axis=0)
+        means = (1-policy["return_shrinkage"]) * means + policy["return_shrinkage"] * np.median(means)
+        result["objective_net_return"] = float(means @ exposure - cost)
+    except (ValueError, TypeError, KeyError, OverflowError) as exc:
+        errors.append(str(exc))
+    result["passed"] = not errors
+    return result
+
+
+def solve_risk_aware_allocation(log_returns, allocation, bounds, policy, *, cost_bps=22.):
+    """Solve sparse LP in amounts/base; normalize only by solved post-fee capital."""
+    started = time.perf_counter()
+    report = {"method":"joint-block-cvar-cost-shock-v1", "status":"unavailable",
+              "policy":dict(policy), "constraints_applied":False}
+    try:
+        policy = validate_allocation_policy(policy)
+        frame = pd.DataFrame(log_returns)
+        initial = current_weights(allocation, frame.columns)
+        samples, limits = build_policy_limits(frame, initial, bounds, policy, cost_bps)
+        n, m = frame.shape[1], len(samples)
+        caps = np.array(list(limits["position_caps"].values()))
+        lower = np.array([b[0] for b in bounds])
+        report["limits"] = limits
+        if np.any(lower > caps + 1e-9) or caps.sum() < 1 - 1e-9:
+            raise ValueError("Shock limits and frozen positions cannot form a fully invested allocation")
+        rate, confidence = limits["cost_rate"], policy["confidence"]
+        means = samples.mean(axis=0)
+        means = (1 - policy["return_shrinkage"]) * means + policy["return_shrinkage"] * np.median(means)
+        # Variables: invested amounts x, trades u, VaR a, tail slacks z, net wealth v.
+        # A separate wealth variable keeps cap rows sparse even with 3,000 assets.
+        eye = sparse.eye(n,format="csr")
+        zeros = sparse.csr_matrix((n,m+2))
+        matrices = [sparse.hstack([eye,-eye,zeros]), sparse.hstack([-eye,-eye,zeros])]
+        rhs = [initial,-initial]
+        for multiplier, limit in ((1.,caps),(-1.,lower)):
+            matrices.append(sparse.hstack([multiplier * eye,sparse.csr_matrix((n,n+m+1)),
+                                           sparse.csr_matrix((-multiplier*limit).reshape(-1,1))]))
+            rhs.append(np.zeros(n))
+        matrices.append(sparse.hstack([-sparse.csr_matrix(samples),
+                                       sparse.csr_matrix(np.full((m,n),rate)),
+                                       sparse.csr_matrix(-np.ones((m,1))),-sparse.eye(m),
+                                       sparse.csr_matrix((m,1))]))
+        rhs.append(np.zeros(m))
+        cvar_row = np.r_[np.zeros(2*n),1.,np.full(m,1/((1-confidence)*m)),0.]
+        matrices.append(sparse.csr_matrix(cvar_row.reshape(1,-1)))
+        rhs.append(np.array([limits["tail_limit"]]))
+        for group in limits["groups"]:
+            row = np.zeros(n)
+            row[[frame.columns.get_loc(t) for t in group["tickers"]]] += 1
+            matrices.append(sparse.csr_matrix(np.r_[row,np.zeros(n+m+1),-group["cap"]].reshape(1,-1)))
+            rhs.append(np.zeros(1))
+        objective = np.r_[-means,np.full(n,rate),np.zeros(m+2)]
+        budget = np.r_[np.ones(n),np.full(n,rate),np.zeros(m+2)]
+        net_wealth = np.r_[np.ones(n),np.zeros(n+m+1),-1.]
+        solution = linprog(objective,A_ub=sparse.vstack(matrices,format="csr"),b_ub=np.concatenate(rhs),
+                           A_eq=sparse.csr_matrix(np.vstack([budget,net_wealth])),b_eq=[1.,0.],
+                           bounds=[(0.,1.)]*n+[(0.,2.)]*n+[(None,None)]+[(0.,None)]*m+[(0.,1.)],
+                           method="highs",options={"time_limit":policy["solver_time_limit_seconds"]})
+        report.update(solver_status=int(solution.status), solver_message=str(solution.message))
+        if not solution.success:
+            report["status"] = "time_limit" if solution.status == 1 else "infeasible"
+            report["reason"] = (
+                "Allocation solve reached its time limit; risk constraints were not waived."
+                if solution.status == 1 else
+                "No fully invested mix was found under the joint tail-loss, single-security and correlated-group budgets."
+            )
+            return None, report
+        invested = solution.x[:n]
+        if invested.sum() <= 0:
+            raise ValueError("No positive self-funded allocation")
+        weights = invested / invested.sum()
+        check = check_policy_weights(weights,frame,limits,scenarios=samples)
+        report.update(candidate=check, status="candidate" if check["passed"] else "failed_recheck",
+                      constraints_applied=bool(check["passed"]), objective_net_return=float(-solution.fun),
+                      modeled_post_cost_capital=float(invested.sum()))
+        return (weights if check["passed"] else None), report
+    except (ValueError, TypeError, KeyError, OverflowError) as exc:
+        report["reason"] = str(exc)
+        return None, report
+    finally:
+        report["elapsed_seconds"] = round(time.perf_counter()-started,3)

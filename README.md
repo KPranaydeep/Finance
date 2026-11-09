@@ -153,6 +153,42 @@ closes support bare US listing symbols; unsupported listings, unavailable access
 or conflicting evidence retain quarantine. No missing witness is treated as a
 confirmation, and a second Yahoo response alone cannot certify the move.
 
+The v6 private allocator adds a sparse SciPy/HiGHS alternative to the existing
+solver, using 1,024 deterministic joint moving-block, 30-session buy-and-hold
+scenarios. Shared block draws preserve cross-security dependence. Its objective
+maximizes shrunk scenario mean return after trading costs, with invested capital
+plus fees equal to the initial capital; no credit or additional cash is assumed.
+The loss CVaR95 budget is the active current mix's CVaR under the same scenarios.
+Per-side modeled costs are stressed at 2× inside the objective and tail constraint.
+Three expanding-window finalist checks refit the same allocator on each training
+prefix; their held-out cost calculation includes both buy and sell legs.
+
+Explicit starting policy in `portfolio_optimizer_config.json`: a 2% portfolio
+loss budget per security under at least a 50% single-security shock (a 4% weight
+ceiling, tightened for larger observed daily losses); positively correlated groups
+linked at 0.90 have a 25% combined ceiling. These are policy assumptions, not
+optimal/safe thresholds learned from prices. Means are shrunk 50% toward their
+cross-security median. An opposite-moving security is not part of a positive group.
+The LP's default 10-second budget is enforced by HiGHS. It uses existing histories
+and installed SciPy, with no new data-provider/library dependency.
+
+Both the incumbent and challenger must pass the same policy and P0 checks before
+comparison. The incumbent may remain selected if it passes those limits; a failed
+or timed-out solve cannot silently restore an unconstrained incumbent. If neither
+passes, no new allocation is selected and the prior saved analysis remains intact.
+The saved panel records the selected method, current-mix tail budget, modeled net
+return/cost comparison, policy assumptions and history date. This fitted comparison
+is not proof of out-of-sample improvement. Current-universe finalist validation is
+not a point-in-time backtest; future returns and unobserved shocks remain unknown.
+
+Final rounded orders recheck the policy on actual post-fee holdings and cash.
+**Update rebalance plan** rebuilds these checks at saved weights and current
+holdings/history without an optimizer; unchanged saved target weights may be
+withheld when they fail the new limits. Unknown histories cannot pass. Policy/cost
+changes invalidate compatible search reuse, while old research rows remain stored.
+Old external configuration files without an `allocation_policy` section retain
+their previous allocator, rather than silently adopting new assumptions.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

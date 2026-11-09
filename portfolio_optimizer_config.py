@@ -7,6 +7,7 @@ import os
 import re
 from datetime import date
 from pathlib import Path
+from allocation_policy_config import DEFAULT_ALLOCATION_POLICY, validate_allocation_policy
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("portfolio_optimizer_config.json")
@@ -41,8 +42,13 @@ def load_optimizer_config(path=None):
         payload = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("OPTIMIZER_CONFIG_UNAVAILABLE") from exc
-    if not isinstance(payload, dict) or set(payload) != REQUIRED_KEYS:
+    if (not isinstance(payload, dict) or not REQUIRED_KEYS.issubset(payload)
+            or set(payload) - REQUIRED_KEYS - {"allocation_policy"}):
         raise ValueError("OPTIMIZER_CONFIG_KEYS_INVALID")
+    # Old external configs retain their old allocator; absence is not consent
+    # to adopt unversioned new risk assumptions.
+    allocation_policy = validate_allocation_policy(payload.get(
+        "allocation_policy", dict(DEFAULT_ALLOCATION_POLICY, enabled=False)))
 
     version = payload["config_version"]
     if not isinstance(version, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{2,63}", version):
@@ -114,6 +120,7 @@ def load_optimizer_config(path=None):
         "trading_days_per_year": trading_days,
         "max_weight_per_asset": float(max_weight),
         "history_start_date": start.isoformat(),
+        "allocation_policy": allocation_policy,
         "momentum_filter": {
             "enabled": momentum["enabled"],
             "method_version": method_version,
@@ -137,3 +144,4 @@ TRADING_DAYS_PER_YEAR = OPTIMIZER_CONFIG["trading_days_per_year"]
 MAX_WEIGHT_PER_ASSET = OPTIMIZER_CONFIG["max_weight_per_asset"]
 DEFAULT_HISTORY_START_DATE = OPTIMIZER_CONFIG["history_start_date"]
 MOMENTUM_FILTER_CONFIG = OPTIMIZER_CONFIG["momentum_filter"]
+ALLOCATION_POLICY = OPTIMIZER_CONFIG["allocation_policy"]
