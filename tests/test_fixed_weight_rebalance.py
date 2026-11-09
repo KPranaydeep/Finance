@@ -41,8 +41,10 @@ def test_current_quantities_replace_old_positions_and_unowned_exits_disappear():
     assert candidate["run_id"] == before["run_id"] and candidate["saved_at"] == before["saved_at"]
     assert payload == before
     assert set(allocation["Yahoo Ticker"]) == {"A", "B", "NEW"}
-    indexed = plan.set_index("Yahoo Ticker")
-    assert indexed.loc["A", "Executable Quantity"] == 2
+    # The legacy 60% target is preserved as research, but cannot bypass the 50% cap.
+    assert plan.empty and not candidate["execution_validation"]["passed"]
+    indexed = pd.DataFrame(candidate["proposed_rebalancing_plan"]).set_index("Yahoo Ticker")
+    assert indexed.loc["A", "Executable Quantity"] <= 1
     assert indexed.loc["NEW", "Action"] == "Sell" and indexed.loc["NEW", "Executable Quantity"] == 2
     assert indexed.loc["NEW", "Optimal Weight"] == 0
     assert candidate["current_portfolio_value"] == 100
@@ -101,7 +103,7 @@ def test_short_history_resizes_exits_without_pretending_risk_checks_pass():
     payload, owned, history = fixtures()
     payload["current_stats"] = {"old": 1}
     candidate, _, plan = run(payload, owned, history.iloc[:3])
-    assert "NEW" in set(plan["Yahoo Ticker"])
+    assert "NEW" in set(pd.DataFrame(candidate["proposed_rebalancing_plan"])["Yahoo Ticker"])
     assert candidate["current_stats"] == {"old": 1}
     assert "Earlier dated metrics retained" in candidate["portfolio_metrics_refresh_error"]
     assert "insufficient" in candidate["executable_rebalance_review"]["decision"].lower()

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from rebalance_review import assess_executable_rebalance, estimate_review_window
-from portfolio_optimizer_config import RISK_FREE_RATE_ANNUAL
+from portfolio_optimizer_config import RISK_FREE_RATE_ANNUAL, MAX_WEIGHT_PER_ASSET
 
 
 def saved_targets(payload):
@@ -105,9 +105,13 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
     weights = np.array([targets.get(t, 0.) for t in tickers])
     cost = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22.))
     days = int((payload.get("settings") or {}).get("days_to_flip", 1))
+    settings = payload.get("settings") or {}
     plan, missing_prices, missing_alloc = plan_builder(
         allocation, weights, returns, native_prices, days,
         transaction_cost_bps=cost, excluded_trade_tickers=paused,
+        max_drawdown=settings.get("internal_max_dd"),
+        target_volatility=settings.get("target_volatility_daily"),
+        maximum_weight=MAX_WEIGHT_PER_ASSET,
     )
     if missing_prices or missing_alloc:
         raise ValueError("Incomplete rebalance coverage; previous plan retained")
@@ -121,6 +125,9 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         executable_trade_count=len(plan), holdings_analyzed=int(allocation["Quantity"].gt(0).sum()),
         total_invested=float(allocation["Invested INR"].sum()), current_portfolio_value=base,
         partial_sell_sharpe_check=plan.attrs.get("partial_sell_sharpe_check", {}),
+        execution_validation=plan.attrs.get("execution_validation", {}),
+        proposed_rebalancing_plan=plan.attrs.get("proposed_rebalancing_plan", []),
+        funding_adjustments=plan.attrs.get("funding_adjustments", []),
         executable_rebalance_review=assess_executable_rebalance(common, owned_values, orders, cost_bps=cost),
         next_review_estimate=estimate_review_window(common, owned_values, targets, cost_bps=cost,
                                                   risk_free_rate=RISK_FREE_RATE_ANNUAL),

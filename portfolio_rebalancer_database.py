@@ -27,6 +27,8 @@ from public_portfolio_trust import round_weights_to_whole_percent
 from public_lumpsum_allocator import allocate_public_lumpsum
 from trade_quantities import format_quantity, plan_quantity, quantity_step
 from partial_sell_review import review_partial_sells, partial_sell_caption
+from allocation_integrity import finalize_weights, fund_buy_orders, execution_check
+from price_move_confirmation import download_confirmation
 from fixed_weight_rebalance import prepare_fixed_universe, rebuild_saved_plan, holdings_fingerprint, target_fingerprint
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
@@ -108,7 +110,7 @@ from trade_deferrals import (
     split_deferred_trades,
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
-from portfolio_ui import render_metric_strip, render_portfolio_heading
+from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -2752,6 +2754,14 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         holdings_analyzed = int(payload.get("holdings_analyzed") or 0)
         total_invested = float(payload.get("total_invested") or 0.0)
         rebalancing_plan = payload.get("rebalancing_plan") or []
+        proposed_rebalancing_plan = payload.get("proposed_rebalancing_plan") or []
+        execution_validation = dict(payload.get("execution_validation") or {})
+        if execution_validation.get("passed"):
+            with get_db_connection() as conn:
+                current_pauses = active_trade_deferrals(conn, owner)
+            paused_now = set(current_pauses["yahoo_ticker"].str.upper()) if not current_pauses.empty else set()
+            if paused_now != set(execution_validation.get("excluded_tickers") or []):
+                execution_validation.update(passed=False, violations=["Pause settings changed; use Update plan to revalidate the final allocation."])
         executable_trade_count = int(
             payload.get("executable_trade_count")
             if payload.get("executable_trade_count") is not None
@@ -2768,8 +2778,14 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             prior_signature = context.get("holdings_fingerprint") or holdings_fingerprint(payload.get("current_allocation") or [])
             if current_signature != prior_signature:
                 st.warning("Holdings have changed since this plan. Update rebalance plan to resize trades using the saved optimal weights.")
+                execution_validation.update(passed=False, violations=["Holdings changed; update the saved plan before using its orders."])
         except (TypeError, ValueError):
             st.caption("Some holding quantities need review before the plan can be resized.")
+            execution_validation.update(passed=False, violations=["Current holdings could not be validated."])
+        if not execution_validation.get("passed"):
+            proposed_rebalancing_plan = proposed_rebalancing_plan or rebalancing_plan
+            rebalancing_plan = []
+            executable_trade_count = 0
         action_bar = st.container(horizontal=True, gap="small")
         if action_bar.button("Update rebalance plan", key=f"update_saved_plan_{widget_scope}", icon=":material/sync:",
                      help="Use current holdings, prices and FX with the saved optimal weights. Refreshes trades, checks and 30-session scenarios without optimizer search."):
@@ -3056,6 +3072,9 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             )
 
         review_cost_bps = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
+        render_execution_validation(execution_validation, proposed_rebalancing_plan)
+        if payload.get("funding_adjustments"):
+            st.caption(f"{len(payload['funding_adjustments'])} proposed buys were reduced or withheld to fit recorded cash and net sale proceeds after costs.")
         rebalance_review = assess_rebalance(current_stats, optimal_stats, payload.get('rebalance_review_orders') or rebalancing_plan, base_value, review_cost_bps)
         with st.container(border=True):
             st.markdown("**Is rebalancing worthwhile?**")
@@ -4661,6 +4680,12 @@ _download_price_integrity_evidence_batch = st.cache_data(
 )(_download_price_integrity_evidence_batch)
 
 
+@st.cache_data(show_spinner=False, ttl="24h", max_entries=2048)
+def _download_price_move_confirmation(ticker, start_date, end_date,
+                                      integrity_version=PRICE_INTEGRITY_VERSION):
+    return download_confirmation(ticker, start_date, end_date)
+
+
 def apply_price_integrity_gate(prices, owned_tickers=()):
     """Repair split discontinuities and quarantine unresolved candidate histories."""
     if prices is None or prices.empty:
@@ -4699,12 +4724,25 @@ def apply_price_integrity_gate(prices, owned_tickers=()):
                     )
                 except Exception:
                     evidence[ticker] = None
-    return reconcile_price_frame(
+    corrected, report = reconcile_price_frame(
         prices,
         evidence,
         owned_tickers=owned_tickers,
         threshold=DEFAULT_EXTREME_RETURN_THRESHOLD,
     )
+    # A genuine crash must remain in the risk history. Request a second source
+    # only after corporate-action reconciliation failed to explain the move.
+    pending = report.loc[report["Status"].eq("QUARANTINED_UNEXPLAINED_JUMP"), "Ticker"]
+    confirmed_any = False
+    for ticker in pending:
+        witness = _download_price_move_confirmation(ticker, observed_start, observed_end)
+        if witness and evidence.get(ticker):
+            evidence[ticker] = dict(evidence[ticker], **witness)
+            confirmed_any = True
+    if confirmed_any:
+        return reconcile_price_frame(prices, evidence, owned_tickers=owned_tickers,
+                                     threshold=DEFAULT_EXTREME_RETURN_THRESHOLD)
+    return corrected, report
 
 
 def _download_recent_market_data_batch(
@@ -5356,7 +5394,8 @@ def select_redundant_tickers(
         buckets = np.arange(len(log_returns)) // int(aggregation_days)
         aggregated = log_returns.groupby(buckets).sum()
 
-    correlation = aggregated.corr().abs()
+    # Opposite-moving exposures are diversifiers, not duplicate long positions.
+    correlation = aggregated.corr()
 
     if avg_volume is None:
         liquidity = pd.Series(0.0, index=tickers)
@@ -5717,7 +5756,8 @@ def screen_log_returns_for_exact_optimizer(
 
 def weight_bounds(num_assets, tickers=(), frozen_weights=None):
     """Per-asset bounds, with quarantined owned holdings frozen in place."""
-    cap = max(MAX_WEIGHT_PER_ASSET, 1.0 / num_assets) if num_assets else 1.0
+    # A small universe does not authorize silently relaxing the configured cap.
+    cap = MAX_WEIGHT_PER_ASSET
     frozen = {str(key).upper(): float(value) for key, value in (frozen_weights or {}).items()}
     # ``log_returns.columns`` is a pandas Index. Its truth value is deliberately
     # undefined, so never use ``if tickers`` here; large runs only reached this
@@ -5787,6 +5827,23 @@ def enforce_min_weight_postprocess(weights, min_weight=0.01, frozen_positions=No
         return weights
     w[adjustable] *= max(1.0 - fixed_total, 0.0) / adjustable_total
     return w
+
+
+def validate_optimizer_allocation(weights, log_returns, *, frozen_weights=None,
+                                  max_dd=None, target_volatility=None):
+    """Validate cleanup and every solver fallback against the requested policy."""
+    frozen_positions = {
+        int(log_returns.columns.get_loc(ticker)): weight
+        for ticker, weight in (frozen_weights or {}).items()
+    }
+    cleaned = enforce_min_weight_postprocess(weights, frozen_positions=frozen_positions)
+    return finalize_weights(
+        weights, cleaned, log_returns,
+        bounds=weight_bounds(len(log_returns.columns), log_returns.columns, frozen_weights),
+        max_drawdown=max_dd,
+        target_volatility=target_volatility,
+        covariance=shrunk_covariance(log_returns) if target_volatility is not None else None,
+    )
 
 class OptimizerTimeBudgetExceeded(RuntimeError):
     """Raised from a SciPy callback when one exact solve exceeds its budget."""
@@ -6150,15 +6207,14 @@ def optimize_prepared_return_matrix(
     if optimal_weights is None:
         return None, log_returns, None, None, solver_screen
 
-    frozen_positions = {
-        int(log_returns.columns.get_loc(ticker)): weight
-        for ticker, weight in frozen_weights.items()
-    }
-    optimal_weights = enforce_min_weight_postprocess(
-        optimal_weights,
-        min_weight=0.01,
-        frozen_positions=frozen_positions,
+    optimal_weights, allocation_validation = validate_optimizer_allocation(
+        optimal_weights, log_returns, frozen_weights=frozen_weights,
+        max_dd=max_dd, target_volatility=target_volatility,
     )
+    solver_screen = dict(solver_screen or {}, allocation_validation=allocation_validation,
+                         frozen_weights=frozen_weights)
+    if optimal_weights is None:
+        return None, log_returns, None, None, solver_screen
     current_stats, optimal_stats = portfolio_stats_comparison(
         current_alloc,
         log_returns,
@@ -6197,11 +6253,12 @@ def solve_prepared_search_finalist(
             integrity_report=(prepared_meta or {}).get("price_integrity_report"),
         )
     )
-    if weights is None:
-        return None, selected_returns, current_stats, optimal_stats, dict(prepared_meta or {})
-
     meta = dict(prepared_meta or {})
     meta["exact_optimizer_screen"] = solver_screen or {}
+    meta["allocation_validation"] = (solver_screen or {}).get("allocation_validation", {})
+    meta["price_integrity_frozen_owned_weights"] = (solver_screen or {}).get("frozen_weights", {})
+    if weights is None:
+        return None, selected_returns, current_stats, optimal_stats, meta
     timings = dict(meta.get("pipeline_timings_seconds") or {})
     timings["final_optimizer_solver"] = round(time.perf_counter() - started, 3)
     meta["pipeline_timings_seconds"] = timings
@@ -6594,16 +6651,13 @@ def run_portfolio_analysis_multi(
         float(time.perf_counter() - solver_started), 3
     )
 
-    # Enforce minimum 1% weight on any non-zero position, then renormalize
-    frozen_positions = {
-        int(log_returns.columns.get_loc(ticker)): weight
-        for ticker, weight in frozen_weights.items()
-    }
-    optimal_weights = enforce_min_weight_postprocess(
-        optimal_weights,
-        min_weight=0.01,
-        frozen_positions=frozen_positions,
+    optimal_weights, allocation_validation = validate_optimizer_allocation(
+        optimal_weights, log_returns, frozen_weights=frozen_weights,
+        max_dd=max_dd, target_volatility=target_volatility,
     )
+    meta["allocation_validation"] = allocation_validation
+    if optimal_weights is None:
+        return None, log_returns, None, None, meta
 
     current_stats, optimal_stats = portfolio_stats_comparison(
         current_alloc, log_returns, optimal_weights
@@ -6730,7 +6784,10 @@ th, td {{ padding: 6px 4px; }}
 
 
 def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, days_to_flip,
-                         *, transaction_cost_bps=22.0, excluded_trade_tickers=()):
+                         *, transaction_cost_bps=22.0, excluded_trade_tickers=(),
+                         available_cash_inr=0., max_drawdown=None,
+                         target_volatility=None, maximum_weight=MAX_WEIGHT_PER_ASSET,
+                         frozen_weights=None):
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
     common_tickers = [t for t in lr_tickers if t in alloc_df.index and t in prices]
@@ -6743,7 +6800,14 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
     pos = [lr_tickers.index(t) for t in common_tickers]
     aligned_optimal_weights = np.array(optimal_weights)[pos]
-    aligned_optimal_weights = aligned_optimal_weights / aligned_optimal_weights.sum()
+    # Missing quotes must not silently redistribute their target weights.
+    if missing_prices or missing_alloc or not np.isclose(aligned_optimal_weights.sum(), 1., atol=1e-7, rtol=0):
+        empty = pd.DataFrame(columns=["Symbol", "Yahoo Ticker", "Currency", "Native Price", "FX to INR",
+                                      "Current Weight", "Optimal Weight", "Action", "Change",
+                                      "Expected Annual Return Lift (%)", "Quantity", "Executable Quantity", "Executable Value"])
+        empty.attrs["execution_validation"] = {
+            "passed": False, "violations": ["Incomplete target, listing metadata or latest quotes; target was not renormalized"]}
+        return empty, missing_prices, missing_alloc
 
     current_values = np.array(
         [
@@ -6828,7 +6892,38 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     rebal_df = rebal_df.sort_values(
         by="Expected Annual Return Lift (%)", ascending=False,
     ).reset_index(drop=True)
+    proposed = rebal_df.to_dict(orient="records")
+    rebal_df, funding_adjustments = fund_buy_orders(
+        rebal_df, current_alloc, cost_bps=transaction_cost_bps,
+        available_cash_inr=available_cash_inr,
+    )
+    # Funding/rounding changes the mix used by the partial-trim review.
+    if partial_check and partial_check.get("allowed"):
+        partial_check = review_partial_sells(
+            log_returns, owned_values, rebal_df,
+            cost_bps=float(transaction_cost_bps), risk_free_rate=RISK_FREE_RATE_ANNUAL,
+            trading_days=TRADING_DAYS_PER_YEAR,
+        )
+        if not partial_check["allowed"]:
+            rebal_df = rebal_df.loc[~(rebal_df["Action"].eq("Sell") & rebal_df["Optimal Weight"].gt(1e-12))]
+            rebal_df, funding_adjustments = fund_buy_orders(
+                rebal_df, current_alloc, cost_bps=transaction_cost_bps,
+                available_cash_inr=available_cash_inr,
+            )
+    validation = execution_check(
+        current_alloc, rebal_df, prices, log_returns, cost_bps=transaction_cost_bps,
+        available_cash_inr=available_cash_inr, excluded_tickers=excluded_trade_tickers,
+        frozen_weights=frozen_weights, max_weight=maximum_weight,
+        max_drawdown=max_drawdown, target_volatility=target_volatility,
+        covariance=shrunk_covariance(log_returns) if target_volatility is not None else None,
+    )
+    if not validation["passed"]:
+        proposed = rebal_df.to_dict(orient="records") or proposed
+        rebal_df = rebal_df.iloc[:0].copy()
     rebal_df.attrs["partial_sell_sharpe_check"] = partial_check
+    rebal_df.attrs["execution_validation"] = validation
+    rebal_df.attrs["funding_adjustments"] = funding_adjustments
+    rebal_df.attrs["proposed_rebalancing_plan"] = proposed if not validation["passed"] else []
     return rebal_df, missing_prices, missing_alloc
 
 
@@ -11802,6 +11897,7 @@ if run_btn:
         # annotation. Remove paused owned rows before any return matrix or
         # optimizer is prepared; universal paused candidates are already
         # filtered inside extend_allocation_with_universal_candidates().
+        execution_allocation = portfolio_df.copy()
         with get_db_connection() as conn:
             active_solver_deferrals = active_trade_deferrals(conn, CURRENT_USER)
         portfolio_df, paused_solver_excluded = exclude_deferred_candidates(
@@ -11983,7 +12079,10 @@ if run_btn:
         if optimal_weights is None:
             stopped_timer = _abort_optimization_plan_timer("no usable allocation")
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
-            st.error("Portfolio optimization did not return a usable allocation.")
+            validation = meta.get("allocation_validation") or {}
+            reasons = "; ".join(validation.get("violations") or [])
+            st.error("Portfolio optimization did not return a usable allocation."
+                     + (" Final constraint check: " + reasons if reasons else ""))
             st.stop()
         solver_screen = meta.get("exact_optimizer_screen") or {}
         history_cache = meta.get("market_history_cache") or {}
@@ -12179,21 +12278,33 @@ if run_btn:
             0.94,
         )
         with st.spinner("Fetching latest prices for the rebalancing plan..."):
-            latest_prices = log_returns.columns.tolist()
+            owned_execution_tickers = execution_allocation.loc[
+                pd.to_numeric(execution_allocation["Quantity"], errors="coerce").gt(0), "Yahoo Ticker"
+            ].tolist()
+            latest_prices = list(dict.fromkeys(log_returns.columns.tolist() + owned_execution_tickers))
             price_map = get_latest_price_map(latest_prices)
 
         with get_db_connection() as conn:
             active_deferrals = active_trade_deferrals(conn, CURRENT_USER)
         rebal_df, missing_prices, missing_alloc = rebalance_plan_multi(
-            portfolio_df.copy(),
+            execution_allocation.copy(),
             optimal_weights,
             log_returns,
             price_map,
             days_to_flip,
             transaction_cost_bps=float(security_forecast_cost_bps),
             excluded_trade_tickers=active_deferrals["yahoo_ticker"].tolist() if not active_deferrals.empty else (),
+            max_drawdown=max_dd, target_volatility=target_volatility,
+            frozen_weights=meta.get("price_integrity_frozen_owned_weights"),
         )
         partial_sell_sharpe_check = rebal_df.attrs.get("partial_sell_sharpe_check", {})
+        execution_validation = rebal_df.attrs.get("execution_validation", {})
+        proposed_rebalancing_plan = rebal_df.attrs.get("proposed_rebalancing_plan", [])
+        funding_adjustments = rebal_df.attrs.get("funding_adjustments", [])
+        render_execution_validation(execution_validation, proposed_rebalancing_plan)
+        _app_run_log("final_allocation_checked", status="passed" if execution_validation.get("passed") else "withheld",
+                     checks_failed=len(execution_validation.get("violations") or []),
+                     funded_adjustments=len(funding_adjustments))
         rebal_df, deferred_rebal_df = split_deferred_trades(
             rebal_df,
             active_deferrals,
@@ -12517,6 +12628,7 @@ if run_btn:
                 },
                 "max_drawdown_input_pct": float(max_dd_pct),
                 "internal_max_dd": float(max_dd),
+                "target_volatility_daily": target_volatility,
                 "drop_bottom_fraction": float(drop_bottom_pct),
                 "momentum_filter": dict(MOMENTUM_FILTER_CONFIG),
                 "universe_preselection": dict(universal_preselection),
@@ -12594,9 +12706,13 @@ if run_btn:
                 if not top_corrs.empty
                 else []
             ),
-            "current_allocation": portfolio_df.to_dict(orient="records"),
+            "current_allocation": execution_allocation.to_dict(orient="records"),
             "holdings_action_summary": holdings_action_df.to_dict(orient="records"),
             "partial_sell_sharpe_check": partial_sell_sharpe_check,
+            "allocation_validation": meta.get("allocation_validation", {}),
+            "execution_validation": execution_validation,
+            "proposed_rebalancing_plan": proposed_rebalancing_plan,
+            "funding_adjustments": funding_adjustments,
             "rebalancing_plan": rebal_df.to_dict(orient="records"),
             "security_scenario_ranking": (
                 scenario_ranking.to_dict(orient="records")

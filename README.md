@@ -127,6 +127,32 @@ The public model-review selector defaults to the latest publication even while
 its entry evidence is pending. Earlier frozen model investments remain selectable;
 their entry dates, capital and performance are never reused for the new version.
 
+Private allocation integrity checks validate solver fallbacks and final weights
+against the configured position, historical drawdown and daily-volatility limits.
+Sub-1% weight cleanup is skipped when it would break a constraint; a small universe
+does not authorize relaxing the configured position cap. Drawdown validation
+includes the initial invested value and replays daily-rebalanced simple returns.
+These historical checks are not future loss limits.
+
+After rounding, pauses and the partial-sell review, buys are rounded down to fit
+recorded cash plus estimated net sale proceeds, including modeled per-side costs.
+Unrecorded cash/credit is assumed zero. The final marked holdings (including paused
+holdings), remaining cash, quantity precision and available risk history are checked
+again. Sale proceeds must be available before buys; settlement and live broker fills
+are not verified. A failed check withholds executable orders while preserving the
+saved analysis and a clearly labelled proposal. **Update plan** performs this check
+against current holdings without rerunning the optimizer. Older saved plans have
+no pass status until refreshed. The configured limits remain explicit policy,
+not statistically proven safe thresholds.
+
+The near-duplicate filter removes strongly positive correlations, preserving
+opposite-moving exposures. Extreme price moves are reconciled against corporate
+actions first. A date-matched second-provider return can verify a genuine move,
+whose complete loss/gain remains in risk history. Optional, cached Stooq daily
+closes support bare US listing symbols; unsupported listings, unavailable access,
+or conflicting evidence retain quarantine. No missing witness is treated as a
+confirmation, and a second Yahoo response alone cannot certify the move.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

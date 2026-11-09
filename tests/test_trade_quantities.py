@@ -37,7 +37,9 @@ def test_fractional_rebalance_and_summary_preserve_quantity_and_value():
         {"Symbol": "B", "Yahoo Ticker": "B", "Currency": "USD", "Quantity": 0.63, "FX to INR": 90, "Weight": 0.63, "Latest Price INR": 900},
     ])
     returns = pd.DataFrame({"A": [0.01, -0.02, 0.01], "B": [0.02, 0.01, -0.01]})
-    plan, _, _ = core.rebalance_plan_multi(allocation, np.array([0, 1]), returns, {"A": 10, "B": 10}, 1)
+    # This test isolates quantity precision; concentration and costs have their own guards.
+    plan, _, _ = core.rebalance_plan_multi(allocation, np.array([0, 1]), returns, {"A": 10, "B": 10}, 1,
+                                          maximum_weight=1., transaction_cost_bps=0.)
     indexed = plan.set_index("Yahoo Ticker")
     assert indexed.loc["A", "Executable Quantity"] == pytest.approx(0.37)
     assert indexed.loc["B", "Executable Quantity"] == pytest.approx(0.37)

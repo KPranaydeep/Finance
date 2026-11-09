@@ -14,8 +14,39 @@ import numpy as np
 import pandas as pd
 
 
-PRICE_INTEGRITY_VERSION = "corporate-action-reconciliation-v1"
+PRICE_INTEGRITY_VERSION = "corporate-action-reconciliation-v2-confirmed-moves"
 DEFAULT_EXTREME_RETURN_THRESHOLD = 0.45
+
+
+def confirmed_extreme_moves(corrected, dates, confirmation_close, confirmation_source):
+    """Require a separately sourced, date-matched return for every extreme move.
+
+    Compare returns, not price levels, because vendors may rebase adjusted prices.
+    A second Yahoo endpoint or a missing witness is not independent confirmation.
+    Two percentage points is a concordance tolerance, not an investment threshold.
+    """
+    source = str(confirmation_source or "").strip()
+    if not source or "yahoo" in source.lower() or confirmation_close is None:
+        return False
+    witness = pd.to_numeric(confirmation_close, errors="coerce").copy()
+    witness.index = pd.to_datetime(witness.index, utc=True).tz_convert(None).normalize()
+    witness = witness[~witness.index.duplicated(keep="last")].sort_index()
+    witness = witness.replace([np.inf, -np.inf], np.nan)
+    own = pd.to_numeric(corrected, errors="coerce").dropna()
+    own.index = pd.to_datetime(own.index, utc=True).tz_convert(None).normalize()
+    for date in dates:
+        date = pd.Timestamp(date).tz_localize(None).normalize()
+        earlier = own.index[own.index < date]
+        if not len(earlier) or date not in witness or earlier[-1] not in witness:
+            return False
+        previous = earlier[-1]
+        if min(float(witness.loc[previous]), float(witness.loc[date])) <= 0:
+            return False
+        expected = float(own.loc[date] / own.loc[previous] - 1)
+        observed = float(witness.loc[date] / witness.loc[previous] - 1)
+        if not np.isfinite(observed) or expected * observed <= 0 or abs(expected - observed) > .02:
+            return False
+    return bool(dates)
 
 
 def extreme_return_dates(
@@ -109,6 +140,8 @@ def reconcile_flagged_history(
     adjusted_close: pd.Series,
     dividends: pd.Series | None = None,
     stock_splits: pd.Series | None = None,
+    confirmation_close: pd.Series | None = None,
+    confirmation_source: str | None = None,
     threshold: float = DEFAULT_EXTREME_RETURN_THRESHOLD,
 ) -> tuple[pd.Series, dict[str, object]]:
     """Reconcile one flagged ticker and return a corrected series plus audit data."""
@@ -137,6 +170,11 @@ def reconcile_flagged_history(
     if not remaining_dates and split_events:
         status = "REPAIRED_CORPORATE_ACTION"
         usable = corrected
+    elif remaining_dates and confirmed_extreme_moves(
+        corrected, remaining_dates, confirmation_close, confirmation_source
+    ):
+        status = "VERIFIED_MARKET_MOVE"
+        usable = corrected
     elif remaining_dates:
         status = "QUARANTINED_UNEXPLAINED_JUMP"
         usable = corrected
@@ -150,6 +188,7 @@ def reconcile_flagged_history(
         "trigger_dates": [value.date().isoformat() for value in original_dates],
         "remaining_extreme_dates": [value.date().isoformat() for value in remaining_dates],
         "split_events": split_events,
+        "confirmation_source": confirmation_source if status == "VERIFIED_MARKET_MOVE" else None,
         "dividend_events": int(
             pd.to_numeric(dividends, errors="coerce").fillna(0.0).ne(0.0).sum()
         )
@@ -193,6 +232,8 @@ def reconcile_price_frame(
                 adjusted_close=ticker_evidence["adjusted_close"],
                 dividends=ticker_evidence.get("dividends"),
                 stock_splits=ticker_evidence.get("stock_splits"),
+                confirmation_close=ticker_evidence.get("confirmation_close"),
+                confirmation_source=ticker_evidence.get("confirmation_source"),
                 threshold=threshold,
             )
             corrected[column] = repaired.reindex(corrected.index)
@@ -217,6 +258,7 @@ def reconcile_price_frame(
                 ),
                 "Dividend events": int(report["dividend_events"]),
                 "Integrity version": report["version"],
+                "Confirmation source": report.get("confirmation_source"),
             }
         )
         if quarantine and not is_owned:

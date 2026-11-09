@@ -21,7 +21,8 @@ def fixture():
 
 def test_partial_sale_allowed_when_rounded_portfolio_net_sharpe_improves():
     allocation, history = fixture()
-    plan, _, _ = core.rebalance_plan_multi(allocation, [0.5, 0.5], history, {"A": 10, "B": 10}, 1)
+    plan, _, _ = core.rebalance_plan_multi(allocation, [0.5, 0.5], history, {"A": 10, "B": 10}, 1,
+                                          maximum_weight=1.)
     check = plan.attrs["partial_sell_sharpe_check"]
     assert check["allowed"]
     assert check["proposed_net_sharpe"] > check["current_sharpe"]

@@ -48,7 +48,7 @@ def _returns():
     )
 
 
-def test_rebalance_plan_omits_partial_sells_but_keeps_buys_and_zero_target_exits():
+def test_suppressed_trim_cannot_leave_an_overweight_plan_marked_executable():
     plan, missing_prices, missing_alloc = core.rebalance_plan_multi(
         _allocation(),
         np.array([0.50, 0.50, 0.0]),
@@ -60,11 +60,12 @@ def test_rebalance_plan_omits_partial_sells_but_keeps_buys_and_zero_target_exits
     assert missing_prices == []
     assert missing_alloc == []
     assert "A.NS" not in set(plan["Yahoo Ticker"])
-    assert set(zip(plan["Yahoo Ticker"], plan["Action"])) == {
-        ("B.NS", "Buy"),
-        ("C.NS", "Sell"),
-    }
-    assert float(plan.set_index("Yahoo Ticker").loc["C.NS", "Optimal Weight"]) == 0.0
+    assert plan.empty
+    assert not plan.attrs["execution_validation"]["passed"]
+    assert any("weight cap" in v for v in plan.attrs["execution_validation"]["violations"])
+    proposal = pd.DataFrame(plan.attrs["proposed_rebalancing_plan"]).set_index("Yahoo Ticker")
+    assert proposal.loc["C.NS", "Optimal Weight"] == 0.
+    assert proposal.loc["B.NS", "Executable Quantity"] <= 9
 
 
 def test_holdings_summary_explains_suppressed_partial_sell():

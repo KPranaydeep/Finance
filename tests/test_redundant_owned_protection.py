@@ -74,3 +74,15 @@ def test_candidate_only_cluster_keeps_highest_volume_security():
     assert "OWNED" not in kept
     row = report.loc[report["Dropped"] == "OWNED"].iloc[0]
     assert row["Kept Instead"] == "LIQUID_CLONE"
+
+
+def test_inverse_exposure_is_preserved_while_positive_clone_is_removed():
+    frame = return_frame()
+    frame["INVERSE"] = -frame["OWNED"]
+    selected, report = load_selector()(
+        frame, pd.Series({"OWNED":1000,"LIQUID_CLONE":900,"SECOND_OWNED":800,
+                          "DIVERSIFIER":700,"INVERSE":600}), correlation_threshold=.8,
+    )
+    assert {"OWNED", "INVERSE", "DIVERSIFIER"}.issubset(selected)
+    assert "LIQUID_CLONE" not in selected
+    assert report["Correlation"].ge(.8).all()

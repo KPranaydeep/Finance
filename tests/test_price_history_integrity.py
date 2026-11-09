@@ -102,3 +102,45 @@ def test_optimizer_weight_bounds_accepts_dataframe_column_index():
 
     assert len(bounds) == 3
     assert all(lower == 0.0 for lower, _ in bounds)
+
+
+def test_confirmed_crash_remains_a_loss_observation_and_owned_weight_is_not_frozen():
+    index = pd.bdate_range("2026-01-01", periods=4)
+    series = pd.Series([10., 10., 5., 5.2], index=index)
+    evidence = {"CRASH": {"raw_close":series, "adjusted_close":series,
+                            "confirmation_close": series * 2,
+                            "confirmation_source":"Independent test exchange feed"}}
+    corrected, report = reconcile_price_frame(pd.DataFrame({"CRASH":series}), evidence,
+                                               owned_tickers=["CRASH"])
+    assert report.iloc[0]["Status"] == "VERIFIED_MARKET_MOVE"
+    assert report.iloc[0]["Optimizer action"] == "USE_RECONCILED_HISTORY"
+    assert corrected["CRASH"].pct_change().min() == -.5
+
+
+def test_missing_conflicting_or_same_provider_witness_cannot_certify_a_crash():
+    index = pd.bdate_range("2026-01-01", periods=3)
+    series = pd.Series([10.,5.,5.1],index=index)
+    for witness, source in [(pd.Series([10.,9.,9.1],index=index),"Independent"),
+                            (series.iloc[1:],"Independent"), (series,"Yahoo chart")]:
+        _, report = reconcile_flagged_history(series, raw_close=series, adjusted_close=series,
+                                               confirmation_close=witness, confirmation_source=source)
+        assert report["status"] == "QUARANTINED_UNEXPLAINED_JUMP"
+
+
+def test_pipeline_requests_second_source_only_for_unresolved_moves(monkeypatch):
+    import portfolio_optimizer_core as core
+    ns = core.apply_price_integrity_gate.__globals__
+    dates = pd.bdate_range("2026-01-01", periods=3)
+    series = pd.Series([10.,5.,5.1],index=dates)
+    primary = {"CRASH": {"raw_close":series,"adjusted_close":series,
+                          "dividends":pd.Series(0.,index=dates),"stock_splits":pd.Series(0.,index=dates)}}
+    calls=[]
+    monkeypatch.setitem(ns,"_download_price_integrity_evidence_batch",lambda *a,**k:primary)
+    def confirmation(ticker, *args):
+        calls.append(ticker)
+        return {"confirmation_close":series,"confirmation_source":"Independent test exchange"}
+    monkeypatch.setitem(ns,"_download_price_move_confirmation",confirmation)
+    corrected, report = core.apply_price_integrity_gate(pd.DataFrame({"CRASH":series,"NORMAL":[10.,11.,12.]},index=dates),owned_tickers=["CRASH"])
+    assert calls == ["CRASH"]
+    assert report.iloc[0]["Status"] == "VERIFIED_MARKET_MOVE"
+    assert corrected["CRASH"].pct_change().min() == -.5
