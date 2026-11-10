@@ -1436,12 +1436,8 @@ def _start_optimization_plan_timer(owner):
     )
 
 
-def _start_optimization_at_raw_peak(owner):
-    """Apply the latest profile-scoped raw peak before Streamlit builds widgets.
-
-    Only X/Y are reused; portfolio evidence, funding and risk checks run normally.
-    Search bounds/warm-start controls and saved research are left untouched.
-    """
+def _optimization_pair_selection(owner):
+    """Read the same profile-scoped source for the preview and Run callback."""
     selection = {"owner": owner, "source": "configured_controls"}
     try:
         with get_db_connection() as conn:
@@ -1450,13 +1446,20 @@ def _start_optimization_at_raw_peak(owner):
         if peak is not None:
             cap, assets = int(peak["Shortlist cap"]), int(peak["Maximum assets"])
             if cap >= 50 and assets >= 50:
-                st.session_state["universal_preselection_cap"] = cap
-                st.session_state["exact_optimizer_asset_cap"] = assets
                 selection.update(source="saved_raw_peak", x=cap, y=assets,
                                  saved_at=(checkpoint or {}).get("updated_at"),
                                  analysis_cutoff=peak.get("Analysis cutoff"))
     except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
         selection["load_error"] = type(exc).__name__
+    return selection
+
+
+def _start_optimization_at_raw_peak(owner):
+    """Apply X/Y before widgets render; current-data funding/risk checks still run."""
+    selection = _optimization_pair_selection(owner)
+    if selection["source"] == "saved_raw_peak":
+        st.session_state["universal_preselection_cap"] = selection["x"]
+        st.session_state["exact_optimizer_asset_cap"] = selection["y"]
     st.session_state["optimization_raw_peak_selection"] = selection
     _app_run_log("optimization_pair_selected", source=selection["source"],
                  x=selection.get("x"), y=selection.get("y"),
@@ -8788,8 +8791,8 @@ st.divider()
 st.subheader("👤 Your profile")
 with st.container(border=True):
     st.caption(
-        "Each nickname keeps its holdings and saved analysis completely separate from "
-        "every other person using this app — nobody can see or overwrite your data."
+        "Holdings and analysis are stored by nickname. Nicknames are not passwords: "
+        "anyone with access to this app who knows a nickname can open its profile."
     )
     entered_user = st.text_input(
         "Enter your name/nickname",
@@ -8880,7 +8883,6 @@ if not st.session_state.get(checkpoint_restore_key):
         st.session_state["shortlist_cap_saved_best"] = dict(restored_best or {})
     st.session_state[checkpoint_restore_key] = True
 
-st.caption(f"Signed in as: **{CURRENT_USER}**")
 st.divider()
 
 # Filled after every add/remove operation using a fresh SQLite query.
@@ -9522,7 +9524,7 @@ with run_analysis_placeholder:
 
     with step_col3:
         with st.container(border=True):
-            st.markdown("**Optimize your portfolio**")
+            run_has_holdings = get_unique_holdings_count(CURRENT_USER) > 0
             run_btn = st.button(
                 "Run optimization",
                 width="stretch",
@@ -9530,10 +9532,23 @@ with run_analysis_placeholder:
                 key="run_optimization_btn_main",
                 on_click=_start_optimization_at_raw_peak,
                 args=(CURRENT_USER,),
+                disabled=not run_has_holdings,
             )
-            st.caption(
-                "Uses the latest saved raw-return X/Y peak and your current sidebar settings."
+            next_pair = (
+                st.session_state.get("optimization_raw_peak_selection") or {}
+                if run_btn else _optimization_pair_selection(CURRENT_USER)
             )
+            if next_pair.get("source") == "saved_raw_peak":
+                st.caption(
+                    f"Raw-return peak · X {next_pair['x']:,} × Y {next_pair['y']:,} · refits on current data."
+                )
+            else:
+                st.caption(
+                    f"Configured pair · X {universal_preselection_cap:,} × Y {exact_optimizer_asset_cap:,} "
+                    "· no usable saved raw peak."
+                )
+            if not run_has_holdings:
+                st.info("Upload or add holdings to enable optimization.")
             if run_btn:
                 raw_selection = st.session_state.get("optimization_raw_peak_selection") or {}
                 if raw_selection.get("owner") == CURRENT_USER and raw_selection.get("source") == "saved_raw_peak":

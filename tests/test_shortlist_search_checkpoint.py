@@ -1,11 +1,55 @@
 import sqlite3
+import json
+import pytest
 
 from shortlist_search_checkpoint import (
     delete_checkpoints,
     load_best_saved_result,
     load_latest_checkpoint,
+    load_latest_checkpoint_for_research_scope,
     save_checkpoint,
 )
+
+
+@pytest.mark.parametrize("bad_payload", ["{broken", "null", "42", '{"not": "rows"}'])
+def test_invalid_checkpoint_is_not_resumed_or_rewritten(bad_payload):
+    conn = _connection()
+    save_checkpoint(conn, "owner", {}, [], status="complete")
+    conn.execute("UPDATE shortlist_search_checkpoints SET results_json = ?", (bad_payload,))
+    conn.commit()
+    assert load_latest_checkpoint(conn, "owner") is None
+    assert load_latest_checkpoint_for_research_scope(conn, "owner", {}) is None
+    assert load_best_saved_result(conn, "owner") is None
+    assert conn.execute("SELECT results_json FROM shortlist_search_checkpoints").fetchone()[0] == bad_payload
+    conn.close()
+
+
+def test_malformed_rows_cannot_crash_startup_or_promote_infinite_peak():
+    conn = _connection()
+    valid = {"Status": "Feasible", "Annual Return": .51,
+             "Shortlist cap": 7700, "Maximum assets": 550}
+    save_checkpoint(conn, "owner", {}, [valid], status="complete")
+    payload = [None, 3, valid, dict(valid, **{"Annual Return": float("inf")})]
+    conn.execute("UPDATE shortlist_search_checkpoints SET results_json = ?", (json.dumps(payload),))
+    conn.commit()
+    assert load_latest_checkpoint(conn, "owner")["results"] == payload[2:]
+    assert load_best_saved_result(conn, "owner") == valid
+    # Incomplete/corrupt search evidence must not activate the recent-search skip.
+    assert load_latest_checkpoint_for_research_scope(conn, "owner", {}) is None
+    conn.close()
+
+
+def test_invalid_coordinates_are_not_restored_into_result_charts():
+    conn = _connection()
+    legacy = {"Shortlist cap": 7700, "Annual Return": .5, "Status": "Feasible"}
+    save_checkpoint(conn, "owner", {}, [legacy], status="complete")
+    payload = [dict(legacy, **{"Maximum assets": float("inf")}),
+               dict(legacy, **{"Shortlist cap": "invalid"}), legacy]
+    conn.execute("UPDATE shortlist_search_checkpoints SET results_json = ?", (json.dumps(payload),))
+    conn.commit()
+    assert load_latest_checkpoint(conn, "owner")["results"] == [legacy]
+    assert load_latest_checkpoint_for_research_scope(conn, "owner", {}) is None
+    conn.close()
 
 
 def _connection():

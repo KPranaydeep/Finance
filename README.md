@@ -247,6 +247,11 @@ portfolio on current data with the normal funding, pause and risk checks. This
 reuses coordinates only, without starting X/Y discovery or replacing the search
 bounds/warm starts. If no usable saved peak exists, the configured execution X/Y
 controls are retained. Explicit search, plateau and raw-peak controls remain separate.
+The action previews the raw peak (or identifies the configured fallback) before
+you click. A profile without holdings must upload/add them before Run is enabled.
+Malformed checkpoint payloads are retained on disk and are not treated as usable
+search evidence; peak selection ignores nonfinite returns and invalid coordinates.
+Profiles are nickname-based storage separation, not authenticated accounts.
 
 Install dependencies and run the suite from the repository root:
 

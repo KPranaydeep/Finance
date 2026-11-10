@@ -163,12 +163,16 @@ def best_feasible_result(
     best = None
     best_key = None
     for row in rows:
+        if not isinstance(row, Mapping):
+            continue
         if str(row.get("Status")) != "Feasible":
             continue
         try:
             annual_return = float(row["Annual Return"])
             cap = int(row["Shortlist cap"])
             maximum_assets = int(row["Maximum assets"])
+            if float(row["Shortlist cap"]) != cap or float(row["Maximum assets"]) != maximum_assets:
+                continue
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
         if not math.isfinite(annual_return) or cap <= 0 or maximum_assets <= 0:

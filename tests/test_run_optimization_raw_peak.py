@@ -21,8 +21,8 @@ def row(x, y, value, status="Feasible"):
 
 def load_callback(connection=None, checkpoint=None, error=None, streamlit=None):
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
-    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
-                and n.name == "_start_optimization_at_raw_peak")
+    nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+             and n.name in {"_start_optimization_at_raw_peak", "_optimization_pair_selection"}]
     state = {"universal_preselection_cap": 400, "exact_optimizer_asset_cap": 300,
              "shortlist_cap_search_start_x": 7700, "shortlist_cap_search_start_y": 600,
              "shortlist_cap_search_results": [row(9000, 900, .99)]}
@@ -44,8 +44,8 @@ def load_callback(connection=None, checkpoint=None, error=None, streamlit=None):
                  "best_feasible_result": best_feasible_result,
                  "_app_run_log": lambda event, **kw: calls.append((event, kw)),
                  "_start_optimization_plan_timer": lambda owner: calls.append(("timer", owner))}
-    exec(compile(ast.Module(body=[node], type_ignores=[]), "<raw-peak>", "exec"), namespace)
-    return namespace[node.name], st.session_state, calls
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), "<raw-peak>", "exec"), namespace)
+    return namespace["_start_optimization_at_raw_peak"], st.session_state, calls
 
 
 def test_click_uses_latest_profile_raw_peak_not_old_or_session_winners():
@@ -94,6 +94,21 @@ def test_smallest_supported_exact_limit_and_deterministic_raw_ties():
     assert (state["universal_preselection_cap"], state["exact_optimizer_asset_cap"]) == (7700, 50)
 
 
+def test_preview_uses_callback_source_without_mutating_controls_or_starting_run():
+    callback, state, calls = load_callback(checkpoint={"results": [None, 3, row(8350, 550, .513)]})
+    before = dict(state)
+    preview = callback.__globals__["_optimization_pair_selection"]("alice")
+    assert (preview["x"], preview["y"]) == (8350, 550)
+    assert state == before
+    assert calls == [("load", "alice")]
+    callback("alice")
+    assert state["optimization_raw_peak_selection"] == preview
+
+
+def test_invalid_fractional_coordinates_never_become_a_different_execution_pair():
+    assert best_feasible_result([None, 3, row(8350.5, 550, .9), row(8350, 550.5, .8)]) is None
+
+
 def test_main_button_wired_to_callback_before_any_normal_run():
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
     button = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
@@ -107,7 +122,7 @@ def test_main_button_wired_to_callback_before_any_normal_run():
 
 def test_streamlit_click_applies_xy_before_widget_construction(tmp_path):
     from streamlit.testing.v1 import AppTest
-    app = AppTest.from_file("tests/raw_peak_ui_fixture.py").run()
+    app = AppTest.from_file("tests/raw_peak_ui_fixture.py", default_timeout=10).run()
     assert not app.exception
     app.button(key="run_optimization_btn_main").click().run()
     assert not app.exception
@@ -115,3 +130,26 @@ def test_streamlit_click_applies_xy_before_widget_construction(tmp_path):
     assert app.number_input(key="exact_optimizer_asset_cap").value == 550
     assert app.number_input(key="shortlist_cap_search_start_x").value == 7700
     assert app.info[0].value == "Using saved raw-return peak **X 8,350 × Y 550**. Refitting on current data."
+
+
+def test_empty_holdings_disable_run_and_usable_holdings_enable_it():
+    from streamlit.testing.v1 import AppTest
+    app = AppTest.from_file("tests/raw_peak_ui_fixture.py", default_timeout=10)
+    app.session_state["fixture_holdings_count"] = 0
+    app.run()
+    assert not app.exception
+    assert app.button(key="run_optimization_btn_main").disabled
+    assert any("Upload or add holdings" in item.value for item in app.info)
+    assert any("Raw-return peak · X 8,350 × Y 550" in item.value for item in app.caption)
+    app.session_state["fixture_holdings_count"] = 2
+    app.run()
+    assert not app.button(key="run_optimization_btn_main").disabled
+
+
+def test_preview_explicitly_identifies_configured_fallback():
+    from streamlit.testing.v1 import AppTest
+    app = AppTest.from_file("tests/raw_peak_ui_fixture.py", default_timeout=10)
+    app.session_state["fixture_no_checkpoint"] = True
+    app.run()
+    assert not app.exception
+    assert any("Configured pair · X 400 × Y 300" in item.value for item in app.caption)

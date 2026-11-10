@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from two_dimensional_search import best_feasible_result
 
 
 CHECKPOINT_DDL = """
@@ -75,6 +76,23 @@ def save_checkpoint(conn, owner, config, results, *, status="running"):
     return signature
 
 
+def _usable_result_rows(results):
+    """Keep legacy rows with no Y, but reject coordinates that cannot be rendered."""
+    usable = []
+    for result in results:
+        if not isinstance(result, dict) or result.get("Shortlist cap") is None:
+            continue
+        try:
+            for key in ("Shortlist cap", "Maximum assets"):
+                value = result.get(key)
+                if value is not None and (int(value) <= 0 or float(value) != int(value)):
+                    raise ValueError("Invalid search coordinate")
+        except (ValueError, TypeError, OverflowError):
+            continue
+        usable.append(result)
+    return usable
+
+
 def load_latest_checkpoint(conn, owner):
     ensure_checkpoint_schema(conn)
     row = conn.execute(
@@ -85,10 +103,17 @@ def load_latest_checkpoint(conn, owner):
     ).fetchone()
     if row is None:
         return None
+    try:
+        config = json.loads(row["config_json"])
+        results = json.loads(row["results_json"])
+    except (ValueError, TypeError):
+        return None  # Retain the stored evidence; never rewrite a corrupt payload.
+    if not isinstance(config, dict) or not isinstance(results, list):
+        return None
     return {
         "config_hash": str(row["config_hash"]),
-        "config": json.loads(row["config_json"]),
-        "results": json.loads(row["results_json"]),
+        "config": config,
+        "results": _usable_result_rows(results),
         "status": str(row["status"]),
         "analysis_cutoff": row["analysis_cutoff"],
         "updated_at": str(row["updated_at"]),
@@ -106,10 +131,17 @@ def load_latest_checkpoint_for_research_scope(conn, owner, config):
     ).fetchall()
     target_scope = research_scope_hash(config)
     for row in rows:
-        saved_config = json.loads(row["config_json"])
+        try:
+            saved_config = json.loads(row["config_json"])
+            results = json.loads(row["results_json"])
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(saved_config, dict) or not isinstance(results, list):
+            return None
+        if len(_usable_result_rows(results)) != len(results):
+            return None
         if research_scope_hash(saved_config) != target_scope:
             continue
-        results = json.loads(row["results_json"])
         if str(row["status"]) == "running":
             # Prefer resuming this incomplete search over replacing it with a
             # one-pair refresh after an interruption.
@@ -146,25 +178,18 @@ def load_best_saved_result(conn, owner):
         """,
         (str(owner),),
     ).fetchall()
-    best = None
-    best_key = None
+    candidates = []
     for stored in stored_rows:
-        for result in json.loads(stored["results_json"]):
-            if str(result.get("Status")) != "Feasible":
-                continue
-            try:
-                annual_return = float(result["Annual Return"])
-                cap = int(result["Shortlist cap"])
-                maximum_assets = int(result["Maximum assets"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if annual_return != annual_return:
-                continue
-            key = (annual_return, -maximum_assets, -cap)
-            if best_key is None or key > best_key:
-                best = dict(result)
-                best_key = key
-    return best
+        try:
+            results = json.loads(stored["results_json"])
+        except (ValueError, TypeError):
+            continue
+        if isinstance(results, list):
+            candidate = best_feasible_result(results)
+            if candidate is not None:
+                candidates.append(candidate)
+    best = best_feasible_result(candidates)
+    return dict(best) if best is not None else None
 
 
 def delete_checkpoints(conn, owner):
