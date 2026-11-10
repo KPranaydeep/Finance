@@ -2896,7 +2896,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         rebalancing_plan = payload.get("rebalancing_plan") or []
         proposed_rebalancing_plan = payload.get("proposed_rebalancing_plan") or []
         execution_validation = dict(payload.get("execution_validation") or {})
-        pair = saved_annual_lift_pair(payload)
+        try:
+            selection_holdings = load_master_holdings(owner)
+        except (TypeError,ValueError):
+            selection_holdings = None
+        pair = saved_annual_lift_pair(payload,selection_holdings)
         if execution_validation.get("selection_mode") != TWO_TRADE_MODE:
             execution_validation.update(passed=False, pair_validation_available=False)
         execution_validation.update(selection_mode=TWO_TRADE_MODE,selected_trade_count=len(pair))
@@ -2921,7 +2925,9 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         st.caption(f"Saved at: {saved_at}")
         context = payload.get("rebalance_plan_context") or {}
         try:
-            current_signature = holdings_fingerprint(load_master_holdings(owner))
+            if selection_holdings is None:
+                raise ValueError("Current ownership unavailable")
+            current_signature = holdings_fingerprint(selection_holdings)
             prior_signature = context.get("holdings_fingerprint") or holdings_fingerprint(payload.get("current_allocation") or [])
             if current_signature != prior_signature:
                 st.warning("Holdings have changed since this plan. Update rebalance plan to resize trades using the saved optimal weights.")
@@ -3330,7 +3336,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 research_pauses = active_trade_deferrals(conn, owner)
             render_two_trade_plan(payload, execution_validation,
                 research_pauses["yahoo_ticker"].tolist() if not research_pauses.empty else (),
-                key=f"saved_pair_{widget_scope}")
+                key=f"saved_pair_{widget_scope}",holdings=selection_holdings)
 
         with st.expander("Market, reserve and borrowing details", expanded=False):
             with st.expander("Market backdrop and risk details", expanded=False):
@@ -7117,7 +7123,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     # Preserve candidates before pauses, funding and validation suppress orders.
     buy_candidate_orders = rebal_df.loc[rebal_df["Action"].eq("Buy") & rebal_df["Executable Quantity"].gt(0)].to_dict(orient="records")
     if two_trade_plan:
-        pair = select_annual_lift_pair(rebal_df)
+        pair = select_annual_lift_pair(rebal_df,current_alloc)
         validation = execution_check(current_alloc,pair,prices,log_returns,cost_bps=transaction_cost_bps,
             available_cash_inr=available_cash_inr,excluded_tickers=excluded_trade_tickers,
             frozen_weights=frozen_weights,max_weight=maximum_weight,max_drawdown=max_drawdown,
@@ -9214,7 +9220,7 @@ with st.sidebar:
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
     ALLOCATION_POLICY = render_policy_controls(
         ALLOCATION_POLICY, CURRENT_USER, get_db_connection, max_weight=MAX_WEIGHT_PER_ASSET)
-    st.caption("Rebalance selection: one highest annual-lift Buy and one highest annual-lift Sell. Controls flag conflicts without changing the selected pair.")
+    st.caption("Rebalance selection: two distinct buys (one not currently held), plus the highest annual-lift sell. Controls flag conflicts without hiding the selections.")
 
     auto_history_end = st.checkbox(
         "Choose the history end date automatically",
@@ -12882,7 +12888,8 @@ if run_btn:
             )
 
         st.subheader("Rebalancing Plan")
-        render_two_trade_plan({"two_trade_plan":two_trade_selection,"rebalance_candidate_orders":rebalance_candidate_orders},
+        render_two_trade_plan({"two_trade_plan":two_trade_selection,"rebalance_candidate_orders":rebalance_candidate_orders,
+            "current_allocation":execution_allocation.to_dict(orient="records")},
             execution_validation,active_deferrals["yahoo_ticker"].tolist() if not active_deferrals.empty else (),
             key="fresh_two_trade_plan")
 

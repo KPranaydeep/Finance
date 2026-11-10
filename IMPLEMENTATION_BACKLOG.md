@@ -85,22 +85,28 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
 
 ## Profit-based partial release (implemented)
 
-### Private rebalance selection: exactly one buy and one sell
+### Private rebalance selection: two buys (one new holding) and one sell
 
 The current private plan supersedes the profit-threshold selection UI. Select
-the highest existing `Expected Annual Return Lift (%)` separately among buys
-and sells before pauses, funding, partial-sell Sharpe, position/tail controls or
+the highest existing `Expected Annual Return Lift (%)` among non-owned buy
+candidates, then the highest remaining buy (owned or new), and the highest sell
+among current holdings before pauses, funding, partial-sell Sharpe, position/tail controls or
 profit thresholds. Keep their existing draft quantities; no assumed outside cash,
 resizing or lower-ranked substitution. This existing score is a historical
 risk-adjusted annual-lift estimate, distinct from the 30-session probability score.
-The visible plan/CSV has two selected rows when both nonzero sides exist; never
-invent a missing side or unavailable score. Exact ticker breaks ties.
+The visible plan/CSV has three selected rows when the required candidates exist;
+never duplicate a buy, invent a missing slot or unavailable score. Exact ticker
+breaks ties. Any positive quantity, including a tiny fractional holding, means
+owned; zero/absent tickers in a complete known holdings snapshot are non-owned.
+Unknown quantities cannot establish a new holding. Listing-qualified tickers
+remain distinct. Saved display uses current master holdings for ownership, so a
+recent purchase changes the new-holding slot without rerunning optimization.
 
-Controls report conflicts without hiding either selected draft. Independent replay
+Controls report conflicts without hiding any selected draft. Independent replay
 still distinguishes selected drafts from validated executable orders. Public
 scheduled publishing retains its existing strict selection/check behavior. Old
-saved drafts can display the pair without a solver/download; current pair sizing
-and checks require Update rebalance plan. All pre-control candidates and the pair
+saved drafts can display the selections without a solver/download; current sizing
+and checks require Update rebalance plan. All pre-control candidates and selections
 persist separately, so a blocked or paused selected order survives restart.
 
 ### Funding-independent buy candidates

@@ -1,5 +1,6 @@
 """Explain recorded execution failures without market requests or a new solve."""
 import math
+from two_trade_rebalance import MODE as REBALANCE_SELECTION_MODE
 
 
 SHOCK_PREFIX = "Single-security shock budget exceeded: "
@@ -17,8 +18,8 @@ def execution_summary_metric(report, executable_count=0):
     """Count released orders only after validation; failures are a status, not zero activity."""
     if not report:
         return "Plan status", "Needs validation", "Saved plan has no execution check"
-    if report.get("selection_mode")=="highest-annual-lift-buy-sell":
-        return "Rebalance plan", f"{report.get('selected_trade_count',0)} selected", "Highest annual-lift Buy + Sell · conflicts do not change selection"
+    if report.get("selection_mode")==REBALANCE_SELECTION_MODE:
+        return "Rebalance plan", f"{report.get('selected_trade_count',0)} selected", "2 buys (one new holding) + top sell · conflicts do not hide selections"
     if report.get("passed") is not True:
         breaches = {t for reason in report.get("violations") or [] if (t := cap_breach_ticker(reason))}
         note = (f"{len(breaches)} {'holding' if len(breaches) == 1 else 'holdings'} over cap · draft withheld"

@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 from allocation_attempts import stage_label
 from execution_diagnostics import execution_position_rows, execution_summary_metric, cap_breach_ticker
+from two_trade_rebalance import MODE as REBALANCE_SELECTION_MODE
 
 
 def render_portfolio_heading(title, description, *, context=None, publication=None):
@@ -34,14 +35,14 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
     """Present final feasibility separately from research and target statistics."""
     report = report or {}
     with st.container(border=True):
-        st.markdown("**Selected-pair checks**" if report.get("selection_mode")=="highest-annual-lift-buy-sell" else "**Final allocation check**")
+        st.markdown("**Selected-trade checks**" if report.get("selection_mode")==REBALANCE_SELECTION_MODE else "**Final allocation check**")
         exception=report.get("profit_cap_exception") or {}
-        if report.get("selection_mode")=="highest-annual-lift-buy-sell":
-            st.info("The highest annual-lift Buy and Sell stay selected. Control conflicts below do not hide or replace either trade.")
+        if report.get("selection_mode")==REBALANCE_SELECTION_MODE:
+            st.info("Two buys (one new holding) and the top annual-lift sell stay selected when available. Control conflicts do not hide or replace selections.")
             if not report.get("pair_validation_available",True):
-                st.caption("This older saved draft has not had the selected pair replayed together. Update rebalance plan refreshes sizing and checks without optimizer search.")
+                st.caption("This saved draft has not had these selections replayed together. Update rebalance plan refreshes sizing and checks without optimizer search.")
             elif report.get("passed"):
-                st.caption("Selected pair passed the recorded checks; no broker orders have been submitted.")
+                st.caption("Selected trades passed the recorded checks; no broker orders have been submitted.")
             for reason in dict.fromkeys(report.get("violations") or []):
                 st.write("• "+str(reason))
         elif report.get("passed") and exception.get("applied"):
@@ -88,7 +89,7 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
             st.info("This older plan has no final allocation check. Use Update plan to validate it without rerunning optimization.")
         if exception and not exception.get("applied"):
             st.caption("Partial release unavailable: " + str(exception.get("reason","required evidence missing")))
-        if proposed_orders and report.get("selection_mode")!="highest-annual-lift-buy-sell":
+        if proposed_orders and report.get("selection_mode")!=REBALANCE_SELECTION_MODE:
             with st.expander("Withheld proposal — review only"):
                 st.caption("This is a draft for review, excluded from the executable plan.")
                 draft = pd.DataFrame(proposed_orders).copy()
