@@ -212,7 +212,7 @@ def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
     columns = list(frame.columns)
     w = np.asarray(weights, dtype=float)
     errors = []
-    result = {"passed":False, "violations":errors}
+    result = {"passed":False, "violations":errors, "position_breaches":[]}
     try:
         policy = validate_allocation_policy(limits["settings"])
         raw_samples, current_samples, objective_means, state = policy_evidence(frame, policy)
@@ -236,6 +236,10 @@ def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
                       / (state["factors"][i] if state is not None else 1.))
             if w[i] > cap + 1e-7:
                 errors.append("Single-security shock budget exceeded: " + str(ticker))
+                result["position_breaches"].append({"ticker": str(ticker),
+                    "weight": float(w[i]), "cap": float(cap), "excess": float(w[i]-cap),
+                    "shock": float(shocks[i]),
+                    "stress_factor": float(state["factors"][i]) if state is not None else 1.})
         weights_by_ticker = dict(zip(columns,w))
         group_checks = list(limits["groups"])
         # New positive correlations can tighten, never silently loosen, a saved policy.

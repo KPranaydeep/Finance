@@ -4,6 +4,7 @@ from __future__ import annotations
 import streamlit as st
 import pandas as pd
 from allocation_attempts import stage_label
+from execution_diagnostics import execution_position_rows, SHOCK_PREFIX
 
 
 def render_portfolio_heading(title, description, *, context=None, publication=None):
@@ -29,7 +30,7 @@ def render_metric_strip(items):
                 st.caption(note)
 
 
-def render_execution_validation(report, proposed_orders=()):
+def render_execution_validation(report, proposed_orders=(), *, allocation_policy=None, weights_saved_at=None):
     """Present final feasibility separately from research and target statistics."""
     report = report or {}
     with st.container(border=True):
@@ -39,17 +40,48 @@ def render_execution_validation(report, proposed_orders=()):
             st.caption("Sale proceeds must be available before buys. This is modeled feasibility, not broker execution approval.")
         elif report:
             st.warning("Plan withheld: the final allocation did not pass every required check. Saved analysis is retained.")
+            rows = execution_position_rows(report, allocation_policy)
+            if rows:
+                st.write(f"{len(rows)} {'holding would' if len(rows) == 1 else 'holdings would'} still exceed {'its position limit' if len(rows) == 1 else 'their position limits'} after the draft trades.")
+                if weights_saved_at:
+                    st.caption(f"Allocation saved {str(weights_saved_at)[:10]}. Update rebalance plan keeps these weights; it does not optimize a new allocation under today's limits.")
+                st.caption("A partial sale can reduce a holding and still leave it above its cap. Buys can also exceed the cap. This draft is not an executable plan.")
+                comparison = pd.DataFrame([{"Security": row["ticker"],
+                    "After draft (%)": None if row["weight"] is None else 100*row["weight"],
+                    "Recorded cap (%)": None if row["cap"] is None else 100*row["cap"],
+                    "Excess (pp)": None if row["excess"] is None else 100*row["excess"]} for row in rows])
+                st.dataframe(comparison, hide_index=True, width="stretch", column_config={
+                    "After draft (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Recorded cap (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Excess (pp)": st.column_config.NumberColumn(format="%.2f"),
+                })
+                if any(row["cap_basis"] != "checked" for row in rows):
+                    st.caption("Older check: caps shown are retained upper ceilings; any excess shown is a minimum. Exact checked caps were not recorded. Missing values remain unavailable; no history or solver was rerun.")
+                st.caption("A new optimization can change the allocation; Update rebalance plan only resizes it. Frozen-holding conflicts must be resolved before a feasible allocation can be established.")
             for reason in dict.fromkeys(report.get("violations") or ["Validation evidence unavailable"]):
-                st.write("• " + str(reason))
+                if not str(reason).startswith(SHOCK_PREFIX):
+                    st.write("• " + str(reason))
         else:
             st.info("This older plan has no final allocation check. Use Update plan to validate it without rerunning optimization.")
         if proposed_orders:
             with st.expander("Withheld proposal — review only"):
                 st.caption("This is a draft for review, excluded from the executable plan.")
-                draft = pd.DataFrame(proposed_orders).rename(columns={
-                    "Executable Quantity": "Proposed quantity", "Executable Value": "Proposed value",
+                draft = pd.DataFrame(proposed_orders).copy()
+                for name in ("Current Weight", "Optimal Weight", "Change"):
+                    if name in draft:
+                        draft[name] = 100*pd.to_numeric(draft[name], errors="coerce")
+                draft = draft.rename(columns={
+                    "Executable Quantity": "Proposed quantity", "Executable Value": "Proposed value (INR)",
+                    "Current Weight": "Current allocation (%)", "Optimal Weight": "Saved allocation (%)" if weights_saved_at else "Proposed allocation (%)",
+                    "Change": "Change (pp)", "Expected Annual Return Lift (%)": "Historical annual-return lift (pp)",
                 })
-                st.dataframe(draft, hide_index=True, width="stretch")
+                formats = {name: st.column_config.NumberColumn(format="%.2f%%")
+                           for name in ("Current allocation (%)", "Saved allocation (%)", "Proposed allocation (%)")}
+                formats.update({name: st.column_config.NumberColumn(format="%.2f") for name in (
+                    "Change (pp)", "Historical annual-return lift (pp)", "Native Price", "Proposed value (INR)")})
+                formats.update({name: st.column_config.NumberColumn(format="%.4f") for name in (
+                    "Quantity", "Proposed quantity", "FX to INR")})
+                st.dataframe(draft, hide_index=True, width="stretch", column_config=formats)
 
 
 def empty_trade_plan_message(deferred_count=0, validation=None):
@@ -102,7 +134,7 @@ def render_allocation_policy(report):
             st.caption(f"Average model mix across securities, not portfolio allocation. Median stress multiplier {adaptive['median_stress_factor']:.2f}×; {adaptive['stressed_assets']:,} securities tightened. Historical crash and current-mix tail guards remain active. Feedback uses past one-step prediction errors, not proof of future returns.")
         elif policy.get("adaptive_enabled") is False:
             st.caption("Manual model · recent adaptive adjustments are disabled for this run.")
-        if report.get("constraints_applied"):
+        if report.get("constraints_applied") and (report.get("candidate") or {}).get("passed") is not False:
             title = ("Risk-aware allocator selected" if selected == "risk-aware" else
                      "Existing allocator retained within the same risk limits" if selected == "incumbent" else
                      "Saved weights checked against the current policy")

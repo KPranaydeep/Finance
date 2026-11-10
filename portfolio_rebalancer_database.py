@@ -2757,7 +2757,7 @@ def update_saved_rebalance_plan(payload, owner):
         raise ValueError("A newer optimization was saved during refresh; update its plan instead")
     candidate["rebalance_plan_context"]["holdings_fingerprint"] = original_holdings
     saved = save_latest_analysis(candidate, owner)
-    _app_run_log("rebalance_plan_refresh_finished", status="completed", optimizer_run=False,
+    _app_run_log("rebalance_plan_refresh_finished", status="completed" if (candidate.get("execution_validation") or {}).get("passed") else "withheld", optimizer_run=False,
                  elapsed_seconds=round(time.perf_counter()-started, 3), holdings_analyzed=int(len(owned)),
                  trades=len(plan), target_count=len(targets))
     return saved
@@ -3112,7 +3112,9 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         review_cost_bps = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
         render_allocation_policy(payload.get("allocation_policy"))
-        render_execution_validation(execution_validation, proposed_rebalancing_plan)
+        render_execution_validation(execution_validation, proposed_rebalancing_plan,
+                                    allocation_policy=payload.get("allocation_policy"),
+                                    weights_saved_at=(context.get("weights_saved_at") or payload.get("saved_at")) if context.get("optimizer_run") is False else None)
         if payload.get("funding_adjustments"):
             st.caption(f"{len(payload['funding_adjustments'])} proposed buys were reduced or withheld to fit recorded cash and net sale proceeds after costs.")
         rebalance_review = assess_rebalance(current_stats, optimal_stats, payload.get('rebalance_review_orders') or rebalancing_plan, base_value, review_cost_bps)
@@ -12510,7 +12512,8 @@ if run_btn:
         execution_validation = rebal_df.attrs.get("execution_validation", {})
         proposed_rebalancing_plan = rebal_df.attrs.get("proposed_rebalancing_plan", [])
         funding_adjustments = rebal_df.attrs.get("funding_adjustments", [])
-        render_execution_validation(execution_validation, proposed_rebalancing_plan)
+        render_execution_validation(execution_validation, proposed_rebalancing_plan,
+                                    allocation_policy=meta.get("allocation_policy"))
         _app_run_log("final_allocation_checked", status="passed" if execution_validation.get("passed") else "withheld",
                      checks_failed=len(execution_validation.get("violations") or []),
                      funded_adjustments=len(funding_adjustments))

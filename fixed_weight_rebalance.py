@@ -136,6 +136,10 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         raise ValueError("Incomplete rebalance coverage; previous plan retained")
     if policy_limits:
         allocation_policy["candidate"] = plan.attrs.get("execution_validation",{}).get("allocation_policy",{})
+        allocation_policy["constraints_applied"] = bool(allocation_policy["candidate"].get("passed"))
+        if not allocation_policy["constraints_applied"]:
+            allocation_policy.update(status="failed_recheck",
+                reason="The resized draft at saved weights failed the current allocation policy. Refreshing a plan does not re-optimize its allocation.")
     if policy["enabled"] and policy_limits is None:
         attributes = dict(plan.attrs)
         attributes["proposed_rebalancing_plan"] = attributes.get("proposed_rebalancing_plan") or plan.to_dict(orient="records")

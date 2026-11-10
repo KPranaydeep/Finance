@@ -326,6 +326,17 @@ Capacity is only a preliminary bounds check, not proof that tail/group constrain
 can be satisfied. Run logs contain aggregate counts/weights only. Older attempts
 without saved bounds cannot retrospectively identify which holdings were frozen.
 
+Final execution failures also record each offending post-trade weight, exact
+checked cap and excess. The UI compares these numerically instead of repeating
+unexplained warnings. Older saved checks use retained ceilings explicitly as
+upper bounds; missing/tighter unsaved caps stay unknown. This display requires no
+optimizer run or provider request. A resized plan preserves dated saved allocation
+weights, so it can still breach newer risk limits even after a partial sale.
+Rejected refreshes are not labelled as passing the policy. Draft allocations are
+displayed as percentages, with weight changes in percentage points and INR trade
+values labelled separately. No constraints or proposed trade quantities are changed
+by these diagnostic presentation changes.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

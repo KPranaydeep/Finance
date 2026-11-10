@@ -212,6 +212,34 @@ def test_execution_cannot_bypass_shock_limits_even_when_old_position_cap_passes(
     assert checked["risk"]["passed"]
     assert not checked["passed"] and not checked["allocation_policy"]["passed"]
     assert any("shock budget" in v for v in checked["violations"])
+    breach = next(row for row in checked["allocation_policy"]["position_breaches"] if row["ticker"] == "T0")
+    assert breach["weight"] == pytest.approx(.3)
+    assert breach["cap"] == pytest.approx(.2)
+    assert breach["excess"] == pytest.approx(.1)
+
+
+def test_saved_overweight_refresh_is_withheld_and_not_labelled_as_policy_passing(monkeypatch):
+    import fixed_weight_rebalance as fixed
+    import portfolio_optimizer_core as core
+    frame, _, policy = fixture()
+    held = pd.DataFrame({"Yahoo Ticker":frame.columns, "Symbol":frame.columns, "Currency":"USD",
+                         "Quantity":[7.]+[.6]*5, "Average Price":10.})
+    targets = [.3]+[.14]*5
+    payload = {"saved_at":"2026-11-01T00:00:00+00:00", "settings":{},
+        "optimal_allocation":[{"ticker":t,"target_weight":w} for t,w in zip(frame.columns, targets)],
+        "current_allocation":held.to_dict(orient="records")}
+    before = deepcopy(payload)
+    monkeypatch.setattr(core,"run_portfolio_analysis_multi",lambda *a,**k:pytest.fail("optimizer called"))
+    candidate, _, plan = fixed.rebuild_saved_plan(payload,held,frame,{t:10. for t in frame.columns},{"USD":1.},
+        plan_builder=core.rebalance_plan_multi,stats_builder=core.portfolio_stats,allocation_policy_settings=policy)
+    assert plan.empty and not candidate["execution_validation"]["passed"]
+    assert candidate["allocation_policy"]["status"] == "failed_recheck"
+    assert not candidate["allocation_policy"]["constraints_applied"]
+    assert candidate["optimal_allocation"] == before["optimal_allocation"]
+    assert payload == before and candidate["rebalance_plan_context"]["optimizer_run"] is False
+    breaches = candidate["execution_validation"]["allocation_policy"]["position_breaches"]
+    assert any(row["ticker"] == "T0" and row["weight"] > row["cap"] for row in breaches)
+    assert candidate["proposed_rebalancing_plan"]
 
 
 def test_search_reuse_cannot_cross_policy_or_cost_changes():
