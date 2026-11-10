@@ -29,7 +29,7 @@ from trade_quantities import format_quantity, plan_quantity, quantity_step
 from partial_sell_review import review_partial_sells, partial_sell_caption
 from allocation_integrity import finalize_weights, fund_buy_orders, execution_check
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
-from allocation_attempts import save_attempt, failure_summary
+from allocation_attempts import save_attempt, failure_summary, capacity_log_summary
 from allocation_policy_ui import render_policy_controls, render_last_attempt
 from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
@@ -12273,7 +12273,8 @@ if run_btn:
                      solver_seconds=policy_log.get("elapsed_seconds"),
                      constraints_applied=bool(policy_log.get("constraints_applied")),
                      blocker_stage=policy_log.get("stage"),
-                     input_summary=policy_log.get("input_summary"))
+                     input_summary=policy_log.get("input_summary"),
+                     capacity_summary=capacity_log_summary(policy_log))
         try:
             with get_db_connection() as conn:
                 save_attempt(conn, CURRENT_USER, policy_log)

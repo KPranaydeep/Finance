@@ -127,19 +127,30 @@ def build_policy_limits(log_returns, initial, bounds, policy, cost_bps):
     policy = validate_allocation_policy(policy)
     frame = pd.DataFrame(log_returns)
     columns = list(frame.columns)
+    bound_array = np.asarray(bounds, dtype=float)
+    if (bound_array.shape != (len(columns), 2) or not np.isfinite(bound_array).all()
+            or (bound_array < 0).any() or (bound_array > 1).any()
+            or (bound_array[:, 0] > bound_array[:, 1]).any()):
+        raise ValueError("Position bounds must provide finite 0 <= minimum <= maximum <= 1 for every security")
     rate = float(cost_bps) / 10000 * policy["cost_stress_multiple"]
     if not math.isfinite(rate) or not 0 <= rate < .25:
         raise ValueError("Invalid modeled cost rate for allocation policy")
     raw_scenarios, scenarios, means, state = policy_evidence(frame, policy)
     shocks = np.maximum(policy["single_name_shock_floor"],
                         np.maximum(-np.expm1(frame.min().to_numpy(dtype=float)), 0.))
-    caps = np.minimum([b[1] for b in bounds], policy["single_name_loss_budget"] / shocks)
-    if state is not None:
-        caps = caps / state["factors"]
+    factors = state["factors"] if state is not None else np.ones(len(columns))
+    # Tighten the risk ceiling, never a fixed holding's equality bound. Scaling
+    # min(frozen_weight, risk_cap) would make any stressed frozen holding fail.
+    policy_caps = policy["single_name_loss_budget"] / shocks / factors
+    caps = np.minimum(bound_array[:, 1], policy_caps)
     groups = policy_groups(frame, policy, state)
     limits = {
         "method": policy["method_version"], "settings": policy,
         "position_caps": dict(zip(columns, map(float, caps))),
+        "policy_position_caps": dict(zip(columns, map(float, policy_caps))),
+        "position_lower_bounds": dict(zip(columns, map(float, bound_array[:, 0]))),
+        "position_upper_bounds": dict(zip(columns, map(float, bound_array[:, 1]))),
+        "adaptive_stress_factors": dict(zip(columns, map(float, factors))),
         "stress_losses": dict(zip(columns, map(float, shocks))),
         "groups": [{"tickers":[columns[i] for i in members], "cap":policy["group_weight_limit"]}
                    for members in groups],
@@ -152,6 +163,46 @@ def build_policy_limits(log_returns, initial, bounds, policy, cost_bps):
         "objective_means": dict(zip(columns, map(float, means))),
     }
     return scenarios, limits
+
+
+def position_capacity(limits):
+    """Diagnose bounds only; enough capacity does not establish joint feasibility."""
+    conflicts = []
+    frozen_count = 0
+    for ticker, cap in limits["position_caps"].items():
+        lower = limits["position_lower_bounds"][ticker]
+        upper = limits["position_upper_bounds"][ticker]
+        frozen = lower > 0 and math.isclose(lower, upper, abs_tol=1e-12, rel_tol=0.)
+        frozen_count += int(frozen)
+        if lower > cap + 1e-9:
+            conflicts.append({"ticker": ticker, "kind": "Frozen holding" if frozen else "Minimum position",
+                "minimum_weight": lower, "policy_cap": limits["policy_position_caps"][ticker],
+                "effective_cap": cap, "excess_weight": lower - cap,
+                "shock": limits["stress_losses"][ticker],
+                "stress_factor": limits["adaptive_stress_factors"][ticker]})
+    lower_sum = float(sum(limits["position_lower_bounds"].values()))
+    cap_sum = float(sum(limits["position_caps"].values()))
+    return {"required_weight": 1., "minimum_weight": lower_sum,
+            "position_cap_sum": cap_sum, "capacity_shortfall": max(0., 1. - cap_sum),
+            "minimum_excess": max(0., lower_sum - 1.),
+            "frozen_count": frozen_count, "conflict_count": len(conflicts),
+            "frozen_conflict_count": sum(row["kind"] == "Frozen holding" for row in conflicts),
+            "conflicts": conflicts,
+            "passed": not conflicts and cap_sum >= 1. - 1e-9 and lower_sum <= 1. + 1e-9}
+
+
+def capacity_failure_reason(capacity):
+    parts = []
+    if capacity["conflict_count"]:
+        parts.append(f"{capacity['conflict_count']} minimum/frozen position(s) exceed their risk caps "
+                     f"({capacity['frozen_conflict_count']} frozen); largest excess "
+                     f"{max(row['excess_weight'] for row in capacity['conflicts'])*100:.2f} percentage points")
+    if capacity["capacity_shortfall"] > 1e-9:
+        parts.append(f"combined position caps permit only {capacity['position_cap_sum']:.2%} "
+                     f"of the required 100% fully invested allocation")
+    if capacity["minimum_excess"] > 1e-9:
+        parts.append(f"minimum/frozen weights total {capacity['minimum_weight']:.2%}, above 100%")
+    return "; ".join(parts) + ". Risk limits and frozen positions were not relaxed."
 
 
 def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
@@ -243,9 +294,10 @@ def solve_risk_aware_allocation(log_returns, allocation, bounds, policy, *, cost
         report["limits"] = limits
         report["adaptive"] = limits["adaptive"]
         report["stage"] = "position_and_frozen_capacity"
-        if np.any(lower > caps + 1e-9) or caps.sum() < 1 - 1e-9:
+        report["capacity"] = position_capacity(limits)
+        if not report["capacity"]["passed"]:
             report["status"] = "infeasible"
-            raise ValueError("Shock limits and frozen positions cannot form a fully invested allocation")
+            raise ValueError(capacity_failure_reason(report["capacity"]))
         report["stage"] = "joint_tail_group_cost_solve"
         rate, confidence = limits["cost_rate"], policy["confidence"]
         means = np.array([limits["objective_means"][ticker] for ticker in frame.columns])

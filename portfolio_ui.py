@@ -63,6 +63,26 @@ def empty_trade_plan_message(deferred_count=0, validation=None):
     return "No executable trades in this plan."
 
 
+def render_capacity_diagnostics(report):
+    """The same private numeric explanation for fresh and restored failures."""
+    capacity = report.get("capacity") or {}
+    if not capacity or capacity.get("passed"):
+        return
+    st.markdown("**Position-cap conflict**")
+    st.write(f"Minimum/frozen allocation {capacity['minimum_weight']:.2%} · combined position caps {capacity['position_cap_sum']:.2%} · required allocation 100%.")
+    if capacity.get("capacity_shortfall", 0) > 1e-9:
+        st.write(f"Position capacity is short by {capacity['capacity_shortfall']*100:.2f} percentage points before group or tail constraints.")
+    if capacity.get("minimum_excess", 0) > 1e-9:
+        st.write(f"Minimum/frozen allocation exceeds available capital by {capacity['minimum_excess']*100:.2f} percentage points.")
+    for row in sorted(capacity.get("conflicts") or [], key=lambda row: (-row["excess_weight"], row["ticker"])):
+        # Short native paragraphs stay readable on mobile and show the exact gap.
+        st.write(f"{row['ticker']} · {row['kind'].lower()} {row['minimum_weight']:.2%} · risk cap {row['policy_cap']:.2%} · excess {row['excess_weight']*100:.2f} percentage points.")
+        st.caption(f"Shock {row['shock']:.1%} × adaptive stress {row['stress_factor']:.2f}; effective position ceiling {row['effective_cap']:.2%}.")
+    if capacity.get("frozen_conflict_count"):
+        st.caption("A frozen holding cannot be reduced by this solve. Repair its quarantined price evidence before allowing it to trade, or explicitly revise the diagnosed risk assumption.")
+    st.caption("More solver time cannot fix this bounds conflict. Position capacity alone does not establish group or tail-loss feasibility.")
+
+
 def render_allocation_policy(report):
     """Compact policy/comparison evidence, without a claim of forecast improvement."""
     if not report:
@@ -99,6 +119,7 @@ def render_allocation_policy(report):
                 st.warning("No allocation passed this policy; previous saved analysis is retained.")
             st.caption(report.get("reason") or report.get("solver_message") or "Check candidate constraints below.")
             st.caption(f"Blocked while {stage_label(report.get('stage'))}. See Allocation risk controls in the sidebar for the applied limits and trade-offs.")
+            render_capacity_diagnostics(report)
         if limits.get("history_through"):
             st.caption(f"Model history through {limits['history_through']} · {policy.get('scenario_paths',0):,} joint resamples · {report.get('elapsed_seconds',0):.2f}s allocator solve.")
         with st.expander("Policy assumptions and allocator comparison", expanded=False):

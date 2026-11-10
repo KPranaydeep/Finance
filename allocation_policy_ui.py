@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 from allocation_policy_config import validate_allocation_policy
 from allocation_attempts import load_workspace, save_controls, failure_summary, stage_label
+from portfolio_ui import render_capacity_diagnostics
 
 CONTROL_FIELDS = ("single_name_loss_budget", "single_name_shock_floor", "group_weight_limit",
                   "cost_stress_multiple", "solver_time_limit_seconds")
@@ -67,4 +68,5 @@ def render_last_attempt(owner, connect):
         evidence = attempt.get("input_summary") or {}
         if evidence:
             st.write(f"History: {evidence.get('sessions', 0):,} sessions · {evidence.get('assets', 0):,} assets · {evidence.get('missing_owned', 0):,} owned histories missing · {evidence.get('nonfinite_values', 0):,} nonfinite values.")
+        render_capacity_diagnostics(attempt)
         st.caption("Use Allocation risk controls in the sidebar for the current limits and their direction. An unavailable input is not evidence that a risk limit is too tight.")

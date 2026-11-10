@@ -314,6 +314,18 @@ history can change replayed evidence. The whole-process chronological comparison
 remains available to assess net returns, drawdown, tail loss and turnover before
 claiming an improvement. No additional provider requests or library are required.
 
+Adaptive tightening is applied to the single-security risk ceiling **before** it
+is intersected with position bounds. A frozen holding below that ceiling remains
+fixed; its equality bound is never divided by a stress multiplier. A frozen
+holding above the actual risk ceiling still blocks the allocation. The private
+attempt stores original bounds, policy ceilings and per-security stress factors,
+and both the immediate result and restored diagnostics show each conflicting
+holding's fixed/minimum weight, risk cap and excess in percentage points. Aggregate
+capacity shortages and minimum weights above 100% are diagnosed separately.
+Capacity is only a preliminary bounds check, not proof that tail/group constraints
+can be satisfied. Run logs contain aggregate counts/weights only. Older attempts
+without saved bounds cannot retrospectively identify which holdings were frozen.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

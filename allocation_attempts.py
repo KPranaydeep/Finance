@@ -56,6 +56,14 @@ def failure_summary(report):
     return f"{category}: {reason}"
 
 
+def capacity_log_summary(report):
+    """Only aggregate counts/weights belong in the run log, never private names."""
+    capacity = report.get("capacity") or {}
+    keys = ("passed", "frozen_count", "conflict_count", "frozen_conflict_count",
+            "minimum_weight", "position_cap_sum", "capacity_shortfall", "minimum_excess")
+    return {key: capacity[key] for key in keys if key in capacity}
+
+
 def stage_label(stage):
     return {
         "policy_validation": "validating risk settings",
