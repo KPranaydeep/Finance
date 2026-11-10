@@ -173,6 +173,7 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         partial_sell_sharpe_check=plan.attrs.get("partial_sell_sharpe_check", {}),
         execution_validation=plan.attrs.get("execution_validation", {}),
         proposed_rebalancing_plan=plan.attrs.get("proposed_rebalancing_plan", []),
+        buy_candidate_orders=plan.attrs.get("buy_candidate_orders", []),
         funding_adjustments=plan.attrs.get("funding_adjustments", []),
         allocation_policy=allocation_policy,
         executable_rebalance_review=assess_executable_rebalance(common, owned_values, orders, cost_bps=cost),

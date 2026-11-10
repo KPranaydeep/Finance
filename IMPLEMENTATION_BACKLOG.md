@@ -85,6 +85,17 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
 
 ## Profit-based partial release (implemented)
 
+### Funding-independent buy candidates
+
+Saved and fresh rebalance views always show positive saved-allocation securities
+as research candidates, even when funding removes every buy or final validation
+withholds the plan. New snapshots retain pre-funding buy quantities separately;
+older snapshots reconstruct the list from immutable saved targets without a
+solver or market download. Scores/dates are reused, not invented or refreshed on
+render. Pauses, cap conflicts and missing evidence remain labeled. Unfunded
+quantities never become executable orders or imply outside income is known.
+New cash must be entered for funded sizing and the final risk checks to apply.
+
 - Private profile control, disabled by default, minimum additional net benefit
   initially ₹8,079. Apply controls, then Update rebalance plan at saved weights;
   full optimization also uses the control when a target allocation is available.

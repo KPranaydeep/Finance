@@ -123,6 +123,7 @@ from trade_deferrals_ui import render_active_security_pauses, render_optimal_wei
 from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message, execution_summary_metric
 from profit_cap_exception import DEFAULT_PROFIT_EXCEPTION, validate_profit_exception, evaluate_profit_cap_exception
 from profit_cap_exception_ui import render_profit_exception_controls
+from buy_candidate_watchlist import render_buy_candidates
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -3324,6 +3325,9 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         with st.expander("Saved rebalancing plan", expanded=True):
             if payload.get("partial_sell_sharpe_check"):
                 st.caption(partial_sell_caption(payload["partial_sell_sharpe_check"]))
+            with get_db_connection() as conn:
+                research_pauses = active_trade_deferrals(conn, owner)
+            render_buy_candidates(payload, research_pauses["yahoo_ticker"].tolist() if not research_pauses.empty else ())
             saved_rebal_df = pd.DataFrame(rebalancing_plan)
             if not saved_rebal_df.empty:
                 saved_rebal_df = _sort_rebalance_df_for_priority(saved_rebal_df)
@@ -7115,6 +7119,8 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         "Executable Value": exec_val,
     })
 
+    # Preserve candidates before pauses, funding and validation suppress orders.
+    buy_candidate_orders = rebal_df.loc[rebal_df["Action"].eq("Buy") & rebal_df["Executable Quantity"].gt(0)].to_dict(orient="records")
     # Evaluate actual rounded quantities together, not isolated security scores.
     blocked = {str(t).upper() for t in excluded_trade_tickers}
     rebal_df = rebal_df.loc[
@@ -7199,6 +7205,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
         proposed = rebal_df.to_dict(orient="records") or proposed
         rebal_df = rebal_df.iloc[:0].copy()
     rebal_df.attrs["partial_sell_sharpe_check"] = partial_check
+    rebal_df.attrs["buy_candidate_orders"] = buy_candidate_orders
     rebal_df.attrs["execution_validation"] = validation
     rebal_df.attrs["funding_adjustments"] = funding_adjustments
     rebal_df.attrs["proposed_rebalancing_plan"] = proposed if not validation["passed"] else residual_proposal
@@ -12641,6 +12648,7 @@ if run_btn:
         execution_validation = rebal_df.attrs.get("execution_validation", {})
         proposed_rebalancing_plan = rebal_df.attrs.get("proposed_rebalancing_plan", [])
         funding_adjustments = rebal_df.attrs.get("funding_adjustments", [])
+        buy_candidate_orders = rebal_df.attrs.get("buy_candidate_orders", [])
         partial_release = execution_validation.get("profit_cap_exception") or {}
         if partial_release.get("applied") and meta.get("allocation_policy"):
             meta["allocation_policy"] = dict(meta["allocation_policy"], status="partial-release",
@@ -12789,7 +12797,7 @@ if run_btn:
         if scenario_ranking_error:
             st.warning(f"Scenario ranking unavailable; the rebalance plan is unaffected: {scenario_ranking_error}")
         elif scenario_ranking.empty:
-            st.info("No executable buy candidates with usable return history were available to rank.")
+            st.info("No research buy scenarios with usable return history were available to rank.")
         else:
             leading_buy = scenario_ranking.iloc[0]
             leading_score = float(leading_buy["Return × positive-probability score (%)"])
@@ -12804,23 +12812,27 @@ if run_btn:
                 )
             else:
                 st.info(
-                    "No executable buy has a positive return × positive-path score under the "
+                    "No research buy has a positive return × positive-path score under the "
                     "selected horizon and cost assumption."
                 )
             scenario_display = scenario_ranking.drop(columns=["Scenario method"])
-            st.dataframe(
-                scenario_display,
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "Optimized Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
-                    "Expected net scenario return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "Median net return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                    "Probability of positive net return (%)": st.column_config.NumberColumn(format="%.1f%%"),
-                    "Return × positive-probability score (%)": st.column_config.NumberColumn(format="%+.2f%%"),
-                },
-            )
+            with st.expander("Detailed buy / sell scenario estimates", expanded=False):
+                st.dataframe(
+                    scenario_display, width="stretch", hide_index=True,
+                    column_config={
+                        "Optimized Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "Expected net scenario return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                        "Median net return (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                        "Probability of positive net return (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Return × positive-probability score (%)": st.column_config.NumberColumn(format="%+.2f%%"),
+                    },
+                )
 
+        render_buy_candidates({"optimal_allocation":[{"ticker":t,"target_weight":float(w)} for t,w in zip(log_returns.columns,optimal_weights)],
+            "current_allocation":execution_allocation.to_dict(orient="records"),
+            "buy_candidate_orders":buy_candidate_orders,"security_scenario_ranking":scenario_ranking.to_dict(orient="records"),
+            "allocation_policy":meta.get("allocation_policy") or {}},
+            active_deferrals["yahoo_ticker"].tolist() if not active_deferrals.empty else ())
         st.markdown("**Single-sell review ranking (research-only)**")
         st.caption(
             "Inverse view of the single-buy model: owned holdings are sorted from weakest "
@@ -13058,6 +13070,7 @@ if run_btn:
             "allocation_validation": meta.get("allocation_validation", {}),
             "allocation_policy": meta.get("allocation_policy", {}),
             "execution_validation": execution_validation,
+            "buy_candidate_orders": buy_candidate_orders,
             "proposed_rebalancing_plan": proposed_rebalancing_plan,
             "funding_adjustments": funding_adjustments,
             "rebalancing_plan": rebal_df.to_dict(orient="records"),
