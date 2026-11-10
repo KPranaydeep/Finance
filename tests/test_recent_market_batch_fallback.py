@@ -28,7 +28,7 @@ def _load_download_function():
     namespace = {
         "pd": pd,
         "_chunked": chunked,
-        "apply_price_integrity_gate": lambda prices: (prices, pd.DataFrame()),
+        "apply_price_integrity_gate": lambda prices, **kwargs: (prices, pd.DataFrame()),
         "PRICE_INTEGRITY_VERSION": "test-v1",
     }
     exec(

@@ -189,6 +189,18 @@ changes invalidate compatible search reuse, while old research rows remain store
 Old external configuration files without an `allocation_policy` section retain
 their previous allocator, rather than silently adopting new assumptions.
 
+Price-integrity validation uses four shared I/O workers, a 60-second corporate-action
+request window and a 20-second independent-source request window. Progress shows
+completed checks, cache hits and elapsed time; this does not bound the whole
+optimization. Unfinished or unavailable evidence stays quarantined (owned positions
+retain the existing freeze rule). There is no cascade of individual retries.
+Completed provider evidence is cached beside the private database across restarts,
+scoped by ticker, history dates, evidence type and integrity version. Successes expire
+after 24 hours and unavailable responses after 15 minutes. In-flight requests may
+finish into that cache after a request window closes, but cannot change the current
+report. Logs record aggregate timing, checked/deferred counts and quarantine totals;
+saved search pairs, price histories and analysis results are preserved.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

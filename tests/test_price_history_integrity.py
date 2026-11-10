@@ -127,9 +127,11 @@ def test_missing_conflicting_or_same_provider_witness_cannot_certify_a_crash():
         assert report["status"] == "QUARANTINED_UNEXPLAINED_JUMP"
 
 
-def test_pipeline_requests_second_source_only_for_unresolved_moves(monkeypatch):
+def test_pipeline_requests_second_source_only_for_unresolved_moves(monkeypatch, tmp_path):
     import portfolio_optimizer_core as core
     ns = core.apply_price_integrity_gate.__globals__
+    monkeypatch.setitem(ns, "DB_PATH", tmp_path / "isolated.db")
+    monkeypatch.setitem(ns, "_app_run_log", lambda *a, **k: None)
     dates = pd.bdate_range("2026-01-01", periods=3)
     series = pd.Series([10.,5.,5.1],index=dates)
     primary = {"CRASH": {"raw_close":series,"adjusted_close":series,
@@ -144,3 +146,12 @@ def test_pipeline_requests_second_source_only_for_unresolved_moves(monkeypatch):
     assert calls == ["CRASH"]
     assert report.iloc[0]["Status"] == "VERIFIED_MARKET_MOVE"
     assert corrected["CRASH"].pct_change().min() == -.5
+    # Same history after a rerun/restart must reuse both pieces of evidence.
+    def must_not_refetch(*a, **k):
+        raise AssertionError("Completed provider evidence should survive reruns")
+    monkeypatch.setitem(ns, "_download_price_integrity_evidence_batch", must_not_refetch)
+    monkeypatch.setitem(ns, "_download_price_move_confirmation", must_not_refetch)
+    restored, report = core.apply_price_integrity_gate(
+        pd.DataFrame({"CRASH": series}, index=dates), owned_tickers=["CRASH"])
+    assert report.iloc[0]["Status"] == "VERIFIED_MARKET_MOVE"
+    assert restored["CRASH"].pct_change().min() == -.5

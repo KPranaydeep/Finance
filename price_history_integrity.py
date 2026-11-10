@@ -67,6 +67,17 @@ def extreme_return_dates(
     return [pd.Timestamp(value) for value in simple_returns.index[simple_returns.abs() >= float(threshold)]]
 
 
+def extreme_return_columns(prices, threshold=DEFAULT_EXTREME_RETURN_THRESHOLD):
+    """Scan in bounded-memory blocks with the same observed-price semantics."""
+    flagged = []
+    for offset in range(0, len(prices.columns), 256):
+        block = prices.iloc[:, offset:offset + 256].apply(pd.to_numeric, errors="coerce")
+        block = block.replace([np.inf, -np.inf], np.nan).where(lambda x: x > 0).ffill()
+        moves = block.pct_change(fill_method=None).abs().ge(float(threshold)).any()
+        flagged.extend(moves.index[moves].tolist())
+    return flagged
+
+
 def split_normalized_adjusted_close(
     adjusted_close: pd.Series,
     stock_splits: pd.Series,
@@ -204,12 +215,15 @@ def reconcile_price_frame(
     *,
     owned_tickers=(),
     threshold: float = DEFAULT_EXTREME_RETURN_THRESHOLD,
+    flagged_columns=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Audit suspicious columns, correcting splits and quarantining candidates."""
     corrected = prices.copy()
     owned = {str(ticker).strip().upper() for ticker in owned_tickers if str(ticker).strip()}
     rows: list[dict[str, object]] = []
-    for column in list(corrected.columns):
+    excluded = []
+    columns = extreme_return_columns(prices, threshold) if flagged_columns is None else flagged_columns
+    for column in columns:
         ticker = str(column).strip().upper()
         trigger_dates = extreme_return_dates(corrected[column], threshold=threshold)
         if not trigger_dates:
@@ -262,6 +276,7 @@ def reconcile_price_frame(
             }
         )
         if quarantine and not is_owned:
-            corrected = corrected.drop(columns=[column])
+            excluded.append(column)
 
-    return corrected, pd.DataFrame(rows)
+    # One copy instead of copying the broad universe for every excluded ticker.
+    return corrected.drop(columns=excluded), pd.DataFrame(rows)

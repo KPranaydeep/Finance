@@ -30,6 +30,7 @@ from partial_sell_review import review_partial_sells, partial_sell_caption
 from allocation_integrity import finalize_weights, fund_buy_orders, execution_check
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
 from price_move_confirmation import download_confirmation
+from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
 from fixed_weight_rebalance import prepare_fixed_universe, rebuild_saved_plan, holdings_fingerprint, target_fingerprint
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
@@ -54,6 +55,7 @@ from price_history_integrity import (
     DEFAULT_EXTREME_RETURN_THRESHOLD,
     PRICE_INTEGRITY_VERSION,
     extreme_return_dates,
+    extreme_return_columns,
     reconcile_price_frame,
 )
 from scalable_universe_preselection import (
@@ -4608,18 +4610,25 @@ def _download_price_integrity_evidence(
     ticker, start_date, end_date, integrity_version=PRICE_INTEGRITY_VERSION
 ):
     """Fetch raw corporate-action evidence only for a suspicious price series."""
-    del integrity_version  # Included in the cache key for deterministic invalidation.
+    del integrity_version  # Persistent cache scope is supplied by the caller.
     ticker = str(ticker).strip().upper()
-    data = _yf_download_quiet(
-        ticker,
+    import yfinance as yf
+    # Ticker.history has per-instance results; concurrent yf.download calls share
+    # global state. No console redirection or automatic retries in worker threads.
+    data = yf.Ticker(ticker).history(
         start=start_date,
         end=end_date,
-        progress=False,
         auto_adjust=False,
         actions=True,
         repair=False,
-        threads=False,
+        timeout=5,
+        raise_errors=True,
     )
+    # Daily Ticker.history is exchange-local/tz-aware; bulk prices use naive
+    # session dates. Strip timezone without shifting a market session's date.
+    data = data.copy()
+    data.index = pd.to_datetime(data.index).tz_localize(None).normalize()
+    data = data.loc[~data.index.duplicated(keep="last")]
     raw_close = _single_ticker_field(data, "Close", ticker)
     adjusted_close = _single_ticker_field(data, "Adj Close", ticker)
     if adjusted_close.dropna().empty:
@@ -4634,72 +4643,35 @@ def _download_price_integrity_evidence(
     }
 
 
-_download_price_integrity_evidence = st.cache_data(
-    show_spinner=False,
-    ttl="24h",
-    max_entries=2048,
-)(_download_price_integrity_evidence)
-
-
 def _download_price_integrity_evidence_batch(
     tickers, start_date, end_date, integrity_version=PRICE_INTEGRITY_VERSION
 ):
     """Batch corporate-action evidence so integrity checks remain scalable."""
-    del integrity_version  # Included in the cache key for deterministic invalidation.
+    del integrity_version  # Persistent cache scope is supplied by the caller.
     tickers = tuple(str(ticker).strip().upper() for ticker in tickers if str(ticker).strip())
     if not tickers:
         return {}
-    data = _yf_download_quiet(
-        list(tickers),
-        start=start_date,
-        end=end_date,
-        progress=False,
-        auto_adjust=False,
-        actions=True,
-        repair=False,
-        threads=True,
-    )
     evidence = {}
     for ticker in tickers:
-        raw_close = _single_ticker_field(data, "Close", ticker)
-        if raw_close.dropna().empty:
-            continue
-        adjusted_close = _single_ticker_field(data, "Adj Close", ticker)
-        evidence[ticker] = {
-            "raw_close": raw_close,
-            "adjusted_close": (
-                adjusted_close if not adjusted_close.dropna().empty else raw_close.copy()
-            ),
-            "dividends": _single_ticker_field(data, "Dividends", ticker),
-            "stock_splits": _single_ticker_field(data, "Stock Splits", ticker),
-        }
+        try:
+            evidence[ticker] = _download_price_integrity_evidence(
+                ticker, start_date, end_date, integrity_version=PRICE_INTEGRITY_VERSION)
+        except Exception:
+            evidence[ticker] = None
     return evidence
 
 
-_download_price_integrity_evidence_batch = st.cache_data(
-    show_spinner=False,
-    ttl="24h",
-    max_entries=4096,
-)(_download_price_integrity_evidence_batch)
-
-
-@st.cache_data(show_spinner=False, ttl="24h", max_entries=2048)
 def _download_price_move_confirmation(ticker, start_date, end_date,
                                       integrity_version=PRICE_INTEGRITY_VERSION):
     return download_confirmation(ticker, start_date, end_date)
 
 
-def apply_price_integrity_gate(prices, owned_tickers=()):
+def apply_price_integrity_gate(prices, owned_tickers=(), _progress_callback=None):
     """Repair split discontinuities and quarantine unresolved candidate histories."""
     if prices is None or prices.empty:
         return prices, pd.DataFrame()
-    flagged = [
-        str(column).strip().upper()
-        for column in prices.columns
-        if extreme_return_dates(
-            prices[column], threshold=DEFAULT_EXTREME_RETURN_THRESHOLD
-        )
-    ]
+    flagged_columns = extreme_return_columns(prices)
+    flagged = [str(column).strip().upper() for column in flagged_columns]
     if not flagged:
         return prices, pd.DataFrame()
 
@@ -4707,44 +4679,47 @@ def apply_price_integrity_gate(prices, owned_tickers=()):
     observed_end = (
         pd.Timestamp(prices.index.max()).normalize() + timedelta(days=1)
     ).strftime("%Y-%m-%d")
-    evidence = {}
-    for batch in _chunked(flagged, 12):
-        try:
-            evidence.update(_download_price_integrity_evidence_batch(
-                tuple(batch),
-                observed_start,
-                observed_end,
-                integrity_version=PRICE_INTEGRITY_VERSION,
-            ))
-        except Exception:
-            for ticker in batch:
-                try:
-                    evidence[ticker] = _download_price_integrity_evidence(
-                        ticker,
-                        observed_start,
-                        observed_end,
-                        integrity_version=PRICE_INTEGRITY_VERSION,
-                    )
-                except Exception:
-                    evidence[ticker] = None
+    started = time.monotonic()
+    cache = EvidenceCache(DB_PATH.with_name("price_integrity_evidence.sqlite3"),
+                          PRICE_INTEGRITY_VERSION, observed_start, observed_end)
+    # Owned names are checked first; unfinished candidates stay quarantined.
+    owned = {str(x).strip().upper() for x in owned_tickers}
+    flagged.sort(key=lambda x: x not in owned)
+    evidence = bounded_evidence(
+        flagged, lambda batch: _download_price_integrity_evidence_batch(
+            batch, observed_start, observed_end, integrity_version=PRICE_INTEGRITY_VERSION),
+        cache=cache, kind="corporate actions", budget_seconds=60,
+        on_progress=_progress_callback)
     corrected, report = reconcile_price_frame(
         prices,
         evidence,
         owned_tickers=owned_tickers,
         threshold=DEFAULT_EXTREME_RETURN_THRESHOLD,
+        flagged_columns=flagged_columns,
     )
     # A genuine crash must remain in the risk history. Request a second source
     # only after corporate-action reconciliation failed to explain the move.
     pending = report.loc[report["Status"].eq("QUARANTINED_UNEXPLAINED_JUMP"), "Ticker"]
+    witnesses = bounded_evidence(
+        pending, lambda batch: {ticker: _download_price_move_confirmation(
+            ticker, observed_start, observed_end) for ticker in batch},
+        cache=cache, kind="independent source", budget_seconds=20, batch_size=1,
+        on_progress=_progress_callback)
     confirmed_any = False
-    for ticker in pending:
-        witness = _download_price_move_confirmation(ticker, observed_start, observed_end)
+    for ticker, witness in witnesses.items():
         if witness and evidence.get(ticker):
             evidence[ticker] = dict(evidence[ticker], **witness)
             confirmed_any = True
     if confirmed_any:
-        return reconcile_price_frame(prices, evidence, owned_tickers=owned_tickers,
-                                     threshold=DEFAULT_EXTREME_RETURN_THRESHOLD)
+        corrected, report = reconcile_price_frame(
+            prices, evidence, owned_tickers=owned_tickers,
+            threshold=DEFAULT_EXTREME_RETURN_THRESHOLD, flagged_columns=flagged_columns)
+    _app_run_log("price_integrity_completed", histories=len(prices.columns),
+                 flagged=len(flagged), corporate_checks=len(evidence),
+                 independent_checks=len(witnesses),
+                 deferred=len(flagged) - len(evidence) + len(pending) - len(witnesses),
+                 quarantined=int(report["Status"].str.startswith("QUARANTINED_").sum()),
+                 elapsed_seconds=round(time.monotonic() - started, 2))
     return corrected, report
 
 
@@ -4828,7 +4803,7 @@ def _download_recent_market_data_bulk(
             "batch_size": int(batch_size_now),
         }
         try:
-            _progress_callback(float(fraction), details)
+            _progress_callback(0.85 * float(fraction), details)
         except Exception:
             # Progress rendering must never invalidate downloaded market data.
             pass
@@ -4886,7 +4861,7 @@ def _download_recent_market_data_bulk(
         if _progress_callback is not None:
             try:
                 _progress_callback(
-                    1.0,
+                    0.85,
                     {
                         "primary_batch": int(total_primary_batches),
                         "primary_batches": int(total_primary_batches),
@@ -4897,8 +4872,21 @@ def _download_recent_market_data_bulk(
                 )
             except Exception:
                 pass
-        closes, integrity_report = apply_price_integrity_gate(closes)
+        def integrity_progress(details):
+            done = int(details.get("integrity_done", 0))
+            total = max(int(details.get("integrity_total", 0)), 1)
+            secondary = details.get("integrity_phase") == "independent source"
+            phase_fraction = (0.7 if secondary else 0) + (0.3 if secondary else 0.7) * done / total
+            _progress_callback(0.85 + 0.14 * phase_fraction, dict(
+                details, recovered=len(closes.columns), validating_integrity=True))
+
+        closes, integrity_report = apply_price_integrity_gate(
+            closes, **({"_progress_callback": integrity_progress} if _progress_callback else {}))
         volumes = volumes.reindex(columns=closes.columns)
+        if _progress_callback:
+            _progress_callback(1.0, {"integrity_complete": True, "recovered": len(closes.columns),
+                                    "quarantined": int(integrity_report["Status"].str.startswith(
+                                        "QUARANTINED_").sum()) if not integrity_report.empty else 0})
     diagnostics = {
         "requested": len(unique_tickers),
         "recovered": int(len(closes.columns)),
@@ -5507,7 +5495,12 @@ def get_daily_log_returns(
         )
     integrity_started = time.perf_counter()
     df, price_integrity_report = apply_price_integrity_gate(
-        df, owned_tickers=owned_tickers
+        df, owned_tickers=owned_tickers,
+        _progress_callback=(
+            lambda details: progress_callback(
+                "Checking price integrity · " + integrity_progress_label(details),
+                0.80, details)
+        ) if progress_callback else None,
     )
     stage_timings["price_integrity"] = time.perf_counter() - integrity_started
 
@@ -11909,6 +11902,10 @@ if run_btn:
             requests = int(details.get("requests") or 0)
             if details.get("validating_integrity"):
                 stage = f"Validating {recovered:,} recovered shortlist histories"
+                if details.get("integrity_phase"):
+                    stage += " · " + integrity_progress_label(details)
+            elif details.get("integrity_complete"):
+                stage = f"Price integrity complete · {int(details.get('quarantined') or 0):,} unresolved histories quarantined"
             elif details.get("retry"):
                 stage = (
                     f"Retrying missing shortlist data after batch "
