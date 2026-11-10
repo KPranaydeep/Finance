@@ -238,6 +238,13 @@ changing them retains prior checkpoint files and starts a new experiment. Versio
 v7 also removes FX backward-fill from normal analysis; older search rows remain
 research, while incompatible results cannot silently resume as current fits.
 
+The private **Run optimization** button automatically applies the highest-return
+feasible X/Y pair from the current profile's latest saved search. It then fits the
+portfolio on current data with the normal funding, pause and risk checks. This
+reuses coordinates only, without starting X/Y discovery or replacing the search
+bounds/warm starts. If no usable saved peak exists, the configured execution X/Y
+controls are retained. Explicit search, plateau and raw-peak controls remain separate.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

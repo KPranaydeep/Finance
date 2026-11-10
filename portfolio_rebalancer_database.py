@@ -1436,6 +1436,34 @@ def _start_optimization_plan_timer(owner):
     )
 
 
+def _start_optimization_at_raw_peak(owner):
+    """Apply the latest profile-scoped raw peak before Streamlit builds widgets.
+
+    Only X/Y are reused; portfolio evidence, funding and risk checks run normally.
+    Search bounds/warm-start controls and saved research are left untouched.
+    """
+    selection = {"owner": owner, "source": "configured_controls"}
+    try:
+        with get_db_connection() as conn:
+            checkpoint = load_latest_checkpoint(conn, owner)
+        peak = best_feasible_result((checkpoint or {}).get("results") or [])
+        if peak is not None:
+            cap, assets = int(peak["Shortlist cap"]), int(peak["Maximum assets"])
+            if cap >= 50 and assets >= 50:
+                st.session_state["universal_preselection_cap"] = cap
+                st.session_state["exact_optimizer_asset_cap"] = assets
+                selection.update(source="saved_raw_peak", x=cap, y=assets,
+                                 saved_at=(checkpoint or {}).get("updated_at"),
+                                 analysis_cutoff=peak.get("Analysis cutoff"))
+    except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+        selection["load_error"] = type(exc).__name__
+    st.session_state["optimization_raw_peak_selection"] = selection
+    _app_run_log("optimization_pair_selected", source=selection["source"],
+                 x=selection.get("x"), y=selection.get("y"),
+                 load_error=selection.get("load_error"), search_started=False)
+    _start_optimization_plan_timer(owner)
+
+
 def _set_optimization_plan_stage(stage, progress, estimated_total_seconds=None):
     timer = st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}
     updated = update_run_stage(
@@ -9103,7 +9131,7 @@ with st.sidebar:
     exact_optimizer_asset_cap = int(
         st.number_input(
             "Maximum assets in exact optimization",
-            min_value=100,
+            min_value=50,
             value=DEFAULT_EXACT_OPTIMIZER_ASSET_CAP,
             step=50,
             key="exact_optimizer_asset_cap",
@@ -9495,16 +9523,26 @@ with step_col3:
         st.markdown("**3️⃣ Run optimization**")
         st.caption(
             "Uses the days-to-flip/drawdown/drop_bottom_pct/target-volatility settings "
-            "from the sidebar, and includes Universal Portfolio symbols as buy candidates."
+            "from the sidebar and automatically selects the latest saved raw-return "
+            "X/Y peak. With no saved feasible peak, uses the configured X/Y controls."
         )
         run_btn = st.button(
             "Run optimization",
             width="stretch",
             type="primary",
             key="run_optimization_btn_main",
-            on_click=_start_optimization_plan_timer,
+            on_click=_start_optimization_at_raw_peak,
             args=(CURRENT_USER,),
         )
+        if run_btn:
+            raw_selection = st.session_state.get("optimization_raw_peak_selection") or {}
+            if raw_selection.get("owner") == CURRENT_USER and raw_selection.get("source") == "saved_raw_peak":
+                st.info(
+                    f"Using saved raw-return peak **X {int(raw_selection['x']):,} × "
+                    f"Y {int(raw_selection['y']):,}**. Refitting on current data."
+                )
+            else:
+                st.info("No usable saved raw-return peak loaded; using the configured X/Y values.")
         scenario_review_btn = st.button(
             "Review saved buy / sell candidates",
             width="stretch",

@@ -169,9 +169,9 @@ def best_feasible_result(
             annual_return = float(row["Annual Return"])
             cap = int(row["Shortlist cap"])
             maximum_assets = int(row["Maximum assets"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
-        if annual_return != annual_return:
+        if not math.isfinite(annual_return) or cap <= 0 or maximum_assets <= 0:
             continue
         key = (annual_return, -maximum_assets, -cap)
         if best_key is None or key > best_key:
