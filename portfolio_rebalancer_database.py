@@ -116,7 +116,7 @@ from trade_deferrals import (
     split_deferred_trades,
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
-from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message
+from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message, execution_summary_metric
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -3099,7 +3099,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         render_metric_strip([
             ("Holdings analysed", holdings_analyzed, "Saved analysis"),
             ("Total invested", f"₹{total_invested:,.2f}", "Saved invested base"),
-            ("Executable trades", executable_trade_count, "Review before execution"),
+            execution_summary_metric(execution_validation, executable_trade_count),
         ])
 
         run_timing = payload.get("run_to_rebalancing_plan_timing") or {}
@@ -3107,7 +3107,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             st.caption(
                 "**Run-to-plan time:** "
                 + format_elapsed(run_timing.get("elapsed_seconds"))
-                + " · Finished when the rebalancing plan was generated."
+                + (" · Finished when the rebalancing plan was generated." if execution_validation.get("passed")
+                   else " · Saved analysis runtime; the current draft is withheld pending execution checks.")
             )
 
         review_cost_bps = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))

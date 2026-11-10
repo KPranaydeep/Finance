@@ -120,7 +120,8 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
             _, policy_limits = build_policy_limits(
                 returns,initial,[(0.,MAX_WEIGHT_PER_ASSET)]*len(tickers),policy,cost)
             allocation_policy = {"status":"saved-weights-recheck", "limits":policy_limits,
-                                 "policy":dict(policy), "constraints_applied":True}
+                                 "policy":dict(policy), "constraints_applied":True,
+                                 "source":"saved-weight-refresh", "stage":"saved_weight_execution_recheck"}
         except (ValueError,TypeError,KeyError) as exc:
             allocation_policy = {"status":"unavailable", "constraints_applied":False,
                                  "policy":dict(policy), "reason":str(exc)}

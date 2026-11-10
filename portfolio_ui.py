@@ -4,7 +4,7 @@ from __future__ import annotations
 import streamlit as st
 import pandas as pd
 from allocation_attempts import stage_label
-from execution_diagnostics import execution_position_rows, SHOCK_PREFIX
+from execution_diagnostics import execution_position_rows, execution_summary_metric, SHOCK_PREFIX
 
 
 def render_portfolio_heading(title, description, *, context=None, publication=None):
@@ -126,6 +126,9 @@ def render_allocation_policy(report):
     limits = report.get("limits") or {}
     policy = report.get("policy") or limits.get("settings") or {}
     selected = report.get("selected")
+    saved_recheck = (report.get("source") == "saved-weight-refresh" or report.get("status") == "saved-weights-recheck"
+        or (report.get("status") == "failed_recheck" and "candidate" in report
+            and not report.get("stage") and "selected" not in report))
     with st.container(border=True):
         st.markdown("**Allocation policy · tail loss, costs and concentration**")
         adaptive = report.get("adaptive") or limits.get("adaptive") or {}
@@ -143,17 +146,23 @@ def render_allocation_policy(report):
             if metrics.get("cvar") is not None:
                 st.caption(f"Joint {policy.get('horizon_sessions',30)}-session CVaR {policy.get('confidence',.95):.0%}: {metrics['cvar']:.2%} · current-mix budget {float(limits.get('tail_limit',0)):.2%} · modeled cost {metrics.get('cost_fraction',0):.2%} at {policy.get('cost_stress_multiple',1):g}× cost stress.")
         else:
-            if report.get("status") == "unavailable":
+            if saved_recheck:
+                st.warning("The draft at saved weights failed the current risk check. No new allocation was optimized.")
+            elif report.get("status") == "unavailable":
                 st.warning("Allocation inputs unavailable; this does not establish that risk limits are too strict. Previous saved analysis is retained.")
             elif report.get("status") == "time_limit":
                 st.warning("Allocation time budget reached; previous saved analysis is retained.")
             else:
                 st.warning("No allocation passed this policy; previous saved analysis is retained.")
-            st.caption(report.get("reason") or report.get("solver_message") or "Check candidate constraints below.")
-            st.caption(f"Blocked while {stage_label(report.get('stage'))}. See Allocation risk controls in the sidebar for the applied limits and trade-offs.")
+            if saved_recheck:
+                st.caption("See Final allocation check below for the holdings and limits blocking this draft. Update rebalance plan preserves saved weights.")
+            else:
+                st.caption(report.get("reason") or report.get("solver_message") or "Check candidate constraints below.")
+                st.caption(f"Blocked while {stage_label(report.get('stage'))}. See Allocation risk controls in the sidebar for the applied limits and trade-offs.")
             render_capacity_diagnostics(report)
         if limits.get("history_through"):
-            st.caption(f"Model history through {limits['history_through']} · {policy.get('scenario_paths',0):,} joint resamples · {report.get('elapsed_seconds',0):.2f}s allocator solve.")
+            activity = "saved-weight check · optimizer not run" if saved_recheck else f"{report.get('elapsed_seconds',0):.2f}s allocator solve"
+            st.caption(f"Model history through {limits['history_through']} · {policy.get('scenario_paths',0):,} joint resamples · {activity}.")
         with st.expander("Policy assumptions and allocator comparison", expanded=False):
             if policy:
                 st.write(f"Single-security loss budget {policy['single_name_loss_budget']:.1%}; assumed shock at least {policy['single_name_shock_floor']:.0%}, increased for worse observed daily losses. Correlated groups are capped at {policy['group_weight_limit']:.0%} when linked by positive correlation ≥ {policy['group_correlation']:.2f}.")

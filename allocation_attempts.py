@@ -72,4 +72,5 @@ def stage_label(stage):
         "position_and_frozen_capacity": "checking position limits and frozen holdings",
         "joint_tail_group_cost_solve": "solving joint tail loss, concentration and trading costs",
         "candidate_recheck": "checking the resulting allocation",
+        "saved_weight_execution_recheck": "checking the resized draft at saved weights",
     }.get(stage, "not recorded")

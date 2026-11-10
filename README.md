@@ -337,6 +337,12 @@ displayed as percentages, with weight changes in percentage points and INR trade
 values labelled separately. No constraints or proposed trade quantities are changed
 by these diagnostic presentation changes.
 
+The summary shows **Plan status: Blocked** when execution validation fails,
+including the distinct count of over-cap holdings. That count describes holdings,
+not trades. Only a passing plan displays an executable-order count. Missing legacy
+validation shows **Needs validation**. Fixed-weight refreshes are labelled as saved-
+weight checks, never as a new optimizer solve or proof that no allocation exists.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

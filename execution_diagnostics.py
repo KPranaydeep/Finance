@@ -5,6 +5,21 @@ import math
 SHOCK_PREFIX = "Single-security shock budget exceeded: "
 
 
+def execution_summary_metric(report, executable_count=0):
+    """Count released orders only after validation; failures are a status, not zero activity."""
+    if not report:
+        return "Plan status", "Needs validation", "Saved plan has no execution check"
+    if report.get("passed") is not True:
+        breaches = {str(reason)[len(SHOCK_PREFIX):] for reason in report.get("violations") or []
+                    if str(reason).startswith(SHOCK_PREFIX)}
+        note = (f"{len(breaches)} {'holding' if len(breaches) == 1 else 'holdings'} over cap · draft withheld"
+                if breaches else "Required checks failed · draft withheld")
+        return "Plan status", "Blocked", note
+    return "Executable trades", executable_count, (
+        "Checks passed · review orders before execution" if executable_count else
+        "Checks passed · no executable orders")
+
+
 def execution_position_rows(report, allocation_policy=None):
     """Use exact checked caps, or clearly qualified saved ceilings for old reports.
 
