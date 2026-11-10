@@ -253,6 +253,26 @@ Malformed checkpoint payloads are retained on disk and are not treated as usable
 search evidence; peak selection ignores nonfinite returns and invalid coordinates.
 Profiles are nickname-based storage separation, not authenticated accounts.
 
+**Allocation risk controls** in the private sidebar exposes the single-security
+loss budget, minimum shock, correlated-group cap, cost stress and LP time budget.
+The default 2% loss budget / 50% shock implies a 4% position cap before worse
+observed shocks or other bounds. These are explicit assumptions, separate from
+the historical drawdown/volatility controls and the current-mix CVaR budget.
+Apply saves only those knobs for the selected profile, without running the solver
+or changing saved weights. Current configuration still governs policy enablement,
+method and evidence horizon. X/Y cache compatibility includes the active policy;
+chronological research and saved-plan rechecks use the chosen settings too.
+Changing policy withholds a previously validated plan until its weights are rechecked.
+
+Allocation attempts are retained in the private holdings database separately from
+the last successful analysis. The app distinguishes unavailable inputs, insufficient
+position/frozen capacity, LP infeasibility, timeout and failed rechecks, and shows
+the exact saved reason under **Last allocation attempt · why no plan**. Run logs
+record the stage and counts, without security names. Missing owned history or
+incomplete data requires repairing evidence, not increasing risk limits. No risk
+constraint is automatically waived to force an allocation. Older logs without a
+detailed reason cannot retrospectively identify which constraint blocked a fit.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

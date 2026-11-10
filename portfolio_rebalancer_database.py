@@ -29,6 +29,8 @@ from trade_quantities import format_quantity, plan_quantity, quantity_step
 from partial_sell_review import review_partial_sells, partial_sell_caption
 from allocation_integrity import finalize_weights, fund_buy_orders, execution_check
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
+from allocation_attempts import save_attempt, failure_summary
+from allocation_policy_ui import render_policy_controls, render_last_attempt
 from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
 from chronological_validation_ui import render_chronological_validation
@@ -2723,7 +2725,7 @@ def update_saved_rebalance_plan(payload, owner):
     paused = deferrals["yahoo_ticker"].tolist() if not deferrals.empty else ()
     candidate, allocation, plan = rebuild_saved_plan(
         payload, current, returns, prices, fx, plan_builder=rebalance_plan_multi,
-        stats_builder=portfolio_stats, paused=paused,
+        stats_builder=portfolio_stats, paused=paused, allocation_policy_settings=ALLOCATION_POLICY,
     )
     # Research scores use one common run; position weights come from the new
     # marked holdings rather than the stale snapshot passed to the forecaster.
@@ -2790,6 +2792,9 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         rebalancing_plan = payload.get("rebalancing_plan") or []
         proposed_rebalancing_plan = payload.get("proposed_rebalancing_plan") or []
         execution_validation = dict(payload.get("execution_validation") or {})
+        saved_policy = (payload.get("allocation_policy") or {}).get("policy")
+        if saved_policy and saved_policy != ALLOCATION_POLICY:
+            execution_validation.update(passed=False, violations=["Allocation risk controls changed; use Update rebalance plan to check the saved weights."])
         if execution_validation.get("passed"):
             with get_db_connection() as conn:
                 current_pauses = active_trade_deferrals(conn, owner)
@@ -5937,6 +5942,8 @@ def apply_allocation_policy(incumbent, log_returns, current_alloc, *, frozen_wei
             if metrics["passed"]:
                 viable.append((metrics["objective_net_return"],label,checked))
     if not viable:
+        if report.get("status") == "candidate":
+            report.update(status="failed_recheck", reason="Neither allocator passed the final drawdown, volatility and policy checks.")
         report.update(selected="none",constraints_applied=False)
         return None, report
     # Deterministic comparison; prefer the existing solution on an exact tie.
@@ -9063,6 +9070,8 @@ with st.sidebar:
     )
     max_dd = (max_dd_pct / 100)
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
+    ALLOCATION_POLICY = render_policy_controls(
+        ALLOCATION_POLICY, CURRENT_USER, get_db_connection, max_weight=MAX_WEIGHT_PER_ASSET)
 
     auto_history_end = st.checkbox(
         "Choose the history end date automatically",
@@ -9578,6 +9587,7 @@ with run_analysis_placeholder:
                     optimization_timer_placeholder.info(timer_text)
 
 st.divider()
+render_last_attempt(CURRENT_USER, get_db_connection)
 if scenario_review_btn:
     st.session_state["open_saved_scenario_review"] = True
 if clear_cap_search_btn:
@@ -12261,10 +12271,17 @@ if run_btn:
         _app_run_log("allocation_policy_checked", status=policy_log.get("status","unavailable"),
                      selected=policy_log.get("selected","none"),
                      solver_seconds=policy_log.get("elapsed_seconds"),
-                     constraints_applied=bool(policy_log.get("constraints_applied")))
+                     constraints_applied=bool(policy_log.get("constraints_applied")),
+                     blocker_stage=policy_log.get("stage"),
+                     input_summary=policy_log.get("input_summary"))
+        try:
+            with get_db_connection() as conn:
+                save_attempt(conn, CURRENT_USER, policy_log)
+        except (sqlite3.Error, ValueError, TypeError) as exc:
+            st.warning(f"Could not save allocation diagnostics ({type(exc).__name__}); prior analysis is retained.")
 
         if optimal_weights is None:
-            stopped_timer = _abort_optimization_plan_timer("no usable allocation")
+            stopped_timer = _abort_optimization_plan_timer(failure_summary(policy_log))
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             validation = meta.get("allocation_validation") or {}
             reasons = "; ".join(validation.get("violations") or [])

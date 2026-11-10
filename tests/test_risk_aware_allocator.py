@@ -64,6 +64,8 @@ def test_insufficient_assets_or_conflicting_frozen_weights_fail_without_relaxati
     policy["single_name_loss_budget"] = .02
     weights,report=solve_risk_aware_allocation(frame,allocation,[(0,.5)]*6,policy)
     assert weights is None and "fully invested" in report["reason"]
+    assert report["status"] == "infeasible"
+    assert report["stage"] == "position_and_frozen_capacity"
     policy["single_name_loss_budget"] = .1
     weights,report=solve_risk_aware_allocation(frame,allocation,[(.3,.3)]+[(0,.5)]*5,policy)
     assert weights is None and "frozen" in report["reason"]
@@ -73,9 +75,14 @@ def test_missing_owned_history_and_nonfinite_history_do_not_get_renormalized_awa
     frame,allocation,policy=fixture()
     weights,report=solve_risk_aware_allocation(frame.drop(columns="T0"),allocation,[(0,.5)]*5,policy)
     assert weights is None and "Owned history missing" in report["reason"]
+    assert report["stage"] == "current_allocation_inputs"
+    assert report["input_summary"]["missing_owned"] == 1
+    assert report["status"] == "unavailable"
     frame.iloc[1,0] = np.nan
     weights,report=solve_risk_aware_allocation(frame,allocation,[(0,.5)]*6,policy)
     assert weights is None and "Complete chronological" in report["reason"]
+    assert report["stage"] == "joint_scenario_inputs"
+    assert report["input_summary"]["nonfinite_values"] == 1
 
 
 def test_inverse_exposure_is_not_part_of_positive_correlation_group():
@@ -172,12 +179,14 @@ def test_refreshed_plan_rechecks_all_owned_and_target_weights_without_an_optimiz
              "settings":{"days_to_flip":1}}
     held=pd.DataFrame({"Yahoo Ticker":frame.columns,"Symbol":frame.columns,"Currency":"USD",
                        "Quantity":1.,"Average Price":10.})
-    monkeypatch.setattr(fixed,"ALLOCATION_POLICY",policy)
+    monkeypatch.setattr(fixed,"ALLOCATION_POLICY",dict(DEFAULT_ALLOCATION_POLICY, enabled=False))
     monkeypatch.setattr(core,"run_portfolio_analysis_multi",lambda *a,**k:pytest.fail("optimizer called"))
     candidate,_,plan=fixed.rebuild_saved_plan(payload,held,frame,{t:10. for t in frame.columns},{"USD":1.},
-                                             plan_builder=core.rebalance_plan_multi,stats_builder=core.portfolio_stats)
+                                             plan_builder=core.rebalance_plan_multi,stats_builder=core.portfolio_stats,
+                                             allocation_policy_settings=policy)
     assert candidate["optimal_allocation"] == payload["optimal_allocation"]
     assert candidate["allocation_policy"]["status"] == "saved-weights-recheck"
+    assert candidate["allocation_policy"]["policy"] == policy
     assert plan.attrs["execution_validation"]["allocation_policy"]["passed"]
     assert candidate["rebalance_plan_context"]["optimizer_run"] is False
 

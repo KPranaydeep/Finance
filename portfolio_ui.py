@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
+from allocation_attempts import stage_label
 
 
 def render_portfolio_heading(title, description, *, context=None, publication=None):
@@ -84,8 +85,14 @@ def render_allocation_policy(report):
             if metrics.get("cvar") is not None:
                 st.caption(f"Joint {policy.get('horizon_sessions',30)}-session CVaR {policy.get('confidence',.95):.0%}: {metrics['cvar']:.2%} · current-mix budget {float(limits.get('tail_limit',0)):.2%} · modeled cost {metrics.get('cost_fraction',0):.2%} at {policy.get('cost_stress_multiple',1):g}× cost stress.")
         else:
-            st.warning("No allocation passed this policy; previous saved analysis is retained.")
+            if report.get("status") == "unavailable":
+                st.warning("Allocation inputs unavailable; this does not establish that risk limits are too strict. Previous saved analysis is retained.")
+            elif report.get("status") == "time_limit":
+                st.warning("Allocation time budget reached; previous saved analysis is retained.")
+            else:
+                st.warning("No allocation passed this policy; previous saved analysis is retained.")
             st.caption(report.get("reason") or report.get("solver_message") or "Check candidate constraints below.")
+            st.caption(f"Blocked while {stage_label(report.get('stage'))}. See Allocation risk controls in the sidebar for the applied limits and trade-offs.")
         if limits.get("history_through"):
             st.caption(f"Model history through {limits['history_through']} · {policy.get('scenario_paths',0):,} joint resamples · {report.get('elapsed_seconds',0):.2f}s allocator solve.")
         with st.expander("Policy assumptions and allocator comparison", expanded=False):

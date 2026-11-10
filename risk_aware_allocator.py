@@ -188,18 +188,30 @@ def solve_risk_aware_allocation(log_returns, allocation, bounds, policy, *, cost
     """Solve sparse LP in amounts/base; normalize only by solved post-fee capital."""
     started = time.perf_counter()
     report = {"method":"joint-block-cvar-cost-shock-v1", "status":"unavailable",
-              "policy":dict(policy), "constraints_applied":False}
+              "policy":dict(policy), "constraints_applied":False, "stage":"policy_validation"}
     try:
         policy = validate_allocation_policy(policy)
         frame = pd.DataFrame(log_returns)
+        held = pd.DataFrame(allocation)
+        owned = set()
+        if {"Yahoo Ticker", "Quantity"}.issubset(held.columns):
+            owned = set(held.loc[pd.to_numeric(held["Quantity"], errors="coerce").gt(0), "Yahoo Ticker"].astype(str).str.strip().str.upper())
+        report["input_summary"] = {"sessions": len(frame), "assets": len(frame.columns),
+            "missing_owned": len(owned - set(frame.columns)),
+            "nonfinite_values": int((~np.isfinite(frame.apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float))).sum())}
+        report["stage"] = "current_allocation_inputs"
         initial = current_weights(allocation, frame.columns)
+        report["stage"] = "joint_scenario_inputs"
         samples, limits = build_policy_limits(frame, initial, bounds, policy, cost_bps)
         n, m = frame.shape[1], len(samples)
         caps = np.array(list(limits["position_caps"].values()))
         lower = np.array([b[0] for b in bounds])
         report["limits"] = limits
+        report["stage"] = "position_and_frozen_capacity"
         if np.any(lower > caps + 1e-9) or caps.sum() < 1 - 1e-9:
+            report["status"] = "infeasible"
             raise ValueError("Shock limits and frozen positions cannot form a fully invested allocation")
+        report["stage"] = "joint_tail_group_cost_solve"
         rate, confidence = limits["cost_rate"], policy["confidence"]
         means = samples.mean(axis=0)
         means = (1 - policy["return_shrinkage"]) * means + policy["return_shrinkage"] * np.median(means)
@@ -246,6 +258,7 @@ def solve_risk_aware_allocation(log_returns, allocation, bounds, policy, *, cost
         if invested.sum() <= 0:
             raise ValueError("No positive self-funded allocation")
         weights = invested / invested.sum()
+        report["stage"] = "candidate_recheck"
         check = check_policy_weights(weights,frame,limits,scenarios=samples)
         report.update(candidate=check, status="candidate" if check["passed"] else "failed_recheck",
                       constraints_applied=bool(check["passed"]), objective_net_return=float(-solution.fun),

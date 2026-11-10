@@ -148,6 +148,7 @@ def make_pipeline_fitter(core, settings):
     """Use the actual production funnel, adaptive X/Y search and allocation guard."""
     config = dict(settings["search"])
     active = core.chronological_research_config()
+    active["allocation_policy"] = config.get("allocation_policy", active["allocation_policy"])
     prepared_by_training = {}
     cached_cutoff = None
 

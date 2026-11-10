@@ -240,6 +240,13 @@ def test_production_funnel_and_recursive_search_are_offline_and_trial_fits_reuse
         "target_volatility": None, "drop_bottom_pct": 0., "redundancy_corr_threshold": .99,
         "exact_optimizer_asset_caps": [30,50], "minimum_trading_days": 252}}
     initial = {t: 1/30 for t in train.columns[:30]}
+    settings["search"]["allocation_policy"] = dict(core.chronological_research_config()["allocation_policy"], group_weight_limit=.6)
+    policies_used = []
+    original_solver = core.optimize_prepared_return_matrix
+    def capture_policy(*args, **kwargs):
+        policies_used.append(dict(kwargs["allocation_policy"]))
+        return original_solver(*args, **kwargs)
+    monkeypatch.setattr(core, "optimize_prepared_return_matrix", capture_policy)
     trials = {}
     fitter = make_pipeline_fitter(core, settings)
     first = fitter(train, volume, metadata, initial, "incumbent", trials, lambda: None, time.monotonic()+30, None)
@@ -249,6 +256,7 @@ def test_production_funnel_and_recursive_search_are_offline_and_trial_fits_reuse
     assert risk["status"] == "selected"
     assert all(r["policy_constraints_applied"] for r in risk_trials.values() if r["weights"])
     assert core.chronological_research_config()["allocation_policy"]["enabled"] is True
+    assert policies_used and all(p["group_weight_limit"] == .6 for p in policies_used)
     saved = json.dumps(trials)
     monkeypatch.setattr(core, "optimize_prepared_return_matrix", lambda *a, **k: pytest.fail("Completed trial refit"))
     second = fitter(train, volume, metadata, initial, "incumbent", trials, lambda: None, time.monotonic()+30, None)

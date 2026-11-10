@@ -86,9 +86,11 @@ def prepare_fixed_universe(payload, current_holdings):
 
 
 def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx_rates,
-                       *, plan_builder, stats_builder, paused=(), now=None):
+                       *, plan_builder, stats_builder, paused=(), now=None, allocation_policy_settings=None):
     """Return a complete candidate; failures leave the input saved payload intact."""
     allocation, targets = prepare_fixed_universe(payload, current_holdings)
+    from allocation_policy_config import validate_allocation_policy
+    policy = ALLOCATION_POLICY if allocation_policy_settings is None else validate_allocation_policy(allocation_policy_settings)
     tickers = allocation["Yahoo Ticker"].tolist()
     for column, values in (("Latest Price", native_prices), ("FX to INR", fx_rates)):
         keys = allocation["Currency"] if column == "FX to INR" else allocation["Yahoo Ticker"]
@@ -112,16 +114,16 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
     settings = payload.get("settings") or {}
     allocation_policy = {"status":"disabled", "constraints_applied":False}
     policy_limits = None
-    if ALLOCATION_POLICY["enabled"]:
+    if policy["enabled"]:
         try:
             initial = current_weights(allocation,returns.columns)
             _, policy_limits = build_policy_limits(
-                returns,initial,[(0.,MAX_WEIGHT_PER_ASSET)]*len(tickers),ALLOCATION_POLICY,cost)
+                returns,initial,[(0.,MAX_WEIGHT_PER_ASSET)]*len(tickers),policy,cost)
             allocation_policy = {"status":"saved-weights-recheck", "limits":policy_limits,
-                                 "policy":dict(ALLOCATION_POLICY), "constraints_applied":True}
+                                 "policy":dict(policy), "constraints_applied":True}
         except (ValueError,TypeError,KeyError) as exc:
             allocation_policy = {"status":"unavailable", "constraints_applied":False,
-                                 "policy":dict(ALLOCATION_POLICY), "reason":str(exc)}
+                                 "policy":dict(policy), "reason":str(exc)}
     plan, missing_prices, missing_alloc = plan_builder(
         allocation, weights, returns, native_prices, days,
         transaction_cost_bps=cost, excluded_trade_tickers=paused,
@@ -134,7 +136,7 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         raise ValueError("Incomplete rebalance coverage; previous plan retained")
     if policy_limits:
         allocation_policy["candidate"] = plan.attrs.get("execution_validation",{}).get("allocation_policy",{})
-    if ALLOCATION_POLICY["enabled"] and policy_limits is None:
+    if policy["enabled"] and policy_limits is None:
         attributes = dict(plan.attrs)
         attributes["proposed_rebalancing_plan"] = attributes.get("proposed_rebalancing_plan") or plan.to_dict(orient="records")
         validation = dict(attributes.get("execution_validation") or {})
