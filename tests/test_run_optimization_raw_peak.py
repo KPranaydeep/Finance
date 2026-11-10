@@ -109,9 +109,9 @@ def test_streamlit_click_applies_xy_before_widget_construction(tmp_path):
     from streamlit.testing.v1 import AppTest
     app = AppTest.from_file("tests/raw_peak_ui_fixture.py").run()
     assert not app.exception
-    app.button[0].click().run()
+    app.button(key="run_optimization_btn_main").click().run()
     assert not app.exception
-    assert app.number_input[0].value == 8350
-    assert app.number_input[1].value == 550
-    assert app.number_input[2].value == 7700  # bounded warm start is untouched
-    assert app.success[0].value == "Using saved raw-return peak X 8,350 × Y 550. Refitting on current data."
+    assert app.number_input(key="universal_preselection_cap").value == 8350
+    assert app.number_input(key="exact_optimizer_asset_cap").value == 550
+    assert app.number_input(key="shortlist_cap_search_start_x").value == 7700
+    assert app.info[0].value == "Using saved raw-return peak **X 8,350 × Y 550**. Refitting on current data."

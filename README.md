@@ -238,7 +238,10 @@ changing them retains prior checkpoint files and starts a new experiment. Versio
 v7 also removes FX backward-fill from normal analysis; older search rows remain
 research, while incompatible results cannot silently resume as current fits.
 
-The private **Run optimization** button automatically applies the highest-return
+The private **Run optimization** action appears directly below the page heading
+once a profile is selected, before saved analysis and diagnostics. It is first on
+mobile too; holdings upload and optional lumpsum remain available alongside it.
+The button automatically applies the highest-return
 feasible X/Y pair from the current profile's latest saved search. It then fits the
 portfolio on current data with the normal funding, pause and risk checks. This
 reuses coordinates only, without starting X/Y discovery or replacing the search

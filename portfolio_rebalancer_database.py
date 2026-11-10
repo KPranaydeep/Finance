@@ -8754,6 +8754,9 @@ render_portfolio_heading(
     "Review your allocation, compare risk, and prepare a rebalance.",
     context="PRIVATE WORKSPACE",
 )
+# Reserve the first content block for the primary action. Fill it only after
+# profile restoration and sidebar inputs are ready; rendering it must not run a fit.
+run_analysis_placeholder = st.container()
 with st.expander("Run diagnostics", expanded=False, icon=":material/troubleshoot:"):
     st.caption(f"Active SQLite file: `{DB_PATH}`")
     st.caption(f"App build: `{APP_BUILD}`")
@@ -9468,99 +9471,96 @@ with st.sidebar:
         disabled=not bool(st.session_state.get("shortlist_cap_search_results")),
     )
 
-st.divider()
-st.subheader("Run analysis", anchor="run-analysis")
-st.caption(
-    "Upload your own broker holdings, then run optimization — it automatically "
-    "considers both your holdings and the shared Universal Portfolio as candidates."
-)
+with run_analysis_placeholder:
+    st.subheader("Run analysis", anchor="run-analysis")
+    st.caption(
+        f"Profile: **{CURRENT_USER}** · Uses your saved holdings and the Universal Portfolio."
+    )
 
-step_col1, step_col2, step_col3 = st.columns(3, gap="medium")
+    step_col3, step_col1, step_col2 = st.columns([1.3, 1, 1], gap="medium")
 
-with step_col1:
-    with st.expander("Upload / update holdings", expanded=False):
-        broker_holdings_upload = st.file_uploader(
-            "Upload Groww/Indian or Tickertape US holdings",
-            type=["xlsx", "xls", "csv"],
-            key="broker_holdings_upload",
-            help=(
-                "Groww/Indian CSV or Excel statements are detected and matched by ISIN. "
-                "Tickertape US reports are detected from explicit USD-labelled columns. "
-                "Because Tickertape omits symbols, US names are matched to Yahoo only "
-                "when the result is unambiguous; unresolved names are reported."
-            ),
-        )
-        broker_holdings_mode = st.radio(
-            "Import behaviour",
-            options=["Merge/update current holdings", "Replace current holdings"],
-            index=0,
-            key="broker_holdings_import_mode",
-            help=(
-                "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
-                "deletes the current holdings first."
-            ),
-        )
-        import_broker_holdings_btn = st.button(
-            "Import broker holdings",
-            width="stretch",
-            key="import_broker_holdings_btn",
-            disabled=broker_holdings_upload is None,
-        )
+    with step_col1:
+        with st.expander("Upload / update holdings", expanded=False):
+            broker_holdings_upload = st.file_uploader(
+                "Upload Groww/Indian or Tickertape US holdings",
+                type=["xlsx", "xls", "csv"],
+                key="broker_holdings_upload",
+                help=(
+                    "Groww/Indian CSV or Excel statements are detected and matched by ISIN. "
+                    "Tickertape US reports are detected from explicit USD-labelled columns. "
+                    "Because Tickertape omits symbols, US names are matched to Yahoo only "
+                    "when the result is unambiguous; unresolved names are reported."
+                ),
+            )
+            broker_holdings_mode = st.radio(
+                "Import behaviour",
+                options=["Merge/update current holdings", "Replace current holdings"],
+                index=0,
+                key="broker_holdings_import_mode",
+                help=(
+                    "Merge updates matching symbols (by ISIN) and keeps other rows. Replace "
+                    "deletes the current holdings first."
+                ),
+            )
+            import_broker_holdings_btn = st.button(
+                "Import broker holdings",
+                width="stretch",
+                key="import_broker_holdings_btn",
+                disabled=broker_holdings_upload is None,
+            )
 
-with step_col2:
-    with st.expander("Lumpsum allocation (optional)", expanded=False):
-        lumpsum_inr = st.number_input(
-            "Lumpsum to allocate (INR)",
-            min_value=0.0,
-            value=10000.0,
-            step=1000.0,
-            format="%.2f",
-            help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
-        )
+    with step_col2:
+        with st.expander("Lumpsum allocation (optional)", expanded=False):
+            lumpsum_inr = st.number_input(
+                "Lumpsum to allocate (INR)",
+                min_value=0.0,
+                value=10000.0,
+                step=1000.0,
+                format="%.2f",
+                help="After optimization, creates a whole-share buy plan using the optimal portfolio weights.",
+            )
 
-with step_col3:
-    with st.container(border=True):
-        st.markdown("**3️⃣ Run optimization**")
-        st.caption(
-            "Uses the days-to-flip/drawdown/drop_bottom_pct/target-volatility settings "
-            "from the sidebar and automatically selects the latest saved raw-return "
-            "X/Y peak. With no saved feasible peak, uses the configured X/Y controls."
-        )
-        run_btn = st.button(
-            "Run optimization",
-            width="stretch",
-            type="primary",
-            key="run_optimization_btn_main",
-            on_click=_start_optimization_at_raw_peak,
-            args=(CURRENT_USER,),
-        )
-        if run_btn:
-            raw_selection = st.session_state.get("optimization_raw_peak_selection") or {}
-            if raw_selection.get("owner") == CURRENT_USER and raw_selection.get("source") == "saved_raw_peak":
-                st.info(
-                    f"Using saved raw-return peak **X {int(raw_selection['x']):,} × "
-                    f"Y {int(raw_selection['y']):,}**. Refitting on current data."
-                )
-            else:
-                st.info("No usable saved raw-return peak loaded; using the configured X/Y values.")
-        scenario_review_btn = st.button(
-            "Review saved buy / sell candidates",
-            width="stretch",
-            key="review_saved_buy_sell_btn",
-            help="Opens the most recent saved buy and sell scenario rankings without running the optimizer.",
-        )
-        optimization_timer_placeholder = st.empty()
-        timer_summary = _timer_summary(
-            st.session_state.get(OPTIMIZATION_TIMER_KEY)
-        )
-        if timer_summary:
-            timer_state, timer_text = timer_summary
-            if timer_state == "finished":
-                optimization_timer_placeholder.success(timer_text)
-            elif timer_state == "stopped":
-                optimization_timer_placeholder.warning(timer_text)
-            else:
-                optimization_timer_placeholder.info(timer_text)
+    with step_col3:
+        with st.container(border=True):
+            st.markdown("**Optimize your portfolio**")
+            run_btn = st.button(
+                "Run optimization",
+                width="stretch",
+                type="primary",
+                key="run_optimization_btn_main",
+                on_click=_start_optimization_at_raw_peak,
+                args=(CURRENT_USER,),
+            )
+            st.caption(
+                "Uses the latest saved raw-return X/Y peak and your current sidebar settings."
+            )
+            if run_btn:
+                raw_selection = st.session_state.get("optimization_raw_peak_selection") or {}
+                if raw_selection.get("owner") == CURRENT_USER and raw_selection.get("source") == "saved_raw_peak":
+                    st.info(
+                        f"Using saved raw-return peak **X {int(raw_selection['x']):,} × "
+                        f"Y {int(raw_selection['y']):,}**. Refitting on current data."
+                    )
+                else:
+                    st.info("No usable saved raw-return peak loaded; using the configured X/Y values.")
+            scenario_review_btn = st.button(
+                "Review saved buy / sell candidates",
+                width="stretch",
+                key="review_saved_buy_sell_btn",
+                help="Opens the most recent saved buy and sell scenario rankings without running the optimizer.",
+            )
+            optimization_timer_placeholder = st.empty()
+            timer_summary = _timer_summary(
+                st.session_state.get(OPTIMIZATION_TIMER_KEY)
+            )
+            if timer_summary:
+                timer_state, timer_text = timer_summary
+                if timer_state == "finished":
+                    optimization_timer_placeholder.success(timer_text)
+                elif timer_state == "stopped":
+                    optimization_timer_placeholder.warning(timer_text)
+                else:
+                    optimization_timer_placeholder.info(timer_text)
 
 st.divider()
 if scenario_review_btn:
