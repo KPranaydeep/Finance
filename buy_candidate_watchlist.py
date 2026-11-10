@@ -82,7 +82,10 @@ def render_buy_candidates(payload, paused=()):
         st.info("No positive saved allocation is available to list. Existing research is retained; candidates are not invented from missing evidence.")
         return
     visible=["Security","Currency","Score (%)","Unfunded draft quantity","Status","Price data through"]
-    st.dataframe(frame[visible],hide_index=True,width="stretch",column_config={
+    if frame["Unfunded draft quantity"].isna().all():
+        visible.remove("Unfunded draft quantity")
+    display=frame[visible].style.format({"Score (%)":"{:+.2f}%","Unfunded draft quantity":"{:.6f}"},na_rep="—")
+    st.dataframe(display,hide_index=True,width="stretch",column_config={
         **{n:st.column_config.NumberColumn(format="%+.2f%%") for n in ("Score (%)","Expected net return (%)")},
         **{n:st.column_config.NumberColumn(format="%.2f%%") for n in ("Positive paths (%)","Saved allocation (%)","Current allocation (%)")},
         "Unfunded draft quantity":st.column_config.NumberColumn(format="%.6f"),
