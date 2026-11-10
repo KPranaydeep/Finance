@@ -74,6 +74,20 @@ def test_paused_security_is_valued_but_not_traded_or_renormalized_out_of_target(
     assert candidate["optimal_allocation"] == payload["optimal_allocation"]
 
 
+def test_refresh_propagates_saved_frozen_holdings_and_optional_profit_controls():
+    payload,owned,history=fixtures()
+    payload["history"]={"price_integrity_frozen_owned_weights":{"A":.8}}
+    calls=[]
+    def builder(*args,**kwargs):
+        calls.append(kwargs)
+        return core.rebalance_plan_multi(*args,**kwargs)
+    settings={"enabled":True,"minimum_net_profit_inr":8079.}
+    rebuild_saved_plan(payload,owned,history,{"A":10.,"B":10.,"NEW":10.},{"USD":1.},
+        plan_builder=builder,stats_builder=core.portfolio_stats,profit_exception_settings=settings)
+    assert calls[0]["frozen_weights"]=={"A":.4}  # Current marked weight, not old .8.
+    assert calls[0]["profit_exception_settings"]==settings
+
+
 def test_fractional_exits_preserve_current_held_quantity():
     payload, owned, history = fixtures()
     owned.loc[owned["Yahoo Ticker"].eq("NEW"), "Quantity"] = .37

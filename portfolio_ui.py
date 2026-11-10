@@ -35,7 +35,22 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
     report = report or {}
     with st.container(border=True):
         st.markdown("**Final allocation check**")
-        if report.get("passed"):
+        exception=report.get("profit_cap_exception") or {}
+        if report.get("passed") and exception.get("applied"):
+            st.warning(f"Partial release: {exception['released_ticker']} only. Other draft trades remain withheld.")
+            st.write(f"Estimated additional net profit versus holding: ₹{exception['estimated_additional_net_profit_inr']:,.2f} over 30 sessions, after stressed modeled costs, before tax. Threshold ₹{exception['settings']['minimum_net_profit_inr']:,.2f}; nearest qualifying order above it.")
+            st.caption(f"Historical comparison through {exception.get('as_of','unavailable')}. This is an estimate, not booked profit or a guaranteed outcome. Pauses, frozen positions, funding and all non-cap risk checks remain enforced.")
+            remaining=exception.get("remaining_over_cap") or []
+            st.write(f"{len(remaining)} residual cap breaches: " + (", ".join(remaining) or "none"))
+            with st.expander("Partial-release evidence"):
+                st.write(exception.get("evidence") or {})
+                breaches=execution_position_rows(dict(report,violations=report.get("cap_exception_violations") or []),allocation_policy)
+                if breaches:
+                    st.dataframe(pd.DataFrame([{"Security":r["ticker"],"After sale (%)":None if r["weight"] is None else 100*r["weight"],
+                        "Cap (%)":None if r["cap"] is None else 100*r["cap"]} for r in breaches]),hide_index=True,width="stretch",column_config={
+                            "After sale (%)":st.column_config.NumberColumn(format="%.2f%%"),"Cap (%)":st.column_config.NumberColumn(format="%.2f%%")})
+                st.caption(exception.get("confidence_note") or "")
+        elif report.get("passed"):
             st.success("Plan passed the recorded funding, position and available risk checks.")
             st.caption("Sale proceeds must be available before buys. This is modeled feasibility, not broker execution approval.")
         elif report:
@@ -63,6 +78,8 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
                     st.write("• " + str(reason))
         else:
             st.info("This older plan has no final allocation check. Use Update plan to validate it without rerunning optimization.")
+        if exception and not exception.get("applied"):
+            st.caption("Partial release unavailable: " + str(exception.get("reason","required evidence missing")))
         if proposed_orders:
             with st.expander("Withheld proposal — review only"):
                 st.caption("This is a draft for review, excluded from the executable plan.")
@@ -140,7 +157,9 @@ def render_allocation_policy(report):
             st.caption(f"Average model mix across securities, not portfolio allocation. Median stress multiplier {adaptive['median_stress_factor']:.2f}×; {adaptive['stressed_assets']:,} raw risk estimates tightened. Historical crash and current-mix tail guards remain active. Feedback uses past one-step prediction errors, not proof of future returns.")
         elif policy.get("adaptive_enabled") is False:
             st.caption("Manual model · recent adaptive adjustments are disabled for this run.")
-        if report.get("constraints_applied") and (report.get("candidate") or {}).get("passed") is not False:
+        if (report.get("candidate") or {}).get("cap_exception_applied"):
+            st.warning("One cap-reducing sell qualifies for a profit-based partial release. The full allocation still has unresolved position caps; see Final allocation check.")
+        elif report.get("constraints_applied") and (report.get("candidate") or {}).get("passed") is not False:
             title = ("Risk-aware allocator selected" if selected == "risk-aware" else
                      "Existing allocator retained within the same risk limits" if selected == "incumbent" else
                      "Saved weights checked against the current policy")

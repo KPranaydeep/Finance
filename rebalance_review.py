@@ -86,7 +86,8 @@ def assess_rebalance(current, optimal, trades, base, cost_bps=22):
             "cost_fraction": drag, "median_gain": gain, "net_median_gain": net_gain}
 
 
-def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22, cash=0.0, seed=430):
+def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22, cash=0.0, seed=430,
+                                minimum_net_gain_inr=0., cost_stress_multiple=2., candidate_subsets=None):
     """Paired historical review of feasible whole-order subsets against holding.
 
     Evaluate identical buy-and-hold 30-session windows for both alternatives.
@@ -95,7 +96,11 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
     Orders and asset selection were chosen on full history: this is a stability
     check, not an independent out-of-sample backtest.
     """
-    result = {"decision": "Hold / review — insufficient executable-history evidence", "candidates": [], "selected_orders": [], "horizon_sessions": 30}
+    result = {"decision": "Hold / review — insufficient executable-history evidence", "candidates": [], "qualified_candidates":[], "selected_orders": [], "horizon_sessions": 30}
+    if (_finite(minimum_net_gain_inr) is None or minimum_net_gain_inr < 0
+            or _finite(cost_stress_multiple) is None or cost_stress_multiple < 1):
+        result["decision"] = "Hold / review — invalid benefit threshold or cost stress"
+        return result
     lr = pd.DataFrame(log_returns).replace([np.inf, -np.inf], np.nan)
     values = {str(k): _finite(v) for k, v in current_values.items()}
     if not values or any(v is None or v < 0 for v in values.values()):
@@ -124,6 +129,8 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
     sells = [t for t in ordered if str(t["Action"]).lower() == "sell"]
     buys = [t for t in ordered if str(t["Action"]).lower() == "buy"]
     subsets += [[s, b] for s in sells[:3] for b in buys[:3]]
+    if candidate_subsets is not None:
+        subsets = candidate_subsets
     unique, seen = [], set()
     for subset in subsets:
         key = tuple(sorted((str(t["Yahoo Ticker"]), str(t["Action"]), float(t["Executable Value"])) for t in subset))
@@ -156,12 +163,12 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
             gross += amount
         cost = gross * cost_bps / 10000
         record = {"Orders": len(subset), "Gross traded / base": gross, "Cost / base": cost}
-        if weights.min() < -1e-9 or remaining_cash < 2 * cost - 1e-9:
-            record.update({"Status": "Not funded at 2× cost stress", "Extra cash needed": max(0, (2 * cost - remaining_cash) * base)})
+        if weights.min() < -1e-9 or remaining_cash < cost_stress_multiple * cost - 1e-9:
+            record.update({"Status": f"Not funded at {cost_stress_multiple:g}× cost stress", "Extra cash needed": max(0, (cost_stress_multiple * cost - remaining_cash) * base)})
             result["candidates"].append(record)
             continue
         proposed = terminal @ weights - cost
-        stressed = terminal @ weights - 2 * cost
+        stressed = terminal @ weights - cost_stress_multiple * cost
         if np.any(1 + stressed <= 0) or np.any(1 + hold <= 0):
             record["Status"] = "Invalid wealth path"
             result["candidates"].append(record)
@@ -174,12 +181,16 @@ def assess_executable_rebalance(log_returns, current_values, trades, cost_bps=22
         tail_size = max(1, int(math.ceil(len(hold) * .05)))
         hold_es = -float(np.sort(hold)[:tail_size].mean())
         candidate_es = -float(np.sort(stressed)[:tail_size].mean())
-        passed = min(bounds) > 0 and candidate_es <= hold_es + 1e-10
+        incremental_net_inr = float(np.mean(stressed-hold)*base)
+        passed = min(bounds) > 0 and candidate_es <= hold_es + 1e-10 and incremental_net_inr >= minimum_net_gain_inr
         record.update({"Net mean gain": float(np.mean(proposed - hold)), "Worst segment lower bound (log wealth)": min(bounds),
-                       "Hold ES95": hold_es, "Post-trade ES95 (2× costs)": candidate_es,
-                       "Status": "Passed stability check" if passed else "Hold — uncertain benefit or worse tail loss"})
+                       "Hold ES95": hold_es, f"Post-trade ES95 ({cost_stress_multiple:g}× costs)": candidate_es,
+                       "Stressed net mean gain (INR)":incremental_net_inr,
+                       "Cost stress multiple":float(cost_stress_multiple),
+                       "Status": "Passed stability check" if passed else "Hold — uncertain benefit, insufficient net gain or worse tail loss"})
         result["candidates"].append(record)
         if passed:
+            result["qualified_candidates"].append({"orders":subset,"evidence":record})
             prior = result.get("selected_gross", float("inf"))
             if gross < prior:
                 result.update({"selected_orders": subset, "selected_gross": gross, "decision": "Lower-turnover candidate passes paired stability and cost-stress checks"})

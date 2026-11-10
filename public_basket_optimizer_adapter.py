@@ -307,7 +307,8 @@ def build_public_signal(
             + ", ".join(sorted(missing_alloc))
         )
     execution_validation = rebalance_df.attrs.get("execution_validation") or {}
-    if execution_validation and not execution_validation.get("passed"):
+    if execution_validation and (not execution_validation.get("passed")
+            or (execution_validation.get("profit_cap_exception") or {}).get("applied")):
         raise RuntimeError("Final allocation check withheld the plan: " + "; ".join(execution_validation.get("violations") or []))
 
     allocation = [

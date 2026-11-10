@@ -22,6 +22,9 @@ def execution_summary_metric(report, executable_count=0):
         note = (f"{len(breaches)} {'holding' if len(breaches) == 1 else 'holdings'} over cap · draft withheld"
                 if breaches else "Required checks failed · draft withheld")
         return "Plan status", "Blocked", note
+    if (report.get("profit_cap_exception") or {}).get("applied"):
+        count=len(report["profit_cap_exception"].get("remaining_over_cap") or [])
+        return "Plan status", "Partial release", f"1 sell available · {count} residual cap breaches · other draft trades withheld"
     return "Executable trades", executable_count, (
         "Checks passed · review orders before execution" if executable_count else
         "Checks passed · no executable orders")

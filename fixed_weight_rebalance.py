@@ -86,7 +86,8 @@ def prepare_fixed_universe(payload, current_holdings):
 
 
 def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx_rates,
-                       *, plan_builder, stats_builder, paused=(), now=None, allocation_policy_settings=None):
+                       *, plan_builder, stats_builder, paused=(), now=None, allocation_policy_settings=None,
+                       profit_exception_settings=None):
     """Return a complete candidate; failures leave the input saved payload intact."""
     allocation, targets = prepare_fixed_universe(payload, current_holdings)
     from allocation_policy_config import validate_allocation_policy
@@ -125,6 +126,12 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         except (ValueError,TypeError,KeyError) as exc:
             allocation_policy = {"status":"unavailable", "constraints_applied":False,
                                  "policy":dict(policy), "reason":str(exc)}
+    extra = {}
+    if profit_exception_settings is not None:
+        extra["profit_exception_settings"] = profit_exception_settings
+    frozen = (payload.get("history") or {}).get("price_integrity_frozen_owned_weights") or {}
+    if frozen:
+        extra["frozen_weights"] = {t:float(w) for t,w in zip(tickers,allocation["Weight"]) if t in frozen}
     plan, missing_prices, missing_alloc = plan_builder(
         allocation, weights, returns, native_prices, days,
         transaction_cost_bps=cost, excluded_trade_tickers=paused,
@@ -132,13 +139,17 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         target_volatility=settings.get("target_volatility_daily"),
         maximum_weight=MAX_WEIGHT_PER_ASSET,
         policy_limits=policy_limits,
+        **extra,
     )
     if missing_prices or missing_alloc:
         raise ValueError("Incomplete rebalance coverage; previous plan retained")
     if policy_limits:
         allocation_policy["candidate"] = plan.attrs.get("execution_validation",{}).get("allocation_policy",{})
         allocation_policy["constraints_applied"] = bool(allocation_policy["candidate"].get("passed"))
-        if not allocation_policy["constraints_applied"]:
+        if allocation_policy["candidate"].get("cap_exception_applied"):
+            allocation_policy.update(status="partial-release", constraints_applied=False,
+                reason="One cap-reducing sale released; the full allocation still has unresolved position caps.")
+        elif not allocation_policy["constraints_applied"]:
             allocation_policy.update(status="failed_recheck",
                 reason="The resized draft at saved weights failed the current allocation policy. Refreshing a plan does not re-optimize its allocation.")
     if policy["enabled"] and policy_limits is None:

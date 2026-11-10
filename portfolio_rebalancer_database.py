@@ -121,6 +121,8 @@ from trade_deferrals import (
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
 from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message, execution_summary_metric
+from profit_cap_exception import DEFAULT_PROFIT_EXCEPTION, validate_profit_exception, evaluate_profit_cap_exception
+from profit_cap_exception_ui import render_profit_exception_controls
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -181,6 +183,7 @@ DEFAULT_HISTORY_START_DATE = _optimizer_config.DEFAULT_HISTORY_START_DATE
 MAX_WEIGHT_PER_ASSET = _optimizer_config.MAX_WEIGHT_PER_ASSET
 MOMENTUM_FILTER_CONFIG = _optimizer_config.MOMENTUM_FILTER_CONFIG
 ALLOCATION_POLICY = _optimizer_config.ALLOCATION_POLICY
+PROFIT_CAP_EXCEPTION = dict(DEFAULT_PROFIT_EXCEPTION)
 OPTIMIZER_CONFIG = _optimizer_config.OPTIMIZER_CONFIG
 OPTIMIZER_CONFIG_VERSION = _optimizer_config.OPTIMIZER_CONFIG_VERSION
 RISK_FREE_RATE_ANNUAL = _optimizer_config.RISK_FREE_RATE_ANNUAL
@@ -2821,6 +2824,7 @@ def update_saved_rebalance_plan(payload, owner):
     candidate, allocation, plan = rebuild_saved_plan(
         payload, current, returns, prices, fx, plan_builder=rebalance_plan_multi,
         stats_builder=portfolio_stats, paused=paused, allocation_policy_settings=ALLOCATION_POLICY,
+        profit_exception_settings=PROFIT_CAP_EXCEPTION,
     )
     # Research scores use one common run; position weights come from the new
     # marked holdings rather than the stale snapshot passed to the forecaster.
@@ -2856,7 +2860,8 @@ def update_saved_rebalance_plan(payload, owner):
         auto_prepare_risk_repair(candidate, owner)
     _app_run_log("rebalance_plan_refresh_finished", status="completed" if (candidate.get("execution_validation") or {}).get("passed") else "withheld", optimizer_run=False,
                  elapsed_seconds=round(time.perf_counter()-started, 3), holdings_analyzed=int(len(owned)),
-                 trades=len(plan), target_count=len(targets))
+                 trades=len(plan), target_count=len(targets),
+                 partial_release=bool(((candidate.get("execution_validation") or {}).get("profit_cap_exception") or {}).get("applied")))
     return saved
 
 
@@ -2889,6 +2894,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         rebalancing_plan = payload.get("rebalancing_plan") or []
         proposed_rebalancing_plan = payload.get("proposed_rebalancing_plan") or []
         execution_validation = dict(payload.get("execution_validation") or {})
+        if execution_validation.get("profit_exception_settings", DEFAULT_PROFIT_EXCEPTION) != PROFIT_CAP_EXCEPTION:
+            execution_validation.update(passed=False, violations=["Partial-release controls changed; use Update rebalance plan to evaluate the saved weights."])
         saved_policy = (payload.get("allocation_policy") or {}).get("policy")
         if saved_policy and saved_policy != ALLOCATION_POLICY:
             execution_validation.update(passed=False, violations=["Allocation risk controls changed; use Update rebalance plan to check the saved weights."])
@@ -7025,7 +7032,8 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
                          *, transaction_cost_bps=22.0, excluded_trade_tickers=(),
                          available_cash_inr=0., max_drawdown=None,
                          target_volatility=None, maximum_weight=MAX_WEIGHT_PER_ASSET,
-                         frozen_weights=None, policy_limits=None):
+                         frozen_weights=None, policy_limits=None, profit_exception_settings=None):
+    profit_settings = validate_profit_exception(profit_exception_settings or DEFAULT_PROFIT_EXCEPTION)
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
     common_tickers = [t for t in lr_tickers if t in alloc_df.index and t in prices]
@@ -7148,21 +7156,52 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
                 rebal_df, current_alloc, cost_bps=transaction_cost_bps,
                 available_cash_inr=available_cash_inr,
             )
-    validation = execution_check(
-        current_alloc, rebal_df, prices, log_returns, cost_bps=transaction_cost_bps,
-        available_cash_inr=available_cash_inr, excluded_tickers=excluded_trade_tickers,
-        frozen_weights=frozen_weights, max_weight=maximum_weight,
-        max_drawdown=max_drawdown, target_volatility=target_volatility,
-        covariance=shrunk_covariance(log_returns) if target_volatility is not None else None,
-        policy_limits=policy_limits,
-    )
+    covariance = shrunk_covariance(log_returns) if target_volatility is not None else None
+    def check_orders(orders):
+        return execution_check(
+            current_alloc, orders, prices, log_returns, cost_bps=transaction_cost_bps,
+            available_cash_inr=available_cash_inr, excluded_tickers=excluded_trade_tickers,
+            frozen_weights=frozen_weights, max_weight=maximum_weight,
+            max_drawdown=max_drawdown, target_volatility=target_volatility,
+            covariance=covariance, policy_limits=policy_limits,
+        )
+    def check_release_orders(orders):
+        checked = check_orders(orders)
+        subset = pd.DataFrame(orders)
+        if not subset.empty and (subset["Action"].eq("Sell") & subset["Optimal Weight"].gt(1e-12)).any():
+            own = {str(t):float(row["Quantity"])*float(prices[t])*float(row["FX to INR"])
+                   for t,row in alloc_df.iterrows() if float(row["Quantity"])>0}
+            trim = review_partial_sells(log_returns, own, subset,
+                cost_bps=float(transaction_cost_bps),risk_free_rate=RISK_FREE_RATE_ANNUAL,
+                trading_days=TRADING_DAYS_PER_YEAR)
+            checked["partial_sell_sharpe_check"] = trim
+            if not trim["allowed"]:
+                checked["passed"] = False
+                checked["violations"].append("Selected partial sale did not pass the after-cost Sharpe check")
+        return checked
+    validation = check_orders(rebal_df)
+    residual_proposal = []
+    if not validation["passed"] and profit_settings["enabled"] and policy_limits:
+        released, release_validation, exception = evaluate_profit_cap_exception(
+            current_alloc, rebal_df, prices, log_returns, profit_settings, check_release_orders,
+            cost_bps=transaction_cost_bps,
+            cost_stress_multiple=policy_limits["settings"]["cost_stress_multiple"],
+            available_cash_inr=available_cash_inr)
+        if released is not None:
+            selected = set(released["Yahoo Ticker"])
+            residual_proposal = rebal_df.loc[~rebal_df["Yahoo Ticker"].isin(selected)].to_dict(orient="records")
+            rebal_df, validation = released, release_validation
+            partial_check = validation.get("partial_sell_sharpe_check") or partial_check
+        else:
+            validation["profit_cap_exception"] = exception
+    validation["profit_exception_settings"] = profit_settings
     if not validation["passed"]:
         proposed = rebal_df.to_dict(orient="records") or proposed
         rebal_df = rebal_df.iloc[:0].copy()
     rebal_df.attrs["partial_sell_sharpe_check"] = partial_check
     rebal_df.attrs["execution_validation"] = validation
     rebal_df.attrs["funding_adjustments"] = funding_adjustments
-    rebal_df.attrs["proposed_rebalancing_plan"] = proposed if not validation["passed"] else []
+    rebal_df.attrs["proposed_rebalancing_plan"] = proposed if not validation["passed"] else residual_proposal
     return rebal_df, missing_prices, missing_alloc
 
 
@@ -9158,6 +9197,7 @@ with st.sidebar:
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
     ALLOCATION_POLICY = render_policy_controls(
         ALLOCATION_POLICY, CURRENT_USER, get_db_connection, max_weight=MAX_WEIGHT_PER_ASSET)
+    PROFIT_CAP_EXCEPTION = render_profit_exception_controls(CURRENT_USER, get_db_connection)
 
     auto_history_end = st.checkbox(
         "Choose the history end date automatically",
@@ -12595,16 +12635,22 @@ if run_btn:
             max_drawdown=max_dd, target_volatility=target_volatility,
             frozen_weights=meta.get("price_integrity_frozen_owned_weights"),
             policy_limits=(meta.get("allocation_policy") or {}).get("limits"),
+            profit_exception_settings=PROFIT_CAP_EXCEPTION,
         )
         partial_sell_sharpe_check = rebal_df.attrs.get("partial_sell_sharpe_check", {})
         execution_validation = rebal_df.attrs.get("execution_validation", {})
         proposed_rebalancing_plan = rebal_df.attrs.get("proposed_rebalancing_plan", [])
         funding_adjustments = rebal_df.attrs.get("funding_adjustments", [])
+        partial_release = execution_validation.get("profit_cap_exception") or {}
+        if partial_release.get("applied") and meta.get("allocation_policy"):
+            meta["allocation_policy"] = dict(meta["allocation_policy"], status="partial-release",
+                constraints_applied=False, candidate=execution_validation.get("allocation_policy") or {})
         render_execution_validation(execution_validation, proposed_rebalancing_plan,
                                     allocation_policy=meta.get("allocation_policy"))
         _app_run_log("final_allocation_checked", status="passed" if execution_validation.get("passed") else "withheld",
                      checks_failed=len(execution_validation.get("violations") or []),
-                     funded_adjustments=len(funding_adjustments))
+                     funded_adjustments=len(funding_adjustments), partial_release=bool(partial_release.get("applied")),
+                     residual_cap_count=len(partial_release.get("remaining_over_cap") or []))
         rebal_df, deferred_rebal_df = split_deferred_trades(
             rebal_df,
             active_deferrals,

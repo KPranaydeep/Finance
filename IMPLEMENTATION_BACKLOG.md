@@ -41,8 +41,8 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
    breaches. If frozen holdings or other limits prevent a complete repair, retain
    the proposal and identify the exact blockers. An incomplete improvement must
    not be called fully compliant or silently released through the old validator.
-   Any separate policy permitting partial risk-reduction execution needs an
-   explicit design and tests before activation.
+   The optional profit-based partial-release policy below is separate from this
+   fully compliant repair workflow.
 4. **Integration and persistence.** Add a standalone “Prepare risk-reduction
    draft” action; also assess the route when normal optimization/plan refresh is
    blocked. No expensive calculation during passive rendering. Persist the dated
@@ -82,3 +82,35 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
 - Cover compliant repair, unavailable inputs, impossible complete repair, stale
   evidence, fractional holdings, zero quantities, costs and currency handling using
   synthetic/in-memory fixtures. Verify desktop/mobile and the clean-checkout suite.
+
+## Profit-based partial release (implemented)
+
+- Private profile control, disabled by default, minimum additional net benefit
+  initially ₹8,079. Apply controls, then Update rebalance plan at saved weights;
+  full optimization also uses the control when a target allocation is available.
+  Applying controls alone never runs a solver or submits orders.
+- Test each existing whole cap-reducing sell separately. Compare identical joint
+  30-session buy-and-hold histories against holding, with sale proceeds at zero
+  modeled yield. Expected benefit is the historical mean incremental portfolio
+  wealth after stressed trading costs, before tax—not realized capital gains.
+- Among qualifying sells choose exactly one with the smallest benefit at or above
+  the threshold (ticker breaks exact ties). Require the paired block-bootstrap
+  lower confidence bound to be positive in each chronological third and no worse
+  historical ES95, with family-wise correction across all tested sells/thirds.
+  Full-history nomination bias remains; no independent forecast calibration claimed.
+- Replay actual quantity, price, FX, funded fees, pauses, frozen holdings, hard
+  position ceiling, correlated groups, historical/adaptive tail budgets, drawdown
+  and volatility checks. Only pre-existing modeled per-security cap breaches may
+  remain. No holding's absolute marked exposure can increase; no buy or borrowing
+  is released. The existing partial-sell Sharpe check remains in force.
+- Record Partial release, the single order, estimated benefit, threshold, history
+  date, evidence and exact residual breaches. Other draft orders stay withheld.
+  Nested allocation-policy checks retain their failed caps; the full allocation
+  is not called compliant. Public scheduled publication rejects partial releases.
+- Controls persist by profile. Changed controls/holdings/pauses/policy invalidate
+  the displayed saved release pending a fresh plan check. Original target weights,
+  holdings and immutable publications are not rewritten.
+- If no candidate qualifies, no trade is released. In particular a sale of an
+  asset with positive expected future return need not beat holding after costs,
+  even when selling would realize an accounting profit. Full X/Y optimizer
+  feasibility is never relaxed by this execution-only exception.
