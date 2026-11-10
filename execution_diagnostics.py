@@ -17,6 +17,8 @@ def execution_summary_metric(report, executable_count=0):
     """Count released orders only after validation; failures are a status, not zero activity."""
     if not report:
         return "Plan status", "Needs validation", "Saved plan has no execution check"
+    if report.get("selection_mode")=="highest-annual-lift-buy-sell":
+        return "Rebalance plan", f"{report.get('selected_trade_count',0)} selected", "Highest annual-lift Buy + Sell · conflicts do not change selection"
     if report.get("passed") is not True:
         breaches = {t for reason in report.get("violations") or [] if (t := cap_breach_ticker(reason))}
         note = (f"{len(breaches)} {'holding' if len(breaches) == 1 else 'holdings'} over cap · draft withheld"

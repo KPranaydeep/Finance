@@ -34,9 +34,17 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
     """Present final feasibility separately from research and target statistics."""
     report = report or {}
     with st.container(border=True):
-        st.markdown("**Final allocation check**")
+        st.markdown("**Selected-pair checks**" if report.get("selection_mode")=="highest-annual-lift-buy-sell" else "**Final allocation check**")
         exception=report.get("profit_cap_exception") or {}
-        if report.get("passed") and exception.get("applied"):
+        if report.get("selection_mode")=="highest-annual-lift-buy-sell":
+            st.info("The highest annual-lift Buy and Sell stay selected. Control conflicts below do not hide or replace either trade.")
+            if not report.get("pair_validation_available",True):
+                st.caption("This older saved draft has not had the selected pair replayed together. Update rebalance plan refreshes sizing and checks without optimizer search.")
+            elif report.get("passed"):
+                st.caption("Selected pair passed the recorded checks; no broker orders have been submitted.")
+            for reason in dict.fromkeys(report.get("violations") or []):
+                st.write("• "+str(reason))
+        elif report.get("passed") and exception.get("applied"):
             st.warning(f"Partial release: {exception['released_ticker']} only. Other draft trades remain withheld.")
             st.write(f"Estimated additional net profit versus holding: ₹{exception['estimated_additional_net_profit_inr']:,.2f} over 30 sessions, after stressed modeled costs, before tax. Threshold ₹{exception['settings']['minimum_net_profit_inr']:,.2f}; nearest qualifying order above it.")
             st.caption(f"Historical comparison through {exception.get('as_of','unavailable')}. This is an estimate, not booked profit or a guaranteed outcome. Pauses, frozen positions, funding and all non-cap risk checks remain enforced.")
@@ -80,7 +88,7 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
             st.info("This older plan has no final allocation check. Use Update plan to validate it without rerunning optimization.")
         if exception and not exception.get("applied"):
             st.caption("Partial release unavailable: " + str(exception.get("reason","required evidence missing")))
-        if proposed_orders:
+        if proposed_orders and report.get("selection_mode")!="highest-annual-lift-buy-sell":
             with st.expander("Withheld proposal — review only"):
                 st.caption("This is a draft for review, excluded from the executable plan.")
                 draft = pd.DataFrame(proposed_orders).copy()

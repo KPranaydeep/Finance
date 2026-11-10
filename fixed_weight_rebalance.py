@@ -87,7 +87,7 @@ def prepare_fixed_universe(payload, current_holdings):
 
 def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx_rates,
                        *, plan_builder, stats_builder, paused=(), now=None, allocation_policy_settings=None,
-                       profit_exception_settings=None):
+                       profit_exception_settings=None,two_trade_plan=False):
     """Return a complete candidate; failures leave the input saved payload intact."""
     allocation, targets = prepare_fixed_universe(payload, current_holdings)
     from allocation_policy_config import validate_allocation_policy
@@ -127,6 +127,8 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
             allocation_policy = {"status":"unavailable", "constraints_applied":False,
                                  "policy":dict(policy), "reason":str(exc)}
     extra = {}
+    if two_trade_plan:
+        extra["two_trade_plan"] = True
     if profit_exception_settings is not None:
         extra["profit_exception_settings"] = profit_exception_settings
     frozen = (payload.get("history") or {}).get("price_integrity_frozen_owned_weights") or {}
@@ -174,6 +176,8 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         execution_validation=plan.attrs.get("execution_validation", {}),
         proposed_rebalancing_plan=plan.attrs.get("proposed_rebalancing_plan", []),
         buy_candidate_orders=plan.attrs.get("buy_candidate_orders", []),
+        **({"two_trade_plan":plan.attrs.get("two_trade_plan",[]),
+            "rebalance_candidate_orders":plan.attrs.get("rebalance_candidate_orders",[])} if two_trade_plan else {}),
         funding_adjustments=plan.attrs.get("funding_adjustments", []),
         allocation_policy=allocation_policy,
         executable_rebalance_review=assess_executable_rebalance(common, owned_values, orders, cost_bps=cost),

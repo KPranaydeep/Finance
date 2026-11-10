@@ -85,6 +85,24 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
 
 ## Profit-based partial release (implemented)
 
+### Private rebalance selection: exactly one buy and one sell
+
+The current private plan supersedes the profit-threshold selection UI. Select
+the highest existing `Expected Annual Return Lift (%)` separately among buys
+and sells before pauses, funding, partial-sell Sharpe, position/tail controls or
+profit thresholds. Keep their existing draft quantities; no assumed outside cash,
+resizing or lower-ranked substitution. This existing score is a historical
+risk-adjusted annual-lift estimate, distinct from the 30-session probability score.
+The visible plan/CSV has two selected rows when both nonzero sides exist; never
+invent a missing side or unavailable score. Exact ticker breaks ties.
+
+Controls report conflicts without hiding either selected draft. Independent replay
+still distinguishes selected drafts from validated executable orders. Public
+scheduled publishing retains its existing strict selection/check behavior. Old
+saved drafts can display the pair without a solver/download; current pair sizing
+and checks require Update rebalance plan. All pre-control candidates and the pair
+persist separately, so a blocked or paused selected order survives restart.
+
 ### Funding-independent buy candidates
 
 Saved and fresh rebalance views always show positive saved-allocation securities

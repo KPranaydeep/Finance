@@ -165,6 +165,9 @@ def test_app_refresh_persists_new_plan_and_marks_research_weights(monkeypatch):
     assert saved == [result]
     assert result["optimal_allocation"] == payload["optimal_allocation"]
     assert result["rebalance_plan_context"]["optimizer_run"] is False
+    assert len(result["two_trade_plan"])==2
+    assert {r["Action"] for r in result["two_trade_plan"]}=={"Buy","Sell"}
+    assert result["rebalance_candidate_orders"]
     research = pd.DataFrame(result["security_scenario_ranking"]).set_index("Yahoo Ticker")
     assert research.loc["A", "Current Weight (%)"] == 40
     assert research.loc["A", "Optimized Weight (%)"] == 60

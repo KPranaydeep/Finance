@@ -122,8 +122,8 @@ from trade_deferrals import (
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
 from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message, execution_summary_metric
 from profit_cap_exception import DEFAULT_PROFIT_EXCEPTION, validate_profit_exception, evaluate_profit_cap_exception
-from profit_cap_exception_ui import render_profit_exception_controls
 from buy_candidate_watchlist import render_buy_candidates
+from two_trade_rebalance import MODE as TWO_TRADE_MODE, select_annual_lift_pair, saved_annual_lift_pair, render_two_trade_plan
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -2826,6 +2826,7 @@ def update_saved_rebalance_plan(payload, owner):
         payload, current, returns, prices, fx, plan_builder=rebalance_plan_multi,
         stats_builder=portfolio_stats, paused=paused, allocation_policy_settings=ALLOCATION_POLICY,
         profit_exception_settings=PROFIT_CAP_EXCEPTION,
+        two_trade_plan=True,
     )
     # Research scores use one common run; position weights come from the new
     # marked holdings rather than the stale snapshot passed to the forecaster.
@@ -2857,7 +2858,7 @@ def update_saved_rebalance_plan(payload, owner):
         raise ValueError("A newer optimization was saved during refresh; update its plan instead")
     candidate["rebalance_plan_context"]["holdings_fingerprint"] = original_holdings
     saved = save_latest_analysis(candidate, owner)
-    if not (candidate.get("execution_validation") or {}).get("passed"):
+    if not (candidate.get("execution_validation") or {}).get("passed") and not candidate.get("two_trade_plan"):
         auto_prepare_risk_repair(candidate, owner)
     _app_run_log("rebalance_plan_refresh_finished", status="completed" if (candidate.get("execution_validation") or {}).get("passed") else "withheld", optimizer_run=False,
                  elapsed_seconds=round(time.perf_counter()-started, 3), holdings_analyzed=int(len(owned)),
@@ -2895,8 +2896,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         rebalancing_plan = payload.get("rebalancing_plan") or []
         proposed_rebalancing_plan = payload.get("proposed_rebalancing_plan") or []
         execution_validation = dict(payload.get("execution_validation") or {})
-        if execution_validation.get("profit_exception_settings", DEFAULT_PROFIT_EXCEPTION) != PROFIT_CAP_EXCEPTION:
-            execution_validation.update(passed=False, violations=["Partial-release controls changed; use Update rebalance plan to evaluate the saved weights."])
+        pair = saved_annual_lift_pair(payload)
+        if execution_validation.get("selection_mode") != TWO_TRADE_MODE:
+            execution_validation.update(passed=False, pair_validation_available=False)
+        execution_validation.update(selection_mode=TWO_TRADE_MODE,selected_trade_count=len(pair))
         saved_policy = (payload.get("allocation_policy") or {}).get("policy")
         if saved_policy and saved_policy != ALLOCATION_POLICY:
             execution_validation.update(passed=False, violations=["Allocation risk controls changed; use Update rebalance plan to check the saved weights."])
@@ -3323,20 +3326,11 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             )
 
         with st.expander("Saved rebalancing plan", expanded=True):
-            if payload.get("partial_sell_sharpe_check"):
-                st.caption(partial_sell_caption(payload["partial_sell_sharpe_check"]))
             with get_db_connection() as conn:
                 research_pauses = active_trade_deferrals(conn, owner)
-            render_buy_candidates(payload, research_pauses["yahoo_ticker"].tolist() if not research_pauses.empty else ())
-            saved_rebal_df = pd.DataFrame(rebalancing_plan)
-            if not saved_rebal_df.empty:
-                saved_rebal_df = _sort_rebalance_df_for_priority(saved_rebal_df)
-            render_trade_deferral_editor(
-                saved_rebal_df,
-                owner,
-                key_prefix=f"saved_rebalancing_plan_{widget_scope}",
-                validation=execution_validation,
-            )
+            render_two_trade_plan(payload, execution_validation,
+                research_pauses["yahoo_ticker"].tolist() if not research_pauses.empty else (),
+                key=f"saved_pair_{widget_scope}")
 
         with st.expander("Market, reserve and borrowing details", expanded=False):
             with st.expander("Market backdrop and risk details", expanded=False):
@@ -7036,8 +7030,9 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
                          *, transaction_cost_bps=22.0, excluded_trade_tickers=(),
                          available_cash_inr=0., max_drawdown=None,
                          target_volatility=None, maximum_weight=MAX_WEIGHT_PER_ASSET,
-                         frozen_weights=None, policy_limits=None, profit_exception_settings=None):
-    profit_settings = validate_profit_exception(profit_exception_settings or DEFAULT_PROFIT_EXCEPTION)
+                         frozen_weights=None, policy_limits=None, profit_exception_settings=None,
+                         two_trade_plan=False):
+    profit_settings = dict(DEFAULT_PROFIT_EXCEPTION) if two_trade_plan else validate_profit_exception(profit_exception_settings or DEFAULT_PROFIT_EXCEPTION)
     alloc_df = current_alloc.set_index("Yahoo Ticker").copy()
     lr_tickers = list(log_returns.columns)
     common_tickers = [t for t in lr_tickers if t in alloc_df.index and t in prices]
@@ -7121,6 +7116,21 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
 
     # Preserve candidates before pauses, funding and validation suppress orders.
     buy_candidate_orders = rebal_df.loc[rebal_df["Action"].eq("Buy") & rebal_df["Executable Quantity"].gt(0)].to_dict(orient="records")
+    if two_trade_plan:
+        pair = select_annual_lift_pair(rebal_df)
+        validation = execution_check(current_alloc,pair,prices,log_returns,cost_bps=transaction_cost_bps,
+            available_cash_inr=available_cash_inr,excluded_tickers=excluded_trade_tickers,
+            frozen_weights=frozen_weights,max_weight=maximum_weight,max_drawdown=max_drawdown,
+            target_volatility=target_volatility,
+            covariance=shrunk_covariance(log_returns) if target_volatility is not None else None,
+            policy_limits=policy_limits)
+        validation.update(selection_mode=TWO_TRADE_MODE,selected_trade_count=len(pair),pair_validation_available=True)
+        output = pair.copy() if validation["passed"] else pair.iloc[:0].copy()
+        output.attrs.update(execution_validation=validation,two_trade_plan=pair.to_dict(orient="records"),
+            rebalance_candidate_orders=rebal_df.to_dict(orient="records"),buy_candidate_orders=buy_candidate_orders,
+            proposed_rebalancing_plan=pair.to_dict(orient="records") if not validation["passed"] else [],
+            partial_sell_sharpe_check={},funding_adjustments=[])
+        return output,missing_prices,missing_alloc
     # Evaluate actual rounded quantities together, not isolated security scores.
     blocked = {str(t).upper() for t in excluded_trade_tickers}
     rebal_df = rebal_df.loc[
@@ -9204,7 +9214,7 @@ with st.sidebar:
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
     ALLOCATION_POLICY = render_policy_controls(
         ALLOCATION_POLICY, CURRENT_USER, get_db_connection, max_weight=MAX_WEIGHT_PER_ASSET)
-    PROFIT_CAP_EXCEPTION = render_profit_exception_controls(CURRENT_USER, get_db_connection)
+    st.caption("Rebalance selection: one highest annual-lift Buy and one highest annual-lift Sell. Controls flag conflicts without changing the selected pair.")
 
     auto_history_end = st.checkbox(
         "Choose the history end date automatically",
@@ -12643,12 +12653,15 @@ if run_btn:
             frozen_weights=meta.get("price_integrity_frozen_owned_weights"),
             policy_limits=(meta.get("allocation_policy") or {}).get("limits"),
             profit_exception_settings=PROFIT_CAP_EXCEPTION,
+            two_trade_plan=True,
         )
         partial_sell_sharpe_check = rebal_df.attrs.get("partial_sell_sharpe_check", {})
         execution_validation = rebal_df.attrs.get("execution_validation", {})
         proposed_rebalancing_plan = rebal_df.attrs.get("proposed_rebalancing_plan", [])
         funding_adjustments = rebal_df.attrs.get("funding_adjustments", [])
         buy_candidate_orders = rebal_df.attrs.get("buy_candidate_orders", [])
+        two_trade_selection = rebal_df.attrs.get("two_trade_plan", [])
+        rebalance_candidate_orders = rebal_df.attrs.get("rebalance_candidate_orders", [])
         partial_release = execution_validation.get("profit_cap_exception") or {}
         if partial_release.get("applied") and meta.get("allocation_policy"):
             meta["allocation_policy"] = dict(meta["allocation_policy"], status="partial-release",
@@ -12778,7 +12791,7 @@ if run_btn:
                 "text/html",
             )
 
-        st.subheader("Rebalancing Plan")
+        st.subheader("Research scenarios")
 
         st.markdown("**Single-buy scenario ranking**")
         st.caption(
@@ -12868,26 +12881,10 @@ if run_btn:
                 },
             )
 
-        if rebal_df.empty:
-            st.info("No executable trades after quantity rounding, pauses and the partial-sell Sharpe check")
-            if partial_sell_sharpe_check:
-                st.caption(partial_sell_caption(partial_sell_sharpe_check))
-        else:
-            st.caption(
-                partial_sell_caption(partial_sell_sharpe_check)
-            )
-            ordered_rebal_df = _sort_rebalance_df_for_priority(rebal_df)
-            st.dataframe(style_rebalance_df(ordered_rebal_df), width="stretch")
-
-            csv = ordered_rebal_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download rebalancing plan CSV",
-                data=csv,
-                file_name="rebalancing_plan.csv",
-                mime="text/csv",
-                width="stretch",
-                key="download_rebalancing_plan_csv",
-            )
+        st.subheader("Rebalancing Plan")
+        render_two_trade_plan({"two_trade_plan":two_trade_selection,"rebalance_candidate_orders":rebalance_candidate_orders},
+            execution_validation,active_deferrals["yahoo_ticker"].tolist() if not active_deferrals.empty else (),
+            key="fresh_two_trade_plan")
 
         publication_run_id = f"RUN-{uuid.uuid4().hex.upper()}"
         approved_constituents = round_weights_to_whole_percent([
@@ -13071,6 +13068,8 @@ if run_btn:
             "allocation_policy": meta.get("allocation_policy", {}),
             "execution_validation": execution_validation,
             "buy_candidate_orders": buy_candidate_orders,
+            "two_trade_plan": two_trade_selection,
+            "rebalance_candidate_orders": rebalance_candidate_orders,
             "proposed_rebalancing_plan": proposed_rebalancing_plan,
             "funding_adjustments": funding_adjustments,
             "rebalancing_plan": rebal_df.to_dict(orient="records"),
@@ -13101,7 +13100,7 @@ if run_btn:
         }
 
         save_latest_analysis(analysis_payload, CURRENT_USER)
-        if not execution_validation.get("passed"):
+        if not execution_validation.get("passed") and not two_trade_selection:
             auto_prepare_risk_repair(analysis_payload, CURRENT_USER)
         render_saved_analysis(
             saved_analysis_placeholder,
