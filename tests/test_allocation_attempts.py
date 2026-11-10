@@ -32,6 +32,18 @@ def test_failure_categories_do_not_call_input_errors_risk_infeasibility():
     assert "No particular constraint has been diagnosed" in failure_summary({})
 
 
+def test_automatic_is_default_and_can_be_disabled_without_an_optimizer():
+    from streamlit.testing.v1 import AppTest
+    app = AppTest.from_file("tests/adaptive_allocation_ui_fixture.py", default_timeout=10).run()
+    assert not app.exception
+    assert any("Auto-adaptive" in m.value for m in app.markdown)
+    assert app.checkbox[0].value is True
+    app.checkbox[0].uncheck()
+    app.button[0].click().run()
+    assert not app.exception
+    assert any("Mode: manual" in item.value for item in app.caption)
+
+
 def test_controls_apply_without_optimizer_and_survive_new_session(tmp_path):
     from streamlit.testing.v1 import AppTest
     path = str(tmp_path / "fixture.sqlite")
@@ -68,6 +80,12 @@ render_last_attempt('synthetic', connect)
     conn.close()
     second.run()
     assert any("Allocation inputs unavailable" in item.value for item in second.warning)
+    assert second.checkbox[0].value is True
+    second.checkbox[0].uncheck()
+    second.button[0].click().run()
+    third = AppTest.from_string(source, default_timeout=10).run()
+    assert third.checkbox[0].value is False
+    assert any("Mode: manual" in item.value for item in third.caption)
     disabled_source = source.replace("render_policy_controls(DEFAULT_ALLOCATION_POLICY,", "render_policy_controls(dict(DEFAULT_ALLOCATION_POLICY, enabled=False),")
     disabled = AppTest.from_string(disabled_source, default_timeout=10).run()
     assert not disabled.exception

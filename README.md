@@ -273,6 +273,47 @@ incomplete data requires repairing evidence, not increasing risk limits. No risk
 constraint is automatically waived to force an allocation. Older logs without a
 detailed reason cannot retrospectively identify which constraint blocked a fit.
 
+Version v8 enables **automatic allocation feedback** by default. No routine slider
+changes are needed: each optimization and saved-plan risk recheck recalculates from
+the supplied chronological history. It does not schedule background runs or place
+trades. Disable **Automatically adapt to recent 13 sessions** and Apply to retain
+the historical/manual model for that profile; re-enabling restores automatic mode.
+The five existing controls remain explicit ceilings/assumptions, not risk tolerance
+inferred from prices. Legacy saved policies with no adaptive flag keep their old
+semantics. Legacy profile controls inherit the new configured mode until overridden.
+
+The newest of the last 13 observations receives weight 13 and the oldest weight 1
+(effective sample size about 10.11, not 13 independent tail observations). After
+26 observations of warmup, forecasts for each subsequent session are scored only
+after that session is observed. Trend and reversal begin with equal priors: they
+predict symmetric, uncertainty-shrunk deviations from the growing long-history
+mean. Exponentially smoothed log-normalized squared forecast errors update their
+soft weights on a 13-session response scale. At least half of the final forecast
+remains anchored to longer history. Scores are expert weights, not probabilities
+of profit. The objective still shrinks cross-security means and charges funded
+trading costs, rather than treating a volatility increase as extra expected alpha.
+
+A separate recent/long innovation-variance blend learns from past variance forecast
+errors. Recent innovations are measured around the slow mean, so a smooth new
+decline/rally cannot masquerade as zero risk simply because its short mean moved.
+Stress factors cannot drop below 1: position caps tighten immediately and excess
+stress releases exponentially over 13 sessions. Recent covariance is shrunk into
+long-history covariance; newly detected positive-correlation groups supplement the
+original groups, never merge exact inverse exposures. Both a recent-volatility-scaled
+joint block scenario book and the complete unscaled historical book must satisfy
+the same original current-mix tail budget, with separate LP tail constraints.
+Observed returns, crash episodes and loss budgets are not clipped/relaxed to fit.
+Cost assumptions and the compute ceiling are not invented from price volatility.
+
+The saved report shows the mean expert mix across securities, effective stress
+multiplier and tightened-name count. State is deterministically replayed from the
+available prefix, so the same data restarts identically and historical folds cannot
+inherit future state. This is adaptive estimation, not evidence of superior net
+performance or an immutable audit of previously issued forecasts: vendor-revised
+history can change replayed evidence. The whole-process chronological comparison
+remains available to assess net returns, drawdown, tail loss and turnover before
+claiming an improvement. No additional provider requests or library are required.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

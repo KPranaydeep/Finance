@@ -14,6 +14,7 @@ from scipy import sparse
 from scipy.sparse.csgraph import connected_components
 
 from allocation_policy_config import validate_allocation_policy
+from adaptive_allocation import adaptive_state, scaled_risk_scenarios, conditional_objective_means
 
 
 def joint_block_scenarios(log_returns, policy):
@@ -99,6 +100,29 @@ def funded_target(weights, initial, rate):
     raise ValueError("Self-funding calculation did not converge")
 
 
+def policy_evidence(frame, policy):
+    raw = joint_block_scenarios(frame, policy)
+    state = adaptive_state(frame) if policy["adaptive_enabled"] else None
+    samples = scaled_risk_scenarios(raw, state, policy["horizon_sessions"]) if state else raw
+    means = conditional_objective_means(raw, state, policy["horizon_sessions"]) if state else raw.mean(axis=0)
+    return raw, samples, means, state
+
+
+def policy_groups(frame, policy, state):
+    groups = correlated_groups(frame, policy["group_correlation"], policy["block_sessions"])
+    if state is not None:
+        a = state["covariance_blend"]
+        cov = (1-a)*frame.cov().to_numpy() + a*state["recent_covariance"]
+        sd = np.sqrt(np.maximum(np.diag(cov), 0.))
+        denominator = np.outer(sd, sd)
+        corr = np.divide(cov, denominator, out=np.zeros_like(cov), where=denominator > 0)
+        adjacency = corr >= policy["group_correlation"]
+        np.fill_diagonal(adjacency, False)
+        _, labels = connected_components(sparse.csr_matrix(adjacency), directed=False)
+        groups += [np.flatnonzero(labels == g).tolist() for g in sorted(set(labels)) if np.sum(labels == g) > 1]
+    return [list(g) for g in sorted(set(tuple(g) for g in groups))]
+
+
 def build_policy_limits(log_returns, initial, bounds, policy, cost_bps):
     policy = validate_allocation_policy(policy)
     frame = pd.DataFrame(log_returns)
@@ -106,22 +130,26 @@ def build_policy_limits(log_returns, initial, bounds, policy, cost_bps):
     rate = float(cost_bps) / 10000 * policy["cost_stress_multiple"]
     if not math.isfinite(rate) or not 0 <= rate < .25:
         raise ValueError("Invalid modeled cost rate for allocation policy")
-    scenarios = joint_block_scenarios(frame, policy)
+    raw_scenarios, scenarios, means, state = policy_evidence(frame, policy)
     shocks = np.maximum(policy["single_name_shock_floor"],
                         np.maximum(-np.expm1(frame.min().to_numpy(dtype=float)), 0.))
     caps = np.minimum([b[1] for b in bounds], policy["single_name_loss_budget"] / shocks)
-    groups = correlated_groups(frame, policy["group_correlation"], policy["block_sessions"])
+    if state is not None:
+        caps = caps / state["factors"]
+    groups = policy_groups(frame, policy, state)
     limits = {
         "method": policy["method_version"], "settings": policy,
         "position_caps": dict(zip(columns, map(float, caps))),
         "stress_losses": dict(zip(columns, map(float, shocks))),
         "groups": [{"tickers":[columns[i] for i in members], "cap":policy["group_weight_limit"]}
                    for members in groups],
-        "tail_limit": scenario_cvar(scenarios @ initial, policy["confidence"]),
+        "tail_limit": scenario_cvar(raw_scenarios @ initial, policy["confidence"]),
         "current_weights": dict(zip(columns, map(float, initial))),
         "cost_rate": rate,
         "history_through": str(frame.index[-1])[:10],
         "scenario_convention": f"Joint moving-block {policy['horizon_sessions']}-session buy-and-hold returns; costs funded from portfolio",
+        "adaptive": state["summary"] if state else {"enabled": False},
+        "objective_means": dict(zip(columns, map(float, means))),
     }
     return scenarios, limits
 
@@ -136,6 +164,7 @@ def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
     result = {"passed":False, "violations":errors}
     try:
         policy = validate_allocation_policy(limits["settings"])
+        raw_samples, current_samples, objective_means, state = policy_evidence(frame, policy)
         if (not math.isfinite(float(limits["tail_limit"])) or not 0 <= float(limits["tail_limit"]) <= 1
                 or any(not math.isfinite(float(cap)) or not 0 <= float(cap) <= 1
                        for cap in limits["position_caps"].values())
@@ -152,17 +181,18 @@ def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
         shocks = np.maximum(policy["single_name_shock_floor"], daily_shocks)
         for i, ticker in enumerate(columns):
             cap = min(float(limits["position_caps"].get(ticker, 0.)),
-                      policy["single_name_loss_budget"] / max(shocks[i], 1e-12))
+                      policy["single_name_loss_budget"] / max(shocks[i], 1e-12)
+                      / (state["factors"][i] if state is not None else 1.))
             if w[i] > cap + 1e-7:
                 errors.append("Single-security shock budget exceeded: " + str(ticker))
         weights_by_ticker = dict(zip(columns,w))
         group_checks = list(limits["groups"])
         # New positive correlations can tighten, never silently loosen, a saved policy.
         group_checks += [{"tickers":[columns[i] for i in group], "cap":policy["group_weight_limit"]}
-                         for group in correlated_groups(frame, policy["group_correlation"],policy["block_sessions"])]
+                         for group in policy_groups(frame, policy, state)]
         if any(sum(weights_by_ticker.get(t,0.) for t in g["tickers"]) > float(g["cap"]) + 1e-7 for g in group_checks):
             errors.append("Correlated-group exposure limit exceeded")
-        samples = scenarios if scenarios is not None else joint_block_scenarios(frame, policy)
+        samples = current_samples if state is not None or scenarios is None else scenarios
         if scenario_weights is None:
             initial = np.array([limits["current_weights"].get(t,0.) for t in columns])
             exposure, cost = funded_target(w, initial, limits["cost_rate"])
@@ -171,11 +201,15 @@ def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
         if exposure.shape != w.shape or not np.isfinite(exposure).all() or not math.isfinite(cost) or cost < 0:
             raise ValueError("Invalid policy funding exposure")
         cvar = scenario_cvar(samples @ exposure - cost, policy["confidence"])
+        historical_cvar = scenario_cvar(raw_samples @ exposure - cost, policy["confidence"])
         if cvar > float(limits["tail_limit"]) + 1e-7:
             errors.append("Joint-scenario tail loss exceeds the current-portfolio budget")
+        if historical_cvar > float(limits["tail_limit"]) + 1e-7:
+            errors.append("Unscaled historical tail loss exceeds the current-portfolio budget")
         result.update(cvar=cvar, tail_limit=limits["tail_limit"], cost_fraction=cost,
+                      historical_cvar=historical_cvar,
                       mean_net_scenario_return=float(np.mean(samples @ exposure - cost)))
-        means = np.mean(samples, axis=0)
+        means = objective_means
         means = (1-policy["return_shrinkage"]) * means + policy["return_shrinkage"] * np.median(means)
         result["objective_net_return"] = float(means @ exposure - cost)
     except (ValueError, TypeError, KeyError, OverflowError) as exc:
@@ -207,51 +241,65 @@ def solve_risk_aware_allocation(log_returns, allocation, bounds, policy, *, cost
         caps = np.array(list(limits["position_caps"].values()))
         lower = np.array([b[0] for b in bounds])
         report["limits"] = limits
+        report["adaptive"] = limits["adaptive"]
         report["stage"] = "position_and_frozen_capacity"
         if np.any(lower > caps + 1e-9) or caps.sum() < 1 - 1e-9:
             report["status"] = "infeasible"
             raise ValueError("Shock limits and frozen positions cannot form a fully invested allocation")
         report["stage"] = "joint_tail_group_cost_solve"
         rate, confidence = limits["cost_rate"], policy["confidence"]
-        means = samples.mean(axis=0)
+        means = np.array([limits["objective_means"][ticker] for ticker in frame.columns])
         means = (1 - policy["return_shrinkage"]) * means + policy["return_shrinkage"] * np.median(means)
-        # Variables: invested amounts x, trades u, VaR a, tail slacks z, net wealth v.
+        # Each scenario book has its own VaR/tail slack. Adaptive stress can
+        # never dilute the full-history guard by mixing the two distributions.
+        books = [samples]
+        if policy["adaptive_enabled"]:
+            books.append(joint_block_scenarios(frame, policy))
+        k = len(books)
+        aux = k*(m+1)
+        # Variables: x, u, k VaRs, k*m tail slacks, net wealth v.
         # A separate wealth variable keeps cap rows sparse even with 3,000 assets.
         eye = sparse.eye(n,format="csr")
-        zeros = sparse.csr_matrix((n,m+2))
+        zeros = sparse.csr_matrix((n,aux+1))
         matrices = [sparse.hstack([eye,-eye,zeros]), sparse.hstack([-eye,-eye,zeros])]
         rhs = [initial,-initial]
         for multiplier, limit in ((1.,caps),(-1.,lower)):
-            matrices.append(sparse.hstack([multiplier * eye,sparse.csr_matrix((n,n+m+1)),
+            matrices.append(sparse.hstack([multiplier * eye,sparse.csr_matrix((n,n+aux)),
                                            sparse.csr_matrix((-multiplier*limit).reshape(-1,1))]))
             rhs.append(np.zeros(n))
-        matrices.append(sparse.hstack([-sparse.csr_matrix(samples),
-                                       sparse.csr_matrix(np.full((m,n),rate)),
-                                       sparse.csr_matrix(-np.ones((m,1))),-sparse.eye(m),
-                                       sparse.csr_matrix((m,1))]))
-        rhs.append(np.zeros(m))
-        cvar_row = np.r_[np.zeros(2*n),1.,np.full(m,1/((1-confidence)*m)),0.]
-        matrices.append(sparse.csr_matrix(cvar_row.reshape(1,-1)))
-        rhs.append(np.array([limits["tail_limit"]]))
+        for b, book in enumerate(books):
+            var_columns = sparse.csr_matrix((-np.ones(m), (np.arange(m), np.full(m,b))), shape=(m,k))
+            slack_columns = sparse.hstack([sparse.csr_matrix((m,b*m)), -sparse.eye(m),
+                                          sparse.csr_matrix((m,(k-b-1)*m))])
+            matrices.append(sparse.hstack([-sparse.csr_matrix(book),
+                sparse.csr_matrix(np.full((m,n),rate)), var_columns, slack_columns,
+                sparse.csr_matrix((m,1))]))
+            rhs.append(np.zeros(m))
+            cvar_row = np.zeros(2*n+aux+1)
+            cvar_row[2*n+b] = 1.
+            cvar_row[2*n+k+b*m:2*n+k+(b+1)*m] = 1/((1-confidence)*m)
+            matrices.append(sparse.csr_matrix(cvar_row.reshape(1,-1)))
+            rhs.append(np.array([limits["tail_limit"]]))
         for group in limits["groups"]:
             row = np.zeros(n)
             row[[frame.columns.get_loc(t) for t in group["tickers"]]] += 1
-            matrices.append(sparse.csr_matrix(np.r_[row,np.zeros(n+m+1),-group["cap"]].reshape(1,-1)))
+            matrices.append(sparse.csr_matrix(np.r_[row,np.zeros(n+aux),-group["cap"]].reshape(1,-1)))
             rhs.append(np.zeros(1))
-        objective = np.r_[-means,np.full(n,rate),np.zeros(m+2)]
-        budget = np.r_[np.ones(n),np.full(n,rate),np.zeros(m+2)]
-        net_wealth = np.r_[np.ones(n),np.zeros(n+m+1),-1.]
+        objective = np.r_[-means,np.full(n,rate),np.zeros(aux+1)]
+        budget = np.r_[np.ones(n),np.full(n,rate),np.zeros(aux+1)]
+        net_wealth = np.r_[np.ones(n),np.zeros(n+aux),-1.]
         solution = linprog(objective,A_ub=sparse.vstack(matrices,format="csr"),b_ub=np.concatenate(rhs),
                            A_eq=sparse.csr_matrix(np.vstack([budget,net_wealth])),b_eq=[1.,0.],
-                           bounds=[(0.,1.)]*n+[(0.,2.)]*n+[(None,None)]+[(0.,None)]*m+[(0.,1.)],
+                           bounds=[(0.,1.)]*n+[(0.,2.)]*n+[(None,None)]*k+[(0.,None)]*(k*m)+[(0.,1.)],
                            method="highs",options={"time_limit":policy["solver_time_limit_seconds"]})
         report.update(solver_status=int(solution.status), solver_message=str(solution.message))
         if not solution.success:
-            report["status"] = "time_limit" if solution.status == 1 else "infeasible"
+            report["status"] = "time_limit" if solution.status == 1 else "infeasible" if solution.status == 2 else "unavailable"
             report["reason"] = (
                 "Allocation solve reached its time limit; risk constraints were not waived."
                 if solution.status == 1 else
                 "No fully invested mix was found under the joint tail-loss, single-security and correlated-group budgets."
+                if solution.status == 2 else "Allocation solver could not establish a result: " + str(solution.message)
             )
             return None, report
         invested = solution.x[:n]

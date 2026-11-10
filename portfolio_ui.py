@@ -76,6 +76,12 @@ def render_allocation_policy(report):
     selected = report.get("selected")
     with st.container(border=True):
         st.markdown("**Allocation policy · tail loss, costs and concentration**")
+        adaptive = report.get("adaptive") or limits.get("adaptive") or {}
+        if adaptive.get("method"):
+            st.write(f"Auto-adaptive · {adaptive['recent_sessions']} recent sessions · trend {adaptive['trend_share']:.0%} / reversal {adaptive['reversal_share']:.0%} / long-history anchor {adaptive['anchor_share']:.0%}.")
+            st.caption(f"Average model mix across securities, not portfolio allocation. Median stress multiplier {adaptive['median_stress_factor']:.2f}×; {adaptive['stressed_assets']:,} securities tightened. Historical crash and current-mix tail guards remain active. Feedback uses past one-step prediction errors, not proof of future returns.")
+        elif policy.get("adaptive_enabled") is False:
+            st.caption("Manual model · recent adaptive adjustments are disabled for this run.")
         if report.get("constraints_applied"):
             title = ("Risk-aware allocator selected" if selected == "risk-aware" else
                      "Existing allocator retained within the same risk limits" if selected == "incumbent" else

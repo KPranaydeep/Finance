@@ -16,7 +16,7 @@ def fixture(n=6):
     allocation=pd.DataFrame({"Yahoo Ticker":frame.columns,"Quantity":1.,
                              "Weight":[.7]+[.3/(n-1)]*(n-1)})
     policy=dict(DEFAULT_ALLOCATION_POLICY,single_name_loss_budget=.1,scenario_paths=128,
-                minimum_history_sessions=60,group_weight_limit=.5)
+                minimum_history_sessions=60,group_weight_limit=.5,adaptive_enabled=False)
     return frame,allocation,policy
 
 
@@ -141,6 +141,16 @@ def test_timeout_is_not_an_unconstrained_success(monkeypatch):
     monkeypatch.setattr(module,"linprog",lambda *a,**k:SimpleNamespace(status=1,success=False,message="Time limit"))
     weights,report=solve_risk_aware_allocation(frame,allocation,[(0,.5)]*6,policy)
     assert weights is None and report["status"] == "time_limit"
+
+
+def test_solver_numerical_failure_is_not_reported_as_a_too_strict_risk_limit(monkeypatch):
+    import risk_aware_allocator as module
+    from types import SimpleNamespace
+    frame,allocation,policy=fixture()
+    monkeypatch.setattr(module,"linprog",lambda *a,**k:SimpleNamespace(status=4,success=False,message="Numerical issue"))
+    weights,report=solve_risk_aware_allocation(frame,allocation,[(0,.5)]*6,policy)
+    assert weights is None and report["status"] == "unavailable"
+    assert "Numerical issue" in report["reason"]
 
 
 def test_model_fit_ignores_future_rows_when_fitting_a_chronological_fold():

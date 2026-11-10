@@ -19,7 +19,7 @@ def source_fingerprint():
     names = ("chronological_validation.py", "chronological_pipeline.py", "portfolio_rebalancer_database.py",
              "risk_aware_allocator.py", "allocation_integrity.py", "scalable_universe_preselection.py",
              "robust_momentum_filter.py", "portfolio_risk_metrics.py", "price_history_integrity.py",
-             "portfolio_optimizer_config.json", "two_dimensional_search.py")
+             "portfolio_optimizer_config.json", "two_dimensional_search.py", "adaptive_allocation.py", "allocation_policy_config.py")
     digest = hashlib.sha256()
     logic = {"get_daily_log_returns", "select_redundant_tickers", "weight_bounds", "feasible_initial_weights",
              "apply_allocation_policy", "validate_optimizer_allocation", "shrunk_covariance", "portfolio_stats",

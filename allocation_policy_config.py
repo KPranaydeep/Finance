@@ -5,6 +5,7 @@ import math
 
 DEFAULT_ALLOCATION_POLICY = {
     "enabled": True,
+    "adaptive_enabled": True,
     "method_version": "joint-block-cvar-cost-shock-v1",
     "horizon_sessions": 30,
     "confidence": .95,
@@ -23,10 +24,15 @@ DEFAULT_ALLOCATION_POLICY = {
 
 
 def validate_allocation_policy(value):
+    # Retained policies/checkpoints keep their original manual semantics.
+    if isinstance(value, dict) and "adaptive_enabled" not in value:
+        value = dict(value, adaptive_enabled=False)
     if not isinstance(value, dict) or set(value) != set(DEFAULT_ALLOCATION_POLICY):
         raise ValueError("ALLOCATION_POLICY_KEYS_INVALID")
     if not isinstance(value["enabled"], bool) or value["method_version"] != DEFAULT_ALLOCATION_POLICY["method_version"]:
         raise ValueError("ALLOCATION_POLICY_VERSION_INVALID")
+    if not isinstance(value["adaptive_enabled"], bool):
+        raise ValueError("ALLOCATION_POLICY_ADAPTIVE_ENABLED_INVALID")
     integers = {"horizon_sessions": (2, 126), "block_sessions": (1, 30),
                 "scenario_paths": (100, 4096), "random_seed": (0, 2**32 - 1),
                 "minimum_history_sessions": (60, 5000)}
