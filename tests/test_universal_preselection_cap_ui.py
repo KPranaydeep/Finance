@@ -39,7 +39,9 @@ class UniversalPreselectionCapUiTests(unittest.TestCase):
         ]
         self.assertEqual(len(controls), 1)
         keywords = {item.arg: item.value for item in controls[0].keywords}
-        self.assertEqual(ast.literal_eval(keywords["min_value"]), 100)
+        # Advanced search supports Y=50; the execution control must accept its
+        # saved raw peak unchanged when Run optimization applies that pair.
+        self.assertEqual(ast.literal_eval(keywords["min_value"]), 50)
         self.assertEqual(ast.unparse(keywords["value"]), "DEFAULT_EXACT_OPTIMIZER_ASSET_CAP")
         self.assertEqual(ast.literal_eval(keywords["step"]), 50)
 
