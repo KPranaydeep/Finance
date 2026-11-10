@@ -343,6 +343,44 @@ not trades. Only a passing plan displays an executable-order count. Missing lega
 validation shows **Needs validation**. Fixed-weight refreshes are labelled as saved-
 weight checks, never as a new optimizer solve or proof that no allocation exists.
 
+**Sell-only risk reduction** is an independent private draft action. It loads only
+owned adjusted histories from the incremental cache, verifies price integrity and
+FX, and reads current master quantities, pauses and saved frozen restrictions.
+Unknown/quarantined owned history blocks preparation. A bounded mixed-integer
+HiGHS solve minimizes gross sales in demonstrated quantity steps under individual
+caps, positively correlated group caps and separate raw/adaptive joint CVaR books.
+Actual fees affect post-trade weights; stressed fees enter the tail comparisons.
+No buys, borrowing or fully-invested requirement are introduced; proceeds remain
+cash at an explicit zero modeled yield. Historical drawdown/volatility are final
+checks, not constraints in this minimum-turnover objective: a failing proposal
+stays withheld. A solver timeout does not release an unproven incumbent.
+
+The action needs no X/Y discovery and is also attempted when an optimization or
+plan refresh fails for a profile with retained analysis. It stores a separate
+profile-scoped snapshot and append-only attempt archive, leaving saved allocations,
+successful analysis and public publications intact. Holdings, restrictions, policy
+or local-date changes mark a snapshot stale; refresh before using dated quotes.
+Only a current snapshot passing its recorded final checks offers a draft CSV.
+This is a review surface, not a broker order API or a promise to improve XIRR.
+Taxes/tax lots and investment of the cash proceeds are not modeled. Partial
+improvement that still violates required checks is not released as compliant.
+
+The private app's configured cap rule is now a **common ceiling equal to 1.2 ×
+the highest raw risk cap in that analysis**, before intersecting other hard bounds.
+It replaces varied individual caps. Raw caps still come from the base loss-budget,
+observed shock and adaptive factor, so refreshes do not multiply an already raised
+cap by 1.2 again. This intentionally can allow an individual security's modeled
+shock loss above the base loss-budget input; portfolio CVaR, group and final
+execution checks remain active. Old saved policies keep the previous per-security
+rule until explicitly refreshed under the new configured policy.
+
+The personal workspace opens without a nickname-entry screen: it retains the
+current/pinned profile or selects the sole existing non-shared profile. An empty
+database starts as `Personal`. Multiple unpinned profiles require the explicit
+`PORTFOLIO_PERSONAL_PROFILE` environment setting, rather than guessing or merging
+accounts. This removes a profile prompt, not authentication; nickname profiles
+were never an access-control boundary. Publisher/admin controls are unchanged.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell

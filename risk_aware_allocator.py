@@ -141,13 +141,18 @@ def build_policy_limits(log_returns, initial, bounds, policy, cost_bps):
     factors = state["factors"] if state is not None else np.ones(len(columns))
     # Tighten the risk ceiling, never a fixed holding's equality bound. Scaling
     # min(frozen_weight, risk_cap) would make any stressed frozen holding fail.
-    policy_caps = policy["single_name_loss_budget"] / shocks / factors
+    raw_caps = policy["single_name_loss_budget"] / shocks / factors
+    common_cap = min(1., 1.2*float(np.max(raw_caps)))
+    policy_caps = np.full(len(columns),common_cap) if policy["common_cap_enabled"] else raw_caps
     caps = np.minimum(bound_array[:, 1], policy_caps)
     groups = policy_groups(frame, policy, state)
     limits = {
         "method": policy["method_version"], "settings": policy,
         "position_caps": dict(zip(columns, map(float, caps))),
         "policy_position_caps": dict(zip(columns, map(float, policy_caps))),
+        "raw_position_caps": dict(zip(columns, map(float, raw_caps))),
+        "cap_rule": {"mode":"common_120pct_raw_max" if policy["common_cap_enabled"] else "per_security",
+                     "raw_max":float(np.max(raw_caps)), "common_cap":common_cap},
         "position_lower_bounds": dict(zip(columns, map(float, bound_array[:, 0]))),
         "position_upper_bounds": dict(zip(columns, map(float, bound_array[:, 1]))),
         "adaptive_stress_factors": dict(zip(columns, map(float, factors))),
@@ -230,12 +235,14 @@ def check_policy_weights(weights, log_returns, limits, *, scenarios=None,
             raise ValueError("No saved shock budget for " + ", ".join(missing))
         daily_shocks = np.maximum(-np.expm1(frame.min().to_numpy(dtype=float)), 0.)
         shocks = np.maximum(policy["single_name_shock_floor"], daily_shocks)
+        raw_caps = policy["single_name_loss_budget"] / shocks / (state["factors"] if state is not None else 1.)
+        current_caps = np.full(len(columns), min(1.,1.2*float(np.max(raw_caps)))) if policy["common_cap_enabled"] else raw_caps
         for i, ticker in enumerate(columns):
             cap = min(float(limits["position_caps"].get(ticker, 0.)),
-                      policy["single_name_loss_budget"] / max(shocks[i], 1e-12)
-                      / (state["factors"][i] if state is not None else 1.))
+                      float(current_caps[i]))
             if w[i] > cap + 1e-7:
-                errors.append("Single-security shock budget exceeded: " + str(ticker))
+                errors.append(("Single-security position cap exceeded: " if policy["common_cap_enabled"] else
+                               "Single-security shock budget exceeded: ") + str(ticker))
                 result["position_breaches"].append({"ticker": str(ticker),
                     "weight": float(w[i]), "cap": float(cap), "excess": float(w[i]-cap),
                     "shock": float(shocks[i]),

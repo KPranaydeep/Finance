@@ -3,6 +3,14 @@ import math
 
 
 SHOCK_PREFIX = "Single-security shock budget exceeded: "
+CAP_PREFIX = "Single-security position cap exceeded: "
+
+
+def cap_breach_ticker(reason):
+    for prefix in (SHOCK_PREFIX, CAP_PREFIX):
+        if str(reason).startswith(prefix):
+            return str(reason)[len(prefix):]
+    return None
 
 
 def execution_summary_metric(report, executable_count=0):
@@ -10,8 +18,7 @@ def execution_summary_metric(report, executable_count=0):
     if not report:
         return "Plan status", "Needs validation", "Saved plan has no execution check"
     if report.get("passed") is not True:
-        breaches = {str(reason)[len(SHOCK_PREFIX):] for reason in report.get("violations") or []
-                    if str(reason).startswith(SHOCK_PREFIX)}
+        breaches = {t for reason in report.get("violations") or [] if (t := cap_breach_ticker(reason))}
         note = (f"{len(breaches)} {'holding' if len(breaches) == 1 else 'holdings'} over cap · draft withheld"
                 if breaches else "Required checks failed · draft withheld")
         return "Plan status", "Blocked", note
@@ -27,8 +34,7 @@ def execution_position_rows(report, allocation_policy=None):
     the newer threshold or recompute history during a display-only migration.
     An invalidated report whose reasons were replaced must not show stale rows.
     """
-    tickers = {str(reason)[len(SHOCK_PREFIX):] for reason in report.get("violations") or []
-               if str(reason).startswith(SHOCK_PREFIX)}
+    tickers = {t for reason in report.get("violations") or [] if (t := cap_breach_ticker(reason))}
     exact = {row["ticker"]: row for row in (report.get("allocation_policy") or {}).get("position_breaches") or []}
     saved_caps = ((allocation_policy or {}).get("limits") or {}).get("position_caps") or {}
     rows = []

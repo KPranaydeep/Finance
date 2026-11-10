@@ -4,7 +4,7 @@ from __future__ import annotations
 import streamlit as st
 import pandas as pd
 from allocation_attempts import stage_label
-from execution_diagnostics import execution_position_rows, execution_summary_metric, SHOCK_PREFIX
+from execution_diagnostics import execution_position_rows, execution_summary_metric, cap_breach_ticker
 
 
 def render_portfolio_heading(title, description, *, context=None, publication=None):
@@ -59,7 +59,7 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
                     st.caption("Older check: caps shown are retained upper ceilings; any excess shown is a minimum. Exact checked caps were not recorded. Missing values remain unavailable; no history or solver was rerun.")
                 st.caption("A new optimization can change the allocation; Update rebalance plan only resizes it. Frozen-holding conflicts must be resolved before a feasible allocation can be established.")
             for reason in dict.fromkeys(report.get("violations") or ["Validation evidence unavailable"]):
-                if not str(reason).startswith(SHOCK_PREFIX):
+                if cap_breach_ticker(reason) is None:
                     st.write("• " + str(reason))
         else:
             st.info("This older plan has no final allocation check. Use Update plan to validate it without rerunning optimization.")
@@ -131,10 +131,13 @@ def render_allocation_policy(report):
             and not report.get("stage") and "selected" not in report))
     with st.container(border=True):
         st.markdown("**Allocation policy · tail loss, costs and concentration**")
+        cap_rule = limits.get("cap_rule") or {}
+        if cap_rule.get("mode") == "common_120pct_raw_max":
+            st.write(f"Common per-security ceiling {cap_rule['common_cap']:.2%} = 1.2 × highest raw cap {cap_rule['raw_max']:.2%}. Recalculated from raw evidence; other hard bounds still apply.")
         adaptive = report.get("adaptive") or limits.get("adaptive") or {}
         if adaptive.get("method"):
             st.write(f"Auto-adaptive · {adaptive['recent_sessions']} recent sessions · trend {adaptive['trend_share']:.0%} / reversal {adaptive['reversal_share']:.0%} / long-history anchor {adaptive['anchor_share']:.0%}.")
-            st.caption(f"Average model mix across securities, not portfolio allocation. Median stress multiplier {adaptive['median_stress_factor']:.2f}×; {adaptive['stressed_assets']:,} securities tightened. Historical crash and current-mix tail guards remain active. Feedback uses past one-step prediction errors, not proof of future returns.")
+            st.caption(f"Average model mix across securities, not portfolio allocation. Median stress multiplier {adaptive['median_stress_factor']:.2f}×; {adaptive['stressed_assets']:,} raw risk estimates tightened. Historical crash and current-mix tail guards remain active. Feedback uses past one-step prediction errors, not proof of future returns.")
         elif policy.get("adaptive_enabled") is False:
             st.caption("Manual model · recent adaptive adjustments are disabled for this run.")
         if report.get("constraints_applied") and (report.get("candidate") or {}).get("passed") is not False:
@@ -165,7 +168,10 @@ def render_allocation_policy(report):
             st.caption(f"Model history through {limits['history_through']} · {policy.get('scenario_paths',0):,} joint resamples · {activity}.")
         with st.expander("Policy assumptions and allocator comparison", expanded=False):
             if policy:
-                st.write(f"Single-security loss budget {policy['single_name_loss_budget']:.1%}; assumed shock at least {policy['single_name_shock_floor']:.0%}, increased for worse observed daily losses. Correlated groups are capped at {policy['group_weight_limit']:.0%} when linked by positive correlation ≥ {policy['group_correlation']:.2f}.")
+                if policy.get("common_cap_enabled"):
+                    st.write(f"Base loss-budget input {policy['single_name_loss_budget']:.1%} and shock floor {policy['single_name_shock_floor']:.0%} generate raw caps. The shared 1.2× maximum replaces individual caps; it can permit a name's modeled shock loss above that base input. Portfolio tail and group limits remain separate.")
+                else:
+                    st.write(f"Single-security loss budget {policy['single_name_loss_budget']:.1%}; assumed shock at least {policy['single_name_shock_floor']:.0%}, increased for worse observed daily losses. Correlated groups are capped at {policy['group_weight_limit']:.0%} when linked by positive correlation ≥ {policy['group_correlation']:.2f}.")
                 st.caption("These are explicit policy assumptions, not safe-loss limits learned from prices. Negative correlations remain separate. Missing evidence cannot pass.")
                 st.caption(f"Scenario means are shrunk {policy['return_shrinkage']:.0%} toward their cross-security median. Policy CVaR uses joint buy-and-hold scenarios and differs from the separate portfolio-statistics bootstrap.")
                 st.caption("Resampling creates scenarios, not additional independent market history. Neither this comparison nor the configured stress budgets establish future returns or a guaranteed loss bound.")

@@ -43,9 +43,13 @@ def render_policy_controls(defaults, owner, connect, *, max_weight=.5):
             with connect() as conn:
                 save_controls(conn, owner, applied)
             st.success("Risk controls saved for this profile. They apply to the next run.")
-        cap = min(max_weight, applied["single_name_loss_budget"] / applied["single_name_shock_floor"])
+        cap = min(max_weight, applied["single_name_loss_budget"] / applied["single_name_shock_floor"] * (1.2 if applied["common_cap_enabled"] else 1.))
         st.caption("Mode: automatic feedback" if applied["adaptive_enabled"] else "Mode: manual historical model")
-        st.write(f"Maximum per security before adaptive tightening: {cap:.2%}, before any worse observed shock or other bound. Correlated groups: {applied['group_weight_limit']:.0%} at positive correlation ≥ {applied['group_correlation']:.2f}.")
+        if applied["common_cap_enabled"]:
+            st.write(f"Common per-security ceiling: 1.2 × the highest raw risk cap in the current analysis, at most {cap:.2%} under these assumptions. Recomputed before applying the multiplier; no repeated 20% compounding. Other hard bounds remain applicable.")
+            st.caption("This common ceiling replaces individual shock caps and can allow a security's modeled shock loss to exceed the base loss-budget input. Group and portfolio tail-loss limits still apply.")
+        else:
+            st.write(f"Maximum per security before adaptive tightening: {cap:.2%}, before any worse observed shock or other bound. Correlated groups: {applied['group_weight_limit']:.0%} at positive correlation ≥ {applied['group_correlation']:.2f}.")
         st.caption("Auto mode weights the newest of 13 sessions most heavily, retains full-history crash scenarios and updates trend/reversal influence from past forecast errors. At least half of the return forecast stays anchored to longer history. Limits are never raised to force a feasible solve; modeled trading costs still apply.")
         st.caption(f"Tail budget: the current portfolio’s joint {applied['horizon_sessions']}-session {applied['confidence']:.0%} CVaR. At least {applied['minimum_history_sessions']} complete chronological observations and every active owned holding’s history are required. Historical drawdown and target-volatility checks remain separate.")
         st.caption("Input/data failures require repairing the evidence; loosening concentration limits cannot resolve them. A timeout needs more compute time. An infeasible result may require changing a diagnosed binding limit; neither higher limits nor a feasible fit guarantees future returns.")

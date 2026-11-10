@@ -1,5 +1,6 @@
 import base64
 import hmac
+import hashlib
 import importlib
 import importlib.util
 import io
@@ -35,6 +36,9 @@ from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
 from chronological_validation_ui import render_chronological_validation
 from fixed_weight_rebalance import prepare_fixed_universe, rebuild_saved_plan, holdings_fingerprint, target_fingerprint
+from risk_repair import prepare_risk_repair, repair_context, save_repair, verify_owned_history_fresh
+from risk_repair_ui import render_risk_repair
+from personal_profile import resolve_personal_profile
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
 from election_reserve import pack_inr_history, history_from_market_cache
@@ -2701,6 +2705,97 @@ def refresh_portfolio_evidence(payload, *, download=False):
     return history
 
 
+def current_repair_context(payload, owner, extra_frozen=()):
+    with get_db_connection() as conn:
+        pauses = active_trade_deferrals(conn, owner)
+    paused = pauses["yahoo_ticker"].tolist() if not pauses.empty else ()
+    frozen = set((payload.get("history") or {}).get("price_integrity_frozen_owned_weights") or {}) | set(extra_frozen)
+    context = repair_context(load_master_holdings(owner), paused, frozen, ALLOCATION_POLICY,
+                             payload.get("settings") or {}, pd.Timestamp.now(tz="Asia/Kolkata").date())
+    known_evidence = {"updated_at":(payload.get("rebalance_plan_context") or {}).get("updated_at"),
+        "metrics_as_of":payload.get("portfolio_metrics_as_of"), "scenario_updated_at":payload.get("scenario_updated_at"),
+        "marks":[{k:row.get(k) for k in ("Yahoo Ticker","Latest Price","Latest Price INR","FX to INR")}
+                 for row in payload.get("current_allocation") or []]}
+    context["known_evidence"] = hashlib.sha256(json.dumps(known_evidence,sort_keys=True,default=str).encode()).hexdigest()
+    return context
+
+
+def prepare_saved_risk_repair(payload, owner):
+    started_at = datetime.now(timezone.utc).isoformat()
+    try:
+        return _prepare_saved_risk_repair(payload, owner)
+    except Exception as exc:
+        try:
+            context = current_repair_context(payload, owner)
+        except (ValueError, TypeError, KeyError):
+            context = None
+        failed = {"version":"sell-only-risk-repair-v1", "status":"unavailable", "orders":[],
+                  "reason":str(exc), "computed_at":started_at, "optimizer_search_run":False}
+        with get_db_connection() as conn:
+            save_repair(conn, owner, failed, context)
+        raise
+
+
+def _prepare_saved_risk_repair(payload, owner):
+    """Owned-only, fresh cached evidence. No optimizer or forecast ranking call."""
+    context = current_repair_context(payload, owner)
+    current, invalid = build_current_allocation_from_db(owner)
+    if current.empty or invalid:
+        raise ValueError("Resolve invalid current holdings before preparing a risk-reduction draft")
+    owned = current.loc[pd.to_numeric(current["Quantity"], errors="coerce").gt(0)].copy()
+    names = tuple(owned["Yahoo Ticker"])
+    closes, _, _ = sync_market_history(MARKET_HISTORY_CACHE_PATH, names,
+        str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10],
+        str(pd.Timestamp.now(tz="Asia/Kolkata").date()), _fetch_combined_daily_history,
+        batch_size=FULL_HISTORY_BATCH_SIZE, retry_after_hours=0)
+    closes, integrity = apply_price_integrity_gate(closes, owned_tickers=names)
+    freshness = verify_owned_history_fresh(closes, owned, pd.Timestamp.now(tz="UTC"))
+    quarantined = (integrity.loc[integrity["Status"].astype(str).str.startswith("QUARANTINED_"),"Ticker"].tolist()
+                   if not integrity.empty else [])
+    # Quarantined placeholders cannot be treated as a measured risk path.
+    if quarantined:
+        raise ValueError("Owned history is quarantined; repair its evidence first: " + ", ".join(quarantined))
+    converted = {}
+    currencies = dict(zip(owned["Yahoo Ticker"],owned["Currency"]))
+    for ticker in names:
+        if ticker not in closes or closes[ticker].dropna().empty:
+            raise ValueError("Missing owned price history: " + ticker)
+        converted[ticker] = convert_price_history_to_inr(closes[[ticker]].dropna(), [(ticker,currencies[ticker])])[ticker]
+    returns = independent_security_log_returns(pd.DataFrame(converted))
+    returns = returns.reindex(columns=list(names)).replace([np.inf,-np.inf],np.nan).dropna()
+    expected_common = min(row["expected"] for row in freshness.values())
+    if returns.empty or str(returns.index[-1].date()) < expected_common:
+        raise ValueError("Common price/FX history is stale; needs session " + expected_common)
+    prices = get_latest_price_map(list(names))
+    fx = get_fx_to_inr_map(owned["Currency"].tolist())
+    report = prepare_risk_repair(owned, returns, prices, fx, ALLOCATION_POLICY,
+        paused=context["paused"], frozen=context["frozen"], cost_bps=context["cost_bps"],
+        max_weight=MAX_WEIGHT_PER_ASSET, max_drawdown=context["max_drawdown"],
+        target_volatility=context["target_volatility"],
+        covariance=shrunk_covariance(returns) if context["target_volatility"] is not None else None)
+    report["native_history_dates"] = freshness
+    latest = load_latest_analysis(owner) or payload
+    if current_repair_context(latest, owner) != context:
+        raise ValueError("Holdings, restrictions or policy changed during calculation; old draft retained")
+    with get_db_connection() as conn:
+        save_repair(conn, owner, report, context)
+    _app_run_log("risk_repair_prepared", status=report["status"], owned=len(owned),
+                 draft_orders=len(report.get("orders") or []), optimizer_run=False,
+                 elapsed_seconds=report.get("elapsed_seconds"))
+    return report
+
+
+def auto_prepare_risk_repair(payload, owner):
+    if not ALLOCATION_POLICY["enabled"]:
+        return
+    try:
+        with st.spinner("Preparing an independent sell-only risk-reduction draft…"):
+            prepare_saved_risk_repair(payload, owner)
+    except Exception as exc:
+        _app_run_log("risk_repair_unavailable", status="unavailable", error_type=type(exc).__name__)
+        st.warning(f"Normal draft remains withheld; risk-reduction preparation needs attention: {exc}")
+
+
 def update_saved_rebalance_plan(payload, owner):
     """Reprice and resize the saved target against current DB holdings only."""
     started = time.perf_counter()
@@ -2757,6 +2852,8 @@ def update_saved_rebalance_plan(payload, owner):
         raise ValueError("A newer optimization was saved during refresh; update its plan instead")
     candidate["rebalance_plan_context"]["holdings_fingerprint"] = original_holdings
     saved = save_latest_analysis(candidate, owner)
+    if not (candidate.get("execution_validation") or {}).get("passed"):
+        auto_prepare_risk_repair(candidate, owner)
     _app_run_log("rebalance_plan_refresh_finished", status="completed" if (candidate.get("execution_validation") or {}).get("passed") else "withheld", optimizer_run=False,
                  elapsed_seconds=round(time.perf_counter()-started, 3), holdings_analyzed=int(len(owned)),
                  trades=len(plan), target_count=len(targets))
@@ -3116,6 +3213,9 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         render_execution_validation(execution_validation, proposed_rebalancing_plan,
                                     allocation_policy=payload.get("allocation_policy"),
                                     weights_saved_at=(context.get("weights_saved_at") or payload.get("saved_at")) if context.get("optimizer_run") is False else None)
+        render_risk_repair(owner, get_db_connection,
+            lambda: current_repair_context(payload, owner),
+            lambda: prepare_saved_risk_repair(payload, owner), key=widget_scope)
         if payload.get("funding_adjustments"):
             st.caption(f"{len(payload['funding_adjustments'])} proposed buys were reduced or withheld to fit recorded cash and net sale proceeds after costs.")
         rebalance_review = assess_rebalance(current_stats, optimal_stats, payload.get('rebalance_review_orders') or rebalancing_plan, base_value, review_cost_bps)
@@ -8797,36 +8897,19 @@ if recovered_db_path is not None:
         f"`{recovered_db_path.name}`. A new holdings database was created."
     )
 
-st.divider()
-st.subheader("👤 Your profile")
-with st.container(border=True):
-    st.caption(
-        "Holdings and analysis are stored by nickname. Nicknames are not passwords: "
-        "anyone with access to this app who knows a nickname can open its profile."
-    )
-    entered_user = st.text_input(
-        "Enter your name/nickname",
-        value=st.session_state.get("current_user", ""),
-        key="current_user_input",
-        placeholder="e.g. Warren Buffett, Jane Doe, or just your initials",
-    ).strip()
-
-if entered_user != st.session_state.get("current_user", ""):
-    st.session_state["current_user"] = entered_user
+try:
+    with get_db_connection() as profile_conn:
+        CURRENT_USER = resolve_personal_profile(profile_conn,
+            configured=os.getenv("PORTFOLIO_PERSONAL_PROFILE", ""),
+            session_profile=st.session_state.get("current_user", ""), shared_owner=UNIVERSAL_OWNER)
+except ValueError as exc:
+    st.error(str(exc))
+    st.stop()
+if CURRENT_USER != st.session_state.get("current_user", ""):
+    st.session_state["current_user"] = CURRENT_USER
     clear_drop_bottom_coverage_preview()
     st.session_state.pop("drop_bottom_auto_result", None)
     st.session_state.pop("drop_bottom_auto_error", None)
-    st.rerun()
-
-CURRENT_USER = st.session_state.get("current_user", "").strip()
-
-if not CURRENT_USER:
-    st.info("Enter your name above to load your personal holdings and continue.")
-    st.stop()
-
-if CURRENT_USER.lower() == UNIVERSAL_OWNER.lower():
-    st.error("That name is reserved for the shared universal portfolio. Please choose another nickname.")
-    st.stop()
 
 checkpoint_restore_key = f"shortlist_checkpoint_restored::{CURRENT_USER}"
 if not st.session_state.get(checkpoint_restore_key):
@@ -12294,6 +12377,10 @@ if run_btn:
                 render_allocation_policy(policy_result)
             st.error("Portfolio optimization did not return a usable allocation."
                      + (" Final constraint check: " + reasons if reasons else ""))
+            retained = load_latest_analysis(CURRENT_USER)
+            if retained is not None:
+                auto_prepare_risk_repair(retained, CURRENT_USER)
+                render_saved_analysis(saved_analysis_placeholder, CURRENT_USER, instance_key="repair_after_failed_run")
             st.stop()
         solver_screen = meta.get("exact_optimizer_screen") or {}
         history_cache = meta.get("market_history_cache") or {}
@@ -12955,6 +13042,8 @@ if run_btn:
         }
 
         save_latest_analysis(analysis_payload, CURRENT_USER)
+        if not execution_validation.get("passed"):
+            auto_prepare_risk_repair(analysis_payload, CURRENT_USER)
         render_saved_analysis(
             saved_analysis_placeholder,
             CURRENT_USER,

@@ -138,6 +138,7 @@ def configure_saved_refresh(monkeypatch):
         "active_trade_deferrals": lambda *a: pd.DataFrame(),
         "save_latest_analysis": lambda p, owner: saved.append(p) or p,
         "run_portfolio_analysis_multi": lambda *a, **k: pytest.fail("optimizer called"),
+        "prepare_saved_risk_repair": lambda *a, **k: {"status":"blocked"},
     }
     for name, value in replacements.items():
         monkeypatch.setitem(ns, name, value)

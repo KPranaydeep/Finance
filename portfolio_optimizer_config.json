@@ -1,5 +1,5 @@
 {
-  "config_version": "portfolio-optimizer-config-v9-frozen-capacity",
+  "config_version": "portfolio-optimizer-config-v10-common-cap-repair",
   "risk_free_rate_annual": 0.08225,
   "trading_days_per_year": 250,
   "max_weight_per_asset": 0.5,
@@ -7,6 +7,7 @@
   "allocation_policy": {
     "enabled": true,
     "adaptive_enabled": true,
+    "common_cap_enabled": true,
     "method_version": "joint-block-cvar-cost-shock-v1",
     "horizon_sessions": 30,
     "confidence": 0.95,
