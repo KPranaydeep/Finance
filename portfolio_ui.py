@@ -51,6 +51,17 @@ def render_execution_validation(report, proposed_orders=()):
                 st.dataframe(draft, hide_index=True, width="stretch")
 
 
+def empty_trade_plan_message(deferred_count=0, validation=None):
+    if validation is not None and not validation.get("passed"):
+        if not validation:
+            return "Saved plan needs validation. Use Update rebalance plan; optimizer search is not required."
+        reasons = "; ".join(dict.fromkeys(validation.get("violations") or ["Required checks did not pass"]))
+        return "Plan withheld: " + reasons + " Saved analysis and the proposal are retained."
+    if deferred_count:
+        return f"All {deferred_count} proposed trades are currently paused. See their expiry dates below."
+    return "No executable trades in this plan."
+
+
 def render_allocation_policy(report):
     """Compact policy/comparison evidence, without a claim of forecast improvement."""
     if not report:

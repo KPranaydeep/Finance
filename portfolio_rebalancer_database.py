@@ -31,6 +31,7 @@ from allocation_integrity import finalize_weights, fund_buy_orders, execution_ch
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
 from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
+from chronological_validation_ui import render_chronological_validation
 from fixed_weight_rebalance import prepare_fixed_universe, rebuild_saved_plan, holdings_fingerprint, target_fingerprint
 from rebalance_review import assess_rebalance, assess_executable_rebalance, estimate_review_window, review_market_date
 from election_watch_ui import render_election_watch
@@ -113,7 +114,7 @@ from trade_deferrals import (
     split_deferred_trades,
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
-from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy
+from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message
 from portfolio_reserve import (
     calculate_portfolio_reserve_target,
 )
@@ -166,11 +167,9 @@ from universal_portfolio_cleaner import (
     score_price_history,
 )
 
-# Streamlit may retain an already-imported helper module across a hot deploy.
-# Reload only when the running process still has the pre-momentum configuration;
-# a fresh process takes the normal single-import path.
-if not hasattr(_optimizer_config, "ALLOCATION_POLICY"):
-    _optimizer_config = importlib.reload(_optimizer_config)
+# Configuration is a small validated JSON read. Refresh it on script startup so
+# hot deployments cannot keep an obsolete search-compatibility/policy version.
+_optimizer_config = importlib.reload(_optimizer_config)
 
 DEFAULT_HISTORY_START_DATE = _optimizer_config.DEFAULT_HISTORY_START_DATE
 MAX_WEIGHT_PER_ASSET = _optimizer_config.MAX_WEIGHT_PER_ASSET
@@ -3186,6 +3185,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 saved_rebal_df,
                 owner,
                 key_prefix=f"saved_rebalancing_plan_{widget_scope}",
+                validation=execution_validation,
             )
 
         with st.expander("Market, reserve and borrowing details", expanded=False):
@@ -3531,7 +3531,7 @@ def convert_price_history_to_inr(prices, ticker_currency_pairs, fx_histories=Non
             fx = download_fx_history_to_inr(
                 currency, converted.index.min(), converted.index.max()
             )
-        fx = fx.reindex(converted.index).ffill().bfill()
+        fx = fx.reindex(fx.index.union(converted.index)).sort_index().ffill().reindex(converted.index)
         if fx.isna().all():
             raise ValueError(f"FX history for {currency}/INR could not be aligned with {ticker}.")
         converted[ticker] = converted[ticker] * fx
@@ -5442,6 +5442,7 @@ def get_daily_log_returns(
     redundancy_corr_threshold=0.80,
     owned_tickers=(),
     progress_callback=None,
+    _history_snapshot=None,
 ):
     pipeline_started = time.perf_counter()
     stage_timings = {}
@@ -5467,22 +5468,29 @@ def get_daily_log_returns(
             0.02,
             {"currencies": int(len(foreign_currencies))},
         )
-    for currency in foreign_currencies:
-        fx_histories[currency] = download_fx_history_to_inr(
-            currency, start_date, effective_end
-        )
+    if _history_snapshot is not None:
+        fx_histories = {c: s.loc[s.index < pd.Timestamp(effective_end)] for c, s in _history_snapshot[2].items()}
+        if any(currency not in fx_histories for currency in foreign_currencies):
+            raise ValueError("Training-only FX evidence is incomplete")
+    else:
+        for currency in foreign_currencies:
+            fx_histories[currency] = download_fx_history_to_inr(
+                currency, start_date, effective_end
+            )
 
     history_started = time.perf_counter()
-    df, volume_df, history_cache = sync_market_history(
-        MARKET_HISTORY_CACHE_PATH,
-        tuple(symbols),
-        start_date,
-        effective_end,
-        _fetch_combined_daily_history,
-        batch_size=FULL_HISTORY_BATCH_SIZE,
-        retry_after_hours=20,
-        on_progress=progress_callback,
-    )
+    if _history_snapshot is not None:
+        df, volume_df = (_history_snapshot[0].reindex(columns=symbols),
+                         _history_snapshot[1].reindex(columns=symbols))
+        df = df.loc[df.index < pd.Timestamp(effective_end)]
+        volume_df = volume_df.loc[volume_df.index < pd.Timestamp(effective_end)]
+        history_cache = {"source": "training-only research snapshot", "network_requests": 0}
+    else:
+        df, volume_df, history_cache = sync_market_history(
+            MARKET_HISTORY_CACHE_PATH, tuple(symbols), start_date, effective_end,
+            _fetch_combined_daily_history, batch_size=FULL_HISTORY_BATCH_SIZE,
+            retry_after_hours=20, on_progress=progress_callback,
+        )
     df = df.copy()
     volume_df = volume_df.copy()
     stage_timings["history_cache"] = time.perf_counter() - history_started
@@ -5494,14 +5502,19 @@ def get_daily_log_returns(
             {"symbols": int(len(df.columns))},
         )
     integrity_started = time.perf_counter()
-    df, price_integrity_report = apply_price_integrity_gate(
-        df, owned_tickers=owned_tickers,
-        _progress_callback=(
-            lambda details: progress_callback(
-                "Checking price integrity · " + integrity_progress_label(details),
-                0.80, details)
-        ) if progress_callback else None,
-    )
+    if _history_snapshot is not None:
+        # A live corporate-action lookup would expose a past fold to later evidence.
+        # Unresolved historical jumps retain the existing quarantine/freeze rule.
+        df, price_integrity_report = reconcile_price_frame(df, {}, owned_tickers=owned_tickers)
+    else:
+        df, price_integrity_report = apply_price_integrity_gate(
+            df, owned_tickers=owned_tickers,
+            _progress_callback=(
+                lambda details: progress_callback(
+                    "Checking price integrity · " + integrity_progress_label(details),
+                    0.80, details)
+            ) if progress_callback else None,
+        )
     stage_timings["price_integrity"] = time.perf_counter() - integrity_started
 
     price_integrity_report = pd.DataFrame(price_integrity_report)
@@ -5843,15 +5856,39 @@ def validate_optimizer_allocation(weights, log_returns, *, frozen_weights=None,
     )
 
 
+def chronological_research_config():
+    """Expose active policy and data-funnel identity to offline comparisons."""
+    import hashlib
+    import ast
+    from importlib.metadata import version
+    selector_path = Path(select_drop_bottom_tickers.__code__.co_filename)
+    selector_source = selector_path.read_bytes() if selector_path.is_file() else select_drop_bottom_tickers.__code__.co_code
+    if selector_path.is_file():
+        parsed = ast.parse(selector_source.decode("utf-8-sig"))
+        if selector_path.name == Path(__file__).name:
+            parsed = ast.Module(body=[node for node in parsed.body if isinstance(node, ast.FunctionDef)
+                                      and node.name in {select_drop_bottom_tickers.__name__, "_percent_drop_count"}], type_ignores=[])
+        selector_source = ast.dump(parsed, include_attributes=False).encode()
+    return {"allocation_policy": dict(ALLOCATION_POLICY),
+            "runtime_versions": {name: version(name) for name in ("numpy", "pandas", "scipy", "pandas_market_calendars")},
+            "optimizer_config_version": OPTIMIZER_CONFIG_VERSION,
+            "risk_free_rate_annual": RISK_FREE_RATE_ANNUAL, "max_weight_per_asset": MAX_WEIGHT_PER_ASSET,
+            "trading_days_per_year": TRADING_DAYS_PER_YEAR, "momentum_filter": dict(MOMENTUM_FILTER_CONFIG),
+            "market_cap_exclusion_fraction": MARKET_CAP_EXCLUSION_FRACTION,
+            "universal_owner": UNIVERSAL_OWNER,
+            "history_selector_hash": hashlib.sha256(selector_source).hexdigest()}
+
+
 def apply_allocation_policy(incumbent, log_returns, current_alloc, *, frozen_weights=None,
-                            max_dd=None, target_volatility=None, transaction_cost_bps=22.):
+                            max_dd=None, target_volatility=None, transaction_cost_bps=22., policy=None):
     """Compare two allocators under the same explicit policy; no permissive fallback."""
-    if not ALLOCATION_POLICY["enabled"]:
+    policy = ALLOCATION_POLICY if policy is None else policy
+    if not policy["enabled"]:
         return incumbent, {"status":"disabled", "constraints_applied":False}
     challenger, report = solve_risk_aware_allocation(
         log_returns, current_alloc,
         weight_bounds(len(log_returns.columns),log_returns.columns,frozen_weights),
-        ALLOCATION_POLICY, cost_bps=transaction_cost_bps,
+        policy, cost_bps=transaction_cost_bps,
     )
     limits = report.get("limits")
     viable = []
@@ -6162,6 +6199,7 @@ def optimize_prepared_return_matrix(
     integrity_report=None,
     timeout_seconds=None,
     transaction_cost_bps=22.,
+    allocation_policy=None,
 ):
     """Solve one exact-asset limit without rebuilding market history.
 
@@ -6247,6 +6285,7 @@ def optimize_prepared_return_matrix(
         optimal_weights, log_returns, current_alloc, frozen_weights=frozen_weights,
         max_dd=max_dd, target_volatility=target_volatility,
         transaction_cost_bps=transaction_cost_bps,
+        policy=allocation_policy,
     )
     if allocation_policy.get("selected") in {"risk-aware", "incumbent"}:
         allocation_validation = allocation_policy[allocation_policy["selected"] + "_validation"]
@@ -7234,7 +7273,7 @@ def style_rebalance_df(df):
     return sorted_df.style.apply(color_action_row, axis=1).format(formatters, na_rep="N/A")
 
 
-def render_trade_deferral_editor(plan_df, owner, key_prefix):
+def render_trade_deferral_editor(plan_df, owner, key_prefix, *, validation=None):
     """Render executable rows with a persistent 90-day pause control."""
     plan_df = _sort_rebalance_df_for_priority(plan_df)
     if plan_df is not None and not plan_df.empty:
@@ -7303,7 +7342,7 @@ def render_trade_deferral_editor(plan_df, owner, key_prefix):
                 )
                 st.rerun()
     else:
-        st.success("No currently executable trades remain after active pauses.")
+        st.info(empty_trade_plan_message(len(deferred), validation))
 
     if not deferrals.empty:
         paused = deferrals.rename(
@@ -7540,6 +7579,7 @@ def search_universal_shortlist_caps(
     prepared_matrix_store=None,
     on_result=None,
     on_progress=None,
+    _research=None,
 ):
     """Explore shortlist capacity and exact-solver dimensionality.
 
@@ -7560,7 +7600,10 @@ def search_universal_shortlist_caps(
         on_progress(stage, float(np.clip(fraction, 0.0, 1.0)), payload)
 
     report_progress("Loading current holdings", 0.0)
-    portfolio_df, invalid_rows = build_current_allocation_from_db(owner)
+    portfolio_df, invalid_rows = (
+        (_research["allocation"].copy(), []) if _research is not None
+        else build_current_allocation_from_db(owner))
+    pair_solver = _research["solve"] if _research is not None else None
     if portfolio_df.empty:
         raise ValueError("No usable holdings are available for shortlist-cap search.")
 
@@ -7673,6 +7716,10 @@ def search_universal_shortlist_caps(
             if isinstance(prepared_matrix_store, dict)
             else None
         )
+        if cached_prepared is None and _research is not None:
+            cached_prepared = _research["prepare"](int(cap))
+            if isinstance(prepared_matrix_store, dict):
+                prepared_matrix_store[int(cap)] = cached_prepared
         if cached_prepared is not None:
             extended_df, prepared_log_returns, analysis_meta = cached_prepared
             extended_df = extended_df.copy()
@@ -7711,7 +7758,7 @@ def search_universal_shortlist_caps(
 
         largest_exact_limit = max(exact_asset_limits)
         prepare_without_largest_solve = bool(
-            adaptive and two_dimensional and alternating_refinement
+            _research is not None or (adaptive and two_dimensional and alternating_refinement)
         )
         if cached_prepared is None:
             optimal_weights, prepared_log_returns, _, optimal_stats, analysis_meta = (
@@ -7775,7 +7822,7 @@ def search_universal_shortlist_caps(
                 )
             else:
                 pair_weights, pair_returns, _, pair_stats, solver_screen = (
-                    optimize_prepared_return_matrix(
+                    (pair_solver or optimize_prepared_return_matrix)(
                         prepared_log_returns,
                         extended_df.copy(),
                         maximum_assets=int(asset_limit),
@@ -8024,6 +8071,7 @@ def search_universal_shortlist_caps(
                 adaptive=False, asset_evaluation_order=asset_evaluation_order,
                 alternating_refinement=False,
                 transaction_cost_bps=transaction_cost_bps,
+                _research=_research,
             )
             for new_row in refined:
                 pair = (int(new_row["Shortlist cap"]), int(new_row["Maximum assets"]))
@@ -8096,6 +8144,7 @@ def search_universal_shortlist_caps(
                 alternating_refinement=False,
                 prior_results=rows,
                 prepared_matrix_store=prepared_matrix_store,
+                _research=_research,
             )
             prediction_map = (
                 {pair: model_prediction}
@@ -8476,6 +8525,7 @@ def search_universal_shortlist_caps(
             and adaptive
             and two_dimensional
             and len(cap_grid) <= 3
+            and _research is None
         ):
             # Tiny configured searches are cheap enough to retain a prepared
             # history for every cap, even when the LR converges early. This
@@ -11676,6 +11726,9 @@ render_saved_analysis(
     saved_analysis_placeholder,
     CURRENT_USER,
     instance_key="page_load",
+)
+render_chronological_validation(
+    CURRENT_USER, DB_PATH, MARKET_HISTORY_CACHE_PATH, cap_search_config,
 )
 
 st.subheader("Master Holdings", anchor="master-holdings")

@@ -416,7 +416,8 @@ def convert_candidate_history_to_inr(
         if fx is None or fx.empty:
             omitted_currencies.add(currency)
             continue
-        aligned_fx = pd.to_numeric(fx, errors="coerce").reindex(close_history.index).ffill().bfill()
+        numeric_fx = pd.to_numeric(fx, errors="coerce")
+        aligned_fx = numeric_fx.reindex(numeric_fx.index.union(close_history.index)).sort_index().ffill().reindex(close_history.index)
         if aligned_fx.isna().all():
             omitted_currencies.add(currency)
             continue

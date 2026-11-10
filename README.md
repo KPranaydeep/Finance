@@ -201,6 +201,43 @@ finish into that cache after a request window closes, but cannot change the curr
 report. Logs record aggregate timing, checked/deferred counts and quarantine totals;
 saved search pairs, price histories and analysis results are preserved.
 
+### Whole-process chronological validation (P2)
+
+The private app has a separate **Whole-process chronological validation · P2**
+block with **Run / resume chronological test**. It does not run on page load,
+download prices or alter saved optimal weights, holdings, pauses or publications.
+Default scope is three non-overlapping 30-session tests from up to three years of
+cached INR history, a minimum 252-session initial training window, and eight X/Y
+fit attempts per allocator per fold. Each click has a 120-second scheduling window;
+an in-progress bounded solve/preparation can finish afterwards. Resume reuses
+completed trials. The report and private checkpoints survive app/process restarts.
+
+Inside each training prefix the actual production ranking, dated market-cap,
+history/momentum, integrity, duplicate and exact-universe filters and adaptive X/Y
+search run again. The incumbent (P0 checks, P1 disabled) and risk-aware allocator
+are evaluated independently; today's winning pair and personal holdings do not
+seed a historical fit. Both begin with a common synthetic equal-weight basket
+chosen from training coverage. A failed fit explicitly holds its prior research
+mix and counts as a held fold, not a successful model selection. The first forward
+return belongs to prior holdings; trades occur at the next close with gross
+buy/sell costs funded from capital and drifting holdings thereafter.
+
+The compact comparison shows net return, drawdown, observed one-session ES95,
+turnover, modeled costs and compute time, with per-fold evidence below it. Missing
+required forward prices withhold the fold rather than erasing the losing asset.
+Calendar-closed sessions alone may carry a prior native mark; missing open quotes
+and future FX cannot be filled permissively. P2 is conditional on the current
+universe/pause settings and vendor-revised cached prices, not reconstructed
+historical membership/delistings or a broker backtest. Small samples do not prove
+future superiority and never automatically promote a strategy. The existing
+finalist stability gate remains separate and keeps its limited-scope label.
+
+Private research lives beside the holdings database under `chronological_research/`.
+Input data, active configuration and source fingerprints isolate experiments;
+changing them retains prior checkpoint files and starts a new experiment. Version
+v7 also removes FX backward-fill from normal analysis; older search rows remain
+research, while incompatible results cannot silently resume as current fits.
+
 Install dependencies and run the suite from the repository root:
 
 ```powershell
