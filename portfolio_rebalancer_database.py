@@ -3331,13 +3331,12 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 get_connection=get_db_connection,
             )
 
-        st.html('<span id="saved-rebalancing-plan"></span>')
         with st.expander("Saved rebalancing plan", expanded=True):
             with get_db_connection() as conn:
                 research_pauses = active_trade_deferrals(conn, owner)
             render_two_trade_plan(payload, execution_validation,
                 research_pauses["yahoo_ticker"].tolist() if not research_pauses.empty else (),
-                key=f"saved_pair_{widget_scope}",holdings=selection_holdings)
+                key=f"saved_pair_{widget_scope}",holdings=selection_holdings,anchor="saved-rebalancing-plan")
 
         with st.expander("Market, reserve and borrowing details", expanded=False):
             with st.expander("Market backdrop and risk details", expanded=False):

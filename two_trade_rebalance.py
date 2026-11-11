@@ -74,10 +74,13 @@ def saved_annual_lift_pair(payload, holdings=_SAVED_HOLDINGS):
     return select_annual_lift_pair(records,holdings)
 
 
-def render_two_trade_plan(payload, validation=None, paused=(), *, key="two_trade_plan",holdings=_SAVED_HOLDINGS):
+def render_two_trade_plan(payload, validation=None, paused=(), *, key="two_trade_plan",holdings=_SAVED_HOLDINGS,anchor=None):
     import streamlit as st
     pair=saved_annual_lift_pair(payload,holdings)
-    st.markdown("**Rebalance plan · two buys + one sell**")
+    if anchor:
+        st.subheader("Rebalance plan · two buys + one sell",anchor=anchor)
+    else:
+        st.markdown("**Rebalance plan · two buys + one sell**")
     st.caption("Buy 1: highest annual-lift security not currently owned. Buy 2: highest remaining buy, owned or new. Sell: highest annual-lift sell. Selection precedes controls; draft sizes assume no outside income.")
     if pair.empty:
         st.info("No nonzero trade with a recorded annual-lift estimate is available. Update rebalance plan at saved weights; optimizer search is not needed.")
