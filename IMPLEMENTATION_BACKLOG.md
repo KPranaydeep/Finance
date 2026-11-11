@@ -1,5 +1,16 @@
 # Implementation status
 
+## Saved optimal weights image (implemented)
+
+The saved-weights section offers an on-demand PNG in the existing cream/serif
+allocation-card style. It uses saved weights and the saved timestamp/history date,
+groups exact listings by verified native currency, sorts by weight, and marks
+active pauses without changing the saved target. Unpaused-capital scope and
+conditional/review-only status remain explicit. Missing metadata is unavailable.
+No account identity, quantities, prices or public-publication claims are included.
+Rendering is deferred until download (no optimizer, quotes or page rerun); dense
+allocations produce bounded PNG pages in a ZIP rather than omit securities.
+
 ## Exclude paused securities from optimization (implemented)
 
 Active pauses exclude owned and unowned securities before shortlist/history/solver

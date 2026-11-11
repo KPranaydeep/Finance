@@ -124,6 +124,7 @@ from trade_deferrals import (
     split_deferred_trades,
 )
 from trade_deferrals_ui import render_active_security_pauses, render_optimal_weight_pause_editor
+from saved_allocation_image import render_saved_weights_download
 from portfolio_ui import render_metric_strip, render_portfolio_heading, render_execution_validation, render_allocation_policy, empty_trade_plan_message, execution_summary_metric
 from profit_cap_exception import DEFAULT_PROFIT_EXCEPTION, validate_profit_exception, evaluate_profit_cap_exception
 from buy_candidate_watchlist import render_buy_candidates
@@ -3370,6 +3371,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 )
 
         with st.expander("Saved optimal weights · pause securities", expanded=True):
+            render_saved_weights_download(payload,paused_now,key=f"saved_weights_image_{widget_scope}")
             render_optimal_weight_pause_editor(
                 payload.get("optimal_allocation") or [], owner,
                 key_prefix=f"saved_optimal_weights_{widget_scope}",
