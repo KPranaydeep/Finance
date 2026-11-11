@@ -3331,6 +3331,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 get_connection=get_db_connection,
             )
 
+        st.html('<span id="saved-rebalancing-plan"></span>')
         with st.expander("Saved rebalancing plan", expanded=True):
             with get_db_connection() as conn:
                 research_pauses = active_trade_deferrals(conn, owner)
@@ -9092,7 +9093,8 @@ if pending_automatic_best_pair:
 
 with st.sidebar:
     st.markdown(
-        "[Saved decisions](#saved-analysis) · [Run analysis](#run-analysis) · "
+        "[Saved decisions](#saved-analysis) · [Saved rebalancing plan](#saved-rebalancing-plan) · "
+        "[Run analysis](#run-analysis) · "
         "[Holdings](#master-holdings)"
     )
     st.header("Holdings database")
