@@ -175,6 +175,29 @@ def test_app_refresh_persists_new_plan_and_marks_research_weights(monkeypatch):
     assert set(pd.DataFrame(result["security_exit_ranking"])["Yahoo Ticker"]) == {"NEW"}
 
 
+def test_conflict_continuation_refreshes_review_but_preserves_targets_and_new_freezes(monkeypatch):
+    payload,_,ns,saved=configure_saved_refresh(monkeypatch)
+    original=deepcopy(payload)
+    metadata={"status":"completed_with_conflicts","frozen_tickers":["A"],"source_saved_at":payload["saved_at"],
+              "new_allocation_established":False,"reason":"Frozen A exceeds cap"}
+    result=ns["update_saved_rebalance_plan"](payload,"synthetic-owner",allocation_recovery=metadata)
+    assert saved==[result] and payload==original
+    assert result["optimal_allocation"]==payload["optimal_allocation"]
+    assert result["run_id"]==payload["run_id"] and result["saved_at"]==payload["saved_at"]
+    assert result["allocation_recovery"]["refreshed_at"]
+    assert result["history"]["price_integrity_frozen_owned_weights"]=={"A":.4}
+    assert not result["execution_validation"]["passed"]
+    assert any("Frozen position changed" in v for v in result["execution_validation"]["violations"])
+
+
+def test_conflict_continuation_does_not_save_a_refresh_without_current_usable_history(monkeypatch):
+    payload,_,ns,saved=configure_saved_refresh(monkeypatch)
+    monkeypatch.setitem(ns,"refresh_security_scenarios",lambda *a,**k:(pd.DataFrame(),pd.DataFrame(),{}))
+    with pytest.raises(ValueError,match="Insufficient usable"):
+        ns["update_saved_rebalance_plan"](payload,"synthetic-owner",allocation_recovery={"frozen_tickers":[]})
+    assert not saved
+
+
 def test_app_refresh_rejects_concurrent_holdings_edit_before_saving(monkeypatch):
     payload, owned, ns, saved = configure_saved_refresh(monkeypatch)
     changed = owned.copy()

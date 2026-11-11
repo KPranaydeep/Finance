@@ -87,7 +87,7 @@ def prepare_fixed_universe(payload, current_holdings):
 
 def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx_rates,
                        *, plan_builder, stats_builder, paused=(), now=None, allocation_policy_settings=None,
-                       profit_exception_settings=None,two_trade_plan=False):
+                       profit_exception_settings=None,two_trade_plan=False,additional_frozen_tickers=()):
     """Return a complete candidate; failures leave the input saved payload intact."""
     allocation, targets = prepare_fixed_universe(payload, current_holdings)
     from allocation_policy_config import validate_allocation_policy
@@ -131,7 +131,7 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         extra["two_trade_plan"] = True
     if profit_exception_settings is not None:
         extra["profit_exception_settings"] = profit_exception_settings
-    frozen = (payload.get("history") or {}).get("price_integrity_frozen_owned_weights") or {}
+    frozen = set((payload.get("history") or {}).get("price_integrity_frozen_owned_weights") or {}) | set(additional_frozen_tickers)
     if frozen:
         extra["frozen_weights"] = {t:float(w) for t,w in zip(tickers,allocation["Weight"]) if t in frozen}
     plan, missing_prices, missing_alloc = plan_builder(
@@ -164,6 +164,8 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         plan = plan.iloc[:0].copy()
         plan.attrs.update(attributes)
     candidate = deepcopy(payload)
+    if additional_frozen_tickers:
+        candidate.setdefault("history",{})["price_integrity_frozen_owned_weights"] = dict(extra.get("frozen_weights") or {})
     owned_values = dict(zip(allocation["Yahoo Ticker"], allocation["Current Value INR"]))
     orders = plan.to_dict(orient="records")
     common = returns.replace([np.inf, -np.inf], np.nan).dropna()

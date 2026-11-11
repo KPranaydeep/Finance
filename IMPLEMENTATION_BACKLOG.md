@@ -85,6 +85,27 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
 
 ## Profit-based partial release (implemented)
 
+### Allocation-conflict continuation (implemented)
+
+- A frozen position above its canonical risk cap proves that a new fully invested
+  allocation is infeasible. Prepared and full-history paths check this before
+  trying slow incumbent solvers. No cap, freeze or full-investment rule is relaxed.
+- On an infeasible/final-recheck allocation outcome, refresh the last saved target
+  using the independent current-holdings/quotes/30-session-scenario pipeline.
+  Original target weights, run ID, allocation date and publications remain unchanged.
+  New frozen tickers from the failed run/recorded bounds are propagated and marked
+  at current weights before final execution replay.
+- A successful refresh finishes as **Analysis completed with allocation conflict**,
+  with explicit original-allocation and refreshed-review dates. The two buy slots
+  and top sell remain visible with their recorded execution conflicts. Neither a
+  new feasible allocation nor a new approved publication is claimed.
+- **Continue review at saved weights** resumes an existing failed allocation
+  attempt directly, without repeating broad X/Y/history discovery or an optimizer.
+- Missing saved targets, unavailable inputs or a failed/insufficient-history refresh
+  do not become a success. Previous analysis is retained; the genuine data/compute
+  failure remains explicit. Continuation requires usable scenarios and at least
+  126 complete common observations. Existing concurrent-edit/save guards remain.
+
 ### Private rebalance selection: two buys (one new holding) and one sell
 
 The current private plan supersedes the profit-threshold selection UI. Select

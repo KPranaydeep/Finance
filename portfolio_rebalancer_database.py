@@ -30,7 +30,9 @@ from trade_quantities import format_quantity, plan_quantity, quantity_step
 from partial_sell_review import review_partial_sells, partial_sell_caption
 from allocation_integrity import finalize_weights, fund_buy_orders, execution_check
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
-from allocation_attempts import save_attempt, failure_summary, capacity_log_summary
+from allocation_attempts import save_attempt, failure_summary, capacity_log_summary, load_workspace as load_allocation_workspace
+from allocation_conflict_recovery import RECOVERY_NOTE, recover_saved_allocation_review, render_allocation_recovery
+from risk_aware_allocator import build_policy_limits, current_weights as policy_current_weights, position_capacity, capacity_failure_reason
 from allocation_policy_ui import render_policy_controls, render_last_attempt
 from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
@@ -1502,9 +1504,11 @@ def _display_optimization_stage(placeholder, stage, progress, estimated_total_se
     return timer
 
 
-def _finish_optimization_plan_timer():
+def _finish_optimization_plan_timer(completion_note=None):
     timer = st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}
     finished = finish_run_timer(timer, "rebalancing plan generated")
+    if completion_note:
+        finished.update(completion_note=completion_note,finish_event="saved allocation review refreshed")
     st.session_state[OPTIMIZATION_TIMER_KEY] = finished
     return finished
 
@@ -1532,6 +1536,8 @@ def _timer_summary(timer):
             "The estimate adapts after each completed stage.",
         )
     if status == "finished":
+        if timer.get("completion_note"):
+            return "completed_with_conflicts", f"Analysis completed with allocation conflict after **{elapsed}**. {timer['completion_note']}"
         return "finished", f"Run-to-plan time: **{elapsed}** · Rebalancing plan generated"
     if status == "stopped_without_plan":
         stage = str(timer.get("stage") or "Unknown stage")
@@ -2800,7 +2806,7 @@ def auto_prepare_risk_repair(payload, owner):
         st.warning(f"Normal draft remains withheld; risk-reduction preparation needs attention: {exc}")
 
 
-def update_saved_rebalance_plan(payload, owner):
+def update_saved_rebalance_plan(payload, owner, *, allocation_recovery=None):
     """Reprice and resize the saved target against current DB holdings only."""
     started = time.perf_counter()
     _app_run_log("rebalance_plan_refresh_started", optimizer_run=False)
@@ -2817,6 +2823,8 @@ def update_saved_rebalance_plan(payload, owner):
     cost = float(((payload.get("settings") or {}).get("security_scenario_forecast") or {}).get("one_way_cost_bps", 22))
     start = str((payload.get("history") or {}).get("valid_start") or "2000-01-01")[:10]
     ranking, returns, _ = refresh_security_scenarios(review, start, 30, cost, include_history=True)
+    if allocation_recovery and (ranking.empty or len(pd.DataFrame(returns).replace([np.inf,-np.inf],np.nan).dropna()) < 126):
+        raise ValueError("Insufficient usable common history/scenarios for a current saved-allocation review; previous analysis retained")
     prices = get_latest_price_map(review["Yahoo Ticker"].tolist())
     fx = get_fx_to_inr_map(review["Currency"].tolist())
     with get_db_connection() as conn:
@@ -2827,6 +2835,7 @@ def update_saved_rebalance_plan(payload, owner):
         stats_builder=portfolio_stats, paused=paused, allocation_policy_settings=ALLOCATION_POLICY,
         profit_exception_settings=PROFIT_CAP_EXCEPTION,
         two_trade_plan=True,
+        additional_frozen_tickers=(allocation_recovery or {}).get("frozen_tickers",()),
     )
     # Research scores use one common run; position weights come from the new
     # marked holdings rather than the stale snapshot passed to the forecaster.
@@ -2857,6 +2866,12 @@ def update_saved_rebalance_plan(payload, owner):
     if latest and (target_fingerprint(latest) != original_targets or latest.get("run_id") != payload.get("run_id")):
         raise ValueError("A newer optimization was saved during refresh; update its plan instead")
     candidate["rebalance_plan_context"]["holdings_fingerprint"] = original_holdings
+    if allocation_recovery:
+        candidate["allocation_recovery"] = dict(allocation_recovery,
+            refreshed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        completed = finish_run_timer(st.session_state.get(OPTIMIZATION_TIMER_KEY) or {},"saved allocation review refreshed")
+        completed["completion_note"] = RECOVERY_NOTE
+        candidate["run_to_rebalancing_plan_timing"] = serializable_timer(completed)
     saved = save_latest_analysis(candidate, owner)
     if not (candidate.get("execution_validation") or {}).get("passed") and not candidate.get("two_trade_plan"):
         auto_prepare_risk_repair(candidate, owner)
@@ -2865,6 +2880,25 @@ def update_saved_rebalance_plan(payload, owner):
                  trades=len(plan), target_count=len(targets),
                  partial_release=bool(((candidate.get("execution_validation") or {}).get("profit_cap_exception") or {}).get("applied")))
     return saved
+
+
+def continue_saved_allocation_analysis(policy_report,owner,timer_placeholder,saved_placeholder,*,frozen_tickers=()):
+    """User-triggered/current-run continuation; no allocation solver or cap relaxation."""
+    if (st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}).get("status")!="running":
+        st.session_state[OPTIMIZATION_TIMER_KEY]=start_run_timer()
+    _display_optimization_stage(timer_placeholder,"Refreshing saved-allocation candidates and scenarios",0.9)
+    recovery=recover_saved_allocation_review(policy_report,owner,load=load_latest_analysis,
+        refresh=update_saved_rebalance_plan,frozen_tickers=frozen_tickers)
+    if recovery["status"]!="completed_with_conflicts":
+        if recovery.get("reason"):
+            st.warning("Saved-allocation review could not be refreshed: "+recovery["reason"])
+        return False
+    finished=_finish_optimization_plan_timer(completion_note=RECOVERY_NOTE)
+    timer_placeholder.info(_timer_summary(finished)[1])
+    _app_run_log("optimization_finished",status="completed_with_conflicts",new_allocation=False,saved_allocation_refreshed=True)
+    st.session_state.pop("approved_publication_candidate",None)
+    render_saved_analysis(saved_placeholder,owner,instance_key="allocation_conflict_recovery")
+    return True
 
 
 def render_saved_analysis(placeholder, owner, *, instance_key="page"):
@@ -2923,6 +2957,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("Last saved analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        render_allocation_recovery(payload.get("allocation_recovery"))
         context = payload.get("rebalance_plan_context") or {}
         try:
             if selection_holdings is None:
@@ -3221,7 +3256,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             st.caption(
                 "**Run-to-plan time:** "
                 + format_elapsed(run_timing.get("elapsed_seconds"))
-                + (" · Finished when the rebalancing plan was generated." if execution_validation.get("passed")
+                + (" · " + run_timing["completion_note"] if run_timing.get("completion_note") else
+                   " · Finished when the rebalancing plan was generated." if execution_validation.get("passed")
                    else " · Saved analysis runtime; the current draft is withheld pending execution checks.")
             )
 
@@ -6029,6 +6065,27 @@ def chronological_research_config():
             "history_selector_hash": hashlib.sha256(selector_source).hexdigest()}
 
 
+def frozen_policy_preflight(log_returns, current_alloc, frozen_weights, *, policy=None, transaction_cost_bps=22.):
+    """Skip slow exact solves only when canonical bounds prove infeasibility."""
+    policy=ALLOCATION_POLICY if policy is None else policy
+    if not frozen_weights or not policy.get("enabled"):
+        return None
+    started=time.perf_counter()
+    try:
+        initial=policy_current_weights(current_alloc,log_returns.columns)
+        _,limits=build_policy_limits(log_returns,initial,
+            weight_bounds(len(log_returns.columns),log_returns.columns,frozen_weights),policy,transaction_cost_bps)
+        capacity=position_capacity(limits)
+    except (ValueError,TypeError,KeyError):
+        return None  # The normal path reports unavailable evidence; never a guessed cap.
+    if capacity["passed"]:
+        return None
+    return {"status":"infeasible","selected":"none","constraints_applied":False,
+        "preflight":True,"stage":"position_and_frozen_capacity","policy":dict(policy),
+        "limits":limits,"capacity":capacity,"adaptive":limits.get("adaptive"),
+        "reason":capacity_failure_reason(capacity),"elapsed_seconds":time.perf_counter()-started}
+
+
 def apply_allocation_policy(incumbent, log_returns, current_alloc, *, frozen_weights=None,
                             max_dd=None, target_volatility=None, transaction_cost_bps=22., policy=None):
     """Compare two allocators under the same explicit policy; no permissive fallback."""
@@ -6398,6 +6455,12 @@ def optimize_prepared_return_matrix(
         if ticker in quarantined_owned
         and float(allocation_weights.get(ticker, 0.0)) > 0.0
     }
+
+    conflict = frozen_policy_preflight(log_returns,current_alloc,frozen_weights,
+        policy=allocation_policy,transaction_cost_bps=transaction_cost_bps)
+    if conflict:
+        return None,log_returns,None,None,dict(solver_screen or {},frozen_weights=frozen_weights,
+            allocation_policy=conflict,allocation_validation={"passed":False,"violations":[conflict["reason"]]})
 
     try:
         if target_volatility is not None:
@@ -6848,6 +6911,12 @@ def run_portfolio_analysis_multi(
             - {str(ticker).strip().upper() for ticker in log_returns.columns}
         )
         return None, log_returns, None, None, meta
+
+    conflict = frozen_policy_preflight(log_returns,current_alloc,frozen_weights,
+        transaction_cost_bps=transaction_cost_bps)
+    if conflict:
+        meta.update(allocation_policy=conflict,allocation_validation={"passed":False,"violations":[conflict["reason"]]})
+        return None,log_returns,None,None,meta
 
     if progress_callback is not None:
         progress_callback(
@@ -9735,6 +9804,18 @@ with run_analysis_placeholder:
                     optimization_timer_placeholder.warning(timer_text)
                 else:
                     optimization_timer_placeholder.info(timer_text)
+            with get_db_connection() as conn:
+                continuation_attempt=(load_allocation_workspace(conn,CURRENT_USER).get("attempt") or {})
+            if continuation_attempt.get("status") in {"infeasible","failed_recheck"}:
+                if st.button("Continue review at saved weights",key="continue_saved_allocation_review",
+                             help="Refresh saved-weight candidates and scenarios without repeating the broad search. No new allocation is claimed; freezes and risk limits remain in force."):
+                    with st.spinner("Refreshing the saved-allocation review…"):
+                        recovered=continue_saved_allocation_analysis(continuation_attempt,CURRENT_USER,
+                            optimization_timer_placeholder,saved_analysis_placeholder)
+                    if recovered:
+                        st.rerun()
+                    stopped_timer=_abort_optimization_plan_timer("Saved-allocation review could not be refreshed; previous analysis retained")
+                    optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
 
 st.divider()
 render_last_attempt(CURRENT_USER, get_db_connection)
@@ -12419,6 +12500,7 @@ if run_btn:
         )
         policy_log = meta.get("allocation_policy") or {}
         _app_run_log("allocation_policy_checked", status=policy_log.get("status","unavailable"),
+                     preflight=bool(policy_log.get("preflight")),
                      selected=policy_log.get("selected","none"),
                      solver_seconds=policy_log.get("elapsed_seconds"),
                      constraints_applied=bool(policy_log.get("constraints_applied")),
@@ -12432,6 +12514,11 @@ if run_btn:
             st.warning(f"Could not save allocation diagnostics ({type(exc).__name__}); prior analysis is retained.")
 
         if optimal_weights is None:
+            if policy_log.get("status") in {"infeasible","failed_recheck"} and continue_saved_allocation_analysis(
+                policy_log,CURRENT_USER,optimization_timer_placeholder,saved_analysis_placeholder,
+                frozen_tickers=(meta.get("price_integrity_frozen_owned_weights") or
+                    (meta.get("exact_optimizer_screen") or {}).get("frozen_weights") or {}).keys()):
+                st.stop()
             stopped_timer = _abort_optimization_plan_timer(failure_summary(policy_log))
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
             validation = meta.get("allocation_validation") or {}
