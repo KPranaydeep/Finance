@@ -138,3 +138,16 @@ def test_recovery_ui_explicitly_preserves_allocation_provenance():
     assert not app.exception
     assert "No new optimized allocation" in app.info[0].value
     assert "not relaxed" in app.caption[0].value
+
+
+def test_real_run_panel_exposes_independent_saved_review_only_for_conflict():
+    from streamlit.testing.v1 import AppTest
+    app=AppTest.from_file("tests/raw_peak_ui_fixture.py",default_timeout=10).run()
+    assert not app.exception
+    assert not any(b.label=="Continue review at saved weights" for b in app.button)
+    app.session_state["fixture_conflict"]=True
+    app.run()
+    assert not app.exception
+    app.button(key="continue_saved_allocation_review").click().run()
+    assert not app.exception
+    assert app.session_state["fixture_continued_review"]=="infeasible"

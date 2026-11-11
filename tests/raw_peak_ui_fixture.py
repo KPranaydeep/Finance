@@ -22,8 +22,14 @@ tree = ast.parse(Path("portfolio_rebalancer_database.py").read_text(encoding="ut
 action = next(n for n in tree.body if isinstance(n, ast.With)
               and any(isinstance(i.context_expr, ast.Name) and i.context_expr.id == "run_analysis_placeholder" for i in n.items))
 namespace = callback.__globals__
+def continue_review(attempt, owner, timer_slot, saved_slot):
+    st.session_state['fixture_continued_review'] = attempt['status']
+    return True
+
 namespace.update(run_analysis_placeholder=slot, CURRENT_USER="fixture", _start_optimization_at_raw_peak=callback,
                  _timer_summary=lambda timer: None, OPTIMIZATION_TIMER_KEY="fixture_timer",
+                 load_allocation_workspace=lambda conn, owner: {"attempt": {"status": "infeasible"}} if st.session_state.get("fixture_conflict") else {},
+                 continue_saved_allocation_analysis=continue_review, saved_analysis_placeholder=slot,
                  get_unique_holdings_count=lambda owner: st.session_state.get("fixture_holdings_count", 2),
                  universal_preselection_cap=st.session_state["universal_preselection_cap"],
                  exact_optimizer_asset_cap=st.session_state["exact_optimizer_asset_cap"])
