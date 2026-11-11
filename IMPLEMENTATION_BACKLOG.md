@@ -142,7 +142,7 @@ currency/category slots are explicit. Rank separately by annual lift;
 never duplicate a buy, invent a missing slot or unavailable score. Exact ticker
 breaks ties. Any positive quantity, including a tiny fractional holding, means
 owned; zero/absent tickers in a complete known holdings snapshot are non-owned.
-Unknown quantities cannot establish a new holding. Listing-qualified tickers
+Unknown quantities cannot establish a new holding or an owned-holding sell. Listing-qualified tickers
 remain distinct. Saved display uses current master holdings for ownership, so a
 recent purchase changes the new-holding slot without rerunning optimization.
 

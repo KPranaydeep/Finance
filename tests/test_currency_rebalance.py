@@ -69,6 +69,14 @@ def test_partial_currency_pool_never_invents_second_buy_or_owned_sell():
     assert len(selected)==3
 
 
+def test_unknown_current_ownership_cannot_establish_a_currency_sell_or_new_holding_slot():
+    orders,held=fixture()
+    held[0]["Quantity"]=None
+    selected=select_annual_lift_pair(orders,held)
+    assert set(selected["Selection"])=={"Open buy"}
+    assert set(selected["Currency"])=={"INR","USD"}
+
+
 def test_real_core_persists_and_checks_all_six_selections_together():
     import portfolio_optimizer_core as core
     names=[f"{c}_{t}" for c in ("INR","USD") for t in ("NEW","OWNED","EXIT")]

@@ -11,10 +11,14 @@ def orders():
         for t,side,lift in [("BUY_A","Buy",1.),("BUY_B","Buy",4.),("SELL_A","Sell",7.),("SELL_B","Sell",8.)]]
 
 
+def owned_orders():
+    return [{"Yahoo Ticker":r["Yahoo Ticker"],"Quantity":1.} for r in orders()]
+
+
 def test_highest_each_side_not_top_two_overall_and_no_probability_or_profit_threshold():
     source=orders(); before=deepcopy(source)
     source[0]["Return × positive-probability score (%)"]=1000.
-    pair=select_annual_lift_pair(source)
+    pair=select_annual_lift_pair(source,owned_orders())
     assert pair["Yahoo Ticker"].tolist()==["BUY_B","SELL_B"]
     assert pair["Action"].tolist()==["Buy","Sell"]
     assert pair["Executable Value"].tolist()==[100.,100.]
@@ -24,7 +28,7 @@ def test_highest_each_side_not_top_two_overall_and_no_probability_or_profit_thre
 def test_ties_are_deterministic_and_negative_lifts_are_not_silently_hidden():
     source=orders()
     for r in source:r[LIFT]=-1.
-    pair=select_annual_lift_pair(source)
+    pair=select_annual_lift_pair(source,owned_orders())
     assert pair["Yahoo Ticker"].tolist()==["BUY_A","SELL_A"]
 
 
@@ -33,12 +37,12 @@ def test_non_trades_are_not_invented_to_fill_two_slots(bad):
     source=orders()
     for r in source:
         if r["Action"]=="Buy":r["Executable Quantity"]=bad
-    pair=select_annual_lift_pair(source)
+    pair=select_annual_lift_pair(source,owned_orders())
     assert pair["Action"].tolist()==["Sell"]
 
 
 def test_older_saved_draft_works_without_solver_and_prefilter_records_take_priority():
-    p={"proposed_rebalancing_plan":orders(),"execution_validation":{"passed":False}}
+    p={"proposed_rebalancing_plan":orders(),"current_allocation":owned_orders(),"execution_validation":{"passed":False}}
     before=deepcopy(p)
     assert saved_annual_lift_pair(p)["Yahoo Ticker"].tolist()==["BUY_B","SELL_B"]
     assert p==before

@@ -83,6 +83,8 @@ def select_annual_lift_pair(orders, holdings=None, *, excluded_tickers=(), curre
         if owned is not None:
             new=buys.loc[~buys["Yahoo Ticker"].isin(owned)].head(1).copy()
             sells=sells.loc[sells["Yahoo Ticker"].isin(owned)]
+        else:
+            sells=sells.iloc[:0].copy()  # Unknown ownership cannot establish a sell candidate.
         # Each currency gets an open buy distinct from its new-holding buy.
         other=buys.loc[~buys["Yahoo Ticker"].isin(new["Yahoo Ticker"])].head(1).copy()
         sell=sells.head(1).copy()
