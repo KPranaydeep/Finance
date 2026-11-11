@@ -122,17 +122,23 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
   failure remains explicit. Continuation requires usable scenarios and at least
   126 complete common observations. Existing concurrent-edit/save guards remain.
 
-### Private rebalance selection: two buys (one new holding) and one sell
+### Private rebalance selection: currency-specific buy and sell categories
 
 The current private plan supersedes the profit-threshold selection UI. Select
 the highest existing `Expected Annual Return Lift (%)` among non-owned buy
 candidates, then the highest remaining buy (owned or new), and the highest sell
-among current holdings **after excluding active 90-day pauses**, before funding,
+among current holdings **within each currency, after excluding active 90-day pauses**, before funding,
 partial-sell Sharpe, position/tail controls or profit thresholds. Rank the remaining
 eligible pool; keep existing draft quantities with no assumed outside cash or
 resizing. This existing score is a historical
 risk-adjusted annual-lift estimate, distinct from the 30-session probability score.
-The visible plan/CSV has three selected rows when the required candidates exist;
+INR and USD each have a new-holding buy, open buy and top-sell slot: six rows when
+the required candidates exist. Other represented currencies follow the same rule.
+The visible plan and CSV include quote currency; draft values remain INR-normalized.
+Currency comes only from consistent explicit order/listing metadata, including
+exact-ticker metadata retained in older saved allocations; unknown/conflicting
+currencies are excluded, never guessed from ticker spelling or suffix. Missing
+currency/category slots are explicit. Rank separately by annual lift;
 never duplicate a buy, invent a missing slot or unavailable score. Exact ticker
 breaks ties. Any positive quantity, including a tiny fractional holding, means
 owned; zero/absent tickers in a complete known holdings snapshot are non-owned.
@@ -140,12 +146,12 @@ Unknown quantities cannot establish a new holding. Listing-qualified tickers
 remain distinct. Saved display uses current master holdings for ownership, so a
 recent purchase changes the new-holding slot without rerunning optimization.
 
-Active pauses remove a security from all three slots and the selections CSV,
+Active pauses remove a security from every currency/category slot and the selections CSV,
 including older saved drafts. Current profile pauses are read on render, so this
 does not require optimization or a plan refresh. Choose the next eligible security;
 if a slot cannot be filled, show it as unavailable. Raw candidates remain retained
 as evidence and can qualify again after pause expiry. Exact listings and tiny
-fractional ownership remain distinct. Selection mode v3 invalidates older check
+fractional ownership remain distinct. Selection mode v4 invalidates older check
 approval; changed pauses require a fresh sizing/check replay before execution.
 
 Other controls report conflicts without hiding a selected eligible draft. Independent replay

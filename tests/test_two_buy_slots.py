@@ -6,7 +6,7 @@ from two_trade_rebalance import LIFT, MODE, saved_annual_lift_pair, select_annua
 
 
 def orders():
-    return [{"Yahoo Ticker":t,"Action":a,LIFT:score,"Executable Quantity":10.,"Executable Value":100.} for t,a,score in
+    return [{"Yahoo Ticker":t,"Currency":"INR","Action":a,LIFT:score,"Executable Quantity":10.,"Executable Value":100.} for t,a,score in
         [("OWNED","Buy",10.),("NEW_A","Buy",8.),("NEW_B","Buy",7.),("EXIT","Sell",9.)]]
 
 
@@ -98,7 +98,7 @@ def test_ui_labels_mandatory_new_and_unrestricted_buy_and_keeps_sell():
 
 def test_pauses_replace_all_three_slots_without_duplicates_and_keep_exchange_listings_distinct():
     source=orders()+[
-        {"Yahoo Ticker":t,"Action":side,LIFT:score,"Executable Quantity":1.,"Executable Value":10.}
+        {"Yahoo Ticker":t,"Currency":"INR","Action":side,LIFT:score,"Executable Quantity":1.,"Executable Value":10.}
         for t,side,score in [("NEW_C","Buy",6.),("EXIT2","Sell",5.),("NEW_A.NS","Buy",4.)]]
     held=holdings()+[{"Yahoo Ticker":"EXIT2","Quantity":1.}]
     before=deepcopy(source)

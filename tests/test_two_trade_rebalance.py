@@ -7,7 +7,7 @@ from two_trade_rebalance import LIFT, MODE, select_annual_lift_pair, saved_annua
 
 
 def orders():
-    return [{"Yahoo Ticker":t,"Action":side,LIFT:lift,"Executable Quantity":10.,"Executable Value":100.}
+    return [{"Yahoo Ticker":t,"Currency":"INR","Action":side,LIFT:lift,"Executable Quantity":10.,"Executable Value":100.}
         for t,side,lift in [("BUY_A","Buy",1.),("BUY_B","Buy",4.),("SELL_A","Sell",7.),("SELL_B","Sell",8.)]]
 
 
