@@ -23,6 +23,28 @@ def fixture():
     return lr,held,policy,pauses
 
 
+def test_conditional_save_preserves_previous_snapshot_verbatim_and_owner_scoped():
+    from paused_allocation import archive_before_conditional_save
+    research={"pause_allocation_research":{"status":"conditional_research"}}
+    conn=sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE latest_analysis(owner TEXT PRIMARY KEY,saved_at TEXT,payload_json TEXT)")
+    raw='{"optimal_allocation": [{"ticker":"A", "target_weight":1.0}]}'
+    conn.executemany("INSERT INTO latest_analysis VALUES(?,?,?)",[("alice","old",raw),("bob","other","{}")])
+    conn.commit()
+    with conn:
+        archive_before_conditional_save(conn,"alice",research)
+        archive_before_conditional_save(conn,"alice",research)
+    assert conn.execute("SELECT owner,saved_at,payload_json FROM pause_analysis_archive").fetchall()==[("alice","old",raw)]
+    with pytest.raises(RuntimeError):
+        with conn:
+            archive_before_conditional_save(conn,"bob",research)
+            raise RuntimeError("replacement failed")
+    assert conn.execute("SELECT COUNT(*) FROM pause_analysis_archive").fetchone()[0]==1
+    archive_before_conditional_save(conn,"bob",{})
+    assert conn.execute("SELECT COUNT(*) FROM pause_analysis_archive").fetchone()[0]==1
+    conn.close()
+
+
 def test_paused_owned_exposure_is_retained_while_paused_new_candidate_is_removed():
     lr,held,policy,pauses=fixture(); before=held.copy(deep=True)
     allocation,count=prepare_pause_allocation(held,pauses)

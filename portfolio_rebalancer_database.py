@@ -32,7 +32,7 @@ from allocation_integrity import finalize_weights, fund_buy_orders, execution_ch
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
 from allocation_attempts import save_attempt, failure_summary, capacity_log_summary, load_workspace as load_allocation_workspace
 from allocation_conflict_recovery import RECOVERY_NOTE, recover_saved_allocation_review, render_allocation_recovery
-from paused_allocation import prepare_pause_allocation, paused_owned_names, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, NOTE as PAUSE_RESEARCH_NOTE
+from paused_allocation import prepare_pause_allocation, paused_owned_names, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, archive_before_conditional_save, NOTE as PAUSE_RESEARCH_NOTE
 from risk_aware_allocator import build_policy_limits, current_weights as policy_current_weights, position_capacity, capacity_failure_reason
 from allocation_policy_ui import render_policy_controls, render_last_attempt
 from price_move_confirmation import download_confirmation
@@ -2054,7 +2054,7 @@ def make_json_safe(value):
 
 
 def save_latest_analysis(payload, owner):
-    """Persist the latest successful analysis as one row per owner."""
+    """Persist the latest analysis, archiving its predecessor before conditional research."""
     if not isinstance(payload, dict):
         raise ValueError("Analysis payload must be a dictionary.")
 
@@ -2073,6 +2073,7 @@ def save_latest_analysis(payload, owner):
 
     with get_db_connection() as conn:
         conn.execute(LATEST_ANALYSIS_DDL)
+        archive_before_conditional_save(conn, owner, safe_payload)
         conn.execute(
             """
             INSERT INTO latest_analysis (owner, saved_at, payload_json)

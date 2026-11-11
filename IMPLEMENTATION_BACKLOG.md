@@ -33,6 +33,11 @@ of tradable capacity, missing evidence and solver errors remain explicit and do
 not fabricate a fully invested solution. A 100% frozen book exposes zero tradable
 capital rather than pretending it can buy replacements.
 
+Before conditional research replaces the latest analysis, the previous snapshot
+is archived verbatim in the same SQLite transaction (`pause_analysis_archive`),
+scoped to its owner and deduplicated by payload hash. A failed save rolls back
+the archive and replacement together; earlier successful evidence is preserved.
+
 ## Opening cap-search action and scan age (implemented)
 
 `Run / resume cap search` appears directly below `Run optimization` in the first

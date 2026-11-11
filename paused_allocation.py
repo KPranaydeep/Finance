@@ -18,6 +18,22 @@ FLAG = "Paused 90 days"
 NOTE = "Fresh tradable weights calculated; frozen exposure and inherited risk breaches remain explicit. Research only; execution requires strict checks."
 
 
+def archive_before_conditional_save(conn, owner, payload):
+    """Preserve the prior snapshot verbatim in the same transaction as replacement."""
+    if (payload.get("pause_allocation_research") or {}).get("status") != "conditional_research":
+        return
+    conn.execute("""CREATE TABLE IF NOT EXISTS pause_analysis_archive(
+        owner TEXT NOT NULL, payload_hash TEXT NOT NULL, saved_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL, archived_at TEXT NOT NULL,
+        PRIMARY KEY(owner,payload_hash))""")
+    previous=conn.execute("SELECT saved_at,payload_json FROM latest_analysis WHERE owner=?",(owner,)).fetchone()
+    if previous is None:
+        return
+    saved_at,raw=previous
+    conn.execute("""INSERT OR IGNORE INTO pause_analysis_archive VALUES(?,?,?,?,?)""",
+                 (owner,hashlib.sha256(raw.encode()).hexdigest(),saved_at,raw,datetime.now(timezone.utc).isoformat()))
+
+
 def prepare_pause_allocation(allocation, pauses):
     frame=pd.DataFrame(allocation).copy()
     active=set(pauses["yahoo_ticker"].astype(str).str.strip().str.upper()) if pauses is not None and not pauses.empty else set()

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from paused_allocation import archive_before_conditional_save
 
 from shortlist_search_checkpoint import (
     load_latest_checkpoint,
@@ -75,9 +76,21 @@ def _load_saved_analysis_functions(db_path):
         "pd": pd,
         "datetime": datetime,
         "get_db_connection": get_db_connection,
+        "archive_before_conditional_save": archive_before_conditional_save,
     }
     exec(compile(ast.Module(body=selected, type_ignores=[]), "<saved-analysis>", "exec"), namespace)
     return namespace["save_latest_analysis"], namespace["load_latest_analysis"]
+
+
+def test_conditional_analysis_save_keeps_previous_successful_payload(tmp_path):
+    path=tmp_path / "analysis.sqlite"
+    save,load=_load_saved_analysis_functions(path)
+    old=save({"saved_at":"2026-11-10T00:00:00+00:00","optimal_allocation":[{"ticker":"A","target_weight":1.}]},"alice")
+    new=save({"saved_at":"2026-11-11T00:00:00+00:00","pause_allocation_research":{"status":"conditional_research"}},"alice")
+    assert load("alice")==new
+    with sqlite3.connect(path) as conn:
+        archived=conn.execute("SELECT payload_json FROM pause_analysis_archive WHERE owner=?",("alice",)).fetchone()
+    assert json.loads(archived[0])==old
 
 
 def test_saved_analysis_survives_restart_with_json_safe_values(tmp_path):
