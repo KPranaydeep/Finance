@@ -55,11 +55,11 @@ def fixture():
     return held,history,{t:10. for t in names}
 
 
-def test_core_pair_survives_pauses_funding_caps_frozen_positions_and_profit_controls():
+def test_core_pair_survives_funding_caps_frozen_positions_and_profit_controls():
     import portfolio_optimizer_core as core
     held,lr,prices=fixture()
     pair_ids=None
-    for kwargs in ({},{"excluded_trade_tickers":list("ABCD")},{"maximum_weight":.01},
+    for kwargs in ({},{"maximum_weight":.01},
                    {"frozen_weights":{t:.25 for t in "ABCD"}},
                    {"profit_exception_settings":{"enabled":True,"minimum_net_profit_inr":1e9}},
                    {"profit_exception_settings":{"disabled_obsolete_controls":"ignored"}}):
@@ -85,11 +85,12 @@ def test_controls_do_not_call_lower_ranked_substitute_or_funding_resizer(monkeyp
     assert len(plan.attrs["two_trade_plan"])==2
 
 
-def test_ui_shows_two_selected_rows_despite_failed_caps_and_paused_buy():
+def test_ui_excludes_paused_buy_even_in_legacy_saved_plan():
     from streamlit.testing.v1 import AppTest
     app=AppTest.from_file("tests/fixtures/two_trade_app.py").run()
     assert not app.exception
     frame=app.dataframe[0].value
-    assert len(frame)==2 and frame["Action"].tolist()==["Buy","Sell"]
-    assert "Paused" in frame.iloc[0]["Check note"]
+    assert frame["Action"].tolist()==["Sell"]
+    assert "NEW.NS" not in set(frame["Yahoo Ticker"])
+    assert not frame["Check note"].str.contains("Paused").any()
     assert not any("Plan withheld" in x.value for x in app.warning)

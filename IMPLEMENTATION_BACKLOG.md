@@ -127,9 +127,10 @@ full X/Y discovery. Generate a reviewable proposal; never submit trades.
 The current private plan supersedes the profit-threshold selection UI. Select
 the highest existing `Expected Annual Return Lift (%)` among non-owned buy
 candidates, then the highest remaining buy (owned or new), and the highest sell
-among current holdings before pauses, funding, partial-sell Sharpe, position/tail controls or
-profit thresholds. Keep their existing draft quantities; no assumed outside cash,
-resizing or lower-ranked substitution. This existing score is a historical
+among current holdings **after excluding active 90-day pauses**, before funding,
+partial-sell Sharpe, position/tail controls or profit thresholds. Rank the remaining
+eligible pool; keep existing draft quantities with no assumed outside cash or
+resizing. This existing score is a historical
 risk-adjusted annual-lift estimate, distinct from the 30-session probability score.
 The visible plan/CSV has three selected rows when the required candidates exist;
 never duplicate a buy, invent a missing slot or unavailable score. Exact ticker
@@ -139,12 +140,20 @@ Unknown quantities cannot establish a new holding. Listing-qualified tickers
 remain distinct. Saved display uses current master holdings for ownership, so a
 recent purchase changes the new-holding slot without rerunning optimization.
 
-Controls report conflicts without hiding any selected draft. Independent replay
+Active pauses remove a security from all three slots and the selections CSV,
+including older saved drafts. Current profile pauses are read on render, so this
+does not require optimization or a plan refresh. Choose the next eligible security;
+if a slot cannot be filled, show it as unavailable. Raw candidates remain retained
+as evidence and can qualify again after pause expiry. Exact listings and tiny
+fractional ownership remain distinct. Selection mode v3 invalidates older check
+approval; changed pauses require a fresh sizing/check replay before execution.
+
+Other controls report conflicts without hiding a selected eligible draft. Independent replay
 still distinguishes selected drafts from validated executable orders. Public
 scheduled publishing retains its existing strict selection/check behavior. Old
 saved drafts can display the selections without a solver/download; current sizing
 and checks require Update rebalance plan. All pre-control candidates and selections
-persist separately, so a blocked or paused selected order survives restart.
+persist separately, so evidence survives restart without showing a paused pick.
 
 ### Funding-independent buy candidates
 

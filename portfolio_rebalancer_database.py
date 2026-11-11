@@ -2935,7 +2935,10 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             selection_holdings = load_master_holdings(owner)
         except (TypeError,ValueError):
             selection_holdings = None
-        pair = saved_annual_lift_pair(payload,selection_holdings)
+        with get_db_connection() as conn:
+            current_pauses = active_trade_deferrals(conn, owner)
+        paused_now = set(current_pauses["yahoo_ticker"].str.upper()) if not current_pauses.empty else set()
+        pair = saved_annual_lift_pair(payload,selection_holdings,excluded_tickers=paused_now)
         if execution_validation.get("selection_mode") != TWO_TRADE_MODE:
             execution_validation.update(passed=False, pair_validation_available=False)
         execution_validation.update(selection_mode=TWO_TRADE_MODE,selected_trade_count=len(pair))
@@ -2943,9 +2946,6 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         if saved_policy and saved_policy != ALLOCATION_POLICY:
             execution_validation.update(passed=False, violations=["Allocation risk controls changed; use Update rebalance plan to check the saved weights."])
         if execution_validation.get("passed"):
-            with get_db_connection() as conn:
-                current_pauses = active_trade_deferrals(conn, owner)
-            paused_now = set(current_pauses["yahoo_ticker"].str.upper()) if not current_pauses.empty else set()
             if paused_now != set(execution_validation.get("excluded_tickers") or []):
                 execution_validation.update(passed=False, violations=["Pause settings changed; use Update plan to revalidate the final allocation."])
         executable_trade_count = int(
@@ -3369,10 +3369,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
             )
 
         with st.expander("Saved rebalancing plan", expanded=True):
-            with get_db_connection() as conn:
-                research_pauses = active_trade_deferrals(conn, owner)
             render_two_trade_plan(payload, execution_validation,
-                research_pauses["yahoo_ticker"].tolist() if not research_pauses.empty else (),
+                paused_now,
                 key=f"saved_pair_{widget_scope}",holdings=selection_holdings,anchor="saved-rebalancing-plan")
 
         with st.expander("Market, reserve and borrowing details", expanded=False):
@@ -7193,7 +7191,7 @@ def rebalance_plan_multi(current_alloc, optimal_weights, log_returns, prices, da
     # Preserve candidates before pauses, funding and validation suppress orders.
     buy_candidate_orders = rebal_df.loc[rebal_df["Action"].eq("Buy") & rebal_df["Executable Quantity"].gt(0)].to_dict(orient="records")
     if two_trade_plan:
-        pair = select_annual_lift_pair(rebal_df,current_alloc)
+        pair = select_annual_lift_pair(rebal_df,current_alloc,excluded_tickers=excluded_trade_tickers)
         validation = execution_check(current_alloc,pair,prices,log_returns,cost_bps=transaction_cost_bps,
             available_cash_inr=available_cash_inr,excluded_tickers=excluded_trade_tickers,
             frozen_weights=frozen_weights,max_weight=maximum_weight,max_drawdown=max_drawdown,

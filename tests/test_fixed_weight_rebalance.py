@@ -175,6 +175,17 @@ def test_app_refresh_persists_new_plan_and_marks_research_weights(monkeypatch):
     assert set(pd.DataFrame(result["security_exit_ranking"])["Yahoo Ticker"]) == {"NEW"}
 
 
+def test_independent_saved_plan_refresh_excludes_current_pauses_from_persisted_selections(monkeypatch):
+    payload,_,ns,saved=configure_saved_refresh(monkeypatch)
+    monkeypatch.setitem(ns,"active_trade_deferrals",lambda *a:pd.DataFrame({"yahoo_ticker":["A"],"expires_at":["2027-02-09T00:00:00Z"]}))
+    result=ns["update_saved_rebalance_plan"](payload,"synthetic-owner")
+    assert saved==[result]
+    assert "A" not in {r["Yahoo Ticker"] for r in result["two_trade_plan"]}
+    assert "A" not in {r["Yahoo Ticker"] for r in result["rebalancing_plan"]}
+    assert result["optimal_allocation"]==payload["optimal_allocation"]
+    assert "A" in {r["Yahoo Ticker"] for r in result["rebalance_candidate_orders"]}
+
+
 def test_conflict_continuation_refreshes_review_but_preserves_targets_and_new_freezes(monkeypatch):
     payload,_,ns,saved=configure_saved_refresh(monkeypatch)
     original=deepcopy(payload)

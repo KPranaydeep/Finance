@@ -70,18 +70,20 @@ def test_exchange_qualified_listings_remain_distinct_and_unowned_sells_are_not_s
     assert "Sell" not in set(selected["Action"])
 
 
-def test_private_core_persists_three_rows_and_controls_do_not_change_them():
+def test_private_core_persists_three_eligible_rows_after_pause_exclusion():
     import portfolio_optimizer_core as core
     import numpy as np
-    held=pd.DataFrame({"Symbol":list("ABCDE"),"Yahoo Ticker":list("ABCDE"),"Quantity":[40.,30.,30.,0.,0.],"FX to INR":1.,"Currency":"INR"})
-    lr=pd.DataFrame({t:np.full(300,mu) for t,mu in zip("ABCDE",[.004,.001,.002,.003,.0015])},index=pd.bdate_range("2025-01-01",periods=300))
-    plan,_,_=core.rebalance_plan_multi(held,[.2,.1,.3,.25,.15],lr,{t:10. for t in "ABCDE"},1,two_trade_plan=True,excluded_trade_tickers=list("ABCDE"))
+    held=pd.DataFrame({"Symbol":list("ABCDEF"),"Yahoo Ticker":list("ABCDEF"),"Quantity":[40.,30.,30.,0.,0.,0.],"FX to INR":1.,"Currency":"INR"})
+    lr=pd.DataFrame({t:np.full(300,mu) for t,mu in zip("ABCDEF",[.004,.001,.002,.003,.0015,.001])},index=pd.bdate_range("2025-01-01",periods=300))
+    plan,_,_=core.rebalance_plan_multi(held,[.2,.1,.25,.2,.15,.1],lr,{t:10. for t in "ABCDEF"},1,two_trade_plan=True,excluded_trade_tickers=["D"])
     restored=json.loads(json.dumps(plan.attrs["two_trade_plan"]))
     assert [r["Action"] for r in restored]==["Buy","Buy","Sell"]
     assert restored[0]["Yahoo Ticker"]!=restored[1]["Yahoo Ticker"]
+    assert "D" not in {r["Yahoo Ticker"] for r in restored}
     assert plan.attrs["execution_validation"]["selection_mode"]==MODE
     assert plan.attrs["execution_validation"]["selected_trade_count"]==3
-    assert plan.empty  # Recorded pause conflicts are not mislabeled execution approval.
+    if not plan.attrs["execution_validation"]["passed"]:
+        assert plan.empty
 
 
 def test_ui_labels_mandatory_new_and_unrestricted_buy_and_keeps_sell():
@@ -91,3 +93,64 @@ def test_ui_labels_mandatory_new_and_unrestricted_buy_and_keeps_sell():
     frame=app.dataframe[0].value
     assert frame["Action"].tolist()==["Buy","Buy","Sell"]
     assert frame["Selection"].tolist()==["New holding buy","Open buy","Top sell"]
+    assert frame["Yahoo Ticker"].tolist()==["NEW2","OWNED","EXIT"]
+
+
+def test_pauses_replace_all_three_slots_without_duplicates_and_keep_exchange_listings_distinct():
+    source=orders()+[
+        {"Yahoo Ticker":t,"Action":side,LIFT:score,"Executable Quantity":1.,"Executable Value":10.}
+        for t,side,score in [("NEW_C","Buy",6.),("EXIT2","Sell",5.),("NEW_A.NS","Buy",4.)]]
+    held=holdings()+[{"Yahoo Ticker":"EXIT2","Quantity":1.}]
+    before=deepcopy(source)
+    selected=select_annual_lift_pair(source,held,excluded_tickers=[" new_a ","owned","exit"])
+    assert selected["Yahoo Ticker"].tolist()==["NEW_B","NEW_C","EXIT2"]
+    assert selected["Yahoo Ticker"].is_unique and source==before
+    selected=select_annual_lift_pair(source,held,excluded_tickers=["NEW_A","NEW_B","NEW_C","OWNED"])
+    assert selected.iloc[0]["Yahoo Ticker"]=="NEW_A.NS"
+
+
+def test_all_paused_leaves_no_selection_or_executable_order():
+    import portfolio_optimizer_core as core
+    from test_two_trade_rebalance import fixture
+    held,lr,prices=fixture()
+    plan,_,_=core.rebalance_plan_multi(held,[.2,.1,.3,.4],lr,prices,1,two_trade_plan=True,excluded_trade_tickers=list("ABCD"))
+    assert plan.empty and not plan.attrs["two_trade_plan"]
+    assert not plan.attrs["proposed_rebalancing_plan"]
+
+
+def test_saved_pool_reselects_on_restart_and_pause_expiry_without_mutating_payload(tmp_path):
+    import sqlite3
+    from trade_deferrals import defer_trades_for_quarter,active_trade_deferrals
+    path=tmp_path/"pauses.db"
+    payload={"rebalance_candidate_orders":orders(),"current_allocation":holdings()}
+    before=deepcopy(payload)
+    with sqlite3.connect(path) as conn:
+        conn.row_factory=sqlite3.Row
+        defer_trades_for_quarter(conn,"alice",[{"Yahoo Ticker":"NEW_A"},{"Yahoo Ticker":"EXIT"}],now="2026-11-11T00:00:00Z")
+    with sqlite3.connect(path) as conn:
+        conn.row_factory=sqlite3.Row
+        pauses=active_trade_deferrals(conn,"alice",now="2026-11-12T00:00:00Z")
+        selected=saved_annual_lift_pair(json.loads(json.dumps(payload)),excluded_tickers=pauses["yahoo_ticker"])
+        assert selected["Yahoo Ticker"].tolist()==["NEW_B","OWNED"]
+        assert active_trade_deferrals(conn,"bob",now="2026-11-12T00:00:00Z").empty
+        expired=active_trade_deferrals(conn,"alice",now="2027-02-09T00:00:00Z")
+        assert expired.empty
+        assert saved_annual_lift_pair(payload,excluded_tickers=expired["yahoo_ticker"])["Yahoo Ticker"].tolist()==["NEW_A","OWNED","EXIT"]
+    assert payload==before
+
+
+def test_render_and_csv_use_identical_eligible_picks_and_never_reuse_old_check_approval(monkeypatch):
+    import io
+    import streamlit as st
+    from two_trade_rebalance import render_two_trade_plan
+    shown=[]; downloads=[]
+    for name in ("subheader","markdown","caption","info"):
+        monkeypatch.setattr(st,name,lambda *a,**k:None)
+    monkeypatch.setattr(st,"dataframe",lambda frame,**kw:shown.append(frame.copy()))
+    monkeypatch.setattr(st,"download_button",lambda label,data,**kw:downloads.append(data))
+    payload={"rebalance_candidate_orders":orders(),"current_allocation":holdings()}
+    render_two_trade_plan(payload,{"passed":True,"selection_mode":MODE,"excluded_tickers":[]},paused=["NEW_A"])
+    csv=pd.read_csv(io.BytesIO(downloads[0]))
+    assert shown[0]["Yahoo Ticker"].tolist()==csv["Yahoo Ticker"].tolist()==["NEW_B","OWNED","EXIT"]
+    assert not shown[0]["Check note"].eq("Checks passed").any()
+    assert "NEW_A" not in set(csv["Yahoo Ticker"])
