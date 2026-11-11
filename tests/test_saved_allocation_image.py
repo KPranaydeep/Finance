@@ -31,7 +31,7 @@ def test_export_preserves_exact_saved_weights_and_snapshot_without_mutation():
     assert [r[2] for p in spec.panels() for r in p[1]]==[1/26]*26
 
 
-@pytest.mark.parametrize("count,expected",[(1,(1272,1200)),(26,(1272,1316)),(48,(1272,1888))])
+@pytest.mark.parametrize("count,expected",[(1,(1272,1740)),(26,(1272,2090)),(48,(1272,2662))])
 def test_exact_png_dimensions_and_no_clipped_or_overlapping_text(monkeypatch,count,expected):
     source=payload(count);spec=saved_weights_image_spec(source,["SECURITY00"])
     original=FigureCanvasAgg.print_png
@@ -62,7 +62,7 @@ def test_dense_export_contains_every_security_in_bounded_png_pages():
         assert len(archive.namelist())==3
         for name in archive.namelist():
             width,height=Image.open(BytesIO(archive.read(name))).size
-            assert width==1272 and 1200<=height<=1888
+            assert width==1272 and 1740<=height<=2662
 
 
 def test_bad_weights_fail_without_fake_zeroes_and_unknown_metadata_remains_unknown():

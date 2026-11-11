@@ -2715,6 +2715,7 @@ def refresh_portfolio_evidence(payload, *, download=False):
                    next_review_estimate=estimate_review_window(returns,owned,weights,cost_bps=cost,risk_free_rate=RISK_FREE_RATE_ANNUAL),
                    leverage_return_history={'dates':[str(d) for d in returns.index], 'portfolio_log_returns':(returns@targets).tolist()},
                    portfolio_metrics_as_of=str(returns.index[-1].date()), portfolio_evidence_history=history,
+                   portfolio_metrics_config={"risk_free_rate_annual":RISK_FREE_RATE_ANNUAL,"trading_days_per_year":TRADING_DAYS_PER_YEAR},
                    portfolio_metrics_refresh_error=None,
                    leverage_assessment=None, leverage_assessment_error="Portfolio evidence refreshed; older detailed leverage scenarios invalidated. Headline debt uses the refreshed history.",
                    portfolio_evidence_updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds'))
@@ -13102,6 +13103,7 @@ if run_btn:
             executable_rebalance_review = {"decision": "Hold / review — executable comparison could not be completed", "error": str(exc)}
             next_review_estimate = {"sessions": 0, "reason": "review-date inputs unavailable", "metrics": []}
         analysis_payload = {
+            "portfolio_metrics_config":{"risk_free_rate_annual":RISK_FREE_RATE_ANNUAL,"trading_days_per_year":TRADING_DAYS_PER_YEAR},
             "optimization_scope": optimization_scope,
             "pause_allocation_research": dict(policy_log) if conditional_pause_research else None,
             "election_reserve_history": pack_inr_history(

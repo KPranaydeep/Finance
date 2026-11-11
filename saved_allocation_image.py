@@ -6,6 +6,8 @@ import math
 from threading import RLock
 from zipfile import ZipFile, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
+from textwrap import wrap
+from allocation_image_metrics import saved_image_metrics, definition_ribbon
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -26,6 +28,9 @@ class SavedWeightsImage:
     history_label: str
     scope_label: str
     review_only: bool
+    statistics: tuple = ()
+    horizon: int | None = None
+    stats_retained: bool = False
 
     def panels(self):
         currencies=sorted({r[1] for r in self.rows},key=lambda c:({"INR":0,"USD":1}.get(c,2),c))
@@ -71,7 +76,7 @@ def saved_weights_image_spec(payload, paused=()):
         slug=date.strftime("%Y-%m-%d")
     except (ValueError,TypeError):
         saved_label="Saved date unavailable";slug="saved"
-    cutoff=str((payload.get("history") or {}).get("valid_end") or "")[:10]
+    cutoff=str(payload.get("portfolio_metrics_as_of") or (payload.get("history") or {}).get("valid_end") or "")[:10]
     try:
         history_label=datetime.strptime(cutoff,"%Y-%m-%d").strftime("%d %b %Y")
     except ValueError:
@@ -81,8 +86,10 @@ def saved_weights_image_spec(payload, paused=()):
     conditional=any((payload.get(k) or {}).get("status")=="conditional_research" for k in ("pause_allocation_research","allocation_policy"))
     review=conditional or (payload.get("allocation_validation") or {}).get("passed") is not True
     review=review or not math.isclose(sum(r[2] for r in rows),1.,abs_tol=1e-6)
+    statistics,horizon=saved_image_metrics(payload)
     return SavedWeightsImage(tuple(rows),saved_label,slug,history_label,
-        "Unpaused capital only · paused holdings excluded" if scoped else "Saved allocation · portfolio weights",review)
+        "Unpaused capital only · paused holdings excluded" if scoped else "Saved allocation · portfolio weights",review,
+        statistics,horizon,bool(payload.get("portfolio_metrics_refresh_error")))
 
 
 def render_saved_weights_page(spec, page=0):
@@ -91,7 +98,8 @@ def render_saved_weights_page(spec, page=0):
     if not 0<=page<pages:
         raise ValueError("Invalid allocation-image page")
     selected=panels[page*2:page*2+2]
-    height=max(1200,640+max(len(p[1]) for p in selected)*52)
+    stats_height=334
+    height=max(1740,1414+max(len(p[1]) for p in selected)*52)
     paper,ink,muted,accent,rule="#f5f0e6","#29251f","#6b665e","#9f4339","#d8cfbf"
     # Deferred downloads run on worker threads. Keep Matplotlib rendering isolated.
     with _RENDER_LOCK:
@@ -119,25 +127,45 @@ def render_saved_weights_page(spec, page=0):
             text(x,254,label,11,color=muted,bold=True)
             text(x,295,value,20,bold=True)
         text(left,349,spec.scope_label,13,color=muted)
+        line(left,right,375)
+        text(left,402,"PORTFOLIO STATISTICS · CURRENT → OPTIMAL",14,color=accent,bold=True)
+        text(left,430,"Saved analysis · before costs/taxes · fitted weights may differ from rounded allocations"+
+             (" · prior dated statistics retained" if spec.stats_retained else ""),11.5,color=muted,max_width=(right-left)*WIDTH)
+        for i,(label,current,optimal,note) in enumerate(spec.statistics):
+            x=left+(i%4)*.225;y=467+(i//4)*110
+            text(x,y,label,10.5,color=muted,bold=True,max_width=.21*WIDTH)
+            value=f"{current} → {optimal}" if current is not None else optimal
+            text(x,y+34,value,16,bold=True,max_width=.21*WIDTH)
+            text(x,y+66,note,10.2,color=muted,max_width=.21*WIDTH)
+        line(left,right,686)
         panel_width=.415 if len(selected)==2 else .88
         for index,(currency,rows,continued) in enumerate(selected):
             x=left+index*.465;end=x+panel_width
             heading=(currency if currency!="UNAVAILABLE" else "CURRENCY UNAVAILABLE")+(" · continued" if continued else "")
-            text(x,412,heading,15,color=accent,bold=True)
-            text(x,452,"SECURITY",11,color=muted,bold=True)
-            text(end,452,"ALLOCATION",11,color=muted,bold=True,align="right")
-            line(x,end,476,color=ink)
+            text(x,412+stats_height,heading,15,color=accent,bold=True)
+            text(x,452+stats_height,"SECURITY",11,color=muted,bold=True)
+            text(end,452+stats_height,"ALLOCATION",11,color=muted,bold=True,align="right")
+            line(x,end,476+stats_height,color=ink)
             for n,(ticker,_,weight,paused) in enumerate(rows):
-                y=512+n*52
+                y=512+stats_height+n*52
                 if n%2:
                     figure.patches.append(Rectangle((x,1-(y+22)/height),panel_width,44/height,
                         transform=figure.transFigure,facecolor="#f0ebe1",edgecolor="none"))
                 text(x+.005,y,ticker+(" *" if paused else ""),19,bold=True,max_width=(panel_width-.14)*WIDTH)
                 text(end-.005,y,"<0.01%" if weight<.0001 else f"{weight:.2%}",19,color=accent,bold=True,align="right")
-        line(left,right,height-140)
-        text(left,height-104,"Saved model weights · not executed trades. No quantities or prices implied.",12,color=muted)
+        figure.patches.append(Rectangle((left-.012,155/height),right-left+.024,440/height,
+            transform=figure.transFigure,facecolor="#eee6d7",edgecolor="none"))
+        text(left,height-568,"HOW TO READ THESE NUMBERS",14,color=accent,bold=True)
+        for i,(term,definition) in enumerate(definition_ribbon(spec.horizon)):
+            x=left+(i%2)*.465;y=height-526+(i//2)*90
+            text(x,y,term,12,bold=True,max_width=.415*WIDTH)
+            for j,part in enumerate(wrap(definition,66)):
+                text(x,y+23+j*20,part,11.1,color=muted,max_width=.415*WIDTH)
+        text(left,height-142,"Concepts: Sharpe (1994) · Künsch (1989) · Rockafellar & Uryasev (2000). App conventions noted above.",9.5,color=muted)
+        line(left,right,height-116)
+        text(left,height-82,"Saved model weights · not executed trades. Historical and resampled risks are not loss limits.",11.5,color=muted)
         if any(r[3] for r in spec.rows):
-            text(left,height-68,"* Paused now · saved weights retained; trading remains paused.",12,color=muted)
+            text(left,height-49,"* Pause marked in this view · saved weights retained; trading remains subject to current checks.",11.5,color=muted)
         text(right,height-32,f"{page+1} / {pages}",11,color=muted,align="right")
         output=BytesIO()
         figure.canvas.print_png(output)

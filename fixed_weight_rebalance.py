@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from rebalance_review import assess_executable_rebalance, estimate_review_window
-from portfolio_optimizer_config import RISK_FREE_RATE_ANNUAL, MAX_WEIGHT_PER_ASSET, ALLOCATION_POLICY
+from portfolio_optimizer_config import RISK_FREE_RATE_ANNUAL, TRADING_DAYS_PER_YEAR, MAX_WEIGHT_PER_ASSET, ALLOCATION_POLICY
 from risk_aware_allocator import build_policy_limits, current_weights
 
 
@@ -199,6 +199,7 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
             current_stats=stats_builder(allocation["Weight"].to_numpy(), common),
             optimal_stats=stats_builder(weights, common),
             portfolio_metrics_as_of=str(common.index[-1])[:10], portfolio_metrics_refresh_error=None,
+            portfolio_metrics_config={"risk_free_rate_annual":RISK_FREE_RATE_ANNUAL,"trading_days_per_year":TRADING_DAYS_PER_YEAR},
             leverage_return_history={"dates": [str(d) for d in common.index], "portfolio_log_returns": (common @ weights).tolist()},
             leverage_assessment=None, leverage_assessment_error="Plan and current holdings refreshed; older detailed debt scenarios invalidated.",
         )
