@@ -45,19 +45,24 @@ def test_conditional_save_preserves_previous_snapshot_verbatim_and_owner_scoped(
     conn.close()
 
 
-def test_paused_owned_exposure_is_retained_while_paused_new_candidate_is_removed():
+def test_all_paused_securities_are_excluded_without_changing_holdings_or_spending_their_capital():
     lr,held,policy,pauses=fixture(); before=held.copy(deep=True)
     allocation,count=prepare_pause_allocation(held,pauses)
-    assert count==1 and "L" not in set(allocation["Yahoo Ticker"])
-    assert allocation.set_index("Yahoo Ticker").loc["A","Weight"]==.4
-    assert allocation.set_index("Yahoo Ticker").loc["A",FLAG]
+    assert count==2 and not {"A","L"} & set(allocation["Yahoo Ticker"])
+    assert allocation.set_index("Yahoo Ticker").loc["B","Weight"]==1.
+    assert not allocation[FLAG].any()
+    scope=allocation.attrs["optimization_scope"]
+    assert scope["excluded_tickers"]==["A","L"]
+    assert scope["excluded_holdings"]==[before.iloc[0].to_dict()]
+    again,count=prepare_pause_allocation(allocation,pauses)
+    assert count==0 and again.attrs["optimization_scope"]==scope
     assert allocation.attrs["pause_reoptimization"]
     pd.testing.assert_frame_equal(held,before)
 
 
 def test_frozen_cap_conflict_gets_fresh_research_not_saved_weight_reuse_or_fake_approval():
     lr,held,policy,pauses=fixture()
-    held,_=prepare_pause_allocation(held,pauses);lr=lr.drop(columns="L")
+    held=held.loc[held["Yahoo Ticker"].ne("L")];lr=lr.drop(columns="L")
     bounds=[(.4,.4)]+[(0.,.5)]*(len(lr.columns)-1)
     weights,report=solve_frozen_sleeve_research(lr,held,bounds,policy)
     assert weights is not None and np.isclose(weights.sum(),1.)
@@ -74,7 +79,7 @@ def test_frozen_cap_conflict_gets_fresh_research_not_saved_weight_reuse_or_fake_
 
 def test_conditional_lane_preserves_whole_book_tail_reference_and_reports_failed_gates(monkeypatch):
     import paused_allocation as module
-    lr,held,policy,pauses=fixture();held,_=prepare_pause_allocation(held,pauses);lr=lr.drop(columns="L")
+    lr,held,policy,pauses=fixture();held=held.loc[held["Yahoo Ticker"].ne("L")];lr=lr.drop(columns="L")
     real=module.linprog;calls=[]
     def solve(*a,**kw):
         calls.append(kw)
@@ -89,7 +94,7 @@ def test_conditional_lane_preserves_whole_book_tail_reference_and_reports_failed
 
 
 def test_missing_owned_history_and_insufficient_tradable_capacity_are_not_fabricated():
-    lr,held,policy,pauses=fixture();held,_=prepare_pause_allocation(held,pauses)
+    lr,held,policy,pauses=fixture()
     weights,report=solve_frozen_sleeve_research(lr.drop(columns="A"),held,[(0.,.5)]*11,policy)
     assert weights is None and "Owned history missing" in report["reason"]
     weights,report=solve_frozen_sleeve_research(lr[["A","B"]],held,[(.4,.4),(0.,.1)],policy)
@@ -104,13 +109,14 @@ def test_real_full_and_prepared_paths_avoid_slow_incumbents_and_reoptimize_fresh
     monkeypatch.setitem(ns,"get_daily_log_returns",lambda *a,**kw:(lr,{}))
     for name in ("optimize_portfolio_max_return_given_daily_risk","optimize_max_sharpe_ratio"):
         monkeypatch.setitem(ns,name,lambda *a,**kw:pytest.fail("slow incumbent rerun"))
-    weights,_,_,_,meta=core.run_portfolio_analysis_multi(tuple(lr.columns),held,exact_optimizer_asset_cap=12,max_dd=.95)
-    assert weights is not None and weights[0]==pytest.approx(.4)
-    assert meta["allocation_policy"]["status"]=="conditional_research"
-    assert meta["price_integrity_frozen_owned_weights"]=={"A":.4}
-    assert not meta["allocation_validation"]["passed"]
-    weights,_,_,_,meta=core.optimize_prepared_return_matrix(lr,held,maximum_assets=12,max_dd=.95)
-    assert weights is not None and meta["allocation_policy"]["new_allocation_established"]
+    weights,returns,_,_,meta=core.run_portfolio_analysis_multi(tuple(lr.columns),held,exact_optimizer_asset_cap=12,max_dd=.95)
+    assert weights is not None and not {"A","L"} & set(returns.columns)
+    assert meta["allocation_policy"]["status"]=="selected"
+    assert meta["price_integrity_frozen_owned_weights"]=={}
+    assert meta["allocation_validation"]["passed"]
+    weights,returns,_,_,meta=core.optimize_prepared_return_matrix(lr,held,maximum_assets=12,max_dd=.95)
+    assert weights is not None and meta["allocation_validation"]["passed"]
+    assert not {"A","L"} & set(returns.columns)
 
 
 def test_paused_unowned_target_can_get_a_strict_new_allocation_without_research_fallback(monkeypatch):
@@ -122,6 +128,17 @@ def test_paused_unowned_target_can_get_a_strict_new_allocation_without_research_
     assert weights is not None and validation["passed"]
     assert report["status"]=="selected" and report["constraints_applied"]
     assert max(weights)<=.2+1e-7
+
+
+def test_all_owned_capital_paused_does_not_invent_funding_for_new_candidates():
+    import portfolio_optimizer_core as core
+    lr,held,policy,pauses=fixture()
+    pauses.loc[len(pauses)]=["B","2026-11-11T00:00:00Z","2027-02-09T00:00:00Z"]
+    eligible,_=prepare_pause_allocation(held,pauses)
+    assert eligible["Weight"].sum()==0 and eligible["Quantity"].sum()==0
+    weights,report,validation=core.solve_pause_reoptimization(lr[eligible["Yahoo Ticker"]],eligible,{},policy=policy)
+    assert weights is None and "No unpaused invested capital" in report["reason"]
+    assert not validation["passed"]
 
 
 def test_all_frozen_exposure_cannot_be_reallocated_or_fabricate_available_capital():

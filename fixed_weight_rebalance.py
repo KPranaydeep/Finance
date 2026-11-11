@@ -53,6 +53,11 @@ def prepare_fixed_universe(payload, current_holdings):
     """Fresh holdings are authoritative; old quantities are never inherited."""
     targets = saved_targets(payload)
     rows = pd.DataFrame(current_holdings).to_dict(orient="records")
+    scope=payload.get("optimization_scope") or {}
+    excluded=set(scope.get("excluded_tickers") or []) if scope.get("mode")=="unpaused-capital-v1" else set()
+    if set(targets) & excluded:
+        raise ValueError("Saved targets contain paused securities; run optimization for fresh eligible weights")
+    rows=[r for r in rows if str(r.get("Yahoo Ticker","")).strip().upper() not in excluded]
     metadata = {str(r.get("Yahoo Ticker", "")).upper(): r
                 for r in payload.get("current_allocation") or []}
     owned = {}

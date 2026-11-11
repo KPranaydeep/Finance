@@ -20,7 +20,8 @@ NOTE = "Fresh tradable weights calculated; frozen exposure and inherited risk br
 
 def archive_before_conditional_save(conn, owner, payload):
     """Preserve the prior snapshot verbatim in the same transaction as replacement."""
-    if (payload.get("pause_allocation_research") or {}).get("status") != "conditional_research":
+    if ((payload.get("pause_allocation_research") or {}).get("status") != "conditional_research"
+            and not (payload.get("optimization_scope") or {}).get("excluded_tickers")):
         return
     conn.execute("""CREATE TABLE IF NOT EXISTS pause_analysis_archive(
         owner TEXT NOT NULL, payload_hash TEXT NOT NULL, saved_at TEXT NOT NULL,
@@ -35,17 +36,44 @@ def archive_before_conditional_save(conn, owner, payload):
 
 
 def prepare_pause_allocation(allocation, pauses):
+    """Optimize only eligible capital; a pause never implies liquidation/funding."""
     frame=pd.DataFrame(allocation).copy()
+    attributes=dict(getattr(allocation,"attrs",{}))
     active=set(pauses["yahoo_ticker"].astype(str).str.strip().str.upper()) if pauses is not None and not pauses.empty else set()
     names=frame["Yahoo Ticker"].astype(str).str.strip().str.upper()
     owned=pd.to_numeric(frame["Quantity"],errors="coerce")
     if owned.isna().any() or owned.lt(0).any():
         raise ValueError("Valid owned quantities required for pause-aware optimization")
-    keep=~names.isin(active) | owned.gt(0)
+    keep=~names.isin(active)
+    previous=attributes.get("optimization_scope") or {}
+    excluded={str(r["Yahoo Ticker"]).upper():r for r in previous.get("excluded_holdings") or []}
+    excluded.update({str(r["Yahoo Ticker"]).upper():r for r in frame.loc[~keep & owned.gt(0)].to_dict(orient="records")})
     frame=frame.loc[keep].copy()
-    frame[FLAG]=frame["Yahoo Ticker"].astype(str).str.upper().isin(active)
+    weights=pd.to_numeric(frame["Weight"],errors="coerce")
+    if weights.isna().any() or weights.lt(0).any():
+        raise ValueError("Valid current weights required for pause exclusion")
+    total=float(weights.sum())
+    frame["Weight"]=weights/total if total>0 else weights
+    frame[FLAG]=False
+    frame.attrs.update(attributes)
     frame.attrs["pause_reoptimization"]=bool(active)
+    frame.attrs["optimization_scope"]={"mode":"unpaused-capital-v1",
+        "excluded_tickers":sorted(active | set(previous.get("excluded_tickers") or [])),
+        "excluded_holdings":list(excluded.values()),
+        "note":"Weights, metrics and trade sizes apply only to unpaused capital. Paused holdings remain in the holdings database and are not sold or used to fund buys."}
     return frame,int((~keep).sum())
+
+
+def eligible_pause_history(log_returns, allocation):
+    excluded=set((allocation.attrs.get("optimization_scope") or {}).get("excluded_tickers") or [])
+    return log_returns.loc[:,~log_returns.columns.astype(str).str.upper().isin(excluded)].copy()
+
+
+def render_pause_exclusion(scope):
+    if scope and scope.get("mode")=="unpaused-capital-v1" and scope.get("excluded_tickers"):
+        import streamlit as st
+        st.info(f"Optimization excludes {len(scope['excluded_tickers'])} paused securities. "
+                "Weights, risk metrics and trade sizes cover unpaused capital only; paused holdings stay unchanged.")
 
 
 def claim_pause_reoptimization(conn, owner, payload, pauses):
@@ -57,7 +85,7 @@ def claim_pause_reoptimization(conn, owner, payload, pauses):
     if not targets & active:
         return False
     rows=pauses[["yahoo_ticker","deferred_at","expires_at"]].sort_values("yahoo_ticker").to_dict(orient="records")
-    signature=hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest()
+    signature=hashlib.sha256(("exclude-paused-v1:"+json.dumps(rows,sort_keys=True)).encode()).hexdigest()
     conn.execute("CREATE TABLE IF NOT EXISTS pause_allocation_attempts(owner TEXT PRIMARY KEY, signature TEXT NOT NULL, claimed_at TEXT NOT NULL)")
     result=conn.execute("""INSERT INTO pause_allocation_attempts VALUES(?,?,?)
         ON CONFLICT(owner) DO UPDATE SET signature=excluded.signature,claimed_at=excluded.claimed_at

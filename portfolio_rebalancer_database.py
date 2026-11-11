@@ -32,7 +32,7 @@ from allocation_integrity import finalize_weights, fund_buy_orders, execution_ch
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
 from allocation_attempts import save_attempt, failure_summary, capacity_log_summary, load_workspace as load_allocation_workspace
 from allocation_conflict_recovery import RECOVERY_NOTE, recover_saved_allocation_review, render_allocation_recovery
-from paused_allocation import prepare_pause_allocation, paused_owned_names, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, archive_before_conditional_save, NOTE as PAUSE_RESEARCH_NOTE
+from paused_allocation import prepare_pause_allocation, eligible_pause_history, render_pause_exclusion, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, archive_before_conditional_save, NOTE as PAUSE_RESEARCH_NOTE
 from risk_aware_allocator import build_policy_limits, current_weights as policy_current_weights, position_capacity, capacity_failure_reason
 from allocation_policy_ui import render_policy_controls, render_last_attempt
 from price_move_confirmation import download_confirmation
@@ -2964,6 +2964,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
 
         st.subheader("Last saved analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
+        render_pause_exclusion(payload.get("optimization_scope"))
         render_allocation_recovery(payload.get("allocation_recovery"))
         render_pause_research(payload.get("pause_allocation_research") or payload.get("allocation_policy"))
         context = payload.get("rebalance_plan_context") or {}
@@ -4460,6 +4461,9 @@ def extend_allocation_with_universal_candidates(
     Returns (extended_df, added_symbols, preselection_summary).
     """
     candidate_cap = max(int(maximum_candidates), 1)
+    with get_db_connection() as conn:
+        quarterly_deferrals = active_trade_deferrals(conn, owner) if owner else pd.DataFrame()
+    portfolio_df, _ = prepare_pause_allocation(portfolio_df, quarterly_deferrals)
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
     if universal_df.empty:
         return portfolio_df, [], {
@@ -4609,6 +4613,7 @@ def extend_allocation_with_universal_candidates(
         }
 
     extended_df = pd.concat([portfolio_df, pd.DataFrame(rows)], ignore_index=True)
+    extended_df.attrs.update(portfolio_df.attrs)
     return extended_df, added_symbols, {
         "method": "scalable-preselection-v1",
         "eligible": eligible_count,
@@ -6096,6 +6101,9 @@ def frozen_policy_preflight(log_returns, current_alloc, frozen_weights, *, polic
 def solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,*,policy=None,max_dd=None,target_volatility=None,transaction_cost_bps=22.):
     """Try a strict fresh solve first; inherited conflicts get explicit new research."""
     policy=ALLOCATION_POLICY if policy is None else policy
+    if not pd.to_numeric(current_alloc.loc[pd.to_numeric(current_alloc["Quantity"],errors="coerce").gt(0),"Weight"],errors="coerce").sum()>0:
+        reason="No unpaused invested capital is available; paused holdings were excluded and cannot fund replacement buys."
+        return None,{"status":"unavailable","selected":"none","constraints_applied":False,"reason":reason},{"passed":False,"violations":[reason]}
     weights,report=apply_allocation_policy(None,log_returns,current_alloc,frozen_weights=frozen_weights,
         max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps,policy=policy)
     if weights is None and report.get("status") in {"infeasible","failed_recheck"}:
@@ -6455,7 +6463,7 @@ def optimize_prepared_return_matrix(
         )
     )
     log_returns, solver_screen = screen_log_returns_for_exact_optimizer(
-        prepared_log_returns,
+        eligible_pause_history(prepared_log_returns,current_alloc),
         maximum_assets=int(maximum_assets),
         owned_tickers=owned_tickers,
     )
@@ -6476,7 +6484,6 @@ def optimize_prepared_return_matrix(
         .groupby("Yahoo Ticker", sort=False)["_weight"]
         .sum()
     )
-    quarantined_owned |= paused_owned_names(current_alloc)
     frozen_weights = {
         ticker: float(allocation_weights.get(ticker, 0.0))
         for ticker in log_returns.columns
@@ -6888,7 +6895,7 @@ def run_portfolio_analysis_multi(
         )
     )
     log_returns, meta = get_daily_log_returns(
-        tuple(symbols),
+        tuple(t for t in symbols if str(t).upper() not in set((current_alloc.attrs.get("optimization_scope") or {}).get("excluded_tickers") or [])),
         drop_bottom_pct=drop_bottom_pct,
         buffer_days=buffer_days,
         ticker_currency_pairs=ticker_currency_pairs,
@@ -6896,6 +6903,7 @@ def run_portfolio_analysis_multi(
         owned_tickers=owned_tickers,
         progress_callback=progress_callback,
     )
+    log_returns=eligible_pause_history(log_returns,current_alloc)
     screen_started = time.perf_counter()
     if progress_callback is not None:
         progress_callback(
@@ -6929,7 +6937,6 @@ def run_portfolio_analysis_multi(
         .groupby("Yahoo Ticker", sort=False)["_weight"]
         .sum()
     )
-    quarantined_owned |= paused_owned_names(current_alloc)
     frozen_weights = {
         ticker: float(allocation_weights.get(ticker, 0.0))
         for ticker in log_returns.columns
@@ -12374,16 +12381,14 @@ if run_btn:
                     owner=CURRENT_USER,
                     progress_callback=report_shortlist_progress,
                 )
-        # Exclude paused new candidates; keep paused owned exposure in whole-book risk.
-        execution_allocation = portfolio_df.copy()
+        # Paused capital is outside the optimization and cannot fund its trades.
         portfolio_df, paused_solver_excluded = prepare_pause_allocation(
             portfolio_df,
             active_solver_deferrals,
         )
-        if paused_solver_excluded:
-            st.info(
-                f"Excluded {int(paused_solver_excluded):,} paused unowned candidates. Paused owned holdings remain frozen in full-portfolio risk accounting."
-            )
+        execution_allocation = portfolio_df.copy()
+        optimization_scope = portfolio_df.attrs.get("optimization_scope") or {}
+        render_pause_exclusion(optimization_scope)
         if portfolio_df.empty:
             stopped_timer = _abort_optimization_plan_timer("all holdings paused")
             optimization_timer_placeholder.warning(_timer_summary(stopped_timer)[1])
@@ -12470,7 +12475,7 @@ if run_btn:
         with col2:
             total_invested = float(portfolio_df["Invested INR"].sum())
             total_current_value = float(portfolio_df["Current Value INR"].sum())
-            st.metric("Holdings in database", int((portfolio_df["Quantity"] > 0).sum()))
+            st.metric("Holdings in this analysis", int((portfolio_df["Quantity"] > 0).sum()))
             st.metric("Cost basis (INR @ current FX)", f"₹{total_invested:,.2f}")
             st.metric("Current portfolio value", f"₹{total_current_value:,.2f}")
 
@@ -13095,6 +13100,7 @@ if run_btn:
             executable_rebalance_review = {"decision": "Hold / review — executable comparison could not be completed", "error": str(exc)}
             next_review_estimate = {"sessions": 0, "reason": "review-date inputs unavailable", "metrics": []}
         analysis_payload = {
+            "optimization_scope": optimization_scope,
             "pause_allocation_research": dict(policy_log) if conditional_pause_research else None,
             "election_reserve_history": pack_inr_history(
                 log_returns,
@@ -13295,6 +13301,8 @@ if run_btn:
         _app_run_log(
             "optimization_finished",
             status="conditional_research" if conditional_pause_research else "completed",
+            allocation_scope="unpaused-capital" if optimization_scope.get("excluded_tickers") else "portfolio",
+            paused_excluded_count=len(optimization_scope.get("excluded_tickers") or []),
             trading_days=int(len(log_returns)),
             holdings_count=int((portfolio_df["Quantity"] > 0).sum()) if "Quantity" in portfolio_df.columns else int(len(portfolio_df)),
             executable_trades=int(len(rebal_df)),

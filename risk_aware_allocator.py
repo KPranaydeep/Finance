@@ -70,8 +70,8 @@ def current_weights(allocation, columns):
     result = mapped.reindex(columns).fillna(0.).to_numpy()
     if result.sum() <= 0:
         raise ValueError("Positive current allocation required for funding costs")
-    # Never normalize missing owned history away. Private pause-aware runs retain
-    # owned paused positions in this book and fix them through equality bounds.
+    # Missing owned history is never normalized away. The private app explicitly
+    # removes paused capital before calling this solver and labels that scope.
     return result / result.sum()
 
 

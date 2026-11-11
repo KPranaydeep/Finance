@@ -59,6 +59,23 @@ def test_current_quantities_replace_old_positions_and_unowned_exits_disappear():
     assert candidate["rebalance_plan_context"]["optimizer_run"] is False
 
 
+def test_pause_excluded_capital_cannot_fund_saved_weight_refresh():
+    payload,owned,history=fixtures()
+    payload["optimal_allocation"]=[{"ticker":"A","target_weight":.5},{"ticker":"B","target_weight":.5}]
+    payload["optimization_scope"]={"mode":"unpaused-capital-v1","excluded_tickers":["NEW"],
+                                   "excluded_holdings":[owned.iloc[-1].to_dict()]}
+    original=owned.copy(deep=True)
+    candidate,allocation,plan=run(payload,owned,history)
+    assert set(allocation["Yahoo Ticker"])=={"A","B"}
+    assert candidate["current_portfolio_value"]==80.
+    assert candidate["optimization_scope"]==payload["optimization_scope"]
+    assert "NEW" not in {r["Yahoo Ticker"] for r in candidate["proposed_rebalancing_plan"]}
+    pd.testing.assert_frame_equal(owned,original)
+    payload["optimization_scope"]["excluded_tickers"]=["A"]
+    with pytest.raises(ValueError,match="Saved targets contain paused"):
+        run(payload,owned,history)
+
+
 def test_previously_owned_target_bought_again_starts_with_zero_current_quantity():
     payload, owned, _ = fixtures()
     universe, targets = prepare_fixed_universe(payload, owned.loc[owned["Yahoo Ticker"].ne("A")])

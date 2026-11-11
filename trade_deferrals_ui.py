@@ -73,8 +73,8 @@ def render_optimal_weight_pause_editor(weights, owner, key_prefix, get_connectio
             st.rerun(scope="app")
     st.caption(
         "Pause any allocated security, including holds with no executable trade. "
-        "The pause blocks trades for 90 days. Owned positions remain frozen in "
-        "portfolio risk accounting; paused unowned candidates are excluded. The "
+        "The pause excludes the security from optimization and trades for 90 days. "
+        "Owned paused holdings stay in your records; their capital does not fund new buys. The "
         "private app requests fresh weights when paused securities affect saved targets."
     )
     with st.form(f"{key_prefix}_pause_form", border=False):

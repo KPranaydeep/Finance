@@ -1,6 +1,23 @@
 # Implementation status
 
-## Pause-aware fresh allocation (implemented)
+## Exclude paused securities from optimization (implemented)
+
+Active pauses exclude owned and unowned securities before shortlist/history/solver
+selection. Remaining current weights are normalized to the unpaused capital base;
+target weights, metrics, costs and trade sizes refer to that base, not the whole
+account. Paused holdings remain unchanged in the master database and are recorded
+separately in `optimization_scope.excluded_holdings`; their value cannot fund buys.
+Saved-plan refresh respects this scope. Prepared matrices discard excluded columns,
+and newly generated optimal allocations contain no paused ticker. Existing normal
+risk constraints remain in force for the eligible allocation. With no unpaused
+invested capital, no funded replacement allocation is fabricated.
+
+The automatic pause-change claim has a new semantics version so an earlier frozen-
+sleeve attempt cannot suppress a fresh exclusion solve. A save archives the prior
+analysis atomically. Old conditional research remains readable but is not treated
+as execution approval. Scope is shown prominently in both fresh and saved results.
+
+## Previous frozen-sleeve research (retained for quarantined evidence/old records)
 
 A profile-scoped durable claim triggers a fresh solve at saved raw-peak X/Y when
 an active pause intersects positive saved targets. It runs once per pause-registry
