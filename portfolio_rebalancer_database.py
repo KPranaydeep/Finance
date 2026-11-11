@@ -35,6 +35,7 @@ from allocation_conflict_recovery import RECOVERY_NOTE, recover_saved_allocation
 from paused_allocation import prepare_pause_allocation, eligible_pause_history, render_pause_exclusion, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, archive_before_conditional_save, NOTE as PAUSE_RESEARCH_NOTE
 from risk_aware_allocator import build_policy_limits, current_weights as policy_current_weights, position_capacity, capacity_failure_reason
 from allocation_policy_ui import render_policy_controls, render_last_attempt
+from weight_freeze_overrides import load_weight_freeze_overrides, released_price_freezes, mark_unverified_weight_research, render_weight_freeze_controls
 from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
 from chronological_validation_ui import render_chronological_validation
@@ -189,6 +190,7 @@ DEFAULT_HISTORY_START_DATE = _optimizer_config.DEFAULT_HISTORY_START_DATE
 MAX_WEIGHT_PER_ASSET = _optimizer_config.MAX_WEIGHT_PER_ASSET
 MOMENTUM_FILTER_CONFIG = _optimizer_config.MOMENTUM_FILTER_CONFIG
 ALLOCATION_POLICY = _optimizer_config.ALLOCATION_POLICY
+WEIGHT_FREEZE_OVERRIDES = {}
 PROFIT_CAP_EXCEPTION = dict(DEFAULT_PROFIT_EXCEPTION)
 OPTIMIZER_CONFIG = _optimizer_config.OPTIMIZER_CONFIG
 OPTIMIZER_CONFIG_VERSION = _optimizer_config.OPTIMIZER_CONFIG_VERSION
@@ -4467,6 +4469,8 @@ def extend_allocation_with_universal_candidates(
     with get_db_connection() as conn:
         quarterly_deferrals = active_trade_deferrals(conn, owner) if owner else pd.DataFrame()
     portfolio_df, _ = prepare_pause_allocation(portfolio_df, quarterly_deferrals)
+    with get_db_connection() as conn:
+        portfolio_df.attrs["weight_freeze_overrides"]=tuple(load_weight_freeze_overrides(conn,owner)) if owner else ()
     universal_df = load_master_holdings(UNIVERSAL_OWNER)
     if universal_df.empty:
         return portfolio_df, [], {
@@ -6101,7 +6105,7 @@ def frozen_policy_preflight(log_returns, current_alloc, frozen_weights, *, polic
         "reason":capacity_failure_reason(capacity),"elapsed_seconds":time.perf_counter()-started}
 
 
-def solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,*,policy=None,max_dd=None,target_volatility=None,transaction_cost_bps=22.):
+def solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,*,policy=None,max_dd=None,target_volatility=None,transaction_cost_bps=22.,released_freezes=()):
     """Try a strict fresh solve first; inherited conflicts get explicit new research."""
     policy=ALLOCATION_POLICY if policy is None else policy
     if not pd.to_numeric(current_alloc.loc[pd.to_numeric(current_alloc["Quantity"],errors="coerce").gt(0),"Weight"],errors="coerce").sum()>0:
@@ -6121,6 +6125,8 @@ def solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,*,policy
         validation=report[report["selected"]+"_validation"]
     else:
         validation={"passed":False,"violations":[report.get("reason") or "Fresh pause-aware allocation unavailable"]}
+    if weights is not None and released_freezes:
+        report,validation=mark_unverified_weight_research(report,validation,released_freezes)
     return weights,report,validation
 
 
@@ -6480,6 +6486,8 @@ def optimize_prepared_return_matrix(
                 "Ticker",
             ].astype(str)
         )
+    released_freezes=(released_price_freezes(quarantined_owned,current_alloc)&set(log_returns.columns)) if (allocation_policy or ALLOCATION_POLICY).get("enabled") else set()
+    quarantined_owned-=released_freezes
     allocation_weights = (
         current_alloc.assign(
             _weight=pd.to_numeric(current_alloc["Weight"], errors="coerce").fillna(0.0)
@@ -6494,9 +6502,9 @@ def optimize_prepared_return_matrix(
         and float(allocation_weights.get(ticker, 0.0)) > 0.0
     }
 
-    if current_alloc.attrs.get("pause_reoptimization") and (allocation_policy or ALLOCATION_POLICY).get("enabled"):
+    if (current_alloc.attrs.get("pause_reoptimization") or released_freezes) and (allocation_policy or ALLOCATION_POLICY).get("enabled"):
         weights,report,validation=solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,
-            policy=allocation_policy,max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps)
+            policy=allocation_policy,max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps,released_freezes=released_freezes)
         stats=portfolio_stats_comparison(current_alloc,log_returns,weights) if weights is not None else (None,None)
         return weights,log_returns,*stats,dict(solver_screen or {},frozen_weights=frozen_weights,allocation_policy=report,allocation_validation=validation)
 
@@ -6945,7 +6953,10 @@ def run_portfolio_analysis_multi(
         for ticker in log_returns.columns
         if ticker in quarantined_owned and float(allocation_weights.get(ticker, 0.0)) > 0.0
     }
+    released_freezes=(released_price_freezes(quarantined_owned,current_alloc)&set(log_returns.columns)) if ALLOCATION_POLICY.get("enabled") else set()
+    frozen_weights={t:w for t,w in frozen_weights.items() if t not in released_freezes}
     meta["price_integrity_frozen_owned_weights"] = dict(frozen_weights)
+    meta["weight_freeze_overrides"] = sorted(released_freezes)
 
     if not solve_portfolio:
         meta["analysis_total_seconds"] = round(
@@ -6957,9 +6968,9 @@ def run_portfolio_analysis_multi(
         )
         return None, log_returns, None, None, meta
 
-    if current_alloc.attrs.get("pause_reoptimization") and ALLOCATION_POLICY.get("enabled"):
+    if (current_alloc.attrs.get("pause_reoptimization") or released_freezes) and ALLOCATION_POLICY.get("enabled"):
         weights,report,validation=solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,
-            max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps)
+            max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps,released_freezes=released_freezes)
         meta.update(allocation_policy=report,allocation_validation=validation)
         stats=portfolio_stats_comparison(current_alloc,log_returns,weights) if weights is not None else (None,None)
         return weights,log_returns,*stats,meta
@@ -9355,6 +9366,7 @@ with st.sidebar:
     st.caption(f"Internal max_dd used: {max_dd:.4f}")
     ALLOCATION_POLICY = render_policy_controls(
         ALLOCATION_POLICY, CURRENT_USER, get_db_connection, max_weight=MAX_WEIGHT_PER_ASSET)
+    WEIGHT_FREEZE_OVERRIDES = render_weight_freeze_controls(CURRENT_USER,get_db_connection)
     st.caption("Rebalance selection: two distinct buys (one not currently held), plus the highest annual-lift sell. Controls flag conflicts without hiding the selections.")
 
     auto_history_end = st.checkbox(
@@ -9932,6 +9944,7 @@ cap_search_config = {
     "skip_recent_best_search": bool(skip_recent_best_search),
     "optimizer_config_version": OPTIMIZER_CONFIG_VERSION,
     "allocation_policy": dict(ALLOCATION_POLICY),
+    "weight_freeze_overrides": sorted(WEIGHT_FREEZE_OVERRIDES),
     "transaction_cost_bps": float(finalist_transaction_cost_bps),
     "risk_free_rate_annual": float(RISK_FREE_RATE_ANNUAL),
     "snapshot_date_ist": datetime.now(
@@ -12341,7 +12354,8 @@ if run_btn:
 
         with get_db_connection() as conn:
             active_solver_deferrals = active_trade_deferrals(conn, CURRENT_USER)
-        if not active_solver_deferrals.empty:
+            active_weight_freeze_overrides = load_weight_freeze_overrides(conn,CURRENT_USER)
+        if not active_solver_deferrals.empty or active_weight_freeze_overrides:
             automatic_prepared_analysis = None  # A prior search matrix may omit newly paused owned exposure.
         if automatic_prepared_analysis is not None:
             cached_allocation, cached_returns, cached_meta = automatic_prepared_analysis
@@ -12390,6 +12404,7 @@ if run_btn:
             active_solver_deferrals,
         )
         execution_allocation = portfolio_df.copy()
+        portfolio_df.attrs["weight_freeze_overrides"]=tuple(active_weight_freeze_overrides)
         optimization_scope = portfolio_df.attrs.get("optimization_scope") or {}
         render_pause_exclusion(optimization_scope)
         if portfolio_df.empty:
@@ -12850,7 +12865,7 @@ if run_btn:
             else {}
         )
         finished_timer = _finish_optimization_plan_timer(
-            completion_note=PAUSE_RESEARCH_NOTE if conditional_pause_research else None,
+            completion_note=(policy_log.get("reason") or PAUSE_RESEARCH_NOTE) if conditional_pause_research else None,
             completion_kind="conditional_optimization" if conditional_pause_research else None)
         if conditional_pause_research:
             optimization_timer_placeholder.info(_timer_summary(finished_timer)[1])

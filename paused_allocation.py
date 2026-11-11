@@ -189,7 +189,7 @@ def withhold_research_plan(plan):
     attributes=dict(plan.attrs)
     validation=dict(attributes.get("execution_validation") or {})
     validation.update(passed=False,violations=list(validation.get("violations") or [])+[
-        "Conditional frozen-sleeve research requires a new strict optimization before execution approval."])
+        "Conditional allocation research requires verified inputs and a new strict optimization before execution approval."])
     attributes["execution_validation"]=validation
     attributes["proposed_rebalancing_plan"]=attributes.get("two_trade_plan") or attributes.get("proposed_rebalancing_plan") or plan.to_dict(orient="records")
     result=plan.iloc[:0].copy();result.attrs.update(attributes)
@@ -200,6 +200,10 @@ def render_pause_research(report):
     if not report or report.get("status")!="conditional_research":
         return
     import streamlit as st
+    if report.get("research_kind")=="price_freeze_override":
+        st.info("Weight freeze released: "+", ".join(report.get("weight_freeze_overrides") or [])+". The optimizer can resize these holdings within its risk limits.")
+        st.warning("Historical price jumps remain unverified. These are fresh review-only weights; no executable plan or public publication is approved.")
+        return
     if report["tradable_fraction"]<=1e-9:
         st.info("Frozen portfolio recalculated: no capital is currently tradable. Frozen holdings were not reassigned to new securities; change the pauses or supply new capital before a new allocation can be funded.")
         return

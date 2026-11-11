@@ -150,6 +150,9 @@ def render_allocation_policy(report):
         st.caption("Risk-budget allocator disabled in the loaded configuration.")
         return
     if report.get("status")=="conditional_research":
+        if report.get("research_kind")=="price_freeze_override":
+            st.caption("A profile override released fixed weights. Historical-price warnings remain; fresh weights are review-only and risk limits remain active.")
+            return
         st.caption("Fresh tradable weights were optimized around fixed holdings. Inherited policy breaches remain; this research allocation is not execution-approved.")
         return
     limits = report.get("limits") or {}

@@ -1,5 +1,22 @@
 # Implementation status
 
+## Explicit weight-freeze release (implemented)
+
+An append-only, profile-scoped registry records exact-listing weight overrides
+and their restoration. Private Allocation risk controls now include a reversible
+Weight freeze overrides section. The override removes only a named quarantined
+holding's equality bound; pauses still exclude it and position/group/tail limits
+remain active. Unrelated holdings stay frozen. Public/default core callers have
+no override. Search configuration includes active overrides and prepared handoffs
+are rebuilt when needed so a stale bound is not silently reused.
+
+Price evidence is never relabeled verified. If a released freeze actually affects
+the solve, new weights are explicitly conditional/review-only, with the separate
+mathematical check retained. Orders, lumpsum execution and public publication stay
+withheld under the existing conditional-research boundary; plan refresh cannot
+upgrade them to approved status. The setting applies to the next optimization
+and does not rewrite previous analysis or holdings.
+
 ## Saved optimal weights image (implemented)
 
 The image includes seven saved current-to-optimal statistics and the recorded
