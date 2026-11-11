@@ -30,7 +30,7 @@ def _save_weight_pauses(rows, owner, key_prefix, get_connection):
         saved = defer_trades_for_quarter(conn, owner, selected.to_dict(orient="records"))
     tickers = ", ".join(row["Yahoo Ticker"] for row in saved)
     st.session_state[f"{key_prefix}_pause_notice"] = (
-        "success", f"Paused for 90 days: {tickers}. Saved optimal weights are unchanged."
+        "success", f"Paused for 90 days: {tickers}. Original analysis is retained; paused trades are excluded."
     )
 
 
@@ -53,7 +53,7 @@ def render_active_security_pauses(owner, get_connection, key_prefix):
 
 
 @st.fragment
-def render_optimal_weight_pause_editor(weights, owner, key_prefix, get_connection):
+def render_optimal_weight_pause_editor(weights, owner, key_prefix, get_connection, *, refresh_app_on_pause=False):
     """Show every positive target and save pauses to the existing owner registry."""
     rows = optimal_weight_pause_rows(weights)
     if rows.empty:
@@ -69,10 +69,13 @@ def render_optimal_weight_pause_editor(weights, owner, key_prefix, get_connectio
     notice = st.session_state.pop(f"{key_prefix}_pause_notice", None)
     if notice:
         getattr(st, notice[0])(notice[1])
+        if notice[0]=="success" and refresh_app_on_pause:
+            st.rerun(scope="app")
     st.caption(
         "Pause any allocated security, including holds with no executable trade. "
-        "The pause blocks trades immediately and excludes it from future optimizer "
-        "runs for 90 days; the saved weights remain a record of the original analysis."
+        "The pause blocks trades for 90 days. Owned positions remain frozen in "
+        "portfolio risk accounting; paused unowned candidates are excluded. The "
+        "private app requests fresh weights when paused securities affect saved targets."
     )
     with st.form(f"{key_prefix}_pause_form", border=False):
         st.data_editor(

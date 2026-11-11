@@ -60,6 +60,10 @@ def render_last_attempt(owner, connect):
     with connect() as conn:
         workspace = load_workspace(conn, owner)
     attempt = workspace.get("attempt") or {}
+    if attempt.get("status")=="conditional_research":
+        from paused_allocation import render_pause_research
+        render_pause_research(attempt)
+        return
     if not attempt or attempt.get("status") == "selected":
         return
     with st.expander("Last allocation attempt · why no plan", expanded=False):

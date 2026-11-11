@@ -1,5 +1,38 @@
 # Implementation status
 
+## Pause-aware fresh allocation (implemented)
+
+A profile-scoped durable claim triggers a fresh solve at saved raw-peak X/Y when
+an active pause intersects positive saved targets. It runs once per pause-registry
+change, not per page render, restart or newly saved run ID. An interrupted/failed
+claimed attempt can be retried with Run optimization. The allocation pause editor
+requests an app rerun after saving; the prior analysis remains available during
+calculation. This does not start a new X/Y cap search.
+
+Paused unowned candidates are removed. Paused owned positions remain in the full
+history/risk book and have equality bounds, alongside quarantined holdings. Cached
+search matrices are not trusted to include this newly fixed exposure. The private
+pause-aware path goes directly to a fresh strict joint-risk allocation, avoiding
+slow incumbent solves known to conflict with frozen caps. Ordinary/public solves
+without the private pause marker retain strict existing semantics.
+
+When the strict solve is infeasible or fails recheck, a separately labeled research
+LP computes **new** tradable weights around fixed full-base exposure. It retains
+strict tradable position caps and first requires non-worsening whole-book tail/group
+risk, including scenario cost drag. Inherited group exposure and separate stressed/
+historical current-book tail references are explicit. If those gates are infeasible,
+a minimum-tail research lane still preserves frozen equality and tradable position
+bounds, and labels any failure to establish non-worsening risk. Strict original
+policy limits and breaches are retained, not overwritten or reported as passed.
+
+Conditional targets retain exact weights rather than publication rounding. They
+cannot generate executable orders, a lumpsum execution sheet, an approved public
+candidate or public-publisher upload. Updating their saved plan cannot upgrade
+them to approved status. Prices/history must still be complete; mathematical lack
+of tradable capacity, missing evidence and solver errors remain explicit and do
+not fabricate a fully invested solution. A 100% frozen book exposes zero tradable
+capital rather than pretending it can buy replacements.
+
 ## Opening cap-search action and scan age (implemented)
 
 `Run / resume cap search` appears directly below `Run optimization` in the first

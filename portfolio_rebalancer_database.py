@@ -32,6 +32,7 @@ from allocation_integrity import finalize_weights, fund_buy_orders, execution_ch
 from risk_aware_allocator import solve_risk_aware_allocation, check_policy_weights
 from allocation_attempts import save_attempt, failure_summary, capacity_log_summary, load_workspace as load_allocation_workspace
 from allocation_conflict_recovery import RECOVERY_NOTE, recover_saved_allocation_review, render_allocation_recovery
+from paused_allocation import prepare_pause_allocation, paused_owned_names, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, NOTE as PAUSE_RESEARCH_NOTE
 from risk_aware_allocator import build_policy_limits, current_weights as policy_current_weights, position_capacity, capacity_failure_reason
 from allocation_policy_ui import render_policy_controls, render_last_attempt
 from price_move_confirmation import download_confirmation
@@ -1505,11 +1506,13 @@ def _display_optimization_stage(placeholder, stage, progress, estimated_total_se
     return timer
 
 
-def _finish_optimization_plan_timer(completion_note=None):
+def _finish_optimization_plan_timer(completion_note=None, *, completion_kind=None):
     timer = st.session_state.get(OPTIMIZATION_TIMER_KEY) or {}
     finished = finish_run_timer(timer, "rebalancing plan generated")
     if completion_note:
         finished.update(completion_note=completion_note,finish_event="saved allocation review refreshed")
+    if completion_kind:
+        finished.update(completion_kind=completion_kind,finish_event="fresh tradable allocation research generated")
     st.session_state[OPTIMIZATION_TIMER_KEY] = finished
     return finished
 
@@ -1537,6 +1540,8 @@ def _timer_summary(timer):
             "The estimate adapts after each completed stage.",
         )
     if status == "finished":
+        if timer.get("completion_kind")=="conditional_optimization":
+            return "conditional_optimization", f"Fresh tradable allocation research completed after **{elapsed}**. {timer['completion_note']}"
         if timer.get("completion_note"):
             return "completed_with_conflicts", f"Analysis completed with allocation conflict after **{elapsed}**. {timer['completion_note']}"
         return "finished", f"Run-to-plan time: **{elapsed}** · Rebalancing plan generated"
@@ -2959,6 +2964,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
         st.subheader("Last saved analysis", anchor="saved-analysis")
         st.caption(f"Saved at: {saved_at}")
         render_allocation_recovery(payload.get("allocation_recovery"))
+        render_pause_research(payload.get("pause_allocation_research") or payload.get("allocation_policy"))
         context = payload.get("rebalance_plan_context") or {}
         try:
             if selection_holdings is None:
@@ -3366,6 +3372,7 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 payload.get("optimal_allocation") or [], owner,
                 key_prefix=f"saved_optimal_weights_{widget_scope}",
                 get_connection=get_db_connection,
+                refresh_app_on_pause=True,
             )
 
         with st.expander("Saved rebalancing plan", expanded=True):
@@ -6085,6 +6092,26 @@ def frozen_policy_preflight(log_returns, current_alloc, frozen_weights, *, polic
         "reason":capacity_failure_reason(capacity),"elapsed_seconds":time.perf_counter()-started}
 
 
+def solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,*,policy=None,max_dd=None,target_volatility=None,transaction_cost_bps=22.):
+    """Try a strict fresh solve first; inherited conflicts get explicit new research."""
+    policy=ALLOCATION_POLICY if policy is None else policy
+    weights,report=apply_allocation_policy(None,log_returns,current_alloc,frozen_weights=frozen_weights,
+        max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps,policy=policy)
+    if weights is None and report.get("status") in {"infeasible","failed_recheck"}:
+        weights,research=solve_frozen_sleeve_research(log_returns,current_alloc,
+            weight_bounds(len(log_returns.columns),log_returns.columns,frozen_weights),policy,cost_bps=transaction_cost_bps)
+        research["strict_attempt"]={k:report.get(k) for k in ("status","reason","capacity","stage")}
+        if weights is not None:
+            _,research["strict_allocation_validation"]=validate_optimizer_allocation(weights,log_returns,
+                frozen_weights=frozen_weights,max_dd=max_dd,target_volatility=target_volatility,policy_limits=research.get("limits"))
+        report=research
+    if report.get("selected") in {"risk-aware","incumbent"}:
+        validation=report[report["selected"]+"_validation"]
+    else:
+        validation={"passed":False,"violations":[report.get("reason") or "Fresh pause-aware allocation unavailable"]}
+    return weights,report,validation
+
+
 def apply_allocation_policy(incumbent, log_returns, current_alloc, *, frozen_weights=None,
                             max_dd=None, target_volatility=None, transaction_cost_bps=22., policy=None):
     """Compare two allocators under the same explicit policy; no permissive fallback."""
@@ -6448,12 +6475,19 @@ def optimize_prepared_return_matrix(
         .groupby("Yahoo Ticker", sort=False)["_weight"]
         .sum()
     )
+    quarantined_owned |= paused_owned_names(current_alloc)
     frozen_weights = {
         ticker: float(allocation_weights.get(ticker, 0.0))
         for ticker in log_returns.columns
         if ticker in quarantined_owned
         and float(allocation_weights.get(ticker, 0.0)) > 0.0
     }
+
+    if current_alloc.attrs.get("pause_reoptimization") and (allocation_policy or ALLOCATION_POLICY).get("enabled"):
+        weights,report,validation=solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,
+            policy=allocation_policy,max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps)
+        stats=portfolio_stats_comparison(current_alloc,log_returns,weights) if weights is not None else (None,None)
+        return weights,log_returns,*stats,dict(solver_screen or {},frozen_weights=frozen_weights,allocation_policy=report,allocation_validation=validation)
 
     conflict = frozen_policy_preflight(log_returns,current_alloc,frozen_weights,
         policy=allocation_policy,transaction_cost_bps=transaction_cost_bps)
@@ -6894,6 +6928,7 @@ def run_portfolio_analysis_multi(
         .groupby("Yahoo Ticker", sort=False)["_weight"]
         .sum()
     )
+    quarantined_owned |= paused_owned_names(current_alloc)
     frozen_weights = {
         ticker: float(allocation_weights.get(ticker, 0.0))
         for ticker in log_returns.columns
@@ -6910,6 +6945,13 @@ def run_portfolio_analysis_multi(
             - {str(ticker).strip().upper() for ticker in log_returns.columns}
         )
         return None, log_returns, None, None, meta
+
+    if current_alloc.attrs.get("pause_reoptimization") and ALLOCATION_POLICY.get("enabled"):
+        weights,report,validation=solve_pause_reoptimization(log_returns,current_alloc,frozen_weights,
+            max_dd=max_dd,target_volatility=target_volatility,transaction_cost_bps=transaction_cost_bps)
+        meta.update(allocation_policy=report,allocation_validation=validation)
+        stats=portfolio_stats_comparison(current_alloc,log_returns,weights) if weights is not None else (None,None)
+        return weights,log_returns,*stats,meta
 
     conflict = frozen_policy_preflight(log_returns,current_alloc,frozen_weights,
         transaction_cost_bps=transaction_cost_bps)
@@ -9106,6 +9148,19 @@ if not st.session_state.get(checkpoint_restore_key):
         st.session_state["shortlist_cap_saved_best"] = dict(restored_best or {})
     st.session_state[checkpoint_restore_key] = True
 
+auto_pause_reoptimization = False
+try:
+    auto_saved_allocation = load_latest_analysis(CURRENT_USER)
+    with get_db_connection() as pause_conn:
+        auto_pauses = active_trade_deferrals(pause_conn, CURRENT_USER)
+        if get_unique_holdings_count(CURRENT_USER)>0:
+            auto_pause_reoptimization = claim_pause_reoptimization(pause_conn,CURRENT_USER,auto_saved_allocation,auto_pauses)
+    if auto_pause_reoptimization:
+        _start_optimization_at_raw_peak(CURRENT_USER)
+        _app_run_log("pause_reoptimization_triggered",saved_pair=True,search_started=False)
+except (sqlite3.Error,ValueError,TypeError) as exc:
+    st.warning(f"Automatic pause reoptimization needs attention ({type(exc).__name__}); saved analysis remains available.")
+
 st.divider()
 
 # Filled after every add/remove operation using a fresh SQLite query.
@@ -9754,6 +9809,9 @@ with run_analysis_placeholder:
                 args=(CURRENT_USER,),
                 disabled=not run_has_holdings,
             )
+            run_btn = run_btn or auto_pause_reoptimization
+            if auto_pause_reoptimization:
+                st.info("Paused securities intersect the saved target. Calculating fresh weights at saved X/Y; this pause change triggers once, without a cap search.")
             next_pair = (
                 st.session_state.get("optimization_raw_peak_selection") or {}
                 if run_btn else _optimization_pair_selection(CURRENT_USER)
@@ -12270,6 +12328,10 @@ if run_btn:
                 overall_progress,
             )
 
+        with get_db_connection() as conn:
+            active_solver_deferrals = active_trade_deferrals(conn, CURRENT_USER)
+        if not active_solver_deferrals.empty:
+            automatic_prepared_analysis = None  # A prior search matrix may omit newly paused owned exposure.
         if automatic_prepared_analysis is not None:
             cached_allocation, cached_returns, cached_meta = automatic_prepared_analysis
             if (
@@ -12311,21 +12373,15 @@ if run_btn:
                     owner=CURRENT_USER,
                     progress_callback=report_shortlist_progress,
                 )
-        # A 90-day pause is a solver exclusion, not only an execution-plan
-        # annotation. Remove paused owned rows before any return matrix or
-        # optimizer is prepared; universal paused candidates are already
-        # filtered inside extend_allocation_with_universal_candidates().
+        # Exclude paused new candidates; keep paused owned exposure in whole-book risk.
         execution_allocation = portfolio_df.copy()
-        with get_db_connection() as conn:
-            active_solver_deferrals = active_trade_deferrals(conn, CURRENT_USER)
-        portfolio_df, paused_solver_excluded = exclude_deferred_candidates(
+        portfolio_df, paused_solver_excluded = prepare_pause_allocation(
             portfolio_df,
             active_solver_deferrals,
         )
         if paused_solver_excluded:
             st.info(
-                f"Excluded {int(paused_solver_excluded):,} paused securities from the optimizer "
-                "until their 90-day deferrals expire."
+                f"Excluded {int(paused_solver_excluded):,} paused unowned candidates. Paused owned holdings remain frozen in full-portfolio risk accounting."
             )
         if portfolio_df.empty:
             stopped_timer = _abort_optimization_plan_timer("all holdings paused")
@@ -12496,6 +12552,8 @@ if run_btn:
             0.88,
         )
         policy_log = meta.get("allocation_policy") or {}
+        conditional_pause_research = policy_log.get("status")=="conditional_research"
+        render_pause_research(policy_log)
         _app_run_log("allocation_policy_checked", status=policy_log.get("status","unavailable"),
                      preflight=bool(policy_log.get("preflight")),
                      selected=policy_log.get("selected","none"),
@@ -12594,7 +12652,7 @@ if run_btn:
                 "portfolio remains valid for the securities in its return matrix."
             )
         # Show optimal portfolio weights table
-        st.subheader("Optimal Portfolio (Weights)")
+        st.subheader("Conditional allocation research (weights)" if conditional_pause_research else "Optimal Portfolio (Weights)")
         optimal_portfolio_df = pd.DataFrame({
             "Ticker": log_returns.columns,
             "Optimal Weight": optimal_weights,
@@ -12607,6 +12665,7 @@ if run_btn:
             optimal_portfolio_df, CURRENT_USER,
             key_prefix="live_optimal_weights",
             get_connection=get_db_connection,
+            refresh_app_on_pause=True,
         )
         
         st.download_button(
@@ -12753,6 +12812,10 @@ if run_btn:
         buy_candidate_orders = rebal_df.attrs.get("buy_candidate_orders", [])
         two_trade_selection = rebal_df.attrs.get("two_trade_plan", [])
         rebalance_candidate_orders = rebal_df.attrs.get("rebalance_candidate_orders", [])
+        if conditional_pause_research:
+            rebal_df=withhold_research_plan(rebal_df)
+            execution_validation=rebal_df.attrs["execution_validation"]
+            proposed_rebalancing_plan=rebal_df.attrs["proposed_rebalancing_plan"]
         partial_release = execution_validation.get("profit_cap_exception") or {}
         if partial_release.get("applied") and meta.get("allocation_policy"):
             meta["allocation_policy"] = dict(meta["allocation_policy"], status="partial-release",
@@ -12777,8 +12840,13 @@ if run_btn:
             if not active_deferrals.empty
             else {}
         )
-        finished_timer = _finish_optimization_plan_timer()
-        optimization_timer_placeholder.success(_timer_summary(finished_timer)[1])
+        finished_timer = _finish_optimization_plan_timer(
+            completion_note=PAUSE_RESEARCH_NOTE if conditional_pause_research else None,
+            completion_kind="conditional_optimization" if conditional_pause_research else None)
+        if conditional_pause_research:
+            optimization_timer_placeholder.info(_timer_summary(finished_timer)[1])
+        else:
+            optimization_timer_placeholder.success(_timer_summary(finished_timer)[1])
         scenario_ranking = pd.DataFrame()
         scenario_ranking_error = None
         exit_ranking = pd.DataFrame()
@@ -12856,11 +12924,15 @@ if run_btn:
             )
 
         lumpsum_plan_payload = None
-        if lumpsum_inr > 0:
+        lumpsum_weights=np.asarray(optimal_weights,dtype=float).copy()
+        for i,ticker in enumerate(log_returns.columns):
+            if ticker in (meta.get("price_integrity_frozen_owned_weights") or {}):
+                lumpsum_weights[i]=0.
+        if lumpsum_inr > 0 and not conditional_pause_research and lumpsum_weights.sum()>0:
             lumpsum_df, unallocated_cash, lumpsum_missing_prices, lumpsum_missing_alloc = (
                 lumpsum_allocation_plan(
                     portfolio_df.copy(),
-                    optimal_weights,
+                    lumpsum_weights,
                     log_returns,
                     price_map,
                     lumpsum_inr,
@@ -12979,10 +13051,12 @@ if run_btn:
             key="fresh_two_trade_plan")
 
         publication_run_id = f"RUN-{uuid.uuid4().hex.upper()}"
-        approved_constituents = round_weights_to_whole_percent([
+        exact_constituents = [
             {"ticker": str(ticker), "target_weight": float(weight)}
             for ticker, weight in zip(log_returns.columns, optimal_weights)
-        ])
+            if float(weight)>1e-12
+        ]
+        approved_constituents = exact_constituents if conditional_pause_research else round_weights_to_whole_percent(exact_constituents)
         portfolio_log_return_history = np.asarray(log_returns @ optimal_weights, dtype=float)
         leverage_assessment = None
         leverage_assessment_error = None
@@ -13020,6 +13094,7 @@ if run_btn:
             executable_rebalance_review = {"decision": "Hold / review — executable comparison could not be completed", "error": str(exc)}
             next_review_estimate = {"sessions": 0, "reason": "review-date inputs unavailable", "metrics": []}
         analysis_payload = {
+            "pause_allocation_research": dict(policy_log) if conditional_pause_research else None,
             "election_reserve_history": pack_inr_history(
                 log_returns,
                 {str(t): float(w) for t, w in zip(log_returns.columns, optimal_weights)},
@@ -13191,6 +13266,8 @@ if run_btn:
             },
         }
 
+        if conditional_pause_research:
+            analysis_payload["publication_candidate"]=None
         save_latest_analysis(analysis_payload, CURRENT_USER)
         if not execution_validation.get("passed") and not two_trade_selection:
             auto_prepare_risk_repair(analysis_payload, CURRENT_USER)
@@ -13216,7 +13293,7 @@ if run_btn:
             reserve_fraction_log = None
         _app_run_log(
             "optimization_finished",
-            status="completed",
+            status="conditional_research" if conditional_pause_research else "completed",
             trading_days=int(len(log_returns)),
             holdings_count=int((portfolio_df["Quantity"] > 0).sum()) if "Quantity" in portfolio_df.columns else int(len(portfolio_df)),
             executable_trades=int(len(rebal_df)),
@@ -13239,7 +13316,10 @@ if run_btn:
             warning_count=len((analysis_payload.get("warnings") or {})),
         )
 
-        st.session_state["approved_publication_candidate"] = analysis_payload["publication_candidate"]
+        if conditional_pause_research:
+            st.session_state.pop("approved_publication_candidate",None)
+        else:
+            st.session_state["approved_publication_candidate"] = analysis_payload["publication_candidate"]
 
     except Exception as e:
         _app_run_log("optimization_finished", status="error", error_type=type(e).__name__)

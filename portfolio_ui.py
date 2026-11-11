@@ -149,6 +149,9 @@ def render_allocation_policy(report):
     if report.get("status") == "disabled":
         st.caption("Risk-budget allocator disabled in the loaded configuration.")
         return
+    if report.get("status")=="conditional_research":
+        st.caption("Fresh tradable weights were optimized around fixed holdings. Inherited policy breaches remain; this research allocation is not execution-approved.")
+        return
     limits = report.get("limits") or {}
     policy = report.get("policy") or limits.get("settings") or {}
     selected = report.get("selected")

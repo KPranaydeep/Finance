@@ -34,6 +34,8 @@ if uploaded is None:
     st.info("Upload the approved JSON exported by the private rebalancer."); st.stop()
 try:
     source=json.loads(uploaded.getvalue().decode("utf-8"))
+    if (source.get("pause_allocation_research") or source.get("allocation_policy") or {}).get("status")=="conditional_research":
+        raise ValueError("Conditional frozen-sleeve research is not an approved public allocation")
     approved=source.get("publication_candidate") or source.get("approved_publication") or source
     allocation=approved.get("constituents") or approved.get("optimal_allocation")
     if not isinstance(allocation,list): raise ValueError("Missing approved constituents")

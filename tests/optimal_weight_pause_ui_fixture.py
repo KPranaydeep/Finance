@@ -26,7 +26,8 @@ if st.session_state.get('registry_only'):
     st.stop()
 if not st.session_state.get('one_shot_results') or st.button('Run synthetic analysis'):
     st.metric('Saved analysis metric', '12.34%')
-    render_optimal_weight_pause_editor(weights, 'synthetic-owner', 'saved-test', connection)
+    render_optimal_weight_pause_editor(weights, 'synthetic-owner', 'saved-test', connection,
+                                      refresh_app_on_pause=st.session_state.get('fixture_refresh_on_pause',False))
     st.markdown('Analysis results remain visible below the pause controls.')
 if st.session_state.get('show_second_view'):
     render_optimal_weight_pause_editor(weights, 'synthetic-owner', 'live-test', connection)

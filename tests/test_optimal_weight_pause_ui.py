@@ -98,3 +98,15 @@ def test_pause_registry_available_without_optimizer_or_saved_weights(tmp_path):
     restarted.button[0].click().run()
     assert not restarted.exception
     assert restarted.dataframe[0].value['Yahoo Ticker'].tolist() == ['NOORDER']
+
+
+def test_private_pause_requests_app_refresh_after_commit_without_losing_analysis(tmp_path):
+    database=tmp_path/'refresh.sqlite'
+    app=editor(database)
+    app.session_state['fixture_refresh_on_pause']=True
+    app.session_state['saved-test_pause_editor']={'edited_rows':{0:{'Pause 90 days':True}},'added_rows':[],'deleted_rows':[]}
+    app.button[0].click().run()
+    assert not app.exception
+    assert pauses(database)['yahoo_ticker'].tolist()==['HOLD.NS']
+    assert app.metric[0].value=='12.34%'
+    assert app.session_state['full_app_runs']>=2

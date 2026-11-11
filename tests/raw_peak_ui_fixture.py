@@ -10,6 +10,8 @@ st.set_page_config(layout="wide")
 callback, _, _ = load_callback(
     checkpoint=None if st.session_state.get("fixture_no_checkpoint") else
     {"results": [row(8350, 550, .513), row(8300, 600, .512)]}, streamlit=st)
+if st.session_state.get("fixture_auto_pause"):
+    callback("fixture")
 render_portfolio_heading("Portfolio Rebalancer", "Review your allocation, compare risk, and prepare a rebalance.", context="PRIVATE WORKSPACE")
 slot = st.container()
 st.subheader("Last saved analysis")
@@ -37,6 +39,7 @@ def cap_search_action(owner, connect, **kwargs):
     return clicked, age_slot
 
 namespace.update(run_analysis_placeholder=slot, CURRENT_USER="fixture", _start_optimization_at_raw_peak=callback,
+                 auto_pause_reoptimization=st.session_state.get("fixture_auto_pause",False),
                  _timer_summary=lambda timer: None, OPTIMIZATION_TIMER_KEY="fixture_timer",
                  load_allocation_workspace=lambda conn, owner: {"attempt": {"status": "infeasible"}} if st.session_state.get("fixture_conflict") else {},
                  continue_saved_allocation_analysis=continue_review, saved_analysis_placeholder=slot,

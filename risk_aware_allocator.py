@@ -70,8 +70,8 @@ def current_weights(allocation, columns):
     result = mapped.reindex(columns).fillna(0.).to_numpy()
     if result.sum() <= 0:
         raise ValueError("Positive current allocation required for funding costs")
-    # Pauses define a separately excluded sleeve. Never normalize missing owned
-    # history away: every owned row in this active sleeve was checked above.
+    # Never normalize missing owned history away. Private pause-aware runs retain
+    # owned paused positions in this book and fix them through equality bounds.
     return result / result.sum()
 
 

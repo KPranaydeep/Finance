@@ -163,6 +163,9 @@ def rebuild_saved_plan(payload, current_holdings, log_returns, native_prices, fx
         attributes["execution_validation"] = validation
         plan = plan.iloc[:0].copy()
         plan.attrs.update(attributes)
+    if (payload.get("pause_allocation_research") or {}).get("status")=="conditional_research":
+        from paused_allocation import withhold_research_plan
+        plan=withhold_research_plan(plan)
     candidate = deepcopy(payload)
     if additional_frozen_tickers:
         candidate.setdefault("history",{})["price_integrity_frozen_owned_weights"] = dict(extra.get("frozen_weights") or {})

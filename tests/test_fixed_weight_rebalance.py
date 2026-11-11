@@ -186,6 +186,15 @@ def test_independent_saved_plan_refresh_excludes_current_pauses_from_persisted_s
     assert "A" in {r["Yahoo Ticker"] for r in result["rebalance_candidate_orders"]}
 
 
+def test_conditional_targets_remain_research_only_after_independent_plan_refresh(monkeypatch):
+    payload,_,ns,saved=configure_saved_refresh(monkeypatch)
+    payload["pause_allocation_research"]={"status":"conditional_research","tradable_fraction":.6,"frozen_fraction":.4}
+    result=ns["update_saved_rebalance_plan"](payload,"synthetic-owner")
+    assert saved==[result] and result["two_trade_plan"]
+    assert not result["execution_validation"]["passed"] and not result["rebalancing_plan"]
+    assert result["pause_allocation_research"]==payload["pause_allocation_research"]
+
+
 def test_conflict_continuation_refreshes_review_but_preserves_targets_and_new_freezes(monkeypatch):
     payload,_,ns,saved=configure_saved_refresh(monkeypatch)
     original=deepcopy(payload)
