@@ -38,7 +38,7 @@ def render_execution_validation(report, proposed_orders=(), *, allocation_policy
         st.markdown("**Selected-trade checks**" if report.get("selection_mode")==REBALANCE_SELECTION_MODE else "**Final allocation check**")
         exception=report.get("profit_cap_exception") or {}
         if report.get("selection_mode")==REBALANCE_SELECTION_MODE:
-            st.info("Two buys (one new holding) and the top annual-lift sell stay selected when available. Control conflicts do not hide or replace selections.")
+            st.info("Paused securities are excluded before ranking. Funding and risk conflicts are shown for the remaining selections.")
             if not report.get("pair_validation_available",True):
                 st.caption("This saved draft has not had these selections replayed together. Update rebalance plan refreshes sizing and checks without optimizer search.")
             elif report.get("passed"):
