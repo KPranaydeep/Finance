@@ -89,6 +89,7 @@ from shortlist_search_checkpoint import (
     save_checkpoint,
 )
 from search_skipper import skipper_decision
+from cap_search_status import render_cap_search_action, render_scan_age
 import portfolio_optimizer_config as _optimizer_config
 from optimization_run_timer import (
     abort_run_timer,
@@ -9687,13 +9688,6 @@ with st.sidebar:
         finalist_transaction_cost_bps = 22.0
         cap_search_start_x = int(cap_search_from)
         cap_search_start_y = int(asset_search_from)
-    run_cap_search_btn = st.button(
-        "Run / resume cap search",
-        width="stretch",
-        key="run_shortlist_cap_search_btn",
-        disabled=not advanced_cap_search,
-        help="This is a long-running research search and does not create trades.",
-    )
     clear_cap_search_btn = st.button(
         "Clear cap-search results",
         width="stretch",
@@ -9775,6 +9769,9 @@ with run_analysis_placeholder:
                     f"Configured pair · X {universal_preselection_cap:,} × Y {exact_optimizer_asset_cap:,} "
                     "· no usable saved raw peak."
                 )
+            run_cap_search_btn, cap_scan_age_placeholder = render_cap_search_action(
+                CURRENT_USER, get_db_connection, enabled=advanced_cap_search,
+            )
             if not run_has_holdings:
                 st.info("Upload or add holdings to enable optimization.")
             if run_btn:
@@ -10071,6 +10068,7 @@ if run_cap_search_btn:
         live_running_pair.empty()
         with get_db_connection() as checkpoint_conn:
             save_checkpoint(checkpoint_conn, CURRENT_USER, cap_search_config, rows, status="running")
+        render_scan_age(cap_scan_age_placeholder, CURRENT_USER, get_db_connection)
         render_live_search_map(rows)
         current_cap = int(latest["Shortlist cap"])
         current_asset_limit = int(latest.get("Maximum assets") or 0)
@@ -10246,6 +10244,7 @@ if run_cap_search_btn:
         st.session_state["shortlist_cap_search_results"] = search_rows
         with get_db_connection() as checkpoint_conn:
             save_checkpoint(checkpoint_conn, CURRENT_USER, cap_search_config, search_rows, status="complete")
+        render_scan_age(cap_scan_age_placeholder, CURRENT_USER, get_db_connection)
         search_progress.progress(1.0)
         search_status.update(
             label=(

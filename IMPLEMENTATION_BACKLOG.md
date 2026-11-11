@@ -1,5 +1,21 @@
 # Implementation status
 
+## Opening cap-search action and scan age (implemented)
+
+`Run / resume cap search` appears directly below `Run optimization` in the first
+main-page action block. The sidebar retains search settings and clearing results.
+The action uses the existing search/reuse settings; no search or price download
+runs while presenting the button.
+
+The adjacent caption reads the profile's durable checkpoint and counts completed
+NSE calendar session closes since the scan timestamp. Weekends, exchange holidays
+and the current unclosed session do not increment the count. This is an explicitly
+NSE-based age; overseas market sessions can differ. Recent-search reuse retains
+the original discovery timestamp rather than making the scan look new. Partial
+checkpoints are labeled separately, with their saved-pair count; missing dates or
+calendar/read failures show unavailable age. The price-history cutoff is separate
+from scan age. The caption refreshes after each saved batch/pair and completion.
+
 ## P0 — Independent sell-only risk-reduction draft
 
 Recorded 10 November 2026, Asia/Kolkata. **Implemented for the private saved-analysis
