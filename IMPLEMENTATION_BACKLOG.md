@@ -30,6 +30,10 @@ Render now recalculates each view's statistics from stored security-level INR
 prices/FX: selected current and target mixes are normalized independently to 100%.
 The actual evidence date/count are shown. No current selection or incomplete
 selected evidence yields unavailable metrics, never full-portfolio substitution.
+Sparse gaps no longer discard all earlier history. Annual moments use valid
+common one-session returns; resampling draws only intact five-session blocks.
+Gap-spanning changes are never compressed into daily returns or filled with zero.
+The evidence date, usable count and incomplete-return count remain visible.
 
 The image includes seven selected current-to-optimal statistics and the recorded
 risk-free/annualization inputs, followed by a definitions ribbon. Export wording

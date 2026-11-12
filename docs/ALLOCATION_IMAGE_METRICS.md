@@ -21,8 +21,12 @@ country-of-listing filter. A filtered image retains each saved weight relative
 to the original capital base and labels its partial sum as **Shown allocation**.
 Statistics describe that selection, not the full portfolio. All views use the
 same INR valuation convention; a US view is not native-USD performance. Returns
-use the contiguous complete tail of the selected series, with at least 120
-common observations. Unselected missing histories do not invalidate a selection.
+use at least 120 valid common one-session observations from the selected series.
+A missing/nonpositive mark invalidates both daily returns touching it; the
+multi-day change is never treated as one daily return. Earlier valid observations
+are retained. Bootstrap blocks are sampled only from intact adjacent stretches,
+never across missing returns. The image shows the number of incomplete returns
+excluded. Unselected missing histories do not invalidate a selection.
 Missing selected history, FX, or recorded calculation inputs produce unavailable
 statistics rather than falling back to full-portfolio values. The image records
 the actual evidence date and observation count.

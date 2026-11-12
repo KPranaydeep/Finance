@@ -57,27 +57,43 @@ def test_unselected_prices_do_not_affect_selection_and_saved_history_is_inr_base
     assert 'INR' in details['error']
 
 
-@pytest.mark.parametrize('problem',['missing_history','missing_security','latest_gap','short_tail','bad_dates','missing_config'])
+@pytest.mark.parametrize('problem',['missing_history','missing_security','latest_gap','too_few','bad_dates','missing_config'])
 def test_incomplete_evidence_never_reuses_whole_portfolio_statistics(problem):
     payload,rows,history,_=evidence()
     if problem=='missing_history':history=None
     if problem=='missing_security':history['columns'][0]='OTHER'
     if problem=='latest_gap':history['values'][-1][0]=None
-    if problem=='short_tail':history['values'][-100][0]=None
+    if problem=='too_few':history['values']=history['values'][-100:];history['dates']=history['dates'][-100:]
     if problem=='bad_dates':history['dates'][-1]=history['dates'][-2]
     if problem=='missing_config':payload['portfolio_metrics_config']={}
     metrics,_,details=selected_image_statistics(payload,rows[:2],history)
     assert details['error'] and all(r[1:3]==('Unavailable','Unavailable') for r in metrics[:-1])
 
 
-def test_leading_gap_keeps_only_contiguous_tail_and_zero_current_is_unavailable():
+def test_gap_keeps_earlier_valid_daily_returns_and_zero_current_is_unavailable():
     payload,rows,history,_=evidence()
     history['values'][30][0]=None
     payload['current_allocation']=[]
     metrics,_,details=selected_image_statistics(payload,rows[:2],history)
-    assert details['observations']==269 and 'No current allocation' in details['error']
+    assert details['observations']==298 and details['excluded_returns']==2
+    assert 'No current allocation' in details['error']
     assert all(r[1]=='Unavailable' for r in metrics[:-1])
     assert metrics[0][2]!='Unavailable'
+
+
+def test_recent_sparse_gap_does_not_erase_years_of_history_or_bridge_prices():
+    payload,rows,history,returns=evidence()
+    history['values'][-6][0]=None  # five recent prices alone cannot support the horizon
+    metrics,_,details=selected_image_statistics(payload,rows[:2],history)
+    assert not details['error'] and details['observations']==298 and details['excluded_returns']==2
+    # The two-day change around the missing mark must not masquerade as one day.
+    target=np.array([1/3,2/3])
+    series=returns[:,:2]@target
+    series[-6:-4]=np.nan
+    observed=series[np.isfinite(series)]
+    assert metrics[0][2]==f'{observed.mean()*252:.2%}'
+    paths=moving_block_bootstrap_return_distribution(series,horizon_sessions=30,preserve_gaps=True)
+    assert metrics[3][2]==f'{np.median(paths):.2%}'
 
 
 def test_missing_current_weight_does_not_invent_current_stats_or_discard_optimal():

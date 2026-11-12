@@ -98,7 +98,8 @@ def test_render_then_download_is_on_demand_and_preview_changes_only_after_render
     app.button[0].click().run()
     assert not app.exception and len(generated)==1
     assert generated[0].view=="INR" and not generated[0].include_ribbon
-    assert generated[0].stats_recomputed and '300 common returns' in generated[0].stats_detail
+    assert generated[0].stats_recomputed and '298 common returns' in generated[0].stats_detail
+    assert '2 incomplete returns excluded' in generated[0].stats_detail
     assert generated[0].statistics[0][2] not in ('Unavailable','48.38%')
     assert len(app.get("download_button"))==1
     record=app.session_state["saved_weights_image_previews"]["synthetic-image"]

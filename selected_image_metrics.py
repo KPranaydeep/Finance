@@ -10,9 +10,12 @@ from portfolio_risk_metrics import (
 
 
 def _stats(series, annualization, risk_free, horizon):
-    annual_return = float(series.mean() * annualization)
-    volatility = float(series.std(ddof=1) * np.sqrt(annualization))
-    scenarios = moving_block_bootstrap_return_distribution(series, horizon_sessions=horizon)
+    observed = series[np.isfinite(series)]
+    annual_return = float(observed.mean() * annualization)
+    volatility = float(observed.std(ddof=1) * np.sqrt(annualization))
+    scenarios = moving_block_bootstrap_return_distribution(series, horizon_sessions=horizon, preserve_gaps=True)
+    if not scenarios.size:
+        raise ValueError("No intact five-session blocks for selected resampling")
     tail = bootstrap_tail_summary(scenarios)
     return {
         "Annual Return": annual_return,
@@ -37,7 +40,7 @@ def selected_image_statistics(payload, selected_rows, history):
     empty = {f"Block-Bootstrap ES 95% ({horizon} Sessions)": None}
     result = {"current_stats": {}, "optimal_stats": empty,
               "portfolio_metrics_config": config}
-    details = {"history_label": "Unavailable", "observations": 0, "error": None}
+    details = {"history_label": "Unavailable", "observations": 0, "excluded_returns": 0, "error": None}
     try:
         annualization = finite_number(config.get("trading_days_per_year"), nonnegative=True)
         risk_free = finite_number(config.get("risk_free_rate_annual"))
@@ -58,14 +61,16 @@ def selected_image_statistics(payload, selected_rows, history):
         valid = np.isfinite(prices).all(axis=1) & prices.gt(0).all(axis=1)
         if not len(valid) or not valid.iloc[-1]:
             raise ValueError("Latest selected prices incomplete")
-        if not valid.all():
-            prices = prices.loc[prices.index > valid.index[~valid][-1]]
+        prices = prices.where(np.isfinite(prices) & prices.gt(0))
         returns = np.log(prices/prices.shift(1)).iloc[1:]
-        if len(returns) < max(120, horizon):
-            raise ValueError("Fewer than 120 contiguous common selected returns")
+        complete = np.isfinite(returns).all(axis=1)
+        details.update(history_label=prices.index[-1].strftime("%d %b %Y"),
+                       observations=int(complete.sum()), excluded_returns=int((~complete).sum()))
+        required=max(120,horizon)
+        if complete.sum() < required:
+            raise ValueError(f"Only {int(complete.sum())} usable common daily returns; {required} required")
         target = np.array([r[2] for r in selected_rows], dtype=float)
         result["optimal_stats"] = _stats((returns @ (target/target.sum())).to_numpy(), annualization, risk_free, horizon)
-        details.update(history_label=returns.index[-1].strftime("%d %b %Y"), observations=len(returns))
         current = dict.fromkeys(tickers, 0.)
         for row in payload.get("current_allocation") or []:
             ticker = str(row.get("Yahoo Ticker") or "").strip().upper()

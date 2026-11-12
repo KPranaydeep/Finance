@@ -61,10 +61,12 @@ def moving_block_bootstrap_return_distribution(
     block_sessions: int = 5,
     simulation_paths: int = 10_000,
     random_seed: int = 20_261_004,
+    preserve_gaps: bool = False,
 ) -> np.ndarray:
     """Return deterministic simple-return paths from a moving-block bootstrap."""
     values = np.asarray(daily_log_returns, dtype=float).reshape(-1)
-    values = values[np.isfinite(values)]
+    if not preserve_gaps:
+        values = values[np.isfinite(values)]
     horizon = int(horizon_sessions)
     block = int(block_sessions)
     paths = int(simulation_paths)
@@ -73,14 +75,21 @@ def moving_block_bootstrap_return_distribution(
     if values.size < block:
         return np.asarray([], dtype=float)
 
+    # A missing daily return is a boundary, never a zero or a bridge between
+    # adjacent observations. Default callers retain their existing convention.
+    valid_starts = np.flatnonzero(
+        np.isfinite(np.lib.stride_tricks.sliding_window_view(values, block)).all(axis=1)
+    ) if preserve_gaps else np.arange(values.size-block+1)
+    if valid_starts.size == 0:
+        return np.asarray([], dtype=float)
+
     blocks_per_path = int(math.ceil(horizon / block))
-    maximum_start = values.size - block
     rng = np.random.default_rng(int(random_seed))
-    starts = rng.integers(
+    starts = valid_starts[rng.integers(
         0,
-        maximum_start + 1,
+        valid_starts.size,
         size=(paths, blocks_per_path),
-    )
+    )]
     offsets = np.arange(block, dtype=int)
     sampled = values[starts[..., None] + offsets]
     horizon_log_returns = sampled.reshape(paths, -1)[:, :horizon].sum(axis=1)

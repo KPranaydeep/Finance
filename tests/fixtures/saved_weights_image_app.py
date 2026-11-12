@@ -27,6 +27,8 @@ prices=100*np.exp(np.vstack([np.zeros(28),np.cumsum(returns,axis=0)]))
 payload["portfolio_evidence_history"]={"schema_version":2,"basis":"INR",
     "columns":[r["ticker"] for r in payload["optimal_allocation"]],
     "dates":[str(d.date()) for d in dates],"values":prices.tolist()}
+# One recent missing mark must not erase the other 298 complete daily returns.
+payload["portfolio_evidence_history"]["values"][-6][1]=None
 for row in payload["current_allocation"]:
     row["Weight"]=1/28
 render_saved_weights_download(st.session_state.get('fixture_payload',payload),["EXAMPLE00"],key="synthetic-image")

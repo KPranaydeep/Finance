@@ -53,5 +53,16 @@ class PortfolioRiskMetricsTests(unittest.TestCase):
             empirical_expected_shortfall([-0.1, 0.1], confidence=1.0)
 
 
+def test_gap_aware_bootstrap_never_builds_a_block_across_missing_returns():
+    values=np.array([.01]*5+[np.nan]+[-.02]*5)
+    paths=moving_block_bootstrap_return_distribution(values,horizon_sessions=5,preserve_gaps=True)
+    assert np.all(np.isclose(paths,np.expm1(.05)) | np.isclose(paths,np.expm1(-.10)))
+    np.testing.assert_array_equal(paths,moving_block_bootstrap_return_distribution(values,horizon_sessions=5,preserve_gaps=True))
+    assert moving_block_bootstrap_return_distribution([.01,np.nan]*10,preserve_gaps=True).size==0
+    clean=np.linspace(-.02,.025,100)
+    np.testing.assert_array_equal(moving_block_bootstrap_return_distribution(clean),
+                                 moving_block_bootstrap_return_distribution(clean,preserve_gaps=True))
+
+
 if __name__ == "__main__":
     unittest.main()

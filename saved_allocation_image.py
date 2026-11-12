@@ -21,6 +21,7 @@ from matplotlib.lines import Line2D
 WIDTH = 1272
 ROWS_PER_PANEL = 24
 _RENDER_LOCK = RLock()
+_IMAGE_STATS_VERSION = "selected-intact-blocks-v2"
 
 
 @dataclass(frozen=True)
@@ -211,6 +212,8 @@ def render_weight_views(spec, views, include_ribbon=True, *, payload=None, histo
         selected=replace(spec,rows=rows,include_ribbon=include_ribbon,view="US / USD quotes" if view=="US" else view)
         statistics,horizon,details=selected_image_statistics(payload or {},rows,history)
         detail="Original-base allocation weights · "+str(details["observations"])+" common returns"
+        if details["excluded_returns"]:
+            detail+=f" · {details['excluded_returns']} incomplete returns excluded; intact-block resampling"
         if details["error"]:
             detail=details["error"]
         selected=replace(selected,statistics=statistics,horizon=horizon,stats_recomputed=True,
@@ -241,7 +244,7 @@ def render_saved_weights_download(payload, paused=(), *, key, history_loader=Non
     except (ValueError,TypeError,OverflowError) as exc:
         st.caption(f"Weights image unavailable: {exc}")
         return
-    signature=hashlib.sha256(repr((spec,payload.get("portfolio_evidence_history"),
+    signature=hashlib.sha256(repr((_IMAGE_STATS_VERSION,spec,payload.get("portfolio_evidence_history"),
         payload.get("current_allocation"),image_metric_config(payload))).encode()).hexdigest()
     cache=st.session_state.setdefault("saved_weights_image_previews",{})
     if key in cache and cache[key]["signature"]!=signature:
