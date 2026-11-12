@@ -19,6 +19,15 @@ and does not rewrite previous analysis or holdings.
 
 ## Saved optimal weights image (implemented)
 
+Export controls now support multiple INR/US/Global image sets and an optional
+definitions ribbon. US explicitly means USD-quoted rows (including USD-quoted
+crypto), not an inferred listing-country classification. Render preview generates
+the images inside an isolated Streamlit fragment; Download serves exactly those
+bytes, with a ZIP for multiple views/pages. Per-session preview storage is bounded
+and invalidated when the saved snapshot changes. Missing views are reported.
+Filtered views retain original weights and show their partial allocation total;
+the statistics remain explicitly labeled as full saved-allocation statistics.
+
 The image includes seven saved current-to-optimal statistics and the recorded
 risk-free/annualization inputs, followed by a definitions ribbon. Export wording
 matches the calculator: annual log-return rate rather than CAGR, an explicitly
@@ -36,7 +45,7 @@ groups exact listings by verified native currency, sorts by weight, and marks
 active pauses without changing the saved target. Unpaused-capital scope and
 conditional/review-only status remain explicit. Missing metadata is unavailable.
 No account identity, quantities, prices or public-publication claims are included.
-Rendering is deferred until download (no optimizer, quotes or page rerun); dense
+Rendering happens only on Render preview (no optimizer or quotes); dense
 allocations produce bounded PNG pages in a ZIP rather than omit securities.
 
 ## Exclude paused securities from optimization (implemented)

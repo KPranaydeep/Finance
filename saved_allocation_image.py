@@ -1,8 +1,10 @@
 """On-demand images of private saved weights; no optimizer or market requests."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from io import BytesIO
 import math
+import hashlib
+import streamlit as st
 from threading import RLock
 from zipfile import ZipFile, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
@@ -31,6 +33,8 @@ class SavedWeightsImage:
     statistics: tuple = ()
     horizon: int | None = None
     stats_retained: bool = False
+    include_ribbon: bool = True
+    view: str = "Global"
 
     def panels(self):
         currencies=sorted({r[1] for r in self.rows},key=lambda c:({"INR":0,"USD":1}.get(c,2),c))
@@ -99,9 +103,10 @@ def render_saved_weights_page(spec, page=0):
         raise ValueError("Invalid allocation-image page")
     selected=panels[page*2:page*2+2]
     stats_height=334
-    height=max(1740,1414+max(len(p[1]) for p in selected)*52)
+    height=max(1740 if spec.include_ribbon else 1300,
+               1414+max(len(p[1]) for p in selected)*52-(0 if spec.include_ribbon else 440))
     paper,ink,muted,accent,rule="#f5f0e6","#29251f","#6b665e","#9f4339","#d8cfbf"
-    # Deferred downloads run on worker threads. Keep Matplotlib rendering isolated.
+    # Keep concurrent session renders and download workers isolated in Matplotlib.
     with _RENDER_LOCK:
         figure=Figure(figsize=(WIDTH/100,height/100+1e-6),dpi=100,facecolor=paper)
         FigureCanvasAgg(figure)
@@ -121,15 +126,16 @@ def render_saved_weights_page(spec, page=0):
         text(left,60,"PRIVATE PORTFOLIO",15,color=accent,bold=True)
         text(right,60,"REVIEW ONLY" if spec.review_only else "SAVED MODEL",12,color=accent,bold=True,align="right")
         text(left,118,"SAVED OPTIMAL WEIGHTS",27,bold=True,family="serif")
-        text(left,170,spec.saved_label,13,color=muted)
+        text(left,170,spec.saved_label+(" · "+spec.view+" view" if spec.view!="Global" else ""),13,color=muted)
         line(left,right,210,color=ink)
-        for x,label,value in ((left,"SECURITIES",str(len(spec.rows))),(.36,"TOTAL ALLOCATION",f"{sum(r[2] for r in spec.rows):.2%}"),(.67,"HISTORY THROUGH",spec.history_label)):
+        for x,label,value in ((left,"SECURITIES",str(len(spec.rows))),(.36,"TOTAL ALLOCATION" if spec.view=="Global" else "SHOWN ALLOCATION",f"{sum(r[2] for r in spec.rows):.2%}"),(.67,"HISTORY THROUGH",spec.history_label)):
             text(x,254,label,11,color=muted,bold=True)
             text(x,295,value,20,bold=True)
         text(left,349,spec.scope_label,13,color=muted)
         line(left,right,375)
         text(left,402,"PORTFOLIO STATISTICS · CURRENT → OPTIMAL",14,color=accent,bold=True)
-        text(left,430,"Saved analysis · before costs/taxes · fitted weights may differ from rounded allocations"+
+        text(left,430,("Saved analysis · before costs/taxes · fitted weights may differ from rounded allocations" if spec.view=="Global" else
+             "Full saved-allocation statistics · before costs/taxes · view weights retain their original portfolio base")+
              (" · prior dated statistics retained" if spec.stats_retained else ""),11.5,color=muted,max_width=(right-left)*WIDTH)
         for i,(label,current,optimal,note) in enumerate(spec.statistics):
             x=left+(i%4)*.225;y=467+(i//4)*110
@@ -137,6 +143,8 @@ def render_saved_weights_page(spec, page=0):
             value=f"{current} → {optimal}" if current is not None else optimal
             text(x,y+34,value,16,bold=True,max_width=.21*WIDTH)
             text(x,y+66,note,10.2,color=muted,max_width=.21*WIDTH)
+        if spec.view!="Global":
+            text(left,671,"Saved fitted weights can differ from rounded allocations.",10.2,color=muted)
         line(left,right,686)
         panel_width=.415 if len(selected)==2 else .88
         for index,(currency,rows,continued) in enumerate(selected):
@@ -153,15 +161,16 @@ def render_saved_weights_page(spec, page=0):
                         transform=figure.transFigure,facecolor="#f0ebe1",edgecolor="none"))
                 text(x+.005,y,ticker+(" *" if paused else ""),19,bold=True,max_width=(panel_width-.14)*WIDTH)
                 text(end-.005,y,"<0.01%" if weight<.0001 else f"{weight:.2%}",19,color=accent,bold=True,align="right")
-        figure.patches.append(Rectangle((left-.012,155/height),right-left+.024,440/height,
-            transform=figure.transFigure,facecolor="#eee6d7",edgecolor="none"))
-        text(left,height-568,"HOW TO READ THESE NUMBERS",14,color=accent,bold=True)
-        for i,(term,definition) in enumerate(definition_ribbon(spec.horizon)):
-            x=left+(i%2)*.465;y=height-526+(i//2)*90
-            text(x,y,term,12,bold=True,max_width=.415*WIDTH)
-            for j,part in enumerate(wrap(definition,66)):
-                text(x,y+23+j*20,part,11.1,color=muted,max_width=.415*WIDTH)
-        text(left,height-142,"Concepts: Sharpe (1994) · Künsch (1989) · Rockafellar & Uryasev (2000). App conventions noted above.",9.5,color=muted)
+        if spec.include_ribbon:
+            figure.patches.append(Rectangle((left-.012,155/height),right-left+.024,440/height,
+                transform=figure.transFigure,facecolor="#eee6d7",edgecolor="none"))
+            text(left,height-568,"HOW TO READ THESE NUMBERS",14,color=accent,bold=True)
+            for i,(term,definition) in enumerate(definition_ribbon(spec.horizon)):
+                x=left+(i%2)*.465;y=height-526+(i//2)*90
+                text(x,y,term,12,bold=True,max_width=.415*WIDTH)
+                for j,part in enumerate(wrap(definition,66)):
+                    text(x,y+23+j*20,part,11.1,color=muted,max_width=.415*WIDTH)
+            text(left,height-142,"Concepts: Sharpe (1994) · Künsch (1989) · Rockafellar & Uryasev (2000). App conventions noted above.",9.5,color=muted)
         line(left,right,height-116)
         text(left,height-82,"Saved model weights · not executed trades. Historical and resampled risks are not loss limits.",11.5,color=muted)
         if any(r[3] for r in spec.rows):
@@ -184,15 +193,72 @@ def saved_weights_image_download(spec):
     return output.getvalue()
 
 
+def render_weight_views(spec, views, include_ribbon=True):
+    """One image set per view; never rescale weights or mislabel portfolio stats."""
+    if not isinstance(include_ribbon,bool) or any(v not in ("INR","US","Global") for v in views):
+        raise ValueError("Choose INR, US or Global and a definitions-ribbon setting")
+    images=[];missing=[]
+    for view in dict.fromkeys(views):
+        rows=tuple(r for r in spec.rows if view=="Global" or r[1]==("INR" if view=="INR" else "USD"))
+        if not rows:
+            missing.append(view);continue
+        selected=replace(spec,rows=rows,include_ribbon=include_ribbon,view="US / USD quotes" if view=="US" else view)
+        pages=(len(selected.panels())+1)//2
+        for page in range(pages):
+            name=f"optimal-weights-{view.lower()}-{spec.date_slug}"+(f"-{page+1:02d}" if pages>1 else "")+".png"
+            images.append((name,render_saved_weights_page(selected,page),view+ (f" · page {page+1}/{pages}" if pages>1 else "")))
+    return tuple(images),tuple(missing)
+
+
+def pack_weight_views(images, date_slug):
+    if len(images)==1:
+        return images[0][0],"image/png",images[0][1]
+    if not images:
+        raise ValueError("No rendered allocation images")
+    output=BytesIO()
+    with ZipFile(output,"w",ZIP_DEFLATED) as archive:
+        for name,data,_ in images:
+            archive.writestr(name,data)
+    return f"optimal-weights-views-{date_slug}.zip","application/zip",output.getvalue()
+
+
+@st.fragment
 def render_saved_weights_download(payload, paused=(), *, key):
-    import streamlit as st
     try:
         spec=saved_weights_image_spec(payload,paused)
     except (ValueError,TypeError,OverflowError) as exc:
         st.caption(f"Weights image unavailable: {exc}")
         return
-    multiple=len(spec.panels())>2
-    st.download_button("Download optimal weights image"+("s (ZIP)" if multiple else " (PNG)"),
-        data=lambda: saved_weights_image_download(spec),
-        file_name=f"optimal-weights-{spec.date_slug}."+("zip" if multiple else "png"),
-        mime="application/zip" if multiple else "image/png",key=key,icon=":material/image:",on_click="ignore")
+    signature=hashlib.sha256(repr(spec).encode()).hexdigest()
+    cache=st.session_state.setdefault("saved_weights_image_previews",{})
+    if key in cache and cache[key]["signature"]!=signature:
+        cache.pop(key)
+    with st.form(key+"_options",border=False):
+        views=st.multiselect("Image coverage",["INR","US","Global"],default=["Global"],key=key+"_views",
+            help="Choose one or more image sets. INR = INR quotes; US = USD quotes (including USD-quoted crypto); Global = all currencies. Saved weights are not rescaled; statistics cover the full saved allocation.")
+        ribbon=st.checkbox("Include definitions ribbon",value=True,key=key+"_ribbon")
+        render=st.form_submit_button("Render preview",icon=":material/image:")
+    if render:
+        cache.pop(key,None)
+        if not views:
+            st.info("Select at least one view, then render the preview.")
+            return
+        with st.spinner("Rendering saved weights…"):
+            images,missing=render_weight_views(spec,views,ribbon)
+        for view in missing:
+            st.info(f"{view}: no positive saved weights with matching quote currency.")
+        if not images:
+            return
+        if key not in cache and len(cache)>=2:
+            cache.pop(next(iter(cache)))
+        cache[key]={"signature":signature,"images":images,"file":pack_weight_views(images,spec.date_slug),"ribbon":ribbon}
+    rendered=cache.get(key)
+    if rendered:
+        st.caption("Rendered views · "+", ".join(dict.fromkeys(label.split(" · ")[0] for _,_,label in rendered["images"]))+
+                   " · Definitions "+("included" if rendered["ribbon"] else "omitted")+". Download matches this preview.")
+        for _,data,label in rendered["images"]:
+            with st.expander(label+" preview",expanded=len(rendered["images"])==1):
+                st.image(data,width=636)
+        name,mime,data=rendered["file"]
+        st.download_button("Download rendered image" if mime=="image/png" else "Download rendered images (ZIP)",
+            data=data,file_name=name,mime=mime,key=key+"_download",icon=":material/download:",on_click="ignore")

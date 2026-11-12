@@ -4,6 +4,8 @@ from saved_allocation_image import render_saved_weights_download, saved_weights_
 
 st.set_page_config(layout="wide")
 st.title("Saved optimal weights · image export")
+st.session_state['full_page_runs']=st.session_state.get('full_page_runs',0)+1
+st.caption(f"Full page executions: {st.session_state['full_page_runs']}")
 payload={"saved_at":"2026-11-11T08:30:00+00:00","history":{"valid_end":"2026-11-10"},
          "allocation_validation":{"passed":True},
          "optimization_scope":{"mode":"unpaused-capital-v1","excluded_tickers":["EXCLUDED.NS"]},
@@ -16,5 +18,4 @@ payload["optimal_stats"]={"Annual Return":.4838,"Annual Volatility":.1171,"Sharp
     "Historical ES 95% (1 Session)":.014,"Block-Bootstrap ES 95% (30 Sessions)":.0413,
     "Block-Bootstrap Median Return (30 Sessions)":.0407,"Block-Bootstrap Tail Loss SD 95% (30 Sessions)":.0156}
 payload["portfolio_metrics_config"]={"risk_free_rate_annual":.08225,"trading_days_per_year":252}
-render_saved_weights_download(payload,["EXAMPLE00"],key="synthetic-image")
-st.image(render_saved_weights_page(saved_weights_image_spec(payload,["EXAMPLE00"])),width=636)
+render_saved_weights_download(st.session_state.get('fixture_payload',payload),["EXAMPLE00"],key="synthetic-image")

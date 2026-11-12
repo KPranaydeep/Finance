@@ -81,15 +81,84 @@ def test_bad_weights_fail_without_fake_zeroes_and_unknown_metadata_remains_unkno
     assert saved_weights_image_spec(source).review_only
 
 
-def test_download_is_lazy_captures_snapshot_and_never_runs_an_optimizer(monkeypatch):
-    import streamlit as st
+def test_render_then_download_is_on_demand_and_preview_changes_only_after_render(monkeypatch):
+    from streamlit.testing.v1 import AppTest
     import saved_allocation_image as module
-    calls=[];generated=[]
-    monkeypatch.setattr(st,"download_button",lambda *a,**kw:calls.append((a,kw)))
-    monkeypatch.setattr(module,"saved_weights_image_download",lambda spec:generated.append(spec) or b"png")
-    source=payload()
-    render_saved_weights_download(source,key="saved-image-one")
-    assert not generated and calls[0][1]["on_click"]=="ignore"
-    assert calls[0][1]["mime"]=="image/png"
-    source["optimal_allocation"][0]["target_weight"]=.9
-    assert calls[0][1]["data"]()==b"png" and generated[0].rows[0][2]==1/26
+    generated=[];original=module.render_saved_weights_page
+    def render(spec,page=0):
+        generated.append(spec);return original(spec,page)
+    monkeypatch.setattr(module,"render_saved_weights_page",render)
+    app=AppTest.from_file("tests/fixtures/saved_weights_image_app.py",default_timeout=20).run()
+    assert not app.exception and not generated and not app.get("download_button")
+    assert app.multiselect[0].value==["Global"] and app.checkbox[0].value
+    app.multiselect[0].set_value(["INR"]);app.checkbox[0].set_value(False)
+    app.button[0].click().run()
+    assert not app.exception and len(generated)==1
+    assert generated[0].view=="INR" and not generated[0].include_ribbon
+    assert len(app.get("download_button"))==1
+    record=app.session_state["saved_weights_image_previews"]["synthetic-image"]
+    assert record["file"][1]=="image/png" and record["images"][0][1]==record["file"][2]
+    assert sum(r[2] for r in generated[0].rows)==pytest.approx(.5)
+    app.multiselect[0].set_value(["US"]).run()
+    assert len(generated)==1 and "INR" in app.caption[-1].value
+    app.button[0].click().run()
+    assert len(generated)==2 and generated[1].view=="US / USD quotes"
+    app.multiselect[0].set_value([]);app.button[0].click().run()
+    assert not app.exception and not app.get("download_button") and app.info
+    app.multiselect[0].set_value(["Global"]);app.button[0].click().run()
+    assert app.get("download_button")
+    app.session_state["fixture_payload"]=payload(1)
+    app.run()
+    assert not app.exception and not app.get("download_button")
+    assert "synthetic-image" not in app.session_state["saved_weights_image_previews"]
+
+
+def test_filtered_views_keep_weights_and_stats_and_zip_contains_exact_preview_bytes(monkeypatch):
+    import saved_allocation_image as module
+    source=saved_weights_image_spec(payload())
+    rendered=[]
+    monkeypatch.setattr(module,"render_saved_weights_page",lambda spec,page=0:rendered.append(spec) or b"synthetic-png")
+    images,missing=module.render_weight_views(source,["INR","US","Global"],False)
+    assert not missing and len(images)==3 and sum(r[2] for r in rendered[0].rows)==pytest.approx(.5)
+    assert rendered[0].statistics==source.statistics and not rendered[0].include_ribbon
+    assert len(rendered[2].rows)==26 and source.include_ribbon
+    name,mime,data=module.pack_weight_views(images,source.date_slug)
+    assert mime=="application/zip"
+    with ZipFile(BytesIO(data)) as archive:
+        assert archive.namelist()==[row[0] for row in images]
+        assert all(archive.read(row[0])==row[1] for row in images)
+    only_inr=module.replace(source,rows=tuple(r for r in source.rows if r[1]=="INR"))
+    images,missing=module.render_weight_views(only_inr,["US"],True)
+    assert not images and missing==("US",)
+
+
+def test_rendered_multi_page_views_use_distinct_pages(monkeypatch):
+    import saved_allocation_image as module
+    pages=[]
+    def render(spec,page=0):
+        pages.append((spec.view,page))
+        return str(page).encode()
+    monkeypatch.setattr(module,"render_saved_weights_page",render)
+    images,missing=module.render_weight_views(saved_weights_image_spec(payload(101)),["Global"])
+    assert not missing and pages==[("Global",0),("Global",1),("Global",2)]
+    assert [row[1] for row in images]==[b"0",b"1",b"2"]
+
+
+def test_no_ribbon_layout_and_filtered_statistics_are_explicit(monkeypatch):
+    import saved_allocation_image as module
+    spec=module.replace(saved_weights_image_spec(payload(48)),include_ribbon=False,view="US / USD quotes")
+    original=FigureCanvasAgg.print_png
+    def inspect(canvas,*args,**kwargs):
+        canvas.draw();renderer=canvas.get_renderer();figure=canvas.figure
+        boxes=[t.get_window_extent(renderer) for t in figure.texts]
+        for i,box in enumerate(boxes):
+            assert figure.bbox.contains(box.x0,box.y0) and figure.bbox.contains(box.x1,box.y1)
+            assert not any(box.overlaps(other) for other in boxes[i+1:])
+        labels=[t.get_text() for t in figure.texts]
+        assert "HOW TO READ THESE NUMBERS" not in labels and "SHOWN ALLOCATION" in labels
+        assert any("Full saved-allocation statistics" in label for label in labels)
+        assert not any("Concepts:" in label for label in labels)
+        return original(canvas,*args,**kwargs)
+    monkeypatch.setattr(FigureCanvasAgg,"print_png",inspect)
+    data=module.render_saved_weights_page(spec)
+    assert Image.open(BytesIO(data)).size==(1272,2222)

@@ -9,6 +9,16 @@ an unpaused-capital scope, both the weights and statistics refer to that scope.
 An optimized in-sample result can overstate an improvement that persists outside
 the fitted period. These statistics do not deduct trading costs or taxes.
 
+Select one or more **INR**, **US**, or **Global** views, optionally include the
+definitions ribbon, then **Render preview** and **Download**. Each view is an
+independent image set; multiple views/pages download as a ZIP. US is explicitly
+the saved USD-quote subset, including USD-quoted crypto, rather than a verified
+country-of-listing filter. A filtered image retains each saved weight relative
+to the original capital base and labels its partial sum as **Shown allocation**.
+Statistics continue to describe the full saved allocation, not the filtered slice.
+Changing options does not silently change an existing preview: render again to
+replace it. Saved-data changes invalidate the prior rendered snapshot.
+
 ## Definitions and the app's conventions
 
 For daily asset log returns `r[t,i]`, the current calculator forms
