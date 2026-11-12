@@ -31,9 +31,12 @@ def test_export_preserves_exact_saved_weights_and_snapshot_without_mutation():
     assert [r[2] for p in spec.panels() for r in p[1]]==[1/26]*26
 
 
-@pytest.mark.parametrize("count,expected",[(1,(1272,1740)),(26,(1272,2090)),(48,(1272,2662))])
-def test_exact_png_dimensions_and_no_clipped_or_overlapping_text(monkeypatch,count,expected):
+@pytest.mark.parametrize("count,expected,recomputed",[(1,(1272,1740),False),(26,(1272,2090),False),(48,(1272,2662),False),(48,(1272,2662),True)])
+def test_exact_png_dimensions_and_no_clipped_or_overlapping_text(monkeypatch,count,expected,recomputed):
     source=payload(count);spec=saved_weights_image_spec(source,["SECURITY00"])
+    if recomputed:
+        from dataclasses import replace
+        spec=replace(spec,stats_recomputed=True,stats_detail="Original-base allocation weights · 300 common returns")
     original=FigureCanvasAgg.print_png
     def inspect(canvas,*args,**kwargs):
         canvas.draw();renderer=canvas.get_renderer();figure=canvas.figure
@@ -95,6 +98,8 @@ def test_render_then_download_is_on_demand_and_preview_changes_only_after_render
     app.button[0].click().run()
     assert not app.exception and len(generated)==1
     assert generated[0].view=="INR" and not generated[0].include_ribbon
+    assert generated[0].stats_recomputed and '300 common returns' in generated[0].stats_detail
+    assert generated[0].statistics[0][2] not in ('Unavailable','48.38%')
     assert len(app.get("download_button"))==1
     record=app.session_state["saved_weights_image_previews"]["synthetic-image"]
     assert record["file"][1]=="image/png" and record["images"][0][1]==record["file"][2]
@@ -120,7 +125,8 @@ def test_filtered_views_keep_weights_and_stats_and_zip_contains_exact_preview_by
     monkeypatch.setattr(module,"render_saved_weights_page",lambda spec,page=0:rendered.append(spec) or b"synthetic-png")
     images,missing=module.render_weight_views(source,["INR","US","Global"],False)
     assert not missing and len(images)==3 and sum(r[2] for r in rendered[0].rows)==pytest.approx(.5)
-    assert rendered[0].statistics==source.statistics and not rendered[0].include_ribbon
+    assert all(r[1:3]==("Unavailable","Unavailable") for r in rendered[0].statistics[:-1])
+    assert rendered[0].stats_recomputed and not rendered[0].include_ribbon
     assert len(rendered[2].rows)==26 and source.include_ribbon
     name,mime,data=module.pack_weight_views(images,source.date_slug)
     assert mime=="application/zip"

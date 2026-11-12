@@ -9,7 +9,8 @@ from threading import RLock
 from zipfile import ZipFile, ZIP_DEFLATED
 from zoneinfo import ZoneInfo
 from textwrap import wrap
-from allocation_image_metrics import saved_image_metrics, definition_ribbon
+from allocation_image_metrics import saved_image_metrics, definition_ribbon, image_metric_config
+from selected_image_metrics import selected_image_statistics
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -35,6 +36,8 @@ class SavedWeightsImage:
     stats_retained: bool = False
     include_ribbon: bool = True
     view: str = "Global"
+    stats_recomputed: bool = False
+    stats_detail: str = ""
 
     def panels(self):
         currencies=sorted({r[1] for r in self.rows},key=lambda c:({"INR":0,"USD":1}.get(c,2),c))
@@ -134,7 +137,8 @@ def render_saved_weights_page(spec, page=0):
         text(left,349,spec.scope_label,13,color=muted)
         line(left,right,375)
         text(left,402,"PORTFOLIO STATISTICS · CURRENT → OPTIMAL",14,color=accent,bold=True)
-        text(left,430,("Saved analysis · before costs/taxes · fitted weights may differ from rounded allocations" if spec.view=="Global" else
+        text(left,430,("Recomputed selected mix · each side normalized to 100% · INR returns · before costs/taxes" if spec.stats_recomputed else
+             "Saved analysis · before costs/taxes · fitted weights may differ from rounded allocations" if spec.view=="Global" else
              "Full saved-allocation statistics · before costs/taxes · view weights retain their original portfolio base")+
              (" · prior dated statistics retained" if spec.stats_retained else ""),11.5,color=muted,max_width=(right-left)*WIDTH)
         for i,(label,current,optimal,note) in enumerate(spec.statistics):
@@ -143,7 +147,9 @@ def render_saved_weights_page(spec, page=0):
             value=f"{current} → {optimal}" if current is not None else optimal
             text(x,y+34,value,16,bold=True,max_width=.21*WIDTH)
             text(x,y+66,note,10.2,color=muted,max_width=.21*WIDTH)
-        if spec.view!="Global":
+        if spec.stats_recomputed:
+            text(left,671,spec.stats_detail,10.2,color=muted,max_width=(right-left)*WIDTH)
+        elif spec.view!="Global":
             text(left,671,"Saved fitted weights can differ from rounded allocations.",10.2,color=muted)
         line(left,right,686)
         panel_width=.415 if len(selected)==2 else .88
@@ -165,7 +171,7 @@ def render_saved_weights_page(spec, page=0):
             figure.patches.append(Rectangle((left-.012,155/height),right-left+.024,440/height,
                 transform=figure.transFigure,facecolor="#eee6d7",edgecolor="none"))
             text(left,height-568,"HOW TO READ THESE NUMBERS",14,color=accent,bold=True)
-            for i,(term,definition) in enumerate(definition_ribbon(spec.horizon)):
+            for i,(term,definition) in enumerate(definition_ribbon(spec.horizon,recalculated=spec.stats_recomputed)):
                 x=left+(i%2)*.465;y=height-526+(i//2)*90
                 text(x,y,term,12,bold=True,max_width=.415*WIDTH)
                 for j,part in enumerate(wrap(definition,66)):
@@ -193,8 +199,8 @@ def saved_weights_image_download(spec):
     return output.getvalue()
 
 
-def render_weight_views(spec, views, include_ribbon=True):
-    """One image set per view; never rescale weights or mislabel portfolio stats."""
+def render_weight_views(spec, views, include_ribbon=True, *, payload=None, history=None):
+    """One image set per view with independently recalculated selected statistics."""
     if not isinstance(include_ribbon,bool) or any(v not in ("INR","US","Global") for v in views):
         raise ValueError("Choose INR, US or Global and a definitions-ribbon setting")
     images=[];missing=[]
@@ -203,6 +209,12 @@ def render_weight_views(spec, views, include_ribbon=True):
         if not rows:
             missing.append(view);continue
         selected=replace(spec,rows=rows,include_ribbon=include_ribbon,view="US / USD quotes" if view=="US" else view)
+        statistics,horizon,details=selected_image_statistics(payload or {},rows,history)
+        detail="Original-base allocation weights · "+str(details["observations"])+" common returns"
+        if details["error"]:
+            detail=details["error"]
+        selected=replace(selected,statistics=statistics,horizon=horizon,stats_recomputed=True,
+                         stats_retained=False,history_label=details["history_label"],stats_detail=detail)
         pages=(len(selected.panels())+1)//2
         for page in range(pages):
             name=f"optimal-weights-{view.lower()}-{spec.date_slug}"+(f"-{page+1:02d}" if pages>1 else "")+".png"
@@ -223,19 +235,20 @@ def pack_weight_views(images, date_slug):
 
 
 @st.fragment
-def render_saved_weights_download(payload, paused=(), *, key):
+def render_saved_weights_download(payload, paused=(), *, key, history_loader=None):
     try:
         spec=saved_weights_image_spec(payload,paused)
     except (ValueError,TypeError,OverflowError) as exc:
         st.caption(f"Weights image unavailable: {exc}")
         return
-    signature=hashlib.sha256(repr(spec).encode()).hexdigest()
+    signature=hashlib.sha256(repr((spec,payload.get("portfolio_evidence_history"),
+        payload.get("current_allocation"),image_metric_config(payload))).encode()).hexdigest()
     cache=st.session_state.setdefault("saved_weights_image_previews",{})
     if key in cache and cache[key]["signature"]!=signature:
         cache.pop(key)
     with st.form(key+"_options",border=False):
         views=st.multiselect("Image coverage",["INR","US","Global"],default=["Global"],key=key+"_views",
-            help="Choose one or more image sets. INR = INR quotes; US = USD quotes (including USD-quoted crypto); Global = all currencies. Saved weights are not rescaled; statistics cover the full saved allocation.")
+            help="Choose one or more image sets. INR = INR quotes; US = USD quotes (including USD-quoted crypto); Global = all currencies. Allocation weights retain their original base. Statistics are recalculated for the selected listings, each mix normalized to 100%, using INR-valued history.")
         ribbon=st.checkbox("Include definitions ribbon",value=True,key=key+"_ribbon")
         render=st.form_submit_button("Render preview",icon=":material/image:")
     if render:
@@ -244,7 +257,13 @@ def render_saved_weights_download(payload, paused=(), *, key):
             st.info("Select at least one view, then render the preview.")
             return
         with st.spinner("Rendering saved weights…"):
-            images,missing=render_weight_views(spec,views,ribbon)
+            history=payload.get("portfolio_evidence_history")
+            if not history and history_loader is not None:
+                try:
+                    history=history_loader()
+                except (ValueError,TypeError,KeyError,OSError):
+                    history=None
+            images,missing=render_weight_views(spec,views,ribbon,payload=payload,history=history)
         for view in missing:
             st.info(f"{view}: no positive saved weights with matching quote currency.")
         if not images:

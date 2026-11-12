@@ -3374,7 +3374,8 @@ def render_saved_analysis(placeholder, owner, *, instance_key="page"):
                 )
 
         with st.expander("Saved optimal weights · pause securities", expanded=True):
-            render_saved_weights_download(payload,paused_now,key=f"saved_weights_image_{widget_scope}")
+            render_saved_weights_download(payload,paused_now,key=f"saved_weights_image_{widget_scope}",
+                history_loader=lambda: portfolio_prices_from_cache(payload, MARKET_HISTORY_CACHE_PATH, pd.Timestamp.now(tz="Asia/Kolkata").date()))
             render_optimal_weight_pause_editor(
                 payload.get("optimal_allocation") or [], owner,
                 key_prefix=f"saved_optimal_weights_{widget_scope}",

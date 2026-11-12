@@ -13,6 +13,13 @@ def finite_number(value, *, nonnegative=False):
         return None
 
 
+def image_metric_config(payload):
+    config=payload.get("portfolio_metrics_config") or {}
+    if not config and not payload.get("portfolio_metrics_as_of"):
+        config=payload.get("review_analysis_context") or (payload.get("settings") or {}).get("optimizer_config") or {}
+    return config
+
+
 def saved_image_metrics(payload):
     current=payload.get("current_stats") or {};optimal=payload.get("optimal_stats") or {}
     horizons={int(m.group(1)) for key in optimal for m in [re.search(r"Block-Bootstrap .*\((\d+) Sessions\)",str(key))] if m}
@@ -36,9 +43,7 @@ def saved_image_metrics(payload):
                 value=None
             values.append("Unavailable" if value is None else f"{value:.2f}" if ratio else f"{value:.2%}")
         result.append((label,*values,note))
-    config=payload.get("portfolio_metrics_config") or {}
-    if not config and not payload.get("portfolio_metrics_as_of"):
-        config=payload.get("review_analysis_context") or (payload.get("settings") or {}).get("optimizer_config") or {}
+    config=image_metric_config(payload)
     rf=finite_number(config.get("risk_free_rate_annual"))
     n=finite_number(config.get("trading_days_per_year"),nonnegative=True)
     result.append(("SAVED RISK-FREE INPUT",None,"Unavailable" if rf is None else f"{rf:.3%}",
@@ -46,7 +51,7 @@ def saved_image_metrics(payload):
     return tuple(result),horizon
 
 
-def definition_ribbon(horizon):
+def definition_ribbon(horizon, *, recalculated=False):
     h=f"{horizon}-session" if horizon else "Multi-session (horizon unrecorded)"
     return (
         ("Annual log return", "Mean weighted daily log return × sessions/year. Historical log-rate; not CAGR, XIRR or a future-return promise."),
@@ -56,5 +61,5 @@ def definition_ribbon(horizon):
         ("Expected shortfall · ES 95%", "Average loss in the worst approximately 5% of outcomes. One-session uses history; multi-session uses resampling. Not VaR or maximum drawdown."),
         ("Tail-loss standard deviation · SD", "Sample standard deviation of non-negative losses within the worst approximately 5% tail. Describes tail dispersion, not total portfolio volatility."),
         ("Moving-block bootstrap", "Resamples short adjacent stretches of history to retain some short-range dependence. Unseen regimes and gaps may be absent."),
-        ("Allocation and comparison", "Weights share the stated capital base. Statistics come from the saved analysis; rounded targets can differ from fitted weights. In-sample comparisons can overstate improvement."),
+        ("Allocation and comparison", "Image weights retain their original base. Selected current and optimal mixes are each normalized to 100% for statistics, using INR-valued history. In-sample comparisons can overstate improvement." if recalculated else "Weights share the stated capital base. Statistics come from the saved analysis; rounded targets can differ from fitted weights. In-sample comparisons can overstate improvement."),
     )

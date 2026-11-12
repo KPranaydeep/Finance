@@ -1,5 +1,7 @@
 """Synthetic preview; no private database, optimizer or external data."""
 import streamlit as st
+import numpy as np
+import pandas as pd
 from saved_allocation_image import render_saved_weights_download, saved_weights_image_spec, render_saved_weights_page
 
 st.set_page_config(layout="wide")
@@ -18,4 +20,13 @@ payload["optimal_stats"]={"Annual Return":.4838,"Annual Volatility":.1171,"Sharp
     "Historical ES 95% (1 Session)":.014,"Block-Bootstrap ES 95% (30 Sessions)":.0413,
     "Block-Bootstrap Median Return (30 Sessions)":.0407,"Block-Bootstrap Tail Loss SD 95% (30 Sessions)":.0156}
 payload["portfolio_metrics_config"]={"risk_free_rate_annual":.08225,"trading_days_per_year":252}
+dates=pd.bdate_range(end="2026-11-10",periods=301)
+returns=np.random.default_rng(12).normal(.0007,.011,(300,28))
+returns[:,1::2]-=.0005
+prices=100*np.exp(np.vstack([np.zeros(28),np.cumsum(returns,axis=0)]))
+payload["portfolio_evidence_history"]={"schema_version":2,"basis":"INR",
+    "columns":[r["ticker"] for r in payload["optimal_allocation"]],
+    "dates":[str(d.date()) for d in dates],"values":prices.tolist()}
+for row in payload["current_allocation"]:
+    row["Weight"]=1/28
 render_saved_weights_download(st.session_state.get('fixture_payload',payload),["EXAMPLE00"],key="synthetic-image")

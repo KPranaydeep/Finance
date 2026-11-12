@@ -1,11 +1,15 @@
 # Reading the saved allocation image
 
-The image transcribes the saved statistics; downloading it does not run a solver,
-fetch prices or recompute evidence. **Current → optimal** compares historical
-analysis of the two mixes, not broker-account returns. Displayed saved allocations
-can have been rounded after fitting; their replay need not reproduce the saved
-statistics exactly. If the allocation has
-an unpaused-capital scope, both the weights and statistics refer to that scope.
+**Render preview** recalculates all seven statistics for the selected securities
+from stored security-level INR-valued price history, including dated FX. If no
+embedded history exists, the private app can read its local price/FX cache; the
+export never downloads prices or runs an optimizer. Download serves the exact
+preview bytes. **Current → optimal** compares the selected current mix with the
+selected saved target mix, each normalized separately to 100%. A selection with
+no current allocation has unavailable current statistics, not zero returns.
+These are historical model comparisons, not broker-account returns. The replay
+uses the displayed saved targets, which may differ from the original fitted
+weights. If the allocation has an unpaused-capital scope, that scope is retained.
 An optimized in-sample result can overstate an improvement that persists outside
 the fitted period. These statistics do not deduct trading costs or taxes.
 
@@ -15,7 +19,13 @@ independent image set; multiple views/pages download as a ZIP. US is explicitly
 the saved USD-quote subset, including USD-quoted crypto, rather than a verified
 country-of-listing filter. A filtered image retains each saved weight relative
 to the original capital base and labels its partial sum as **Shown allocation**.
-Statistics continue to describe the full saved allocation, not the filtered slice.
+Statistics describe that selection, not the full portfolio. All views use the
+same INR valuation convention; a US view is not native-USD performance. Returns
+use the contiguous complete tail of the selected series, with at least 120
+common observations. Unselected missing histories do not invalidate a selection.
+Missing selected history, FX, or recorded calculation inputs produce unavailable
+statistics rather than falling back to full-portfolio values. The image records
+the actual evidence date and observation count.
 Changing options does not silently change an existing preview: render again to
 replace it. Saved-data changes invalidate the prior rendered snapshot.
 

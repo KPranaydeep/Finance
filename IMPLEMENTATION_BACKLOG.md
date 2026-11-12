@@ -25,10 +25,13 @@ crypto), not an inferred listing-country classification. Render preview generate
 the images inside an isolated Streamlit fragment; Download serves exactly those
 bytes, with a ZIP for multiple views/pages. Per-session preview storage is bounded
 and invalidated when the saved snapshot changes. Missing views are reported.
-Filtered views retain original weights and show their partial allocation total;
-the statistics remain explicitly labeled as full saved-allocation statistics.
+Filtered views retain original weights and show their partial allocation total.
+Render now recalculates each view's statistics from stored security-level INR
+prices/FX: selected current and target mixes are normalized independently to 100%.
+The actual evidence date/count are shown. No current selection or incomplete
+selected evidence yields unavailable metrics, never full-portfolio substitution.
 
-The image includes seven saved current-to-optimal statistics and the recorded
+The image includes seven selected current-to-optimal statistics and the recorded
 risk-free/annualization inputs, followed by a definitions ribbon. Export wording
 matches the calculator: annual log-return rate rather than CAGR, an explicitly
 approximate Sharpe-like ratio, and empirical/bootstrapped ES with the correct
@@ -36,8 +39,8 @@ horizon. It distinguishes tail-loss dispersion from volatility and ES from a
 loss ceiling. Missing values are unavailable; legacy horizons remain unchanged.
 Metric dates are separate from the saved weights' date, and refreshes persist
 their calculation configuration. Definitions and primary references are in
-`docs/ALLOCATION_IMAGE_METRICS.md`. Saved rounded targets may differ from the
-fitted weights behind historical statistics; the image states that distinction.
+`docs/ALLOCATION_IMAGE_METRICS.md`. The replay uses the saved rounded targets;
+original full-portfolio fitted statistics are not substituted into a selected view.
 
 The saved-weights section offers an on-demand PNG in the existing cream/serif
 allocation-card style. It uses saved weights and the saved timestamp/history date,
