@@ -17,6 +17,13 @@ withheld under the existing conditional-research boundary; plan refresh cannot
 upgrade them to approved status. The setting applies to the next optimization
 and does not rewrite previous analysis or holdings.
 
+Overrides apply only to currently owned exact listings. Removing a holding or
+replacing/importing holdings now appends an override-restored event in the same
+transaction when the final positive quantity is gone. Partial exits, other owners
+and other exchange listings retain their overrides; a later repurchase does not
+reactivate an expired release. The historical research warning stays, but the
+stale present-tense “Weight freeze released” banner has been removed.
+
 ## Saved optimal weights image (implemented)
 
 Export controls now support multiple INR/US/Global image sets and an optional

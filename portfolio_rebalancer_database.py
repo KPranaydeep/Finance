@@ -35,7 +35,7 @@ from allocation_conflict_recovery import RECOVERY_NOTE, recover_saved_allocation
 from paused_allocation import prepare_pause_allocation, eligible_pause_history, render_pause_exclusion, claim_pause_reoptimization, solve_frozen_sleeve_research, render_pause_research, withhold_research_plan, archive_before_conditional_save, NOTE as PAUSE_RESEARCH_NOTE
 from risk_aware_allocator import build_policy_limits, current_weights as policy_current_weights, position_capacity, capacity_failure_reason
 from allocation_policy_ui import render_policy_controls, render_last_attempt
-from weight_freeze_overrides import load_weight_freeze_overrides, released_price_freezes, mark_unverified_weight_research, render_weight_freeze_controls
+from weight_freeze_overrides import load_weight_freeze_overrides, released_price_freezes, mark_unverified_weight_research, render_weight_freeze_controls, retire_exited_weight_freeze_overrides
 from price_move_confirmation import download_confirmation
 from price_integrity_runtime import EvidenceCache, bounded_evidence, integrity_progress_label
 from chronological_validation_ui import render_chronological_validation
@@ -1812,6 +1812,7 @@ def import_broker_holdings_excel(uploaded_file, owner, mode="merge"):
                 """,
                 records,
             )
+            retire_exited_weight_freeze_overrides(conn,owner)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1997,6 +1998,7 @@ def restore_holdings_backup(uploaded_file, owner, mode="merge"):
                 """,
                 records,
             )
+            retire_exited_weight_freeze_overrides(conn,owner)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -4253,6 +4255,7 @@ def remove_symbols_from_master(symbols, owner):
                 ),
                 [owner, *resolved_to_remove],
             )
+            retire_exited_weight_freeze_overrides(conn,owner)
             conn.commit()
 
     return resolved_to_remove, missing

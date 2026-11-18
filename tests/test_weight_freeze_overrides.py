@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from weight_freeze_overrides import load_weight_freeze_overrides,set_weight_freeze_override,released_price_freezes
+from weight_freeze_overrides import load_weight_freeze_overrides,set_weight_freeze_override,released_price_freezes,retire_exited_weight_freeze_overrides
 from allocation_policy_config import DEFAULT_ALLOCATION_POLICY
 
 
@@ -85,6 +85,8 @@ def test_override_controls_persist_without_an_optimizer_or_page_load_write(tmp_p
     app=AppTest.from_file('tests/fixtures/weight_freeze_app.py',default_timeout=10)
     app.session_state['db']=str(path);app.run()
     assert not app.exception
+    assert not any('Weight freeze released:' in message.value for message in app.info)
+    assert app.warning and 'review-only' in app.warning[0].value
     app.text_input[0].set_value('GVT&D.NS')
     app.button[0].click().run()
     assert not app.exception and app.success
@@ -93,3 +95,69 @@ def test_override_controls_persist_without_an_optimizer_or_page_load_write(tmp_p
     app.button[1].click().run()
     with sqlite3.connect(path) as conn:
         assert not load_weight_freeze_overrides(conn,'synthetic')
+
+
+def test_full_exit_retires_override_atomically_without_affecting_other_owner_or_listing(tmp_path):
+    path=tmp_path/'exited.sqlite'
+    with sqlite3.connect(path) as conn:
+        conn.execute('CREATE TABLE master_holdings(owner TEXT,yahoo_ticker TEXT,quantity REAL)')
+        conn.executemany('INSERT INTO master_holdings VALUES(?,?,?)',
+                         [('alice','GVT&D.NS',2.),('alice','GVT&D.BO',1.),('bob','GVT&D.NS',3.)])
+        for owner,ticker in [('alice','GVT&D.NS'),('alice','GVT&D.BO'),('bob','GVT&D.NS')]:
+            set_weight_freeze_override(conn,owner,ticker,enabled=True,reason='User override')
+        conn.execute("UPDATE master_holdings SET quantity=.5 WHERE owner='alice' AND yahoo_ticker='GVT&D.NS'")
+        assert retire_exited_weight_freeze_overrides(conn,'alice')==()
+        conn.commit()
+        conn.execute("DELETE FROM master_holdings WHERE owner='alice' AND yahoo_ticker='GVT&D.NS'")
+        assert retire_exited_weight_freeze_overrides(conn,'alice')==('GVT&D.NS',)
+        assert set(load_weight_freeze_overrides(conn,'alice'))=={'GVT&D.BO'}
+        conn.rollback()
+        assert 'GVT&D.NS' in load_weight_freeze_overrides(conn,'alice')
+        conn.execute("DELETE FROM master_holdings WHERE owner='alice' AND yahoo_ticker='GVT&D.NS'")
+        retire_exited_weight_freeze_overrides(conn,'alice');conn.commit()
+        assert retire_exited_weight_freeze_overrides(conn,'alice')==()
+        assert 'GVT&D.NS' in load_weight_freeze_overrides(conn,'bob')
+        conn.execute("INSERT INTO master_holdings VALUES('alice','GVT&D.NS',1.)");conn.commit()
+    with sqlite3.connect(path) as conn:
+        assert set(load_weight_freeze_overrides(conn,'alice'))=={'GVT&D.BO'}
+        assert conn.execute('SELECT enabled FROM weight_freeze_override_events WHERE owner=? AND ticker=? ORDER BY id DESC LIMIT 1',
+                            ('alice','GVT&D.NS')).fetchone()==(0,)
+
+
+def test_unowned_overrides_are_ineffective_and_reading_does_not_write():
+    with sqlite3.connect(':memory:') as conn:
+        conn.execute('CREATE TABLE master_holdings(owner TEXT,yahoo_ticker TEXT,quantity REAL)')
+        conn.execute("INSERT INTO master_holdings VALUES('alice','GVT&D.NS',1.)")
+        set_weight_freeze_override(conn,'alice','GVT&D.NS',enabled=True,reason='User override')
+        conn.execute("UPDATE master_holdings SET quantity=0");conn.commit()
+        before=conn.total_changes
+        assert load_weight_freeze_overrides(conn,'alice')=={} and conn.total_changes==before
+        with pytest.raises(ValueError,match='currently owned'):
+            set_weight_freeze_override(conn,'alice','GVT&D.NS',enabled=True,reason='Not owned')
+
+
+@pytest.mark.parametrize('operation',['remove','restore'])
+def test_holdings_write_paths_retire_exited_overrides(tmp_path,monkeypatch,operation):
+    import portfolio_optimizer_core as core
+    path=tmp_path/'holdings.sqlite'
+    @contextmanager
+    def connect():
+        conn=sqlite3.connect(path);conn.row_factory=sqlite3.Row
+        try:yield conn
+        finally:conn.close()
+    with connect() as conn:
+        conn.execute('CREATE TABLE master_holdings(owner TEXT,symbol TEXT,stock_name TEXT,yahoo_ticker TEXT,exchange TEXT,currency TEXT,quantity REAL,average_price REAL,added_at TEXT,updated_at TEXT,UNIQUE(owner,symbol))')
+        conn.execute("INSERT INTO master_holdings VALUES('alice','GVT&D','Example','GVT&D.NS','NSE','INR',2,100,'2026-01-01','2026-01-01')")
+        set_weight_freeze_override(conn,'alice','GVT&D.NS',enabled=True,reason='User override')
+    namespace=core.remove_symbols_from_master.__globals__
+    monkeypatch.setitem(namespace,'get_db_connection',connect)
+    if operation=='remove':
+        assert core.remove_symbols_from_master(['GVT&D.NS'],'alice')[0]==['GVT&D']
+    else:
+        replacement=pd.DataFrame([{'Symbol':'OTHER','Stock Name':'Other','Yahoo Ticker':'OTHER.NS','Exchange':'NSE','Currency':'INR',
+                                  'Quantity':1.,'Average Price':100.,'Added At':None,'Updated At':None}])
+        monkeypatch.setitem(namespace,'_read_holdings_backup',lambda _:replacement)
+        assert core.restore_holdings_backup(object(),'alice',mode='replace')==1
+    with connect() as conn:
+        assert not load_weight_freeze_overrides(conn,'alice')
+        assert conn.execute('SELECT enabled FROM weight_freeze_override_events ORDER BY id DESC LIMIT 1').fetchone()[0]==0

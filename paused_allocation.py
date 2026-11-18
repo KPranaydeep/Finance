@@ -201,8 +201,7 @@ def render_pause_research(report):
         return
     import streamlit as st
     if report.get("research_kind")=="price_freeze_override":
-        st.info("Weight freeze released: "+", ".join(report.get("weight_freeze_overrides") or [])+". The optimizer can resize these holdings within its risk limits.")
-        st.warning("Historical price jumps remain unverified. These are fresh review-only weights; no executable plan or public publication is approved.")
+        st.warning("This allocation used unverified historical price jumps and remains review-only. Execution and publication approval require verified inputs and a fresh strict allocation check.")
         return
     if report["tradable_fraction"]<=1e-9:
         st.info("Frozen portfolio recalculated: no capital is currently tradable. Frozen holdings were not reassigned to new securities; change the pauses or supply new capital before a new allocation can be funded.")
