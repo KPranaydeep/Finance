@@ -36,7 +36,7 @@ def test_exact_png_dimensions_and_no_clipped_or_overlapping_text(monkeypatch,cou
     source=payload(count);spec=saved_weights_image_spec(source,["SECURITY00"])
     if recomputed:
         from dataclasses import replace
-        spec=replace(spec,stats_recomputed=True,stats_detail="Original-base allocation weights · 300 common returns")
+        spec=replace(spec,stats_recomputed=True,stats_detail="Selected mix · 300 common returns")
     original=FigureCanvasAgg.print_png
     def inspect(canvas,*args,**kwargs):
         canvas.draw();renderer=canvas.get_renderer();figure=canvas.figure
@@ -46,7 +46,7 @@ def test_exact_png_dimensions_and_no_clipped_or_overlapping_text(monkeypatch,cou
             assert not any(box.overlaps(other) for other in boxes[i+1:])
         labels=[t.get_text() for t in figure.texts]
         assert "SAVED OPTIMAL WEIGHTS" in labels and "SAVED MODEL" in labels
-        assert "Unpaused capital only · paused holdings excluded" in labels
+        assert any(t.startswith("Unpaused capital only · paused holdings excluded") for t in labels)
         assert not any("PUBLIC" in t for t in labels)
         return original(canvas,*args,**kwargs)
     monkeypatch.setattr(FigureCanvasAgg,"print_png",inspect)
@@ -169,3 +169,37 @@ def test_no_ribbon_layout_and_filtered_statistics_are_explicit(monkeypatch):
     monkeypatch.setattr(FigureCanvasAgg,"print_png",inspect)
     data=module.render_saved_weights_page(spec)
     assert Image.open(BytesIO(data)).size==(1272,2222)
+
+
+@pytest.mark.parametrize("count",[3,101])
+def test_image_allocations_use_entire_shown_mix_not_currency_or_page(monkeypatch,count):
+    from dataclasses import replace
+    source=saved_weights_image_spec(payload(count))
+    rows=tuple((t,c,w*.3212,p) for t,c,w,p in source.rows)
+    spec=replace(source,rows=rows,view="INR",review_only=True)
+    captured=[];original=FigureCanvasAgg.print_png
+    def inspect(canvas,*args,**kwargs):
+        captured.append([t.get_text() for t in canvas.figure.texts])
+        return original(canvas,*args,**kwargs)
+    monkeypatch.setattr(FigureCanvasAgg,"print_png",inspect)
+    saved_weights_image_download(spec)
+    for labels in captured:
+        assert "32.12%" in labels and "SCALED ALLOCATION" in labels
+        assert labels.count(f"{1/count:.2%}")>0
+    assert source.rows==saved_weights_image_spec(payload(count)).rows
+
+
+def test_scaled_allocation_matches_shown_fraction_and_preserves_raw_saved_weights(monkeypatch):
+    from dataclasses import replace
+    source=saved_weights_image_spec(payload(3))
+    spec=replace(source,rows=(("A.NS","INR",.04,False),("B.NS","INR",.06,False),("C.NS","INR",.10,False)),view="INR")
+    original=FigureCanvasAgg.print_png
+    def inspect(canvas,*args,**kwargs):
+        labels=[t.get_text() for t in canvas.figure.texts]
+        assert "SHOWN ALLOCATION" in labels and "20.00%" in labels
+        assert all(value in labels for value in ("20.00%","30.00%","50.00%"))
+        assert "4.00%" not in labels and "6.00%" not in labels and "10.00%" not in labels
+        return original(canvas,*args,**kwargs)
+    monkeypatch.setattr(FigureCanvasAgg,"print_png",inspect)
+    render_saved_weights_page(spec)
+    assert [r[2] for r in spec.rows]==[.04,.06,.10]

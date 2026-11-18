@@ -8,7 +8,7 @@ preview bytes. **Current → optimal** compares the selected current mix with th
 selected saved target mix, each normalized separately to 100%. A selection with
 no current allocation has unavailable current statistics, not zero returns.
 These are historical model comparisons, not broker-account returns. The replay
-uses the displayed saved targets, which may differ from the original fitted
+uses the saved targets before image rounding, which may differ from the original fitted
 weights. If the allocation has an unpaused-capital scope, that scope is retained.
 An optimized in-sample result can overstate an improvement that persists outside
 the fitted period. These statistics do not deduct trading costs or taxes.
@@ -17,8 +17,13 @@ Select one or more **INR**, **US**, or **Global** views, optionally include the
 definitions ribbon, then **Render preview** and **Download**. Each view is an
 independent image set; multiple views/pages download as a ZIP. US is explicitly
 the saved USD-quote subset, including USD-quoted crypto, rather than a verified
-country-of-listing filter. A filtered image retains each saved weight relative
-to the original capital base and labels its partial sum as **Shown allocation**.
+country-of-listing filter. The header's **Shown allocation** retains the selected
+mix's original share of the portfolio. The security column divides each saved
+weight by that share, so the shown mix totals **100% before display rounding**.
+For example, a saved 4.80% position in a 32.12% slice displays about 14.94%.
+The denominator covers the entire selected view, across all currencies and pages;
+each page or currency panel is not independently rescaled. Saved weights, holdings,
+optimizer inputs and the statistics calculation remain unchanged by this display.
 Statistics describe that selection, not the full portfolio. All views use the
 same INR valuation convention; a US view is not native-USD performance. Returns
 use at least 120 valid common one-session observations from the selected series.

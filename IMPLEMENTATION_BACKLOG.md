@@ -25,7 +25,10 @@ crypto), not an inferred listing-country classification. Render preview generate
 the images inside an isolated Streamlit fragment; Download serves exactly those
 bytes, with a ZIP for multiple views/pages. Per-session preview storage is bounded
 and invalidated when the saved snapshot changes. Missing views are reported.
-Filtered views retain original weights and show their partial allocation total.
+The header retains the shown mix's original portfolio share. Image security
+allocations are scaled by that share to total 100% before display rounding,
+using one denominator across the entire view, currencies and pages. This display
+change leaves saved weights, holdings and statistics inputs unchanged.
 Render now recalculates each view's statistics from stored security-level INR
 prices/FX: selected current and target mixes are normalized independently to 100%.
 The actual evidence date/count are shown. No current selection or incomplete

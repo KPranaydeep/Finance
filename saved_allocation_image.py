@@ -21,7 +21,7 @@ from matplotlib.lines import Line2D
 WIDTH = 1272
 ROWS_PER_PANEL = 24
 _RENDER_LOCK = RLock()
-_IMAGE_STATS_VERSION = "selected-intact-blocks-v2"
+_IMAGE_STATS_VERSION = "selected-intact-blocks-v3-scaled-allocation"
 
 
 @dataclass(frozen=True)
@@ -102,6 +102,9 @@ def saved_weights_image_spec(payload, paused=()):
 
 def render_saved_weights_page(spec, page=0):
     """Same cream/serif share-card style, with exact weights and bounded pages."""
+    shown_total=math.fsum(r[2] for r in spec.rows)
+    if not math.isfinite(shown_total) or shown_total<=0:
+        raise ValueError("A positive shown allocation is required to scale the image")
     panels=spec.panels();pages=(len(panels)+1)//2
     if not 0<=page<pages:
         raise ValueError("Invalid allocation-image page")
@@ -132,15 +135,15 @@ def render_saved_weights_page(spec, page=0):
         text(left,118,"SAVED OPTIMAL WEIGHTS",27,bold=True,family="serif")
         text(left,170,spec.saved_label+(" · "+spec.view+" view" if spec.view!="Global" else ""),13,color=muted)
         line(left,right,210,color=ink)
-        for x,label,value in ((left,"SECURITIES",str(len(spec.rows))),(.36,"TOTAL ALLOCATION" if spec.view=="Global" else "SHOWN ALLOCATION",f"{sum(r[2] for r in spec.rows):.2%}"),(.67,"HISTORY THROUGH",spec.history_label)):
+        for x,label,value in ((left,"SECURITIES",str(len(spec.rows))),(.36,"TOTAL ALLOCATION" if spec.view=="Global" else "SHOWN ALLOCATION",f"{shown_total:.2%}"),(.67,"HISTORY THROUGH",spec.history_label)):
             text(x,254,label,11,color=muted,bold=True)
             text(x,295,value,20,bold=True)
-        text(left,349,spec.scope_label,13,color=muted)
+        text(left,349,spec.scope_label+" · shown mix scaled to 100%",13,color=muted,max_width=(right-left)*WIDTH)
         line(left,right,375)
         text(left,402,"PORTFOLIO STATISTICS · CURRENT → OPTIMAL",14,color=accent,bold=True)
         text(left,430,("Recomputed selected mix · each side normalized to 100% · INR returns · before costs/taxes" if spec.stats_recomputed else
              "Saved analysis · before costs/taxes · fitted weights may differ from rounded allocations" if spec.view=="Global" else
-             "Full saved-allocation statistics · before costs/taxes · view weights retain their original portfolio base")+
+             "Full saved-allocation statistics · before costs/taxes · image weights scaled to the shown mix")+
              (" · prior dated statistics retained" if spec.stats_retained else ""),11.5,color=muted,max_width=(right-left)*WIDTH)
         for i,(label,current,optimal,note) in enumerate(spec.statistics):
             x=left+(i%4)*.225;y=467+(i//4)*110
@@ -159,7 +162,7 @@ def render_saved_weights_page(spec, page=0):
             heading=(currency if currency!="UNAVAILABLE" else "CURRENCY UNAVAILABLE")+(" · continued" if continued else "")
             text(x,412+stats_height,heading,15,color=accent,bold=True)
             text(x,452+stats_height,"SECURITY",11,color=muted,bold=True)
-            text(end,452+stats_height,"ALLOCATION",11,color=muted,bold=True,align="right")
+            text(end,452+stats_height,"SCALED ALLOCATION",11,color=muted,bold=True,align="right")
             line(x,end,476+stats_height,color=ink)
             for n,(ticker,_,weight,paused) in enumerate(rows):
                 y=512+stats_height+n*52
@@ -167,7 +170,8 @@ def render_saved_weights_page(spec, page=0):
                     figure.patches.append(Rectangle((x,1-(y+22)/height),panel_width,44/height,
                         transform=figure.transFigure,facecolor="#f0ebe1",edgecolor="none"))
                 text(x+.005,y,ticker+(" *" if paused else ""),19,bold=True,max_width=(panel_width-.14)*WIDTH)
-                text(end-.005,y,"<0.01%" if weight<.0001 else f"{weight:.2%}",19,color=accent,bold=True,align="right")
+                scaled_weight=weight/shown_total
+                text(end-.005,y,"<0.01%" if scaled_weight<.0001 else f"{scaled_weight:.2%}",19,color=accent,bold=True,align="right")
         if spec.include_ribbon:
             figure.patches.append(Rectangle((left-.012,155/height),right-left+.024,440/height,
                 transform=figure.transFigure,facecolor="#eee6d7",edgecolor="none"))
@@ -179,7 +183,7 @@ def render_saved_weights_page(spec, page=0):
                     text(x,y+23+j*20,part,11.1,color=muted,max_width=.415*WIDTH)
             text(left,height-142,"Concepts: Sharpe (1994) · Künsch (1989) · Rockafellar & Uryasev (2000). App conventions noted above.",9.5,color=muted)
         line(left,right,height-116)
-        text(left,height-82,"Saved model weights · not executed trades. Historical and resampled risks are not loss limits.",11.5,color=muted)
+        text(left,height-82,"Shown mix = 100% before rounding · not executed trades. Historical/resampled risks are not loss limits.",11.5,color=muted)
         if any(r[3] for r in spec.rows):
             text(left,height-49,"* Pause marked in this view · saved weights retained; trading remains subject to current checks.",11.5,color=muted)
         text(right,height-32,f"{page+1} / {pages}",11,color=muted,align="right")
@@ -211,7 +215,7 @@ def render_weight_views(spec, views, include_ribbon=True, *, payload=None, histo
             missing.append(view);continue
         selected=replace(spec,rows=rows,include_ribbon=include_ribbon,view="US / USD quotes" if view=="US" else view)
         statistics,horizon,details=selected_image_statistics(payload or {},rows,history)
-        detail="Original-base allocation weights · "+str(details["observations"])+" common returns"
+        detail="Selected mix · "+str(details["observations"])+" common returns"
         if details["excluded_returns"]:
             detail+=f" · {details['excluded_returns']} incomplete returns excluded; intact-block resampling"
         if details["error"]:
@@ -251,7 +255,7 @@ def render_saved_weights_download(payload, paused=(), *, key, history_loader=Non
         cache.pop(key)
     with st.form(key+"_options",border=False):
         views=st.multiselect("Image coverage",["INR","US","Global"],default=["Global"],key=key+"_views",
-            help="Choose one or more image sets. INR = INR quotes; US = USD quotes (including USD-quoted crypto); Global = all currencies. Allocation weights retain their original base. Statistics are recalculated for the selected listings, each mix normalized to 100%, using INR-valued history.")
+            help="Choose one or more image sets. INR = INR quotes; US = USD quotes (including USD-quoted crypto); Global = all currencies. Image allocations are scaled to 100% of each shown mix; its original portfolio share stays in the header. Statistics are recalculated for the selected listings, each mix normalized to 100%, using INR-valued history.")
         ribbon=st.checkbox("Include definitions ribbon",value=True,key=key+"_ribbon")
         render=st.form_submit_button("Render preview",icon=":material/image:")
     if render:
